@@ -22,8 +22,14 @@ import {
   type GroundedEvidenceSnapshot,
 } from "./grounded-analysis/evidence-registry.js";
 import type { AnalystEvidenceService } from "./analyst-evidence-service.js";
-import type { AnalystProjectionSnapshot } from "./analyst-evidence-projections.js";
-import { ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST } from "./analyst-evidence-projections.js";
+import type {
+  AnalystCollectionEvidenceClass,
+  AnalystProjectionSnapshot,
+} from "./analyst-evidence-projections.js";
+import {
+  ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST,
+  isAnalystCollectionEvidenceClass,
+} from "./analyst-evidence-projections.js";
 import {
   canonicalJson,
   canonicalSha256,
@@ -264,7 +270,10 @@ function completeDependencies(
   );
 }
 
-function analystPayloadForReflection(evidenceClass: string, payload: unknown): unknown {
+function analystPayloadForReflection(
+  evidenceClass: AnalystCollectionEvidenceClass,
+  payload: unknown,
+): unknown {
   switch (evidenceClass) {
     case "game-identity-ownership": {
       const source = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[evidenceClass].parse(payload);
@@ -691,6 +700,10 @@ export function createReflectionEvidenceService(
         : undefined;
     const deliveredEntries = accumulated.evidence.entries.flatMap((entry) => {
       if (entry.evidenceClass !== "owner-game-note") {
+        if (!isAnalystCollectionEvidenceClass(entry.evidenceClass))
+          throw new Error(
+            `Analyst evidence class is not supported by Reflection: ${entry.evidenceClass}`,
+          );
         const payload = analystPayloadForReflection(entry.evidenceClass, entry.payload);
         return [{ ...entry, payload }];
       }
@@ -748,7 +761,8 @@ export function createReflectionEvidenceService(
               ? { sourceDisplayContext: { kind: "profile", label: "Collection profile" } }
               : citation.destination.operationId === "shelf.collection.get"
                 ? { sourceDisplayContext: { kind: "collection", label: "Collection" } }
-                : citation.destination.parameters.gameId === undefined
+                : !("gameId" in citation.destination.parameters) ||
+                    typeof citation.destination.parameters.gameId !== "string"
                   ? {}
                   : (() => {
                       const gameTitle = gameTitles.get(citation.destination.parameters.gameId);

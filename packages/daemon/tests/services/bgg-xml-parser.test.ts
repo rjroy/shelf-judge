@@ -4,6 +4,7 @@ import {
   parseThingResponse,
   parseThingMetadata,
   parseThingItems,
+  parseBoardgameScoringThings,
   parseSearchResponse,
   parseCollectionResponse,
   parsePlaysResponse,
@@ -262,6 +263,27 @@ describe("BGG XML Parser", () => {
   });
 
   describe("parseThingItems", () => {
+    test("parses bounded scoring facts and reports absent fields", () => {
+      const xml = `<items><item type="boardgame" id="1">
+        <name type="primary" value="Scoring Test"/>
+        <yearpublished value="2020"/><minplayers value="1"/><maxplayers value="4"/>
+        <playingtime value="60"/><link type="boardgamecategory" id="10" value="Strategy"/>
+        <poll name="suggested_numplayers">${playerCountResult("2", 5)}</poll>
+      </item></items>`;
+
+      expect(parseBoardgameScoringThings(xml, "2026-08-26T10:00:00.000Z")[0]).toMatchObject({
+        bggId: 1,
+        type: "boardgame",
+        primaryName: "Scoring Test",
+        yearPublished: 2020,
+        minPlayers: 1,
+        maxPlayers: 4,
+        playingTime: 60,
+        categories: [{ id: 10, name: "Strategy" }],
+        missingFields: ["weight"],
+      });
+    });
+
     test("parses complete entity classes with deterministic validation and deduplication", async () => {
       const observedAt = "2026-08-28T10:00:00.000Z";
       const items = parseThingItems(await readFixture("thing-entity-links.xml"), observedAt);

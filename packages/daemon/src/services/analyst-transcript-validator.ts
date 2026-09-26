@@ -2,7 +2,7 @@ import { AnalystTurnRequestSchema } from "@shelf-judge/shared";
 import type { AnalystAttestationService } from "./analyst-attestation-service.js";
 
 export type AnalystTranscriptValidation =
-  | { valid: true }
+  | { valid: true; discoveryIds: readonly { bggId: number; source: "search" | "hot" }[] }
   | { valid: false; outcome: "invalid-transcript" | "stale-transcript" };
 
 export type AnalystNoteDependencyComparator = (
@@ -39,10 +39,48 @@ export function createAnalystTranscriptValidator(options: {
             content: message.content,
             outcome: message.outcome,
             noteDependencies: message.noteDependencies,
+            ...(message.discoveryDigest === undefined
+              ? {}
+              : { discoveryDigest: message.discoveryDigest }),
           },
           message.validationAttestation,
         );
         if (!authentic) return { valid: false as const, outcome: "invalid-transcript" };
+        if (
+          message.discoveryIds !== undefined &&
+          options.attestationService.discoveryDigest(message.discoveryIds) !==
+            message.discoveryDigest
+        ) {
+          return { valid: false as const, outcome: "invalid-transcript" };
+        }
+      }
+      const acceptedDiscoveryIds = new Map<number, "search" | "hot">();
+      for (const receipt of transcript.discoveryReceipts ?? []) {
+        const decoded = options.attestationService.verifyDiscoveryReceipt(receipt);
+        if (
+          !decoded ||
+          decoded.conversationId !== transcript.conversationId ||
+          decoded.turnIndex >= assistantMessages.length
+        )
+          return { valid: false as const, outcome: "invalid-transcript" };
+        const origin = assistantMessages[decoded.turnIndex];
+        if (
+          !origin ||
+          origin.discoveryIds === undefined ||
+          origin.discoveryDigest === undefined ||
+          decoded.attestationDigest !==
+            options.attestationService.attestationDigest(origin.validationAttestation) ||
+          !origin.discoveryIds.some(
+            ({ bggId, source }) => bggId === decoded.bggId && source === decoded.source,
+          )
+        ) {
+          return { valid: false as const, outcome: "invalid-transcript" };
+        }
+        // Receipt authenticity is scoped to its own attested assistant turn.
+        // A game may be independently discovered through different sources in
+        // different turns; only lookup eligibility is deduplicated by BGG ID.
+        if (!acceptedDiscoveryIds.has(decoded.bggId))
+          acceptedDiscoveryIds.set(decoded.bggId, decoded.source);
       }
       const dependencies = new Map<string, number>();
       for (const message of assistantMessages) {
@@ -64,7 +102,10 @@ export function createAnalystTranscriptValidator(options: {
         )) === "stale"
       )
         return { valid: false as const, outcome: "stale-transcript" };
-      return { valid: true as const };
+      return {
+        valid: true as const,
+        discoveryIds: [...acceptedDiscoveryIds].map(([bggId, source]) => ({ bggId, source })),
+      };
     },
   });
 }

@@ -1,19 +1,27 @@
 import { describe, expect, test } from "bun:test";
-import { ANALYST_EVIDENCE_CLASSES } from "@shelf-judge/shared";
+import {
+  ANALYST_DISCLOSURE_VERSION,
+  ANALYST_EVIDENCE_CLASSES,
+  ANALYST_MANIFEST_VERSION,
+} from "@shelf-judge/shared";
 import { analystAsk, analystChat, type AnalystIo } from "../../src/commands/analyst.js";
 import { createMockClient } from "../helpers/mock-client.js";
 
 const timestamp = "2026-09-08T00:00:00.000Z";
 const configuration = {
-  contractVersion: 1,
-  manifestVersion: 2,
+  contractVersion: 4,
+  manifestVersion: ANALYST_MANIFEST_VERSION,
+  disclosureVersion: ANALYST_DISCLOSURE_VERSION,
   configuration: {
     status: "configured",
     identity: { providerId: "provider", modelId: "model", extensionIds: [] },
   },
+  bgg: { status: "configured" },
   disclosure: {
     evidenceClasses: ANALYST_EVIDENCE_CLASSES,
     relevantOwnerNotesMayBeTransmitted: true,
+    selectedOwnerTitleOrBggIdsMayBeSentToBgg: true,
+    bggProcessingIsSeparateFromProviderProcessing: true,
     localRetention: "Shelf Judge does not persist Analyst conversations.",
     providerProcessingAndRetentionFollowProviderPolicy: true,
     applicationTokenCap: null,
@@ -92,7 +100,13 @@ describe("Collection Analyst CLI commands", () => {
   test("sends a disclosed one-shot turn through the daemon stream without persistence", async () => {
     let request:
       | {
-          disclosure: { providerId: string; modelId: string; acknowledged: boolean };
+          disclosure: {
+            providerId: string;
+            modelId: string;
+            manifestVersion: number;
+            disclosureVersion: number;
+            acknowledged: boolean;
+          };
           messages: Array<{ role: string; content: string }>;
           conversationCapability: string;
         }
@@ -109,7 +123,13 @@ describe("Collection Analyst CLI commands", () => {
             const turn = body as {
               conversationId: string;
               requestId: string;
-              disclosure: { providerId: string; modelId: string; acknowledged: boolean };
+              disclosure: {
+                providerId: string;
+                modelId: string;
+                manifestVersion: number;
+                disclosureVersion: number;
+                acknowledged: boolean;
+              };
               messages: Array<{ role: string; content: string }>;
               conversationCapability: string;
             };
@@ -128,7 +148,13 @@ describe("Collection Analyst CLI commands", () => {
     );
 
     expect(request).toMatchObject({
-      disclosure: { providerId: "provider", modelId: "model", acknowledged: true },
+      disclosure: {
+        providerId: "provider",
+        modelId: "model",
+        manifestVersion: ANALYST_MANIFEST_VERSION,
+        disclosureVersion: ANALYST_DISCLOSURE_VERSION,
+        acknowledged: true,
+      },
       messages: [{ role: "owner", content: "Which games are owned?" }],
     });
     expect(request?.conversationCapability).toMatch(/^[0-9a-f]{64}$/);
@@ -151,6 +177,8 @@ describe("Collection Analyst CLI commands", () => {
       `Evidence classes sent when relevant: ${ANALYST_EVIDENCE_CLASSES.join(", ")}.`,
     );
     expect(output.errors).toContain("Relevant owner notes may be transmitted: yes.");
+    expect(output.errors).toContain("Selected owner titles or BGG IDs may be sent to BGG: yes.");
+    expect(output.errors).toContain("BGG processing is separate from provider processing: yes.");
   });
 
   test("emits each validated daemon event as NDJSON without human stdout", async () => {

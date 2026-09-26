@@ -38,7 +38,14 @@ import {
 } from "./collection-mutation-service.js";
 import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 import type { FitnessService } from "./fitness-service.js";
-import type { BggClient, BggGameResult } from "./bgg-client.js";
+import type {
+  BggClient,
+  BggGameResult,
+  BggRequestAttemptBudget,
+  BoardgameFactsObservation,
+  BoardgameScoringInput,
+  BoardgameTitleSearchObservation,
+} from "./bgg-client.js";
 import type { BggCollectionItem } from "./bgg-xml-parser.js";
 import { createLogger, type Logger } from "./logger.js";
 import { canonicalSuggestedPlayerPoll } from "./suggested-player-poll.js";
@@ -95,6 +102,30 @@ export interface GameService {
   rateGame(id: string, ratings: Record<string, number | null>): Promise<GameWithScore>;
   removeGame(id: string): Promise<void>;
   searchGames(query: string, signal?: AbortSignal): Promise<BggSearchResult[]>;
+  searchBoardgameTitles?(
+    query: string,
+    options?: {
+      exact?: boolean;
+      limit?: number;
+      signal?: AbortSignal;
+      attemptBudget?: BggRequestAttemptBudget;
+    },
+  ): Promise<BoardgameTitleSearchObservation>;
+  reviewBoardgameHot?(options?: {
+    limit?: number;
+    signal?: AbortSignal;
+    attemptBudget?: BggRequestAttemptBudget;
+  }): Promise<BoardgameTitleSearchObservation>;
+  getBoardgameFacts?(
+    ids: number[],
+    signal?: AbortSignal,
+    attemptBudget?: BggRequestAttemptBudget,
+  ): Promise<BoardgameFactsObservation>;
+  getBoardgameScoringInput?(
+    bggId: number,
+    signal?: AbortSignal,
+    attemptBudget?: BggRequestAttemptBudget,
+  ): Promise<BoardgameScoringInput>;
   refreshBggData(gameId: string): Promise<PlayEvidenceMutationResult>;
   refreshAllBggData(): Promise<RefreshSummary>;
   setOwnership(id: string, ownership: OwnershipStatus): Promise<OwnershipMutationResult>;
@@ -966,6 +997,31 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
     async searchGames(query: string, signal?: AbortSignal): Promise<BggSearchResult[]> {
       return configuredBggClient().searchGames(query, signal);
+    },
+
+    async searchBoardgameTitles(query, options = {}) {
+      const client = configuredBggClient();
+      if (!client.searchBoardgameTitles) throw new Error("BGG title search is unavailable");
+      return client.searchBoardgameTitles(query, options);
+    },
+
+    async reviewBoardgameHot(options = {}) {
+      const client = configuredBggClient();
+      if (!client.reviewBoardgameHot) throw new Error("BGG Hot review is unavailable");
+      return client.reviewBoardgameHot(options);
+    },
+
+    async getBoardgameFacts(ids, signal, attemptBudget) {
+      const client = configuredBggClient();
+      if (!client.getBoardgameFacts) throw new Error("BGG Thing facts are unavailable");
+      return client.getBoardgameFacts(ids, signal, attemptBudget);
+    },
+
+    async getBoardgameScoringInput(bggId, signal, attemptBudget) {
+      const client = configuredBggClient();
+      if (!client.getBoardgameScoringInput)
+        throw new Error("BGG Thing scoring input is unavailable");
+      return client.getBoardgameScoringInput(bggId, signal, attemptBudget);
     },
 
     async setAdditionalBggIds(id: string, bggIds: number[]): Promise<Game> {

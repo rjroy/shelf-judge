@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import * as path from "node:path";
-import { createBggClient, type BggClient } from "../../src/services/bgg-client.js";
+import { BggClientError, createBggClient, type BggClient } from "../../src/services/bgg-client.js";
 import { createMockFetch, type MockFetch } from "../helpers/mock-fetch.js";
 
 const fixturesDir = path.join(import.meta.dir, "../fixtures");
@@ -1243,7 +1243,7 @@ describe("BggClient", () => {
       expect(batchEvents).toHaveLength(2);
       // First batch failed, should have 0 results
       expect(batchEvents[0].resultCount).toBe(0);
-      expect(batchEvents[0].error).toBe("BGG API returned HTTP 502: Bad Gateway");
+      expect(batchEvents[0].error).toBe("BGG API returned HTTP 502");
       // Second batch succeeded
       expect(batchEvents[1].resultCount).toBeGreaterThan(0);
       expect(batchEvents[1].error).toBeUndefined();
@@ -1261,6 +1261,269 @@ describe("BggClient", () => {
 
       expect(results.size).toBe(0);
       expect(failure).toBe("Malformed BGG thing response: missing root <items> element");
+    });
+  });
+
+  describe("bounded Analyst transport methods", () => {
+    test("returns verified rich scoring facts from Thing only, never the configured collection", async () => {
+      const logs: unknown[][] = [];
+      const scoringClient = createLoggingClient(mockFetch, logs, "private-user");
+      mockFetch.enqueue(
+        200,
+        `<items><item type="boardgame" id="77">
+        <name type="primary" value="Scoring Game"/><yearpublished value="2022"/>
+        <minplayers value="2"/><maxplayers value="5"/><playingtime value="45"/>
+        <link type="boardgamecategory" id="10" value="Strategy"/>
+        <link type="boardgamemechanic" id="11" value="Drafting"/>
+        <statistics><ratings><averageweight value="2.4"/></ratings></statistics>
+        <poll name="suggested_numplayers"><results numplayers="3">
+          <result value="Best" numvotes="12"/><result value="Recommended" numvotes="8"/>
+        </results></poll>
+      </item></items>`,
+      );
+
+      const result = await scoringClient.getBoardgameScoringInput!(77);
+
+      expect(result).toMatchObject({
+        bggId: 77,
+        type: "boardgame",
+        primaryName: "Scoring Game",
+        yearPublished: 2022,
+        minPlayers: 2,
+        maxPlayers: 5,
+        playingTime: 45,
+        weight: 2.4,
+        categories: [{ id: 10, name: "Strategy" }],
+        mechanics: [{ id: 11, name: "Drafting" }],
+        suggestedPlayerPoll: {
+          state: "usable",
+          buckets: [{ playerCount: "3", best: 12, recommended: 8, notRecommended: 0 }],
+        },
+        missingFields: [],
+      });
+      expect(mockFetch.calls).toHaveLength(1);
+      expect(mockFetch.calls[0]?.url).toBe(
+        "https://boardgamegeek.com/xmlapi2/thing?id=77&stats=1&type=boardgame",
+      );
+      expect(mockFetch.calls[0]?.url).not.toContain("collection");
+      expect(mockFetch.calls[0]?.url).not.toContain("private-user");
+      expect(JSON.stringify(logs)).not.toContain("private-user");
+      expect(JSON.stringify(logs)).not.toContain("77");
+      expect(JSON.stringify(logs)).not.toContain("test-token");
+      expect(findLogContext(logs, "scoring Thing fetch attempt")).toEqual({
+        requestedCount: 1,
+        sourceRequest: "bgg-thing",
+      });
+    });
+
+    test("keeps omitted scoring fields distinct", async () => {
+      mockFetch.enqueue(
+        200,
+        '<items><item type="boardgame" id="78"><name type="primary" value="Sparse"/></item></items>',
+      );
+      const result = await client.getBoardgameScoringInput!(78);
+      expect(result.missingFields).toEqual([
+        "yearPublished",
+        "minPlayers",
+        "maxPlayers",
+        "playingTime",
+        "weight",
+        "categories",
+        "suggestedPlayerPoll",
+      ]);
+      expect(result.minPlayers).toBeNull();
+      expect(result.maxPlayers).toBeNull();
+      expect(result.playingTime).toBeNull();
+      expect(result.weight).toBeNull();
+      expect(result.categories).toEqual([]);
+      expect(result.suggestedPlayerPoll.state).toBe("absent");
+    });
+
+    test("uses stable identity errors and does not log upstream XML or payload", async () => {
+      const logs: unknown[][] = [];
+      const loggingClient = createLoggingClient(mockFetch, logs, "private-user");
+      mockFetch.enqueue(
+        200,
+        '<items><item type="boardgame" id="80"><name type="primary" value="SENTINEL PRIVATE XML"/></item></items>',
+      );
+      const identityError = await loggingClient.getBoardgameScoringInput!(79).catch(
+        (error: unknown) => error,
+      );
+      expect(identityError).toMatchObject({
+        name: "BoardgameScoringInputError",
+        code: "MismatchedId",
+      });
+      expect(JSON.stringify(logs)).not.toContain("SENTINEL PRIVATE XML");
+      expect(JSON.stringify(logs)).not.toContain("private-user");
+      expect(JSON.stringify(logs)).not.toContain("79");
+      expect(JSON.stringify(logs)).not.toContain("test-token");
+    });
+
+    test("honors caller cancellation and shared physical-attempt budgets", async () => {
+      let consumed = 0;
+      const budgetClient = createBggClient({
+        config: { bggAuthToken: "test-token", username: "private-user" },
+        fetchFn: mockFetch.fn,
+        delayMs: 0,
+        delayFn: () => Promise.resolve(),
+      });
+      mockFetch.enqueue(
+        200,
+        '<items><item type="boardgame" id="81"><name type="primary" value="Budget"/></item></items>',
+      );
+      await budgetClient.getBoardgameScoringInput!(81, undefined, {
+        tryConsume() {
+          consumed += 1;
+          return consumed <= 1;
+        },
+      });
+      expect(consumed).toBe(1);
+      const budgetError = await budgetClient.getBoardgameScoringInput!(82, undefined, {
+        tryConsume() {
+          consumed += 1;
+          return false;
+        },
+      }).catch((error: unknown) => error);
+      expect(budgetError).toMatchObject({ name: "BggClientError", code: "attempt-budget" });
+      expect(mockFetch.calls).toHaveLength(1);
+
+      const controller = new AbortController();
+      controller.abort();
+      const abortError = await budgetClient.getBoardgameScoringInput!(83, controller.signal).catch(
+        (error: unknown) => error,
+      );
+      expect(abortError).toMatchObject({ name: "AbortError" });
+      expect(mockFetch.calls).toHaveLength(1);
+    });
+
+    test("title search supports zero hits without enrichment and keeps logs private", async () => {
+      const logs: unknown[][] = [];
+      const privateClient = createBggClient({
+        config: { bggAuthToken: "secret-token", username: "testuser" },
+        fetchFn: mockFetch.fn,
+        delayMs: 0,
+        logger: {
+          log: (...args) => logs.push(args),
+          warn: (...args) => logs.push(args),
+          error: (...args) => logs.push(args),
+        },
+      });
+      mockFetch.enqueue(200, "<items></items>");
+      const result = await privateClient.searchBoardgameTitles!("secret query", { limit: 1 });
+      expect(result).toMatchObject({
+        returnedCount: 0,
+        emittedCount: 0,
+        truncated: false,
+        candidates: [],
+      });
+      expect(mockFetch.calls).toHaveLength(1);
+      expect(logs.flat().join(" ")).not.toContain("secret query");
+      expect(logs.flat().join(" ")).not.toContain("secret-token");
+    });
+
+    test("fixed Hot caps the sample and Thing preserves missing fields and filters identity", async () => {
+      mockFetch.enqueue(
+        200,
+        `<items>${Array.from({ length: 21 }, (_, i) => `<item type="boardgame" id="${i + 1}"><name type="primary" value="Game ${i + 1}"/></item>`).join("")}</items>`,
+      );
+      const hot = await client.reviewBoardgameHot!();
+      expect(hot.returnedCount).toBe(21);
+      expect(hot.candidates).toHaveLength(20);
+      expect(mockFetch.calls[0].url).toBe("https://boardgamegeek.com/xmlapi2/hot?type=boardgame");
+      mockFetch.enqueue(
+        200,
+        thingXml([
+          `<item type="boardgame" id="7"><name type="primary" value="Fact Game"/></item>`,
+          `<item type="boardgameexpansion" id="8"><name type="primary" value="Expansion"/></item>`,
+        ]),
+      );
+      const facts = await client.getBoardgameFacts!([7, 8]);
+      expect(facts.facts).toHaveLength(1);
+      expect(facts.facts[0]).toMatchObject({
+        bggId: 7,
+        primaryName: "Fact Game",
+        yearMissing: true,
+        mechanicsMissing: true,
+        mechanicsComplete: false,
+        warnings: ["partial-links"],
+      });
+      expect(facts.failures).toEqual([{ bggId: 8, code: "NonBoardgame" }]);
+    });
+
+    test("accepts real-shaped Hot items without type and rejects non-primary Thing identities", async () => {
+      mockFetch.enqueue(
+        200,
+        '<items><item id="42" rank="1"><name type="primary" value="Hot Game"/><thumbnail value="thumb"/></item></items>',
+      );
+      const hot = await client.reviewBoardgameHot!();
+      expect(hot.candidates).toEqual([{ bggId: 42, primaryName: "Hot Game", yearPublished: null }]);
+
+      mockFetch.enqueue(
+        200,
+        '<items><item type="boardgame" id="7"><name type="alternate" value="Alias"/><link type="boardgamemechanic" id="1" value="Mechanic"/></item></items>',
+      );
+      const facts = await client.getBoardgameFacts!([7]);
+      expect(facts.facts).toEqual([]);
+      expect(facts.failures).toEqual([{ bggId: 7, code: "BggParse" }]);
+    });
+
+    test("reports mechanic completeness before applying the emitted cap", async () => {
+      const links = Array.from(
+        { length: 21 },
+        (_, index) =>
+          `<link type="boardgamemechanic" id="${index + 1}" value="Mechanic ${index + 1}"/>`,
+      ).join("");
+      mockFetch.enqueue(
+        200,
+        `<items><item type="boardgame" id="7"><name type="primary" value="Fact Game"/><yearpublished value="invalid"/>${links}</item></items>`,
+      );
+      const [fact] = (await client.getBoardgameFacts!([7])).facts;
+      expect(fact).toMatchObject({
+        yearPublished: null,
+        yearMissing: false,
+        mechanicsComplete: false,
+        warnings: ["partial-links"],
+      });
+      expect(fact?.mechanics).toHaveLength(20);
+    });
+
+    test("uses typed safe failures without returning upstream payloads", async () => {
+      mockFetch.enqueue(401, "secret upstream body");
+      let error: unknown;
+      try {
+        await client.searchBoardgameTitles!("private query");
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(BggClientError);
+      expect(error).toMatchObject({ code: "unauthorized", status: 401 });
+      expect((error as Error).message).not.toContain("secret upstream body");
+      expect((error as Error).message).not.toContain("private query");
+
+      mockFetch.enqueue(200, "not xml");
+      try {
+        await client.getBoardgameFacts!([42]);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(BggClientError);
+      expect(error).toMatchObject({ code: "parse" });
+    });
+
+    test("attempt budget caps retries and upstream auth errors omit the body", async () => {
+      let attempts = 0;
+      mockFetch.enqueue(429, "private upstream response");
+      const budget = { tryConsume: () => ++attempts <= 1 };
+      const budgetError = await client.searchBoardgameTitles!("Wingspan", {
+        attemptBudget: budget,
+      }).catch((error: unknown) => error);
+      expect(budgetError).toBeInstanceOf(Error);
+      expect((budgetError as Error).message).toContain("attempt budget");
+      expect(mockFetch.calls).toHaveLength(1);
+      mockFetch.enqueue(401, "secret body token");
+      const authError = await client.getBoardgameFacts!([42]).catch((error: unknown) => error);
+      expect(authError).toBeInstanceOf(Error);
+      expect((authError as Error).message).toContain("HTTP 401");
     });
   });
 });

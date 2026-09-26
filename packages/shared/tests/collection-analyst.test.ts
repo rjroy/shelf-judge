@@ -4,11 +4,19 @@ import {
   ANALYST_EVIDENCE_CLASSES,
   ANALYST_EVIDENCE_MANIFEST,
   ANALYST_UNAVAILABLE_REASONS,
+  AnalystBggTitleSearchResultSchema,
+  AnalystBggHotReviewResultSchema,
+  AnalystBggFactsResultSchema,
+  AnalystBggFitnessPreviewResultSchema,
   AnalystAnswerBlockSchema,
   AnalystCancelRequestSchema,
   AnalystCancelResultSchema,
   AnalystCitationInspectRequestSchema,
   AnalystCitationInspectResultSchema,
+  AnalystCitationInspectionRecordSchema,
+  AnalystCitationInspectionUnsignedRecordSchema,
+  AnalystCitationInspectionAttestedUnsignedRecordSchema,
+  AnalystCitationInspectionsSchema,
   AnalystCitationSchema,
   AnalystConfigurationGetRequestSchema,
   AnalystConfigurationSchema,
@@ -37,7 +45,13 @@ const citation = {
   destination: { operationId: "shelf.game.get", parameters: { gameId: "game-1" } },
 };
 const block = { text: "The owner described a useful quality.", citationIds: ["citation-1"] };
-const disclosure = { providerId: "provider", modelId: "model", acknowledged: true as const };
+const disclosure = {
+  providerId: "provider",
+  modelId: "model",
+  manifestVersion: 4 as const,
+  disclosureVersion: 1 as const,
+  acknowledged: true as const,
+};
 
 function request(
   messages: AnalystTurnRequest["messages"] = [{ role: "owner", content: "What fits best?" }],
@@ -80,9 +94,14 @@ describe("Collection Analyst closed manifest", () => {
       "collection-summary",
       "profile-evidence",
       "owner-game-note",
+      "bgg-search-observation",
+      "bgg-hot-observation",
+      "bgg-candidate-identity",
+      "bgg-thing-facts",
+      "bgg-preview-calculation",
     ]);
     expect(ANALYST_EVIDENCE_MANIFEST).toEqual({
-      version: 2,
+      version: 4,
       classes: [
         {
           id: "game-identity-ownership",
@@ -196,8 +215,57 @@ describe("Collection Analyst closed manifest", () => {
           observationTime: "none",
           canonicalSummary: "Current owner testimony or non-text note state",
         },
+        {
+          id: "bgg-search-observation",
+          fields: ["returnedCount", "emittedCount", "truncated"],
+          sourceIdentity: "turn-local title search observation",
+          observationTime: "observedAt",
+          canonicalSummary: "Bounded BGG title search observation",
+        },
+        {
+          id: "bgg-hot-observation",
+          fields: ["returnedCount", "emittedCount", "truncated"],
+          sourceIdentity: "turn-local fixed boardgame Hot observation",
+          observationTime: "observedAt",
+          canonicalSummary: "Bounded BGG Hot sample observation",
+        },
+        {
+          id: "bgg-candidate-identity",
+          fields: ["bggId", "primaryName", "yearPublished"],
+          sourceIdentity: "verified BGG boardgame item",
+          observationTime: "observedAt",
+          canonicalSummary: "Verified BGG candidate identity",
+        },
+        {
+          id: "bgg-thing-facts",
+          fields: [
+            "bggId",
+            "primaryName",
+            "yearPublished",
+            "mechanics",
+            "missingFields",
+            "warnings",
+          ],
+          sourceIdentity: "verified BGG Thing observation",
+          observationTime: "observedAt",
+          canonicalSummary: "Verified BGG boardgame facts",
+        },
+        {
+          id: "bgg-preview-calculation",
+          fields: ["bggId", "score", "readinessStage", "sourceVersion"],
+          sourceIdentity: "local collection/profile snapshot and verified Thing input",
+          observationTime: "calculatedAt",
+          canonicalSummary: "Versioned local fitness preview calculation",
+        },
       ],
-      destinations: ["shelf.game.get", "shelf.profile.get", "shelf.collection.get"],
+      destinations: [
+        "shelf.game.get",
+        "shelf.profile.get",
+        "shelf.collection.get",
+        "shelf.bgg.item.get",
+        "shelf.analyst.discovery.get",
+        "shelf.analyst.calculation.get",
+      ],
     });
   });
 
@@ -236,11 +304,55 @@ describe("Collection Analyst closed manifest", () => {
       false,
     );
   });
+
+  test("requires canonical BGG destinations matched to the citation evidence class", () => {
+    const bggCitation = {
+      ...citation,
+      evidenceClass: "bgg-candidate-identity",
+      testimony: false,
+      destination: { operationId: "shelf.bgg.item.get", parameters: { bggId: 174430 } },
+    };
+    expect(AnalystCitationSchema.safeParse(bggCitation).success).toBe(true);
+    for (const destination of [
+      { operationId: "shelf.game.get", parameters: { gameId: "174430" } },
+      {
+        operationId: "shelf.bgg.item.get",
+        parameters: { bggId: 174430, url: "https://evil.test" },
+      },
+    ])
+      expect(AnalystCitationSchema.safeParse({ ...bggCitation, destination }).success).toBe(false);
+    expect(
+      AnalystCitationSchema.safeParse({
+        ...bggCitation,
+        evidenceClass: "bgg-search-observation",
+        destination: { operationId: "shelf.bgg.item.get", parameters: { bggId: 174430 } },
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("Collection Analyst requests and results", () => {
   test("enforces capability, ordered transcript, current owner turn, turn identity, and prior attestations", () => {
     expect(AnalystTurnRequestSchema.safeParse(request()).success).toBe(true);
+    expect(
+      AnalystTurnRequestSchema.safeParse({ ...request(), discoveryReceipts: ["r".repeat(2049)] })
+        .success,
+    ).toBe(false);
+    expect(
+      AnalystTurnRequestSchema.safeParse({
+        ...request(),
+        discoveryReceipts: ["receipt", "receipt"],
+      }).success,
+    ).toBe(false);
+    expect(
+      AnalystTurnRequestSchema.safeParse({
+        ...request(),
+        discoveryReceipts: Array.from({ length: 21 }, (_, i) => `r${i}`),
+      }).success,
+    ).toBe(false);
+    expect(
+      AnalystTurnRequestSchema.safeParse({ ...request(), discoveryReceipts: ["receipt"] }).success,
+    ).toBe(true);
     const prior = {
       role: "analyst" as const,
       content: "A cited answer",
@@ -257,6 +369,26 @@ describe("Collection Analyst requests and results", () => {
         ]),
       ).success,
     ).toBe(true);
+    const emittedIds = [{ bggId: 174430, source: "search" as const }];
+    const emittedDigest = "d".repeat(43);
+    expect(
+      AnalystTurnRequestSchema.safeParse(
+        request([
+          { role: "owner", content: "First" },
+          { ...prior, discoveryIds: emittedIds, discoveryDigest: emittedDigest },
+          { role: "owner", content: "Follow-up" },
+        ]),
+      ).success,
+    ).toBe(true);
+    expect(
+      AnalystTurnRequestSchema.safeParse(
+        request([
+          { role: "owner", content: "First" },
+          { ...prior, discoveryIds: emittedIds },
+          { role: "owner", content: "Follow-up" },
+        ]),
+      ).success,
+    ).toBe(false);
     for (const invalid of [
       { ...request(), conversationCapability: "a".repeat(63) },
       { ...request(), turnIndex: 1 },
@@ -301,6 +433,19 @@ describe("Collection Analyst requests and results", () => {
         ...citation,
         evidenceClass,
         testimony: evidenceClass === "owner-game-note",
+        destination: evidenceClass.startsWith("bgg-")
+          ? evidenceClass === "bgg-preview-calculation"
+            ? {
+                operationId: "shelf.analyst.calculation.get",
+                parameters: { citationId: "calculation-1" },
+              }
+            : evidenceClass === "bgg-search-observation" || evidenceClass === "bgg-hot-observation"
+              ? {
+                  operationId: "shelf.analyst.discovery.get",
+                  parameters: { citationId: "discovery-1" },
+                }
+              : { operationId: "shelf.bgg.item.get", parameters: { bggId: 174430 } }
+          : citation.destination,
       };
       expect(AnalystCitationSchema.safeParse(candidate).success, evidenceClass).toBe(true);
     }
@@ -401,15 +546,19 @@ describe("Collection Analyst requests and results", () => {
     expect(AnalystConfigurationGetRequestSchema.safeParse({}).success).toBe(true);
     expect(AnalystConfigurationGetRequestSchema.safeParse({ unknown: true }).success).toBe(false);
     const configuration = {
-      contractVersion: 1,
-      manifestVersion: 2,
+      contractVersion: 4,
+      manifestVersion: 4,
+      disclosureVersion: 1,
       configuration: {
         status: "configured",
         identity: { providerId: "provider", modelId: "model", extensionIds: [] },
       },
+      bgg: { status: "configured" },
       disclosure: {
         evidenceClasses: [...ANALYST_EVIDENCE_CLASSES],
         relevantOwnerNotesMayBeTransmitted: true,
+        selectedOwnerTitleOrBggIdsMayBeSentToBgg: true,
+        bggProcessingIsSeparateFromProviderProcessing: true,
         localRetention: "Ephemeral client memory",
         providerProcessingAndRetentionFollowProviderPolicy: true,
         applicationTokenCap: null,
@@ -420,6 +569,12 @@ describe("Collection Analyst requests and results", () => {
       },
     };
     expect(AnalystConfigurationSchema.safeParse(configuration).success).toBe(true);
+    expect(
+      AnalystConfigurationSchema.safeParse({
+        ...configuration,
+        bgg: { status: "configured", token: "secret" },
+      }).success,
+    ).toBe(false);
     expect(
       AnalystConfigurationSchema.safeParse({ ...configuration, manifestVersion: 3 }).success,
     ).toBe(false);
@@ -507,21 +662,358 @@ describe("Collection Analyst requests and results", () => {
         .success,
     ).toBe(false);
   });
+
+  test("validates signed historical BGG inspection records and bounds terminal metadata", () => {
+    const inspectionCitation = {
+      citationId: "search-citation",
+      sourceId: "search-source",
+      sourceVersion: "1",
+      evidenceClass: "bgg-search-observation" as const,
+      observedAt: time,
+      canonicalSummary: "A bounded BGG title search",
+      testimony: false,
+      destination: {
+        operationId: "shelf.analyst.discovery.get" as const,
+        parameters: { citationId: "search-citation" },
+      },
+    };
+    const result = {
+      status: "ok" as const,
+      source: "title" as const,
+      observedAt: time,
+      returnedCount: 0,
+      emittedCount: 0,
+      truncated: false,
+      observationCitationId: inspectionCitation.citationId,
+      candidates: [],
+    };
+    const record = {
+      version: 1 as const,
+      conversationId: "conversation-1",
+      requestId: "request-1",
+      turnIndex: 0,
+      attestationDigest: "a".repeat(43),
+      citation: inspectionCitation,
+      view: { kind: "discovery" as const, result },
+      authenticationToken: "daemon-signature",
+    };
+    expect(AnalystCitationInspectionRecordSchema.safeParse(record).success).toBe(true);
+    const unsignedRecord = {
+      version: record.version,
+      conversationId: record.conversationId,
+      requestId: record.requestId,
+      turnIndex: record.turnIndex,
+      citation: record.citation,
+      view: record.view,
+    };
+    expect(AnalystCitationInspectionUnsignedRecordSchema.safeParse(unsignedRecord).success).toBe(
+      true,
+    );
+    expect(AnalystCitationInspectionUnsignedRecordSchema.safeParse(record).success).toBe(false);
+    const attestedUnsignedRecord = {
+      ...unsignedRecord,
+      attestationDigest: record.attestationDigest,
+    };
+    expect(
+      AnalystCitationInspectionAttestedUnsignedRecordSchema.safeParse(attestedUnsignedRecord)
+        .success,
+    ).toBe(true);
+    expect(AnalystCitationInspectionAttestedUnsignedRecordSchema.safeParse(record).success).toBe(
+      false,
+    );
+    const candidateCitation = {
+      citationId: "candidate-identity",
+      sourceId: "174430",
+      sourceVersion: "1",
+      evidenceClass: "bgg-candidate-identity" as const,
+      observedAt: time,
+      canonicalSummary: "Candidate identity from BGG discovery",
+      testimony: false,
+      destination: { operationId: "shelf.bgg.item.get" as const, parameters: { bggId: 174430 } },
+    };
+    const candidateResult = {
+      ...result,
+      candidates: [
+        {
+          bggId: 174430,
+          primaryName: "The Game",
+          yearPublished: 2020,
+          identityCitationId: candidateCitation.citationId,
+        },
+      ],
+      emittedCount: 1,
+      returnedCount: 1,
+    };
+    const candidateRecord = {
+      ...record,
+      citation: candidateCitation,
+      view: { kind: "discovery" as const, result: candidateResult },
+    };
+    expect(AnalystCitationInspectionRecordSchema.safeParse(candidateRecord).success).toBe(true);
+    expect(
+      AnalystCitationInspectionRecordSchema.safeParse({
+        ...candidateRecord,
+        citation: { ...candidateCitation, destination: inspectionCitation.destination },
+      }).success,
+    ).toBe(false);
+    expect(
+      AnalystCitationInspectionRecordSchema.safeParse({
+        ...candidateRecord,
+        view: {
+          ...candidateRecord.view,
+          result: {
+            ...candidateResult,
+            candidates: [
+              { ...candidateResult.candidates[0], identityCitationId: "forged-citation" },
+            ],
+          },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      AnalystCitationInspectRequestSchema.safeParse({
+        citation: {
+          citationId: inspectionCitation.citationId,
+          sourceId: inspectionCitation.sourceId,
+          sourceVersion: "1",
+          evidenceClass: "bgg-search-observation",
+        },
+        inspection: record,
+      }).success,
+    ).toBe(true);
+    expect(
+      AnalystCitationInspectRequestSchema.safeParse({
+        citation: {
+          citationId: "tampered",
+          sourceId: inspectionCitation.sourceId,
+          sourceVersion: "1",
+          evidenceClass: "bgg-search-observation",
+        },
+        inspection: record,
+      }).success,
+    ).toBe(false);
+    expect(
+      AnalystCitationInspectionRecordSchema.safeParse({ ...record, authenticationToken: "" })
+        .success,
+    ).toBe(false);
+    expect(
+      AnalystCitationInspectionRecordSchema.safeParse({ ...record, extra: "raw payload" }).success,
+    ).toBe(false);
+    expect(
+      AnalystCitationInspectionRecordSchema.safeParse({
+        ...record,
+        view: { ...record.view, result: { ...result, observationCitationId: "other" } },
+      }).success,
+    ).toBe(false);
+    expect(
+      AnalystCitationInspectionRecordSchema.safeParse({
+        ...record,
+        citation: {
+          ...inspectionCitation,
+          destination: { operationId: "shelf.bgg.item.get", parameters: { bggId: 1 } },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      AnalystCitationInspectResultSchema.safeParse({
+        state: "historical",
+        destination: inspectionCitation.destination,
+        inspectedAt: time,
+        view: record.view,
+        authenticationToken: record.authenticationToken,
+      }).success,
+    ).toBe(true);
+    expect(
+      AnalystCitationInspectResultSchema.safeParse({
+        state: "historical",
+        destination: { operationId: "shelf.bgg.item.get", parameters: { bggId: 1 } },
+        inspectedAt: time,
+        view: record.view,
+        authenticationToken: record.authenticationToken,
+      }).success,
+    ).toBe(false);
+    const oversized = {
+      ...record,
+      citation: { ...inspectionCitation, canonicalSummary: "x".repeat(17_000) },
+    };
+    expect(AnalystCitationInspectionRecordSchema.safeParse(oversized).success).toBe(false);
+    expect(AnalystCitationInspectionsSchema.safeParse([oversized]).success).toBe(false);
+    expect(
+      AnalystCitationInspectRequestSchema.safeParse({
+        citation: {
+          citationId: inspectionCitation.citationId,
+          sourceId: inspectionCitation.sourceId,
+          sourceVersion: "1",
+          evidenceClass: "bgg-search-observation",
+        },
+        inspection: oversized,
+      }).success,
+    ).toBe(false);
+    expect(
+      AnalystCitationInspectionsSchema.safeParse(Array.from({ length: 65 }, () => record)).success,
+    ).toBe(false);
+    const largeRecords = Array.from({ length: 15 }, (_, index) => ({
+      ...record,
+      citation: {
+        ...inspectionCitation,
+        citationId: `citation-${index}`,
+        destination: {
+          ...inspectionCitation.destination,
+          parameters: { citationId: `citation-${index}` },
+        },
+        canonicalSummary: "x".repeat(9_000),
+      },
+      view: {
+        kind: "discovery" as const,
+        result: { ...result, observationCitationId: `citation-${index}` },
+      },
+    }));
+    expect(AnalystCitationInspectionsSchema.safeParse(largeRecords).success).toBe(false);
+  });
+});
+
+describe("Collection Analyst BGG result contracts", () => {
+  const candidate = {
+    bggId: 174430,
+    primaryName: "The Game",
+    yearPublished: 2020,
+    identityCitationId: "opaque-identity",
+  };
+  test("strictly parses bounded title and Hot observation envelopes", () => {
+    const title = {
+      status: "ok",
+      source: "title",
+      observedAt: time,
+      returnedCount: 1,
+      emittedCount: 1,
+      truncated: false,
+      observationCitationId: "opaque-observation",
+      candidates: [candidate],
+    };
+    expect(AnalystBggTitleSearchResultSchema.safeParse(title).success).toBe(true);
+    expect(AnalystBggHotReviewResultSchema.safeParse({ ...title, source: "hot" }).success).toBe(
+      true,
+    );
+    expect(AnalystBggTitleSearchResultSchema.safeParse({ ...title, source: "hot" }).success).toBe(
+      false,
+    );
+    expect(AnalystBggTitleSearchResultSchema.safeParse({ ...title, extra: true }).success).toBe(
+      false,
+    );
+    expect(
+      AnalystBggTitleSearchResultSchema.safeParse({ ...title, returnedCount: 0 }).success,
+    ).toBe(false);
+    expect(
+      AnalystBggTitleSearchResultSchema.safeParse({
+        ...title,
+        candidates: [{ ...candidate, primaryName: "x".repeat(161) }],
+      }).success,
+    ).toBe(false);
+    expect(
+      AnalystBggTitleSearchResultSchema.safeParse({
+        ...title,
+        candidates: [{ ...candidate, bggId: 0 }],
+      }).success,
+    ).toBe(false);
+    expect(
+      AnalystBggTitleSearchResultSchema.safeParse({
+        status: "error",
+        code: "BggOutage",
+        retryable: true,
+      }).success,
+    ).toBe(true);
+  });
+
+  test("parses facts batch partitioning and preview variants with strict bounds", () => {
+    const facts = {
+      status: "ok",
+      requestedCount: 1,
+      coverage: "complete",
+      failures: [],
+      facts: [
+        {
+          bggId: 174430,
+          primaryName: "The Game",
+          yearPublished: null,
+          mechanics: [{ id: 1, name: "Cooperative" }],
+          mechanicsComplete: true,
+          missingFields: ["year"],
+          warnings: [],
+          observedAt: time,
+          factCitationId: "fact-citation",
+        },
+      ],
+    };
+    expect(AnalystBggFactsResultSchema.safeParse(facts).success).toBe(true);
+    expect(AnalystBggFactsResultSchema.safeParse({ ...facts, extra: 1 }).success).toBe(false);
+    expect(AnalystBggFactsResultSchema.safeParse({ ...facts, requestedCount: 2 }).success).toBe(
+      false,
+    );
+    expect(
+      AnalystBggFactsResultSchema.safeParse({
+        ...facts,
+        facts: [
+          {
+            ...facts.facts[0],
+            mechanics: Array.from({ length: 21 }, (_, id) => ({ id: id + 1, name: "Mechanic" })),
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    const score = {
+      value: 0,
+      label: "predicted",
+      readinessStage: 0,
+      confidence: "insufficient",
+      predictionUnavailable: { reason: "stage-0", ratedGameCount: 0, gamesNeeded: 5 },
+      axes: [],
+      referenceGames: [],
+    };
+    const preview = {
+      status: "ok",
+      state: "predicted",
+      bggId: 174430,
+      primaryName: "The Game",
+      bggLookup: { status: "verified", observedAt: time, factCitationId: "fact" },
+      calculatedAt: time,
+      sourceVersion: "fitness-v2",
+      calculationCitationId: "calc",
+      score,
+    };
+    expect(AnalystBggFitnessPreviewResultSchema.safeParse(preview).success).toBe(true);
+    expect(
+      AnalystBggFitnessPreviewResultSchema.safeParse({ ...preview, rawXml: "forbidden" }).success,
+    ).toBe(false);
+    expect(
+      AnalystBggFitnessPreviewResultSchema.safeParse({
+        status: "unavailable",
+        state: "unavailable",
+        bggId: 174430,
+        code: "PredictionUnavailable",
+        retryable: false,
+        predictionUnavailable: null,
+      }).success,
+    ).toBe(true);
+  });
 });
 
 describe("Collection Analyst strict variant regressions", () => {
   test("rejects empty final blocks and unknown configuration fields", () => {
     expect(AnalystFinalSchema.safeParse({ ...final(), blocks: [] }).success).toBe(false);
     const configuration = {
-      contractVersion: 1,
-      manifestVersion: 2,
+      contractVersion: 4,
+      manifestVersion: 4,
+      disclosureVersion: 1,
       configuration: {
         status: "configured" as const,
         identity: { providerId: "provider", modelId: "model", extensionIds: [] },
       },
+      bgg: { status: "configured" },
       disclosure: {
         evidenceClasses: [...ANALYST_EVIDENCE_CLASSES],
         relevantOwnerNotesMayBeTransmitted: true as const,
+        selectedOwnerTitleOrBggIdsMayBeSentToBgg: true as const,
+        bggProcessingIsSeparateFromProviderProcessing: true as const,
         localRetention: "Ephemeral client memory",
         providerProcessingAndRetentionFollowProviderPolicy: true as const,
         applicationTokenCap: null,
@@ -592,6 +1084,66 @@ describe("Collection Analyst stream contracts", () => {
     ];
     for (const event of events)
       expect(AnalystStreamEventSchema.safeParse(event).success, event.type).toBe(true);
+    expect(
+      AnalystStreamEventSchema.safeParse({
+        ...events[5],
+        discoveryReceipts: ["opaque"],
+        discovery: [
+          {
+            status: "ok",
+            source: "title",
+            observedAt: time,
+            returnedCount: 1,
+            emittedCount: 1,
+            truncated: false,
+            observationCitationId: "obs",
+            candidates: [
+              { bggId: 174430, primaryName: "Game", yearPublished: null, identityCitationId: "id" },
+            ],
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      AnalystStreamEventSchema.safeParse({
+        ...events[5],
+        discoveryReceipts: Array.from({ length: 21 }, (_, i) => `r${i}`),
+      }).success,
+    ).toBe(false);
+    const identityFields = {
+      discoveryIds: [{ bggId: 174430, source: "search" as const }],
+      discoveryDigest: "d".repeat(43),
+    };
+    expect(AnalystStreamEventSchema.safeParse({ ...events[5], ...identityFields }).success).toBe(
+      true,
+    );
+    expect(
+      AnalystStreamEventSchema.safeParse({
+        ...events[5],
+        discoveryIds: identityFields.discoveryIds,
+      }).success,
+    ).toBe(false);
+    expect(
+      AnalystStreamEventSchema.safeParse({
+        ...events[5],
+        ...identityFields,
+        discoveryIds: Array.from({ length: 21 }, (_, i) => ({
+          bggId: i + 1,
+          source: "hot" as const,
+        })),
+      }).success,
+    ).toBe(false);
+    expect(
+      AnalystStreamEventSchema.safeParse({
+        ...events[5],
+        ...identityFields,
+        discoveryIds: [{ bggId: 174430, source: "other" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      AnalystStreamEventSchema.safeParse({ ...events[5], ...identityFields, surprise: true })
+        .success,
+    ).toBe(false);
     for (const status of ["started", "completed"] as const) {
       expect(
         AnalystStreamEventSchema.safeParse({ ...events[1], status }).success,

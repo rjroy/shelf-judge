@@ -11,6 +11,12 @@ export const COLLECTION_TOP_TOOL_NAME = "top";
 export const COLLECTION_GREP_TOOL_NAME = "grep";
 export const COLLECTION_READ_GAMES_TOOL_NAME = "readGames";
 export const COLLECTION_SUMMARIZE_TOOL_NAME = "summarize";
+export const ANALYST_BGG_TOOL_NAMES = Object.freeze([
+  "searchBggTitles",
+  "reviewBggHot",
+  "readBggFacts",
+  "previewBggFitness",
+] as const);
 
 export const COLLECTION_EVIDENCE_TOOL_NAMES = Object.freeze([
   COLLECTION_TOP_TOOL_NAME,
@@ -96,10 +102,29 @@ export function createGroundedSubmissionOnlyToolManifest(feature: string) {
 }
 
 /** The model-directed collection tools available to an Analyst turn. */
-export function createCollectionAnalystToolManifest() {
+export function createCollectionAnalystToolManifest(
+  bggToolNames: readonly (typeof ANALYST_BGG_TOOL_NAMES)[number][] = [],
+) {
+  if (bggToolNames.some((name) => !ANALYST_BGG_TOOL_NAMES.includes(name)))
+    throw new Error("Unsupported Analyst BGG tool name");
+  if (new Set(bggToolNames).size !== bggToolNames.length)
+    throw new Error("Analyst BGG tool names must be unique");
+  if (bggToolNames.length !== 0 && bggToolNames.length !== ANALYST_BGG_TOOL_NAMES.length)
+    throw new Error("Analyst BGG manifest must include every canonical tool");
+  if (
+    bggToolNames.length > 0 &&
+    ANALYST_BGG_TOOL_NAMES.some((name) => !bggToolNames.includes(name))
+  )
+    throw new Error("Analyst BGG manifest must include every canonical tool");
   return Object.freeze({
     feature: "collection-analyst",
-    toolNames: Object.freeze(["top", "grep", "readGames", "summarize"]),
+    // BGG tools are added only when an implementation is injected. This keeps
+    // the provider's exact registered-tool/allowlist check intact meanwhile.
+    toolNames: Object.freeze([
+      ...COLLECTION_EVIDENCE_TOOL_NAMES,
+      ...bggToolNames,
+      GROUNDED_SUBMISSION_TOOL_NAME,
+    ]),
   });
 }
 

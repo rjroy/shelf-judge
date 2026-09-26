@@ -3,6 +3,7 @@ import type { StorageService } from "./services/storage-service.js";
 import type { AxisService } from "./services/axis-service.js";
 import type { GameService } from "./services/game-service.js";
 import type { BggClient } from "./services/bgg-client.js";
+import { calculateBggFitnessPreview } from "./services/bgg-fitness-preview-service.js";
 import { createGameRoutes } from "./routes/games.js";
 import { createAxisRoutes } from "./routes/axes.js";
 import { createScoreRoutes } from "./routes/scores.js";
@@ -274,6 +275,50 @@ export function createApp(deps: AppDeps): AppResult {
     turnService: createAnalystTurnService({
       provider: groundedAnalysisProvider,
       evidenceService: analystEvidenceService,
+      bggClient,
+      previewFitness: async (bggId, options) => {
+        const [collection, settings, tournamentData] = await Promise.all([
+          storageService.loadCollection(),
+          storageService.loadPredictionSettings(),
+          storageService.loadTournament(),
+        ]);
+        options.signal.throwIfAborted();
+        const matches = collection.games.filter((game) =>
+          [game.bggId, ...(game.additionalBggIds ?? [])].includes(bggId),
+        );
+        if (matches.length > 1)
+          return { kind: "ambiguous" as const, gameIds: matches.slice(0, 10).map(({ id }) => id) };
+        try {
+          const calculated = await calculateBggFitnessPreview(
+            predictionService,
+            storageService,
+            bggId,
+            {
+              signal: options.signal,
+              attemptBudget: options.attemptBudget,
+              ...(options.cachedFact ? { verifiedFact: options.cachedFact } : {}),
+              snapshot: { collection, settings, tournamentData },
+            },
+          );
+          options.signal.throwIfAborted();
+          return { kind: "calculated" as const, ...calculated };
+        } catch (error) {
+          if (options.signal.aborted) throw error;
+          const code =
+            typeof error === "object" && error !== null && "code" in error
+              ? String(error.code)
+              : error instanceof Error && /verification failed \(([^)]+)\)/u.test(error.message)
+                ? (error.message.match(/verification failed \(([^)]+)\)/u)?.[1] ?? "BggOutage")
+                : error instanceof Error && /MissingGame/u.test(error.message)
+                  ? "MissingGame"
+                  : error instanceof Error && /NonBoardgame/u.test(error.message)
+                    ? "NonBoardgame"
+                    : error instanceof Error && /MismatchedId/u.test(error.message)
+                      ? "MismatchedId"
+                      : "BggOutage";
+          return { kind: "failed" as const, code };
+        }
+      },
     }),
     attestationService: analystAttestationService,
   });

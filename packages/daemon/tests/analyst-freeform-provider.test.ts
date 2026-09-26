@@ -55,6 +55,14 @@ function finalText(text: string, finishReason: "stop" | "length" = "stop"): stri
   ].join("");
 }
 
+function submitAnalysis(text: string, id = "submit-analysis"): string {
+  return toolCall(
+    "submit_grounded_analysis",
+    { submission: { outcome: "answered", blocks: [{ text, citationIds: [] }] } },
+    id,
+  );
+}
+
 /**
  * A finite protocol fixture, not an agent simulator. Each HTTP request consumes
  * exactly one declared step. It retains only request facts needed by assertions.
@@ -195,7 +203,7 @@ async function runAnalyst(
 }
 
 describe("Analyst freeform provider protocol", () => {
-  test("retrieves evidence then accepts a plain terminal answer without the submission tool", async () => {
+  test("retrieves evidence then accepts a structured terminal submission", async () => {
     const { result, requestFacts } = await runAnalyst([
       {
         expected: { tools: ["readGames"] },
@@ -206,8 +214,8 @@ describe("Analyst freeform provider protocol", () => {
         ),
       },
       {
-        expected: { excludes: ["submit_grounded_analysis"], contains: ["Game A"] },
-        response: finalText("analyst-evidence-selected"),
+        expected: { tools: ["submit_grounded_analysis"], contains: ["Game A"] },
+        response: submitAnalysis("analyst-evidence-selected"),
       },
     ]);
     expect(result).toMatchObject({
@@ -217,11 +225,11 @@ describe("Analyst freeform provider protocol", () => {
     expect(requestFacts).toHaveLength(2);
   });
 
-  test("accepts a direct plain terminal answer without retrieval", async () => {
+  test("accepts a direct structured terminal submission without retrieval", async () => {
     const { result } = await runAnalyst([
       {
-        expected: { tools: ["readGames"], excludes: ["submit_grounded_analysis"] },
-        response: finalText("direct-answer"),
+        expected: { tools: ["readGames", "submit_grounded_analysis"] },
+        response: submitAnalysis("direct-answer"),
       },
     ]);
     expect(result).toMatchObject({
@@ -248,8 +256,8 @@ describe("Analyst freeform provider protocol", () => {
         ),
       },
       {
-        expected: { contains: ["Game B"], excludes: ["submit_grounded_analysis"] },
-        response: finalText("multipage-answer"),
+        expected: { contains: ["Game B"], tools: ["submit_grounded_analysis"] },
+        response: submitAnalysis("multipage-answer"),
       },
     ]);
     expect(result).toMatchObject({
@@ -295,24 +303,44 @@ describe("Analyst freeform provider protocol", () => {
     ).rejects.toMatchObject({ reason: "internal", safeDetail: "grounded-analysis-failed" });
   });
 
-  test("rejects an empty terminal answer as no freeform response", async () => {
+  test("rejects an empty structured terminal answer", async () => {
     // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun's expect().rejects is thenable
     await expect(
       runAnalyst([
-        { expected: { excludes: ["submit_grounded_analysis"] }, response: finalText("") },
+        {
+          expected: { tools: ["submit_grounded_analysis"] },
+          response: toolCall(
+            "submit_grounded_analysis",
+            { submission: { outcome: "answered", blocks: [] } },
+            "empty-submission",
+          ),
+        },
+        {
+          expected: { tools: ["submit_grounded_analysis"] },
+          response: finalText(""),
+        },
       ]),
     ).rejects.toMatchObject({ reason: "output-validation" });
   });
 
-  test("normalizes a length-limited terminal narrative as the final freeform response", async () => {
+  test("does not invoke BGG tools for a structured answer", async () => {
     const { result } = await runAnalyst([
       {
-        expected: { excludes: ["submit_grounded_analysis"] },
-        response: finalText("partial narrative", "length"),
+        expected: {
+          tools: [
+            "readGames",
+            "submit_grounded_analysis",
+            "searchBggTitles",
+            "reviewBggHot",
+            "readBggFacts",
+            "previewBggFitness",
+          ],
+        },
+        response: submitAnalysis("structured answer"),
       },
     ]);
     expect(result).toMatchObject({
-      output: { blocks: [{ text: "partial narrative", citationIds: [] }] },
+      output: { blocks: [{ text: "structured answer", citationIds: [] }] },
       usage: { inferenceRoundTrips: 1 },
     });
   });

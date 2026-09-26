@@ -3,7 +3,10 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AnalystEvidenceService } from "../src/services/analyst-evidence-service.js";
 import type { AnalystTopResult } from "@shelf-judge/shared";
 import type { AnalystProjectionSnapshot } from "../src/services/analyst-evidence-projections.js";
-import { createAnalystTurnService } from "../src/services/analyst-turn-service.js";
+import {
+  createAnalystTurnService,
+  projectFitnessPreview,
+} from "../src/services/analyst-turn-service.js";
 import type { GroundedAnalysisProvider } from "../src/services/grounded-analysis/provider.js";
 
 // These tools must not use session context; fail if an implementation starts doing so.
@@ -49,7 +52,7 @@ function unavailableProvider(
       reason: "model-configuration",
       correctionDestination: { operationId: "shelf.grounded-analysis.configuration.get" },
     },
-    analyze: () => Promise.reject(new Error("structured analysis is not configured")),
+    analyze: (analysisRequest) => run(analysisRequest),
     analyzeFreeform: run,
   };
 }
@@ -91,7 +94,132 @@ function request(signal: AbortSignal) {
 }
 
 describe("Analyst turn service boundaries", () => {
-  test("registers only the four model-directed collection tools", async () => {
+  test("uses verified Thing facts, not imported collection metadata, for BGG preview claims", () => {
+    const staged: Array<{ evidenceClass: string; payload: unknown }> = [];
+    const registry = {
+      stage(record: { evidenceClass: string; payload: unknown }) {
+        staged.push(record);
+        return `citation-${staged.length}`;
+      },
+      commit() {},
+      discard() {},
+    };
+    const fact = {
+      bggId: 42,
+      primaryName: "Verified BGG Name",
+      yearPublished: 2024,
+      yearMissing: false,
+      mechanics: [{ id: 7, name: "Verified mechanic" }],
+      mechanicsMissing: false,
+      mechanicsComplete: true,
+      warnings: [],
+      observedAt: "2025-02-03T04:05:06.000Z",
+    };
+    const preview = projectFitnessPreview(
+      {
+        kind: "calculated",
+        result: {
+          game: {
+            id: "imported-game",
+            name: "Imported Local Name",
+            yearPublished: 1999,
+            bggData: { mechanics: [{ id: 99, name: "Imported mechanic" }] },
+            ownership: "owned",
+          },
+          score: { score: 81, breakdown: [], predictionMeta: null },
+          predictionUnavailable: null,
+          previewIdentity: {
+            calculationVersion: "bgg-fitness-preview-v2",
+            source: "local-unverified",
+            calculatedAt: "2025-02-03T04:06:00.000Z",
+            bggObservedAt: fact.observedAt,
+            collectionRevision: 1,
+            predictionSettingsVersion: "settings",
+            tournamentDataVersion: "tournament",
+          },
+          bggVerification: { status: "verified" },
+        },
+      },
+      42,
+      registry,
+      fact,
+    );
+
+    expect(preview).toMatchObject({
+      status: "ok",
+      state: "existing",
+      primaryName: "Verified BGG Name",
+      collectionGameId: "imported-game",
+      score: { value: 81 },
+    });
+    expect(
+      staged.find(({ evidenceClass }) => evidenceClass === "bgg-thing-facts")?.payload,
+    ).toMatchObject({
+      bggId: 42,
+      primaryName: "Verified BGG Name",
+      yearPublished: 2024,
+      mechanics: [{ id: 7, name: "Verified mechanic" }],
+    });
+    expect(
+      staged.find(({ evidenceClass }) => evidenceClass === "current-scoring")?.payload,
+    ).toMatchObject({
+      gameId: "imported-game",
+      name: "Imported Local Name",
+      score: 81,
+      ownership: "owned",
+    });
+  });
+
+  test("does not make a BGG claim from local metadata when Thing facts are unavailable", () => {
+    const staged: Array<{ evidenceClass: string }> = [];
+    const registry = {
+      stage(record: { evidenceClass: string }) {
+        staged.push(record);
+        return `citation-${staged.length}`;
+      },
+      commit() {},
+      discard() {},
+    };
+    const preview = projectFitnessPreview(
+      {
+        kind: "calculated",
+        result: {
+          game: {
+            id: "imported-game",
+            name: "Imported Local Name",
+            yearPublished: 1999,
+            bggData: { mechanics: [] },
+            ownership: "owned",
+          },
+          score: { score: 81, breakdown: [], predictionMeta: null },
+          predictionUnavailable: null,
+          previewIdentity: {
+            calculationVersion: "bgg-fitness-preview-v2",
+            source: "local-unverified",
+            calculatedAt: "2025-02-03T04:06:00.000Z",
+            bggObservedAt: "2025-02-03T04:05:06.000Z",
+            collectionRevision: 1,
+            predictionSettingsVersion: "settings",
+            tournamentDataVersion: "tournament",
+          },
+          bggVerification: { status: "verified" },
+        },
+      },
+      42,
+      registry,
+    );
+
+    expect(preview).toMatchObject({
+      status: "partial",
+      state: "existing-local-unverified",
+      collectionName: "Imported Local Name",
+      bggLookup: { status: "failed", code: "BggParse" },
+      score: { value: 81 },
+    });
+    expect(staged.some(({ evidenceClass }) => evidenceClass === "bgg-thing-facts")).toBe(false);
+  });
+
+  test("registers the complete Analyst collection and BGG tool set", async () => {
     const service = createAnalystTurnService({
       provider: unavailableProvider((analysisRequest) => {
         expect(analysisRequest.allowedTools.toolNames).toEqual([
@@ -99,12 +227,21 @@ describe("Analyst turn service boundaries", () => {
           "grep",
           "readGames",
           "summarize",
+          "searchBggTitles",
+          "reviewBggHot",
+          "readBggFacts",
+          "previewBggFitness",
+          "submit_grounded_analysis",
         ]);
         expect(analysisRequest.retrievalTools?.map(({ name }) => name)).toEqual([
           "top",
           "grep",
           "readGames",
           "summarize",
+          "searchBggTitles",
+          "reviewBggHot",
+          "readBggFacts",
+          "previewBggFitness",
         ]);
         return Promise.reject(new Error("stop after manifest inspection"));
       }),
@@ -153,6 +290,324 @@ describe("Analyst turn service boundaries", () => {
     await started.promise;
     controller.abort();
     expect(await failure(running)).toMatchObject({ name: "AbortError" });
+  });
+
+  test("rejects model-created citation IDs that are absent from the turn registry", () => {
+    const provider: GroundedAnalysisProvider = {
+      configurationStatus: unavailableProvider(() => Promise.reject(new Error()))
+        .configurationStatus,
+      analyze: () =>
+        Promise.resolve({
+          output: {
+            outcome: "answered",
+            blocks: [{ text: "Unsupported claim", citationIds: ["forged-citation"] }],
+          },
+          usage: { state: "unavailable" },
+        } as never),
+    };
+    const service = createAnalystTurnService({
+      provider,
+      evidenceService: evidenceService({
+        accumulatedEvidence: () =>
+          Promise.resolve({
+            snapshotFingerprint: snapshot.snapshotFingerprint,
+            evidence: {} as never,
+            citations: [],
+            noteDependencies: [],
+            scope: {
+              totalSourceCount: 0,
+              matchingSourceCount: 0,
+              examinedSourceCount: 0,
+              exhaustive: true,
+            },
+            nextCursor: null,
+          }),
+      }),
+    });
+
+    expect(service.run(request(new AbortController().signal))).resolves.toMatchObject({
+      valid: false,
+      reason: "handoff-failed",
+    });
+  });
+
+  test("inspects the Hot observation and all 20 candidate identity citations", async () => {
+    const provider = unavailableProvider(async (analysisRequest) => {
+      const tool = analysisRequest.retrievalTools?.find(({ name }) => name === "reviewBggHot");
+      if (!tool) throw new Error("hot review tool missing");
+      await tool.execute("hot-review", {}, undefined, undefined, unusedContext);
+      return {
+        output: { outcome: "answered", blocks: [{ text: "No BGG results", citationIds: [] }] },
+        usage: { state: "unavailable" },
+      } as never;
+    });
+    const service = createAnalystTurnService({
+      provider,
+      bggClient: {
+        isConfigured: () => true,
+        reviewBoardgameHot: () =>
+          Promise.resolve({
+            observedAt: "2025-02-03T04:05:06.000Z",
+            returnedCount: 20,
+            emittedCount: 20,
+            truncated: false,
+            candidates: Array.from({ length: 20 }, (_, index) => ({
+              bggId: index + 1,
+              primaryName: `Hot game ${index + 1}`,
+              yearPublished: 2020,
+            })),
+          }),
+      } as never,
+      evidenceService: evidenceService({
+        accumulatedEvidence: () =>
+          Promise.resolve({
+            snapshotFingerprint: snapshot.snapshotFingerprint,
+            evidence: {} as never,
+            citations: [],
+            noteDependencies: [],
+            scope: {
+              totalSourceCount: 0,
+              matchingSourceCount: 0,
+              examinedSourceCount: 0,
+              exhaustive: true,
+            },
+            nextCursor: null,
+          }),
+      }),
+    });
+    const result = await service.run({
+      ...request(new AbortController().signal),
+      conversationId: "conversation",
+      turnIndex: 0,
+    });
+
+    expect(result).toMatchObject({ output: { outcome: "answered" } });
+    if (!("inspectionRecords" in result)) throw new Error("Expected successful turn result");
+    expect(result.inspectionRecords).toHaveLength(21);
+    expect(
+      result.inspectionRecords.filter(
+        ({ citation }) => citation.evidenceClass === "bgg-candidate-identity",
+      ),
+    ).toHaveLength(20);
+    expect(
+      result.inspectionRecords.find(
+        ({ citation }) => citation.evidenceClass === "bgg-hot-observation",
+      ),
+    ).toMatchObject({
+      citation: { evidenceClass: "bgg-hot-observation" },
+      view: { kind: "discovery", result: { status: "ok", source: "hot", emittedCount: 20 } },
+    });
+    expect(
+      result.inspectionRecords.every(
+        (record) => !("authenticationToken" in record) && !("attestationDigest" in record),
+      ),
+    ).toBe(true);
+  });
+
+  test("materializes candidate identities, Thing facts, and preview calculation source versions", async () => {
+    const provider = unavailableProvider(async (analysisRequest) => {
+      const search = analysisRequest.retrievalTools?.find(({ name }) => name === "searchBggTitles");
+      const preview = analysisRequest.retrievalTools?.find(
+        ({ name }) => name === "previewBggFitness",
+      );
+      if (!search || !preview) throw new Error("BGG tools missing");
+      await search.execute(
+        "search",
+        { ownerMessageIndex: 0, start: 7, end: 11 },
+        undefined,
+        undefined,
+        unusedContext,
+      );
+      await preview.execute("preview", { bggId: 42 }, undefined, undefined, unusedContext);
+      return {
+        output: { outcome: "answered", blocks: [{ text: "Azul", citationIds: [] }] },
+        usage: { state: "unavailable" },
+      } as never;
+    });
+    const service = createAnalystTurnService({
+      provider,
+      bggClient: {
+        isConfigured: () => true,
+        searchBoardgameTitles: () =>
+          Promise.resolve({
+            observedAt: "2025-02-03T04:05:06.000Z",
+            returnedCount: 1,
+            emittedCount: 1,
+            truncated: false,
+            candidates: [{ bggId: 42, primaryName: "Azul", yearPublished: 2017 }],
+          }),
+      } as never,
+      previewFitness: () =>
+        Promise.resolve({
+          kind: "calculated",
+          result: {
+            game: { id: "preview-42", name: "Azul", yearPublished: 2017 },
+            score: { score: 81, breakdown: [], predictionMeta: null, ratedAxisCount: 0 },
+            predictionUnavailable: null,
+            previewIdentity: {
+              calculationVersion: "bgg-fitness-preview-v2",
+              source: "bgg-verified",
+              calculatedAt: "2025-02-03T04:06:00.000Z",
+              bggObservedAt: "2025-02-03T04:05:06.000Z",
+              collectionRevision: 3,
+              predictionSettingsVersion: "settings-2",
+              tournamentDataVersion: "tournament-4",
+            },
+            verifiedFact: {
+              bggId: 42,
+              primaryName: "Azul",
+              yearPublished: null,
+              yearMissing: true,
+              mechanics: [],
+              mechanicsMissing: false,
+              mechanicsComplete: true,
+              warnings: [],
+              observedAt: "2025-02-03T04:05:06.000Z",
+            },
+            bggVerification: { status: "verified" },
+          },
+        }),
+      evidenceService: evidenceService({
+        accumulatedEvidence: () =>
+          Promise.resolve({
+            snapshotFingerprint: snapshot.snapshotFingerprint,
+            evidence: {} as never,
+            citations: [],
+            noteDependencies: [],
+            scope: {
+              totalSourceCount: 0,
+              matchingSourceCount: 0,
+              examinedSourceCount: 0,
+              exhaustive: true,
+            },
+            nextCursor: null,
+          }),
+      }),
+    });
+    const result = await service.run({
+      ...request(new AbortController().signal),
+      ownerMessages: ["I like Azul"],
+      conversationId: "conversation",
+      turnIndex: 2,
+    });
+
+    if (!("inspectionRecords" in result)) throw new Error("Expected successful turn result");
+    const candidateRecord = result.inspectionRecords.find(
+      ({ citation }) => citation.evidenceClass === "bgg-candidate-identity",
+    );
+    const factsRecord = result.inspectionRecords.find(
+      ({ citation }) => citation.evidenceClass === "bgg-thing-facts",
+    );
+    const calculationRecord = result.inspectionRecords.find(
+      ({ citation }) => citation.evidenceClass === "bgg-preview-calculation",
+    );
+    expect(candidateRecord).toMatchObject({
+      citation: { sourceId: "42" },
+      view: { kind: "discovery" },
+    });
+    expect(factsRecord).toMatchObject({ citation: { sourceId: "42" }, view: { kind: "item" } });
+    expect(factsRecord).toMatchObject({
+      view: { kind: "item", result: { facts: [{ yearPublished: null, missingFields: ["year"] }] } },
+    });
+    expect(calculationRecord).toMatchObject({
+      citation: { sourceId: "42" },
+      view: { kind: "calculation" },
+    });
+    if (calculationRecord?.view.kind !== "calculation")
+      throw new Error("Expected calculation inspection record");
+    if (!("sourceVersion" in calculationRecord.view.result))
+      throw new Error("Expected calculation source version");
+    expect(calculationRecord.view.result.sourceVersion).toContain("bgg-fitness-preview-v2:");
+  });
+
+  test("discards staged BGG inspections when the provider turn is aborted", async () => {
+    const providerStarted = deferred<void>();
+    const finishProvider = deferred<never>();
+    const controller = new AbortController();
+    const service = createAnalystTurnService({
+      provider: unavailableProvider(async (analysisRequest) => {
+        const tool = analysisRequest.retrievalTools?.find(({ name }) => name === "reviewBggHot");
+        if (!tool) throw new Error("hot review tool missing");
+        await tool.execute("hot-review", {}, undefined, undefined, unusedContext);
+        providerStarted.resolve();
+        return finishProvider.promise;
+      }),
+      bggClient: {
+        isConfigured: () => true,
+        reviewBoardgameHot: () =>
+          Promise.resolve({
+            observedAt: "2025-02-03T04:05:06.000Z",
+            returnedCount: 0,
+            emittedCount: 0,
+            truncated: false,
+            candidates: [],
+          }),
+      } as never,
+      evidenceService: evidenceService({}),
+    });
+
+    const running = service.run({
+      ...request(controller.signal),
+      conversationId: "conversation",
+      turnIndex: 3,
+    });
+    await providerStarted.promise;
+    controller.abort();
+    finishProvider.resolve(Promise.reject(new DOMException("aborted", "AbortError")) as never);
+    expect(await failure(running)).toMatchObject({ name: "AbortError" });
+  });
+
+  test("shares the 24-call reservation across collection, BGG, and submission dispatch", async () => {
+    const service = createAnalystTurnService({
+      provider: unavailableProvider(async (analysisRequest) => {
+        const collectionTool = analysisRequest.retrievalTools?.find(({ name }) => name === "top");
+        if (collectionTool === undefined) throw new Error("top tool missing");
+        await collectionTool.execute(
+          "top",
+          { rankBy: "fitness" },
+          undefined,
+          undefined,
+          unusedContext,
+        );
+        const bggTool = analysisRequest.retrievalTools?.find(
+          ({ name }) => name === "previewBggFitness",
+        );
+        if (bggTool === undefined) throw new Error("preview tool missing");
+        for (let index = 0; index < 22; index++)
+          await bggTool.execute("preview", { bggId: 999 }, undefined, undefined, unusedContext);
+        analysisRequest.toolLifecycle?.dispatch("submit_grounded_analysis", "submission");
+        expect(() =>
+          analysisRequest.toolLifecycle?.dispatch("submit_grounded_analysis", "submission"),
+        ).toThrow(/budget exhausted/u);
+        const denied = await bggTool.execute(
+          "preview",
+          { bggId: 999 },
+          undefined,
+          undefined,
+          unusedContext,
+        );
+        expect((denied.content[0] as { text: string }).text).toContain("BudgetExhausted");
+        return Promise.reject(new Error("stop after shared invocation budget check"));
+      }),
+      evidenceService: evidenceService({
+        top: () =>
+          Promise.resolve({
+            snapshotFingerprint: snapshot.snapshotFingerprint,
+            entries: [],
+            scope: {
+              totalGameCount: 0,
+              matchingGameCount: 0,
+              examinedGameCount: 0,
+              exhaustive: true,
+            },
+            nextCursor: null,
+            truncated: false,
+          }),
+      }),
+    });
+    expect(await failure(service.run(request(new AbortController().signal)))).toMatchObject({
+      message: "stop after shared invocation budget check",
+    });
   });
 
   test("returns repeated retrieval pages", async () => {

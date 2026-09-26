@@ -40,6 +40,7 @@ import {
 } from "./session-factory.js";
 import {
   COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
+  ANALYST_BGG_TOOL_NAMES,
   createGroundedStructuredSubmission,
   GROUNDED_SUBMISSION_TOOL_NAME,
   type GroundedSubmissionUsageSnapshot,
@@ -52,6 +53,11 @@ import {
 
 const GROUNDED_SUBMISSION_ONLY_TOOL_NAMES = Object.freeze([GROUNDED_SUBMISSION_TOOL_NAME] as const);
 const COLLECTION_EVIDENCE_TOOL_NAMES = COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES;
+const ANALYST_STRUCTURED_TOOL_NAMES = Object.freeze([
+  ...COLLECTION_EVIDENCE_TOOL_NAMES.slice(0, -1),
+  ...ANALYST_BGG_TOOL_NAMES,
+  GROUNDED_SUBMISSION_TOOL_NAME,
+]);
 const MAX_ASSISTANT_STOP_REASON_SNAPSHOT = 32;
 
 type SubmissionDiagnostics = GroundedSubmissionDiagnostics;
@@ -295,14 +301,15 @@ export function createGroundedAnalysisProvider(
     const collectionEvidenceTools =
       allowedTools.toolNames.length === COLLECTION_EVIDENCE_TOOL_NAMES.length &&
       COLLECTION_EVIDENCE_TOOL_NAMES.every((toolName) => allowedTools.toolNames.includes(toolName));
+    const analystStructuredTools =
+      allowedTools.toolNames.length === ANALYST_STRUCTURED_TOOL_NAMES.length &&
+      ANALYST_STRUCTURED_TOOL_NAMES.every((toolName) => allowedTools.toolNames.includes(toolName));
     const freeformCollectionTools = ["top", "grep", "readGames", "summarize"];
     const supportsFreeformCollection =
       feature === "collection-analyst" &&
       allowedTools.toolNames.length === freeformCollectionTools.length &&
       freeformCollectionTools.every((toolName) => allowedTools.toolNames.includes(toolName));
-    const supportsCollectionEvidence =
-      (feature === "collection-analyst" || feature === "profile-reflection") &&
-      collectionEvidenceTools;
+    const supportsCollectionEvidence = feature === "profile-reflection" && collectionEvidenceTools;
     if (
       allowedTools.feature !== feature ||
       new Set(registeredToolNames).size !== registeredToolNames.length ||
@@ -311,7 +318,7 @@ export function createGroundedAnalysisProvider(
       (feature === "collection-analyst"
         ? freeform
           ? !supportsFreeformCollection
-          : !supportsCollectionEvidence
+          : !(collectionEvidenceTools || analystStructuredTools)
         : feature === "profile-reflection"
           ? !(submissionOnly || supportsCollectionEvidence)
           : !submissionOnly)
@@ -403,7 +410,7 @@ export function createGroundedAnalysisProvider(
           if (event.event === "model-response-end") activeRoundIndex = event.roundIndex;
           safelyTrace(request.audit, event);
         },
-        traceAssistantContent,
+        traceAssistantContent: feature === "collection-analyst" ? false : traceAssistantContent,
       };
       if (freeform) {
         if (sessionFactory.createFreeform === undefined)

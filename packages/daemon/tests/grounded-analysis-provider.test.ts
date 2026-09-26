@@ -15,7 +15,10 @@ import {
   GroundedAnalysisError,
   mapGroundedAnalysisFailure,
 } from "../src/services/grounded-analysis/failure-mapping.js";
-import { createGroundedAnalysisProvider } from "../src/services/grounded-analysis/provider.js";
+import {
+  createGroundedAnalysisProvider,
+  type GroundedAnalysisRequest,
+} from "../src/services/grounded-analysis/provider.js";
 import { createAnalystTurnService } from "../src/services/analyst-turn-service.js";
 import { AnalystEvidenceSourceChangedError } from "../src/services/analyst-evidence-service.js";
 import {
@@ -40,6 +43,7 @@ import {
 import {
   COLLECTION_EVIDENCE_TOOL_NAMES,
   COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
+  ANALYST_BGG_TOOL_NAMES,
   createCollectionAnalystToolManifest,
   createGroundedSubmissionOnlyToolManifest,
   createProfileReflectionToolManifest,
@@ -534,12 +538,94 @@ describe("grounded-analysis provider lifecycle", () => {
     ]);
     expect(createCollectionAnalystToolManifest()).toEqual({
       feature: "collection-analyst",
-      toolNames: COLLECTION_EVIDENCE_TOOL_NAMES,
+      toolNames: COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
     });
     expect(createProfileReflectionToolManifest()).toEqual({
       feature: "profile-reflection",
       toolNames: COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
     });
+    expect(ANALYST_BGG_TOOL_NAMES).toEqual([
+      "searchBggTitles",
+      "reviewBggHot",
+      "readBggFacts",
+      "previewBggFitness",
+    ]);
+    expect(createCollectionAnalystToolManifest(ANALYST_BGG_TOOL_NAMES).toolNames).toEqual([
+      "top",
+      "grep",
+      "readGames",
+      "summarize",
+      ...ANALYST_BGG_TOOL_NAMES,
+      GROUNDED_SUBMISSION_TOOL_NAME,
+    ]);
+    expect(createProfileReflectionToolManifest().toolNames).not.toContain("searchBggTitles");
+    expect(() => createCollectionAnalystToolManifest(["searchBggTitles"])).toThrow(
+      "Analyst BGG manifest must include every canonical tool",
+    );
+  });
+
+  test("accepts only canonical Analyst tools and excludes BGG tools from Reflection", async () => {
+    const injectedTool = defineTool({
+      name: "injectedAnalystTool",
+      label: "Injected tool",
+      description: "Not part of the Analyst capability manifest",
+      parameters: Type.Object({}, { additionalProperties: false }),
+      execute: () => Promise.resolve({ content: [], details: undefined }),
+    });
+    const analystFailure = await captureFailure(
+      configuredProvider({ transmissions: [] }).analyze({
+        ...request(),
+        audit: { ...request().audit, feature: "collection-analyst" },
+        allowedTools: {
+          feature: "collection-analyst",
+          toolNames: [...COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES, "injectedAnalystTool"],
+        },
+        retrievalTools: [injectedTool],
+      }),
+    );
+    expect(analystFailure.safeDetail).toBe("unsupported-feature-tool-manifest");
+
+    const reflectionFailure = await captureFailure(
+      configuredProvider({ transmissions: [] }).analyze({
+        ...request(),
+        audit: { ...request().audit, feature: "profile-reflection" },
+        allowedTools: createCollectionAnalystToolManifest(ANALYST_BGG_TOOL_NAMES),
+        retrievalTools: [...COLLECTION_EVIDENCE_TOOL_NAMES, ...ANALYST_BGG_TOOL_NAMES].map((name) =>
+          defineTool({
+            name,
+            label: name,
+            description: "Read-only test retrieval tool",
+            parameters: Type.Object({}, { additionalProperties: false }),
+            execute: () => Promise.resolve({ content: [], details: undefined }),
+          }),
+        ),
+      }),
+    );
+    expect(reflectionFailure.safeDetail).toBe("unsupported-feature-tool-manifest");
+  });
+
+  test("never traces Analyst assistant content even when content tracing is enabled", async () => {
+    const controls: LocalProviderControls = { transmissions: [], modelLogs: [] };
+    await configuredProvider(controls, [], [], true).analyze({
+      ...request(),
+      audit: { ...request().audit, feature: "collection-analyst" },
+      allowedTools: createCollectionAnalystToolManifest(),
+      retrievalTools: COLLECTION_EVIDENCE_TOOL_NAMES.map((name) =>
+        defineTool({
+          name,
+          label: name,
+          description: "Read-only test collection tool",
+          parameters: Type.Object({}, { additionalProperties: false }),
+          execute: () => Promise.resolve({ content: [], details: undefined }),
+        }),
+      ),
+    });
+
+    const trace = controls.modelLogs?.filter(
+      (record): record is Extract<GroundedModelLogRecord, { recordType: "grounded-model-trace" }> =>
+        record.recordType === "grounded-model-trace",
+    );
+    expect(trace?.some((record) => "assistantText" in record)).toBe(false);
   });
 
   test("accepts the exact collection tool set for profile reflection", async () => {
@@ -1165,6 +1251,14 @@ describe("grounded-analysis provider lifecycle", () => {
       createAnalystTurnService({
         provider: {
           ...configuredProvider({ transmissions: [] }),
+          analyze: <Output>(request: GroundedAnalysisRequest<Output>) =>
+            Promise.resolve({
+              output: request.submissionSchema.parse({
+                outcome: "answered",
+                blocks: [{ text: "Grounded", citationIds: [] }],
+              }),
+              usage: { state: "unavailable" as const },
+            }),
           analyzeFreeform: () =>
             Promise.resolve({ output: "Grounded", usage: { state: "unavailable" as const } }),
         },
@@ -1200,6 +1294,14 @@ describe("grounded-analysis provider lifecycle", () => {
       createAnalystTurnService({
         provider: {
           ...configuredProvider({ transmissions: [] }),
+          analyze: <Output>(request: GroundedAnalysisRequest<Output>) =>
+            Promise.resolve({
+              output: request.submissionSchema.parse({
+                outcome: "answered",
+                blocks: [{ text: "Grounded", citationIds: [] }],
+              }),
+              usage: { state: "unavailable" as const },
+            }),
           analyzeFreeform: () =>
             Promise.resolve({ output: "Grounded", usage: { state: "unavailable" as const } }),
         },

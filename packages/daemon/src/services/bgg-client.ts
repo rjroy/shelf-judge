@@ -7,6 +7,7 @@ import {
 } from "@shelf-judge/shared";
 import {
   parseThingItems,
+  parseBoardgameScoringThings,
   parseSearchResponse,
   parseCollectionResponse,
   parsePlaysResponse,
@@ -16,6 +17,7 @@ import {
   type BggPlayRecord,
   type ParsedSuggestedPlayerPoll,
   type ThingItem,
+  type BoardgameScoringThing,
 } from "./bgg-xml-parser.js";
 import { createLogger, type Logger } from "./logger.js";
 
@@ -32,6 +34,41 @@ const MAX_5XX_RETRIES = 2;
 const MAX_202_RETRIES = 3;
 const BASE_202_DELAY_MS = 5000;
 const FETCH_TIMEOUT_MS = 30000;
+
+export type BggClientErrorCode =
+  | "attempt-budget"
+  | "unauthorized"
+  | "rate-limited"
+  | "queued"
+  | "timeout"
+  | "outage"
+  | "parse";
+
+/** A transport failure with a stable, privacy-safe category and no upstream payload. */
+export class BggClientError extends Error {
+  constructor(
+    readonly code: BggClientErrorCode,
+    readonly status?: number,
+  ) {
+    const messages: Record<BggClientErrorCode, string> = {
+      "attempt-budget": "BGG request attempt budget exhausted",
+      unauthorized: "BGG authentication failed",
+      "rate-limited": "BGG API rate limit exceeded",
+      queued: "BGG request remained queued",
+      timeout: "BGG API request timed out",
+      outage: "BGG API request failed",
+      parse: "BGG response could not be parsed",
+    };
+    super(
+      status === undefined
+        ? messages[code]
+        : code === "outage" || code === "unauthorized" || code === "rate-limited"
+          ? `BGG API returned HTTP ${status}`
+          : `${messages[code]} (HTTP ${status})`,
+    );
+    this.name = "BggClientError";
+  }
+}
 
 export interface BggGameResult {
   metadata: ThingMetadata;
@@ -52,6 +89,30 @@ export interface BatchProgressEvent {
 
 export interface BggClient {
   searchGames(query: string, signal?: AbortSignal): Promise<BggSearchResult[]>;
+  searchBoardgameTitles?(
+    query: string,
+    options?: {
+      exact?: boolean;
+      limit?: number;
+      signal?: AbortSignal;
+      attemptBudget?: BggRequestAttemptBudget;
+    },
+  ): Promise<BoardgameTitleSearchObservation>;
+  reviewBoardgameHot?(options?: {
+    limit?: number;
+    signal?: AbortSignal;
+    attemptBudget?: BggRequestAttemptBudget;
+  }): Promise<BoardgameTitleSearchObservation>;
+  getBoardgameFacts?(
+    ids: number[],
+    signal?: AbortSignal,
+    attemptBudget?: BggRequestAttemptBudget,
+  ): Promise<BoardgameFactsObservation>;
+  getBoardgameScoringInput?(
+    bggId: number,
+    signal?: AbortSignal,
+    attemptBudget?: BggRequestAttemptBudget,
+  ): Promise<BoardgameScoringInput>;
   getGame(bggId: number): Promise<BggGameResult>;
   getGames(
     bggIds: number[],
@@ -60,6 +121,62 @@ export interface BggClient {
   getUserCollection(): Promise<BggCollectionItem[]>;
   getPlayCount(bggIds: number[]): Promise<CollectiomItemMetadata>;
   isConfigured(): boolean;
+}
+
+export interface BggRequestAttemptBudget {
+  tryConsume(): boolean;
+}
+export interface BoardgameTitleSearchObservation {
+  observedAt: string;
+  returnedCount: number;
+  emittedCount: number;
+  truncated: boolean;
+  candidates: Array<{ bggId: number; primaryName: string; yearPublished: number | null }>;
+}
+export interface BoardgameFactResult {
+  bggId: number;
+  primaryName: string;
+  yearPublished: number | null;
+  yearMissing: boolean;
+  mechanics: Array<{ id: number; name: string }>;
+  mechanicsMissing: boolean;
+  mechanicsComplete: boolean;
+  warnings: Array<"partial-links">;
+  observedAt: string;
+}
+export interface BoardgameFactsObservation {
+  facts: BoardgameFactResult[];
+  failures: Array<{
+    bggId: number;
+    code: "MissingGame" | "NonBoardgame" | "MismatchedId" | "BggParse";
+  }>;
+}
+
+/** Rich, bounded public facts from one verified BGG Thing item; excludes collection/user data. */
+export interface BoardgameScoringInput extends BoardgameScoringThing {
+  observedAt: string;
+}
+
+export type BoardgameScoringInputErrorCode =
+  | "MissingGame"
+  | "NonBoardgame"
+  | "MismatchedId"
+  | "DuplicateId"
+  | "MissingPrimaryName";
+
+/** Safe, stable identity validation failure for the scoring Thing request. */
+export class BoardgameScoringInputError extends Error {
+  constructor(readonly code: BoardgameScoringInputErrorCode) {
+    const messages: Record<BoardgameScoringInputErrorCode, string> = {
+      MissingGame: "BGG Thing response did not contain the requested board game",
+      NonBoardgame: "BGG Thing response item is not a board game",
+      MismatchedId: "BGG Thing response did not contain the requested BGG ID",
+      DuplicateId: "BGG Thing response contained duplicate requested BGG IDs",
+      MissingPrimaryName: "BGG Thing response did not contain a primary game name",
+    };
+    super(messages[code]);
+    this.name = "BoardgameScoringInputError";
+  }
 }
 
 export interface BggClientDeps {
@@ -226,14 +343,34 @@ export function createBggClient(deps: BggClientDeps): BggClient {
     };
   }
 
+  function parseSafely<T>(parse: () => T): T {
+    try {
+      return parse();
+    } catch {
+      throw new BggClientError("parse");
+    }
+  }
+
+  async function readToolResponse(response: Response, signal?: AbortSignal): Promise<string> {
+    try {
+      return await readSearchResponse(response, signal);
+    } catch (error) {
+      if (signal?.aborted) throw abortError(signal.reason);
+      if (error instanceof BggClientError) throw error;
+      throw new BggClientError("outage");
+    }
+  }
+
   let rateLimitRetries = 0;
 
   async function throttledFetch(
     url: string,
     retryCount = 0,
     signal?: AbortSignal,
+    attemptBudget?: BggRequestAttemptBudget,
   ): Promise<Response> {
     throwIfAborted(signal);
+    if (attemptBudget && !attemptBudget.tryConsume()) throw new BggClientError("attempt-budget");
     const now = Date.now();
     const elapsed = now - lastRequestTime;
     if (elapsed < currentDelayMs && lastRequestTime > 0) {
@@ -245,7 +382,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
     throwIfAborted(signal);
     lastRequestTime = Date.now();
 
-    logger.log(`fetch: ${url}`);
+    logger.log("BGG transport request");
     let response: Response;
     let abortFromCaller: (() => void) | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -281,16 +418,16 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       if (abortFromCaller) signal?.removeEventListener("abort", abortFromCaller);
       if (signal?.aborted) throw abortError(signal.reason);
       if (timedOut || (err instanceof DOMException && err.name === "AbortError")) {
-        logger.error(`timeout after ${fetchTimeoutMs / 1000}s: ${url}`);
-        throw new Error(`BGG API request timed out after ${fetchTimeoutMs / 1000}s`);
+        logger.error(`timeout after ${fetchTimeoutMs / 1000}s`);
+        throw new BggClientError("timeout");
       }
-      logger.error(`fetch error: ${toErrorMessage(err)}`);
-      throw new Error(`BGG API request failed: ${toErrorMessage(err)}`);
+      logger.error("BGG transport failed");
+      throw new BggClientError("outage");
     } finally {
       if (!retainTimeoutThroughBody && timeoutId !== undefined) clearTimeout(timeoutId);
     }
 
-    logger.log(`response: ${response.status} from ${url}`);
+    logger.log("BGG transport response", { status: response.status });
 
     // Handle 429 rate limiting with bounded retries
     if (response.status === 429) {
@@ -299,12 +436,12 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       rateLimitRetries++;
       logger.warn(`rate limited (429), retry ${rateLimitRetries}/${MAX_429_RETRIES}`);
       if (rateLimitRetries > MAX_429_RETRIES) {
-        throw new Error(`BGG API rate limited after ${MAX_429_RETRIES} retries. Try again later.`);
+        throw new BggClientError("rate-limited", 429);
       }
       if (signal) await abortableDelay(BACKOFF_429_MS, signal);
       else await delayFn(BACKOFF_429_MS);
       currentDelayMs = 10000; // Slow recovery: 1 req/10s after backoff
-      return throttledFetch(url, retryCount, signal);
+      return throttledFetch(url, retryCount, signal, attemptBudget);
     }
 
     // Successful non-429 response: reset retry counter and gradually recover rate.
@@ -323,22 +460,31 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       logger.warn(`server error (${response.status}), retry ${retryCount + 1}/${MAX_5XX_RETRIES}`);
       if (signal) await abortableDelay(RETRY_5XX_MS, signal);
       else await delayFn(RETRY_5XX_MS);
-      return throttledFetch(url, retryCount + 1, signal);
+      return throttledFetch(url, retryCount + 1, signal, attemptBudget);
     }
 
     if (!response.ok && response.status !== 202) {
-      const body = signal ? await readSearchResponse(response, signal) : await response.text();
-      logger.error(`HTTP ${response.status}: ${body}`);
-      throw new Error(`BGG API returned HTTP ${response.status}: ${body}`);
+      if (signal) await readSearchResponse(response, signal);
+      else await response.body?.cancel();
+      logger.error("BGG HTTP failure", { status: response.status });
+      throw response.status === 401
+        ? new BggClientError("unauthorized", 401)
+        : response.status === 429
+          ? new BggClientError("rate-limited", 429)
+          : new BggClientError("outage", response.status);
     }
 
     return response;
   }
 
-  function queuedFetch(url: string, signal?: AbortSignal): Promise<Response> {
+  function queuedFetch(
+    url: string,
+    signal?: AbortSignal,
+    attemptBudget?: BggRequestAttemptBudget,
+  ): Promise<Response> {
     const result = requestQueue.then(
-      () => throttledFetch(url, 0, signal),
-      () => throttledFetch(url, 0, signal),
+      () => throttledFetch(url, 0, signal, attemptBudget),
+      () => throttledFetch(url, 0, signal, attemptBudget),
     );
     requestQueue = result.then(
       () => undefined,
@@ -377,6 +523,22 @@ export function createBggClient(deps: BggClientDeps): BggClient {
     });
   }
 
+  async function queuedToolFetch(
+    url: string,
+    signal?: AbortSignal,
+    attemptBudget?: BggRequestAttemptBudget,
+  ): Promise<Response> {
+    for (let retry = 0; retry <= MAX_202_RETRIES; retry++) {
+      throwIfAborted(signal);
+      const response = await queuedFetch(url, signal, attemptBudget);
+      if (response.status !== 202) return response;
+      void response.body?.cancel().catch(() => {});
+      if (retry === MAX_202_RETRIES) throw new BggClientError("queued");
+      await abortableDelay(BASE_202_DELAY_MS * 2 ** retry, signal);
+    }
+    throw new BggClientError("queued");
+  }
+
   async function readSearchResponse(response: Response, signal?: AbortSignal): Promise<string> {
     try {
       throwIfAborted(signal);
@@ -386,7 +548,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       if (signal?.aborted) throw abortError(signal.reason);
       if (state?.timedOut()) {
         logger.error(`timeout after ${fetchTimeoutMs / 1000}s while reading response body`);
-        throw new Error(`BGG API request timed out after ${fetchTimeoutMs / 1000}s`);
+        throw new BggClientError("timeout");
       }
       throw error;
     } finally {
@@ -428,6 +590,248 @@ export function createBggClient(deps: BggClientDeps): BggClient {
   return {
     isConfigured(): boolean {
       return Boolean(config.bggAuthToken);
+    },
+
+    async searchBoardgameTitles(query, options = {}): Promise<BoardgameTitleSearchObservation> {
+      assertConfigured();
+      throwIfAborted(options.signal);
+      const normalized = query.trim();
+      if (
+        normalized.length < 2 ||
+        [...normalized].length > 120 ||
+        [...normalized].some((character) => {
+          const code = character.charCodeAt(0);
+          return code <= 0x1f || code === 0x7f;
+        }) ||
+        /https?:\/\//i.test(normalized)
+      ) {
+        throw new Error("Invalid BGG title query");
+      }
+      const limit = options.limit ?? 10;
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10)
+        throw new Error("Invalid BGG result limit");
+      const url = `${BGG_BASE_URL}/search?query=${encodeURIComponent(normalized)}&type=boardgame${options.exact ? "&exact=1" : ""}`;
+      const response = await queuedToolFetch(url, options.signal, options.attemptBudget);
+      const xml = await readToolResponse(response, options.signal);
+      throwIfAborted(options.signal);
+      const observedAt = now();
+      const parsed = parseSafely(() => parseSearchResponse(xml, observedAt));
+      const boardgameTags = [...xml.matchAll(/<item\b([^>]*)>/g)].map((match) => match[1] ?? "");
+      const candidates = parsed.flatMap((item, index) => {
+        const attrs = boardgameTags[index] ?? "";
+        const type = attrs.match(/\btype=["']([^"']+)["']/)?.[1];
+        return type === "boardgame" &&
+          Number.isSafeInteger(item.bggId) &&
+          item.bggId > 0 &&
+          item.name &&
+          item.name !== "Unknown"
+          ? [
+              {
+                bggId: item.bggId,
+                primaryName: item.name.slice(0, 160),
+                yearPublished: item.yearPublished,
+              },
+            ]
+          : [];
+      });
+      return {
+        observedAt,
+        returnedCount: parsed.length,
+        emittedCount: Math.min(candidates.length, limit),
+        truncated: parsed.length > Math.min(candidates.length, limit),
+        candidates: candidates.slice(0, limit),
+      };
+    },
+
+    async reviewBoardgameHot(options = {}): Promise<BoardgameTitleSearchObservation> {
+      assertConfigured();
+      throwIfAborted(options.signal);
+      const limit = options.limit ?? 20;
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20)
+        throw new Error("Invalid BGG result limit");
+      const response = await queuedToolFetch(
+        `${BGG_BASE_URL}/hot?type=boardgame`,
+        options.signal,
+        options.attemptBudget,
+      );
+      const xml = await readToolResponse(response, options.signal);
+      throwIfAborted(options.signal);
+      const observedAt = now();
+      const parsed = parseSafely(() => parseSearchResponse(xml, observedAt));
+      const tags = [...xml.matchAll(/<item\b([^>]*)>/g)].map((match) => match[1] ?? "");
+      const candidates = parsed.flatMap((item, index) => {
+        const attrs = tags[index] ?? "";
+        // /hot?type=boardgame is a scoped endpoint; real Hot items can omit type.
+        return (!/\btype=/.test(attrs) || /\btype=["']boardgame["']/.test(attrs)) &&
+          Number.isSafeInteger(item.bggId) &&
+          item.bggId > 0 &&
+          item.name &&
+          item.name !== "Unknown"
+          ? [
+              {
+                bggId: item.bggId,
+                primaryName: item.name.slice(0, 160),
+                yearPublished: item.yearPublished,
+              },
+            ]
+          : [];
+      });
+      return {
+        observedAt,
+        returnedCount: parsed.length,
+        emittedCount: Math.min(candidates.length, limit),
+        truncated: parsed.length > Math.min(candidates.length, limit),
+        candidates: candidates.slice(0, limit),
+      };
+    },
+
+    async getBoardgameFacts(ids, signal, attemptBudget): Promise<BoardgameFactsObservation> {
+      assertConfigured();
+      throwIfAborted(signal);
+      if (
+        ids.length < 1 ||
+        ids.length > 10 ||
+        ids.some((id) => !Number.isSafeInteger(id) || id <= 0) ||
+        new Set(ids).size !== ids.length
+      )
+        throw new Error("Invalid BGG IDs");
+      const response = await queuedToolFetch(
+        `${BGG_BASE_URL}/thing?id=${ids.join(",")}&type=boardgame`,
+        signal,
+        attemptBudget,
+      );
+      const xml = await readToolResponse(response, signal);
+      throwIfAborted(signal);
+      const observedAt = now();
+      const items = parseSafely(() => parseThingItems(xml, observedAt));
+      const tags = [...xml.matchAll(/<item\b([^>]*)>([\s\S]*?)<\/item>/g)];
+      const facts: BoardgameFactResult[] = [];
+      const failures: BoardgameFactsObservation["failures"] = [];
+      for (const id of ids) {
+        const matches = items.filter((item) => item.bggId === id);
+        if (matches.length !== 1) {
+          failures.push({
+            bggId: id,
+            code:
+              matches.length > 1
+                ? "BggParse"
+                : items.some((item) => !ids.includes(item.bggId))
+                  ? "MismatchedId"
+                  : "MissingGame",
+          });
+          continue;
+        }
+        const item = matches[0];
+        const raw = tags.find((tag) => Number(tag[1]?.match(/\bid=["'](\d+)["']/)?.[1]) === id);
+        if (!raw || !/\btype=["']boardgame["']/.test(raw[1] ?? "")) {
+          failures.push({ bggId: id, code: raw ? "NonBoardgame" : "MismatchedId" });
+          continue;
+        }
+        const primaryName =
+          /<name\b(?=[^>]*\btype=["']primary["'])[^>]*\bvalue=["']([^"']*)["'][^>]*\/?\s*>/
+            .exec(raw[2] ?? "")?.[1]
+            ?.trim();
+        if (!primaryName || primaryName === "Unknown") {
+          failures.push({ bggId: id, code: "BggParse" });
+          continue;
+        }
+        const body = raw[2] ?? "";
+        const mechanicsBeforeCap = item.entityMetadata.mechanic.entities;
+        const mechanics = mechanicsBeforeCap
+          .filter(
+            (entry) => Number.isSafeInteger(Number(entry.id)) && Number(entry.id) > 0 && entry.name,
+          )
+          .slice(0, 20)
+          .map((entry) => ({ id: Number(entry.id), name: entry.name.slice(0, 80) }));
+        const mechanicField = /<link\b[^>]*\btype=["']boardgamemechanic["']/.test(body);
+        const mechanicsComplete =
+          mechanicField &&
+          item.entityMetadata.mechanic.state === "complete" &&
+          mechanics.length === mechanicsBeforeCap.length;
+        facts.push({
+          bggId: id,
+          primaryName: primaryName.slice(0, 160),
+          yearPublished: item.metadata.yearPublished,
+          yearMissing: !/<yearpublished\b/.test(body),
+          mechanics,
+          mechanicsMissing: !mechanicField,
+          mechanicsComplete,
+          warnings: mechanicsComplete ? [] : ["partial-links"],
+          observedAt,
+        });
+      }
+      return { facts, failures };
+    },
+
+    async getBoardgameScoringInput(bggId, signal, attemptBudget): Promise<BoardgameScoringInput> {
+      assertConfigured();
+      throwIfAborted(signal);
+      if (!Number.isSafeInteger(bggId) || bggId <= 0) throw new Error("Invalid BGG ID");
+      const url = `${BGG_BASE_URL}/thing?id=${bggId}&stats=1&type=boardgame`;
+      // This endpoint may feed private scoring requests; log operation metadata only,
+      // never identifiers, request data, credentials, URLs, or upstream payloads.
+      logger.log("scoring Thing fetch attempt", { requestedCount: 1, sourceRequest: "bgg-thing" });
+      let observedAt: string | null = null;
+      try {
+        const response = await queuedToolFetch(url, signal, attemptBudget);
+        const xml = await readToolResponse(response, signal);
+        throwIfAborted(signal);
+        observedAt = now();
+        const observedAtValue = observedAt;
+        if (observedAtValue === null) throw new BggClientError("parse");
+        const things = parseSafely(() => parseBoardgameScoringThings(xml, observedAtValue));
+        const matches = things.filter((thing) => thing.bggId === bggId);
+        if (matches.length === 0) {
+          throw new BoardgameScoringInputError(
+            things.length === 0 ? "MissingGame" : "MismatchedId",
+          );
+        }
+        if (matches.length !== 1) throw new BoardgameScoringInputError("DuplicateId");
+        const thing = matches[0];
+        if (thing.type !== "boardgame") throw new BoardgameScoringInputError("NonBoardgame");
+        if (!thing.primaryName || thing.primaryName === "Unknown") {
+          throw new BoardgameScoringInputError("MissingPrimaryName");
+        }
+        const result: BoardgameScoringInput = {
+          ...thing,
+          primaryName: thing.primaryName.slice(0, 160),
+          categories: thing.categories
+            .filter((entry) => Number.isSafeInteger(entry.id) && entry.id > 0 && entry.name)
+            .slice(0, 40)
+            .map((entry) => ({ id: entry.id, name: entry.name.slice(0, 100) })),
+          mechanics: thing.mechanics
+            .filter((entry) => Number.isSafeInteger(entry.id) && entry.id > 0 && entry.name)
+            .slice(0, 40)
+            .map((entry) => ({ id: entry.id, name: entry.name.slice(0, 100) })),
+          observedAt,
+        };
+        logger.log("scoring Thing fetch outcome", {
+          requestedCount: 1,
+          returnedCount: 1,
+          sourceRequest: "bgg-thing",
+          observedAt,
+          state: "complete",
+          missingFields: result.missingFields,
+        });
+        return result;
+      } catch (error) {
+        if (signal?.aborted) throw abortError(signal.reason);
+        const safeError =
+          error instanceof BoardgameScoringInputError
+            ? error
+            : error instanceof BggClientError
+              ? error
+              : new BggClientError("parse");
+        logger.warn("scoring Thing fetch outcome", {
+          requestedCount: 1,
+          returnedCount: 0,
+          sourceRequest: "bgg-thing",
+          observedAt,
+          state: "failure",
+          errorCode: safeError.code,
+        });
+        throw safeError;
+      }
     },
 
     async searchGames(query: string, signal?: AbortSignal): Promise<BggSearchResult[]> {

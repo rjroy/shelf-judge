@@ -70,6 +70,22 @@ describe("owner-note persisted flow", () => {
         if (successfulBggResult !== null) return Promise.resolve(successfulBggResult);
         return Promise.reject(new Error("BGG must not be used by owner-note commands"));
       },
+      getBoardgameScoringInput: (bggId) =>
+        Promise.resolve({
+          bggId,
+          type: "boardgame",
+          primaryName: "Wishlist fixture",
+          yearPublished: 2024,
+          minPlayers: 2,
+          maxPlayers: 4,
+          playingTime: 60,
+          weight: 2.5,
+          categories: [],
+          mechanics: [],
+          suggestedPlayerPoll: { state: "absent", buckets: [] },
+          missingFields: ["suggestedPlayerPoll"],
+          observedAt: "2026-09-05T13:00:00.000Z",
+        }),
       getUserCollection: () =>
         Promise.resolve([
           { bggId: 123, name: "Refreshed BGG fixture", yearPublished: 2026, numplays: 0 },
@@ -294,7 +310,7 @@ describe("owner-note persisted flow", () => {
         expect(payload).not.toContain(sentinel);
         expect(payload).not.toContain(superseded);
       }
-      expect(bggCalls).toBe(2);
+      expect(bggCalls).toBe(1);
 
       const collectionText = await readFile(collectionPath, "utf8");
       expect(collectionText).toContain(sentinel);
