@@ -5,6 +5,10 @@ import {
   AnalystFinalSchema,
   AnalystStreamEventSchema,
   type AnalystCitation,
+  type AnalystCitationInspectionRecord,
+  type AnalystCitationInspectionView,
+  type AnalystBggDiscoveryResult,
+  type AnalystBggFitnessPreviewResult,
   type AnalystStreamEvent,
   type AnalystTurnRequest,
 } from "@shelf-judge/shared";
@@ -16,17 +20,28 @@ type Configuration = {
   readonly configuration: {
     readonly identity: { readonly providerId: string; readonly modelId: string };
   };
+  readonly manifestVersion: number;
+  readonly disclosureVersion: number;
   readonly disclosure: { readonly localRetention: string; readonly cancellation: string };
 };
-type Message = AnalystTurnRequest["messages"][number] & { citations?: AnalystCitation[] };
+type Message = AnalystTurnRequest["messages"][number] & {
+  citations?: AnalystCitation[];
+  discovery?: AnalystBggDiscoveryResult[];
+  fitnessPreview?: AnalystBggFitnessPreviewResult[];
+  discoveryReceipts?: string[];
+  discoveryIds?: { bggId: number; source: "search" | "hot" }[];
+  discoveryDigest?: string;
+  inspections?: AnalystCitationInspectionRecord[];
+};
+type InspectionOutcome = {
+  state: "current" | "superseded" | "historical";
+  destination?: unknown;
+  inspectedAt?: string;
+  view?: AnalystCitationInspectionView;
+};
 type LiveState = "idle" | "loading" | "streaming" | "cancelled" | "failed";
 
-const markdownComponents = {
-  a: ({ node, ...props }) => {
-    void node;
-    return <a {...props} target="_blank" rel="noopener noreferrer" />;
-  },
-} satisfies Components;
+const markdownComponents = { a: ({ children }) => <span>{children}</span> } satisfies Components;
 
 function id(): string {
   return generateBrowserUuid();
@@ -43,7 +58,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseConfiguration(value: unknown): Configuration {
-  AnalystConfigurationSchema.parse(value);
+  const parsed = AnalystConfigurationSchema.parse(value);
   if (!isRecord(value) || !isRecord(value.configuration) || !isRecord(value.disclosure)) {
     throw new Error("The Analyst configuration was invalid.");
   }
@@ -58,6 +73,8 @@ function parseConfiguration(value: unknown): Configuration {
     throw new Error("The Analyst configuration was invalid.");
   }
   return {
+    manifestVersion: parsed.manifestVersion,
+    disclosureVersion: parsed.disclosureVersion,
     configuration: { identity: { providerId: identity.providerId, modelId: identity.modelId } },
     disclosure: {
       localRetention: value.disclosure.localRetention,
@@ -79,11 +96,171 @@ function progressFor(event: AnalystStreamEvent): string | undefined {
   return undefined;
 }
 
+function BggLink({ id, children }: { id: number; children: ReactNode }) {
+  return (
+    <a href={`https://boardgamegeek.com/boardgame/${id}`} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  );
+}
+
+function Discovery({ result }: { result: AnalystBggDiscoveryResult }) {
+  if (result.status === "error")
+    return (
+      <section className="analyst-tool-card">
+        <h3>
+          {result.code === "BggThrottled"
+            ? "BGG is temporarily limiting requests"
+            : result.code === "BggUnauthorized" || result.code === "NotConfigured"
+              ? "BGG access is not configured"
+              : "BGG discovery could not be completed"}
+        </h3>
+        <p>
+          Code: {result.code}.{" "}
+          {result.retryable ? "You can ask again later." : "This request cannot be retried as-is."}
+        </p>
+      </section>
+    );
+  const title = result.source === "title";
+  return (
+    <section
+      className="analyst-tool-card analyst-discovery"
+      aria-label={title ? "BGG title matches" : "BGG Hot sample"}
+    >
+      <header>
+        <h3>{title ? "BGG title matches" : "BGG Hot sample"}</h3>
+        <span>
+          {result.emittedCount} shown · {result.returnedCount} returned
+        </span>
+      </header>
+      <p className="analyst-provenance">
+        Source: {title ? "BGG title search" : "fixed boardgame Hot request"} · Observed{" "}
+        {new Date(result.observedAt).toLocaleString()}
+      </p>
+      {result.truncated && <p role="note">Showing a bounded sample; more results were returned.</p>}
+      {result.candidates.length ? (
+        <ul className="analyst-candidates">
+          {result.candidates.map((candidate) => (
+            <li key={candidate.bggId}>
+              <BggLink id={candidate.bggId}>
+                <strong>{candidate.primaryName}</strong> · BGG {candidate.bggId}
+              </BggLink>
+              {candidate.yearPublished && <span> · {candidate.yearPublished}</span>}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>
+          {title
+            ? "No matches in this title search."
+            : "No useful candidates in this checked Hot sample."}
+        </p>
+      )}
+      <p className="analyst-hint">
+        If a match is ambiguous, inspect alternatives and tell the Analyst which game you mean.
+      </p>
+    </section>
+  );
+}
+
+function FitnessPreview({ result }: { result: AnalystBggFitnessPreviewResult }) {
+  if (result.status === "error")
+    return (
+      <section className="analyst-tool-card">
+        <h3>Fitness preview unavailable</h3>
+        <p>
+          {result.code}.{" "}
+          {result.retryable ? "Try again later." : "This preview cannot be retried as-is."}
+        </p>
+      </section>
+    );
+  if (result.state === "ambiguous")
+    return (
+      <section className="analyst-tool-card">
+        <h3>Identity is ambiguous</h3>
+        <p>Several collection entries may match BGG {result.bggId}. No score was selected.</p>
+        <p>
+          Possible collection IDs: {result.collectionGameIds.join(", ")}. Tell the Analyst which
+          identity you mean.
+        </p>
+      </section>
+    );
+  if (result.state === "unavailable")
+    return (
+      <section className="analyst-tool-card">
+        <h3>Fitness preview unavailable</h3>
+        <p>
+          BGG {result.bggId}: {result.code}.
+          {result.predictionUnavailable
+            ? ` Your profile is at readiness stage 0 (${result.predictionUnavailable.ratedGameCount} rated; ${result.predictionUnavailable.gamesNeeded} more needed).`
+            : " No score is available."}
+        </p>
+      </section>
+    );
+  const score = result.score;
+  const local = result.state === "existing-local-unverified";
+  const existing = result.state !== "predicted";
+  return (
+    <section className="analyst-tool-card analyst-preview">
+      <h3>{existing ? "Existing in collection" : "Predicted fitness"}</h3>
+      <p>
+        <strong>{local ? result.collectionName : result.primaryName}</strong> · BGG {result.bggId}
+        {local && " · Local identity; BGG not verified"}
+      </p>
+      <p className="analyst-score">
+        <span>{score.value.toFixed(1)}</span> / 10{" "}
+        <strong>{score.label === "actual" ? "Current actual score" : "Predicted score"}</strong>
+      </p>
+      <p>
+        Readiness stage {score.readinessStage}
+        {score.confidence && ` · Confidence: ${score.confidence}`}
+        {score.predictionUnavailable &&
+          ` · Personal prediction unavailable at stage 0 (${score.predictionUnavailable.ratedGameCount} rated, ${score.predictionUnavailable.gamesNeeded} more needed)`}
+      </p>
+      {!local && (
+        <p>BGG identity verified · {new Date(result.bggLookup.observedAt).toLocaleString()}</p>
+      )}
+      {local && <p>BGG lookup failed: {result.bggLookup.code}. This is a local-only score.</p>}
+      <details>
+        <summary>Score details and sources</summary>
+        <p>
+          Calculated {new Date(result.calculatedAt).toLocaleString()} · Source version{" "}
+          {result.sourceVersion}
+        </p>
+        {score.axes.length > 0 && (
+          <ul>
+            {score.axes.map((axis) => (
+              <li key={axis.axisId}>
+                {axis.axisName}: {axis.value === null ? "Not available" : axis.value.toFixed(1)} ·{" "}
+                {axis.source}
+                {axis.confidence ? ` · ${axis.confidence} confidence` : ""}
+              </li>
+            ))}
+          </ul>
+        )}
+        {score.referenceGames.length > 0 && (
+          <p>
+            Reference games:{" "}
+            {score.referenceGames.map((game) => `${game.gameName} (${game.gameId})`).join(", ")}
+          </p>
+        )}
+        {existing && (
+          <p>
+            Collection entry: {result.collectionGameId} · {result.ownership}
+          </p>
+        )}
+      </details>
+      <p className="analyst-hint">Read-only preview. Nothing was added or changed.</p>
+    </section>
+  );
+}
+
 async function readEvents(response: Response, onEvent: (event: AnalystStreamEvent) => void) {
   const reader = response.body?.getReader();
   if (!reader) throw new Error("The Analyst stream was unavailable.");
   const decoder = new TextDecoder();
   let buffered = "";
+  let terminal = false;
   while (true) {
     const result = await reader.read();
     if (result.done) break;
@@ -100,8 +277,57 @@ async function readEvents(response: Response, onEvent: (event: AnalystStreamEven
       const parsed = AnalystStreamEventSchema.safeParse(JSON.parse(payload));
       if (!parsed.success) throw new Error("The Analyst returned an invalid stream event.");
       onEvent(parsed.data);
+      if (["completed", "cancelled", "failed"].includes(parsed.data.type)) terminal = true;
     }
   }
+  if (!terminal)
+    throw new Error(
+      "The Analyst connection ended before a complete response. Retry your question.",
+    );
+}
+
+function InspectionView({ view }: { view: AnalystCitationInspectionView }) {
+  if (view.kind === "discovery")
+    return (
+      <div>
+        <p>
+          BGG{" "}
+          {view.result.status === "ok"
+            ? `${view.result.source} observation · ${view.result.emittedCount} shown of ${view.result.returnedCount} returned · observed ${new Date(view.result.observedAt).toLocaleString()}`
+            : `discovery failed: ${view.result.code}`}
+        </p>
+        {view.result.status === "ok" && (
+          <ul>
+            {view.result.candidates.map((candidate) => (
+              <li key={candidate.bggId}>
+                <BggLink id={candidate.bggId}>
+                  {candidate.primaryName} · BGG {candidate.bggId}
+                  {candidate.yearPublished ? ` · ${candidate.yearPublished}` : ""}
+                </BggLink>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  if (view.kind === "calculation")
+    return (
+      <div>
+        <p>
+          Fitness calculation ·{" "}
+          {"calculatedAt" in view.result
+            ? new Date(view.result.calculatedAt).toLocaleString()
+            : "time unavailable"}
+        </p>
+        <pre>{JSON.stringify(view.result, null, 2)}</pre>
+      </div>
+    );
+  return (
+    <div>
+      <p>BGG facts recorded with this answer (historical; no refresh performed).</p>
+      <pre>{JSON.stringify(view.result, null, 2)}</pre>
+    </div>
+  );
 }
 
 function Modal({
@@ -181,6 +407,11 @@ function Disclosure({
         {configuration.disclosure.localRetention} Relevant owner notes may be transmitted. Provider
         processing and retention follow its policy.
       </p>
+      <p>
+        If the Analyst uses a BGG tool, a title or explicit BGG ID mentioned in your chat may be
+        sent to BoardGameGeek. Hot uses a separate fixed request and does not include your question.
+        BGG processing is separate from provider processing.
+      </p>
       <p>This application has no token or monetary cap. {configuration.disclosure.cancellation}</p>
       <div className="analyst-actions">
         <button type="button" onClick={onClose}>
@@ -203,6 +434,9 @@ export function AnalystChat() {
   const [state, setState] = useState<LiveState>("loading");
   const [showDisclosure, setShowDisclosure] = useState(false);
   const [resetConfirmation, setResetConfirmation] = useState(false);
+  const [inspectionOutcomes, setInspectionOutcomes] = useState<Record<string, InspectionOutcome>>(
+    {},
+  );
   const composer = useRef<HTMLTextAreaElement>(null);
   const active = useRef<{
     conversationId: string;
@@ -237,8 +471,33 @@ export function AnalystChat() {
     const request = { ...conversation.current, requestId, controller };
     active.current = request;
     const owner = { role: "owner" as const, content: content.trim() };
-    const transcript = [...priorMessages, owner];
-    setMessages(transcript);
+    const projectedMessages = [...priorMessages, owner].map((message) =>
+      message.role === "owner"
+        ? { role: "owner" as const, content: message.content }
+        : {
+            role: "analyst" as const,
+            content: message.content,
+            outcome: message.outcome,
+            noteDependencies: message.noteDependencies,
+            validationAttestation: message.validationAttestation,
+            ...(message.discoveryIds ? { discoveryIds: message.discoveryIds } : {}),
+            ...(message.discoveryDigest ? { discoveryDigest: message.discoveryDigest } : {}),
+          },
+    );
+    const firstMessage = projectedMessages[0];
+    if (!firstMessage) throw new Error("The Analyst question could not be prepared.");
+    const transcript: AnalystTurnRequest["messages"] = [
+      firstMessage,
+      ...projectedMessages.slice(1),
+    ];
+    const discoveryReceipts = Array.from(
+      new Set(
+        priorMessages.flatMap((message) =>
+          message.role === "analyst" ? (message.discoveryReceipts ?? []) : [],
+        ),
+      ),
+    ).slice(-20);
+    setMessages([...priorMessages, owner]);
     setQuestion("");
     setState("streaming");
     setLive("Sending your question…");
@@ -252,9 +511,12 @@ export function AnalystChat() {
           conversationCapability: request.capability,
           requestId,
           turnIndex: priorMessages.filter((message) => message.role === "analyst").length,
+          discoveryReceipts,
           disclosure: {
             providerId: configuration.configuration.identity.providerId,
             modelId: configuration.configuration.identity.modelId,
+            manifestVersion: configuration.manifestVersion,
+            disclosureVersion: configuration.disclosureVersion,
             acknowledged: true,
           },
           messages: transcript,
@@ -276,6 +538,12 @@ export function AnalystChat() {
               noteDependencies: event.noteDependencies,
               validationAttestation: event.validationAttestation,
               citations: final.citations,
+              discovery: event.discovery,
+              fitnessPreview: event.fitnessPreview,
+              discoveryReceipts: event.discoveryReceipts,
+              discoveryIds: event.discoveryIds,
+              discoveryDigest: event.discoveryDigest,
+              inspections: event.citationInspections,
             },
           ]);
           setPendingQuestion(null);
@@ -318,20 +586,51 @@ export function AnalystChat() {
     setState("cancelled");
     setLive("The Analyst request was cancelled.");
   };
-  const inspect = async (citation: AnalystCitation) => {
+  const inspect = async (
+    citation: AnalystCitation,
+    inspection?: AnalystCitationInspectionRecord,
+  ) => {
     const response = await fetch("/api/daemon/analyst/citations/inspect", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ citation }),
+      body: JSON.stringify({
+        citation: {
+          citationId: citation.citationId,
+          sourceId: citation.sourceId,
+          sourceVersion: citation.sourceVersion,
+          evidenceClass: citation.evidenceClass,
+        },
+        ...(inspection ? { inspection } : {}),
+      }),
     });
-    const result = (await response.json()) as {
-      destination?: { operationId: string; parameters: { gameId?: string } };
-    };
+    if (!response.ok) {
+      setLive("This citation could not be opened. Try again later.");
+      return;
+    }
+    const result: unknown = await response.json();
+    if (isRecord(result) && result.state === "historical") {
+      setInspectionOutcomes((current) => ({
+        ...current,
+        [citation.citationId]: result as InspectionOutcome,
+      }));
+      setLive("Showing the historical evidence recorded with this answer; BGG was not contacted.");
+      return;
+    }
+    if (!isRecord(result)) return;
+    if (result.state === "current" || result.state === "superseded") {
+      setInspectionOutcomes((current) => ({
+        ...current,
+        [citation.citationId]: result as InspectionOutcome,
+      }));
+    }
+    const destination = result.destination;
     if (
-      result.destination?.operationId === "shelf.game.get" &&
-      result.destination.parameters.gameId
+      isRecord(destination) &&
+      destination.operationId === "shelf.game.get" &&
+      isRecord(destination.parameters) &&
+      typeof destination.parameters.gameId === "string"
     )
-      window.location.assign(`/games/${result.destination.parameters.gameId}`);
+      window.location.assign(`/games/${destination.parameters.gameId}`);
   };
   const retry = () => {
     if (!pendingQuestion) return;
@@ -343,6 +642,7 @@ export function AnalystChat() {
     conversation.current = { conversationId: id(), capability: conversationCapability() };
     active.current = null;
     setMessages([]);
+    setInspectionOutcomes({});
     setPendingQuestion(null);
     setResetConfirmation(false);
     setState("idle");
@@ -389,14 +689,56 @@ export function AnalystChat() {
                   <ul aria-label="Citations">
                     {message.citations.map((citation) => (
                       <li key={citation.citationId}>
-                        <button type="button" onClick={() => void inspect(citation)}>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void inspect(
+                              citation,
+                              message.inspections?.find(
+                                (record) => record.citation.citationId === citation.citationId,
+                              ),
+                            )
+                          }
+                        >
                           {citation.testimony ? "Owner testimony" : "Evidence"}:{" "}
                           {citation.canonicalSummary}
                         </button>
+                        {inspectionOutcomes[citation.citationId] && (
+                          <div className="analyst-inspection-result">
+                            <p>
+                              {inspectionOutcomes[citation.citationId]?.state === "historical"
+                                ? `Historical evidence · inspected ${inspectionOutcomes[citation.citationId]?.inspectedAt ? new Date(inspectionOutcomes[citation.citationId]?.inspectedAt ?? "").toLocaleString() : ""} · BGG was not contacted.`
+                                : inspectionOutcomes[citation.citationId]?.state === "superseded"
+                                  ? "This evidence has been superseded; the record shown below is from the original answer."
+                                  : "This evidence is current."}{" "}
+                              Source version {citation.sourceVersion}
+                              {citation.observedAt
+                                ? ` · Observed ${new Date(citation.observedAt).toLocaleString()}`
+                                : ""}
+                              .
+                            </p>
+                            {inspectionOutcomes[citation.citationId]?.view && (
+                              <InspectionView
+                                view={
+                                  inspectionOutcomes[citation.citationId]
+                                    .view as AnalystCitationInspectionView
+                                }
+                              />
+                            )}
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>
                 ) : null}
+                {message.role === "analyst" &&
+                  message.discovery?.map((result, discoveryIndex) => (
+                    <Discovery key={`discovery-${discoveryIndex}`} result={result} />
+                  ))}
+                {message.role === "analyst" &&
+                  message.fitnessPreview?.map((result, previewIndex) => (
+                    <FitnessPreview key={`preview-${previewIndex}`} result={result} />
+                  ))}
               </article>
             ))
           )}

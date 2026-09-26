@@ -2,7 +2,10 @@ import {
   AttentionCommandReceiptSchema,
   AttentionDispositionCommandSchema,
   AttentionDispositionCommandResultSchema,
+  AnalystCitationInspectRequestSchema,
+  AnalystCitationInspectResultSchema,
   AnalystConfigurationSchema,
+  AnalystTurnRequestSchema,
   CollectionProfileResultSchema,
   GameDetailWithPurchaseUtilizationSchema,
   IntentionMutationResultSchema,
@@ -125,7 +128,104 @@ let attentionConfigGets = 0;
 let attentionConfigPuts = 0;
 let attentionConfigPutBodies: Array<Record<string, unknown>> = [];
 const analystCancelledConversations = new Set<string>();
+const analystEofConversations = new Set<string>();
+const currentDiscoveryInspectionConversations = new Set<string>();
 let profileNavigationTelemetry = createProfileNavigationTelemetry();
+
+function candidate(bggId: number, primaryName: string, identityCitationId: string) {
+  return { bggId, primaryName, yearPublished: 2024, identityCitationId };
+}
+
+function previewFor(state: string, now: string): Record<string, unknown> {
+  const score = {
+    value: 7.4,
+    label: state === "existing" ? "actual" : "predicted",
+    readinessStage: state === "stage0" ? 0 : 2,
+    confidence: state === "stage0" ? "insufficient" : "moderate",
+    predictionUnavailable:
+      state === "stage0" ? { reason: "stage-0", ratedGameCount: 0, gamesNeeded: 5 } : null,
+    axes: [
+      {
+        axisId: "strategy",
+        axisName: "Strategy",
+        value: 7,
+        source: "predicted",
+        confidence: "moderate",
+      },
+    ],
+    referenceGames: [{ gameId: "game-1", gameName: "Atlas Equal" }],
+  };
+  if (state === "unavailable")
+    return {
+      status: "unavailable",
+      state,
+      bggId: 174430,
+      code: "PredictionUnavailable",
+      retryable: false,
+      predictionUnavailable: { reason: "stage-0", ratedGameCount: 0, gamesNeeded: 5 },
+    };
+  if (state === "ambiguous")
+    return {
+      status: "partial",
+      state,
+      bggId: 174430,
+      collectionGameIds: ["game-1", "game-2"],
+      code: "AmbiguousCollectionMatch",
+    };
+  if (state === "error") return { status: "error", code: "BggOutage", retryable: true };
+  const common = {
+    bggId: 174430,
+    calculatedAt: now,
+    sourceVersion: "fixture-source-v1",
+    calculationCitationId: `calc-${state}`,
+  };
+  if (state === "local-unverified")
+    return {
+      ...common,
+      status: "partial",
+      state: "existing-local-unverified",
+      bggLookup: { status: "failed", code: "BggOutage", retryable: true },
+      collectionGameId: "game-1",
+      collectionName: "Local Atlas",
+      ownership: "owned",
+      collectionCitationId: "collection-local",
+      score: { ...score, label: "actual" },
+    };
+  return {
+    ...common,
+    status: "ok",
+    state: state === "existing" ? "existing" : "predicted",
+    primaryName: "Atlas Equal",
+    bggLookup: { status: "verified", observedAt: now, factCitationId: `facts-${state}` },
+    ...(state === "existing"
+      ? {
+          collectionGameId: "game-1",
+          ownership: "previously-owned",
+          collectionCitationId: "collection-existing",
+        }
+      : {}),
+    score,
+  };
+}
+
+function answerFor(ownerText: string, previewState?: string): string {
+  const text = ownerText.toLowerCase();
+  if (text.includes("zero-hit")) return "No matches in this title search.";
+  if (text.includes("hot limited")) return "The checked Hot sample contains two candidates.";
+  if (text.includes("truncated") || text.includes("partial"))
+    return "Showing a bounded sample; more results were returned.";
+  if (previewState === "predicted") return "A predicted fitness preview is available.";
+  if (previewState === "existing") return "An existing collection score is available.";
+  if (previewState === "local-unverified")
+    return "A local score is available, but BGG identity could not be verified.";
+  if (previewState === "stage0")
+    return "The profile is at readiness stage 0; personal prediction is unavailable.";
+  if (previewState === "unavailable") return "Fitness preview unavailable.";
+  if (previewState === "ambiguous")
+    return "Several collection entries may match; no score was selected.";
+  if (previewState === "error") return "The BGG request failed; no preview is available.";
+  return "Atlas Equal is supported by current validated collection evidence.";
+}
 
 interface ProfileNavigationTelemetry {
   profileGets: number;
@@ -208,6 +308,8 @@ function reset(next: Scenario): void {
   attentionConfigPuts = 0;
   attentionConfigPutBodies = [];
   analystCancelledConversations.clear();
+  analystEofConversations.clear();
+  currentDiscoveryInspectionConversations.clear();
   persistOwnerNoteState(ownerNoteState, ownerNotePersistencePath);
   if (next === "manual-values") {
     game.manualValues = {
@@ -281,12 +383,14 @@ function json(value: unknown, status = 200): Response {
 
 function analystConfiguration() {
   return AnalystConfigurationSchema.parse({
-    contractVersion: 1,
-    manifestVersion: 2,
+    contractVersion: 4,
+    manifestVersion: 4,
+    disclosureVersion: 1,
     configuration: {
       status: "configured",
       identity: { providerId: "fixture-provider", modelId: "fixture-model", extensionIds: [] },
     },
+    bgg: { status: "configured" },
     disclosure: {
       evidenceClasses: [
         "game-identity-ownership",
@@ -297,8 +401,15 @@ function analystConfiguration() {
         "collection-summary",
         "profile-evidence",
         "owner-game-note",
+        "bgg-search-observation",
+        "bgg-hot-observation",
+        "bgg-candidate-identity",
+        "bgg-thing-facts",
+        "bgg-preview-calculation",
       ],
       relevantOwnerNotesMayBeTransmitted: true,
+      selectedOwnerTitleOrBggIdsMayBeSentToBgg: true,
+      bggProcessingIsSeparateFromProviderProcessing: true,
       localRetention: "Shelf Judge does not persist Analyst conversations.",
       providerProcessingAndRetentionFollowProviderPolicy: true,
       applicationTokenCap: null,
@@ -822,22 +933,83 @@ async function handle(request: Request): Promise<Response> {
     return json(analystConfiguration());
   }
   if (path === "/api/analyst/citations/inspect" && request.method === "POST") {
-    return json({
-      state: "current",
-      destination: { operationId: "shelf.game.get", parameters: { gameId: "game-1" } },
-    });
+    const parsed = AnalystCitationInspectRequestSchema.safeParse(await body(request));
+    if (!parsed.success) return json({ error: "Invalid citation inspection request" }, 400);
+    const citationId = parsed.data.citation.citationId;
+    const inspection = parsed.data.inspection;
+    const inspectionDestination =
+      inspection?.view.kind === "discovery"
+        ? {
+            operationId: "shelf.analyst.discovery.get",
+            parameters: { citationId: inspection.citation.citationId },
+          }
+        : {
+            operationId: "shelf.game.get",
+            parameters: { gameId: "game-1" },
+          };
+    const result =
+      citationId === "discovery-zero" && inspection !== undefined
+        ? currentDiscoveryInspectionConversations.has(inspection.conversationId)
+          ? {
+              state: "historical",
+              destination: inspectionDestination,
+              inspectedAt: "2026-09-08T11:00:00.000Z",
+              view: inspection.view,
+              authenticationToken: inspection.authenticationToken,
+            }
+          : (currentDiscoveryInspectionConversations.add(inspection.conversationId),
+            {
+              state: "current",
+              destination: inspectionDestination,
+            })
+        : citationId === "score-historical"
+          ? {
+              state: "historical",
+              destination: {
+                operationId: "shelf.analyst.discovery.get",
+                parameters: { citationId: "historical-discovery" },
+              },
+              inspectedAt: "2026-09-08T11:00:00.000Z",
+              view: {
+                kind: "discovery",
+                result: {
+                  status: "ok",
+                  source: "title",
+                  observedAt: "2026-09-08T10:00:00.000Z",
+                  returnedCount: 0,
+                  emittedCount: 0,
+                  truncated: false,
+                  observationCitationId: "historical-discovery",
+                  candidates: [],
+                },
+              },
+              authenticationToken: "fixture-historical-authentication",
+            }
+          : citationId === "score-superseded"
+            ? {
+                state: "superseded",
+                destination: {
+                  operationId: "shelf.analyst.discovery.get",
+                  parameters: { citationId: "superseded-discovery" },
+                },
+              }
+            : {
+                state: "current",
+                destination: {
+                  operationId: "shelf.game.get",
+                  parameters: { gameId: "game-1" },
+                },
+              };
+    return json(AnalystCitationInspectResultSchema.parse(result));
   }
   if (path === "/api/analyst/turns/cancel" && request.method === "POST") {
     return json({ outcome: "accepted", requestId: (await body(request)).requestId });
   }
   if (path === "/api/analyst/turns/stream" && request.method === "POST") {
     const requestBody = await body(request);
-    const requestId =
-      typeof requestBody.requestId === "string" ? requestBody.requestId : "invalid-request";
-    const conversationId =
-      typeof requestBody.conversationId === "string"
-        ? requestBody.conversationId
-        : "invalid-conversation";
+    const parsedRequest = AnalystTurnRequestSchema.safeParse(requestBody);
+    if (!parsedRequest.success) return json({ error: "Invalid Analyst turn request" }, 400);
+    const { requestId, conversationId, turnIndex } = parsedRequest.data;
     const now = "2026-09-08T10:00:00.000Z";
     const event = (sequence: number, value: Record<string, unknown>) =>
       `data: ${JSON.stringify({ version: 1, operationId: "fixture-analyst-operation", sequence, occurredAt: now, ...value })}\n\n`;
@@ -850,19 +1022,169 @@ async function handle(request: Request): Promise<Response> {
       testimony: false,
       destination: { operationId: "shelf.game.get", parameters: { gameId: "game-1" } },
     };
+    const lastMessage = parsedRequest.data.messages.at(-1);
+    const ownerText = lastMessage?.role === "owner" ? lastMessage.content : "";
+    const discovery = ownerText.includes("zero-hit")
+      ? [
+          {
+            status: "ok",
+            source: "title",
+            observedAt: now,
+            returnedCount: 0,
+            emittedCount: 0,
+            truncated: false,
+            observationCitationId: "discovery-zero",
+            candidates: [],
+          },
+        ]
+      : ownerText.includes("hot limited")
+        ? [
+            {
+              status: "ok",
+              source: "hot",
+              observedAt: now,
+              returnedCount: 2,
+              emittedCount: 2,
+              truncated: false,
+              observationCitationId: "hot-limited",
+              candidates: [
+                candidate(174430, "Atlas Equal", "candidate-hot"),
+                candidate(13, "Catan", "candidate-catan"),
+              ],
+            },
+          ]
+        : ownerText.includes("truncated") || ownerText.includes("partial")
+          ? [
+              {
+                status: "ok",
+                source: "title",
+                observedAt: now,
+                returnedCount: 12,
+                emittedCount: 10,
+                truncated: true,
+                observationCitationId: "discovery-truncated",
+                candidates: Array.from({ length: 10 }, (_, index) =>
+                  candidate(
+                    1000 + index,
+                    `Fixture Candidate ${index + 1}`,
+                    `candidate-${index + 1}`,
+                  ),
+                ),
+              },
+            ]
+          : undefined;
+    const previewState = [
+      "predicted",
+      "existing",
+      "local-unverified",
+      "stage0",
+      "unavailable",
+      "ambiguous",
+      "error",
+    ].find((state) => ownerText.toLowerCase().includes(state));
+    const citations = [
+      citation,
+      ...[
+        ["score-historical", "Historical fitness score", "game-historical", "2"],
+        ["score-superseded", "Superseded fitness score", "game-superseded", "3"],
+      ].map(([citationId, canonicalSummary, sourceId, sourceVersion]) => ({
+        ...citation,
+        citationId,
+        canonicalSummary,
+        sourceId,
+        sourceVersion,
+      })),
+    ];
+    const discoveryEvidence = discovery?.[0];
+    const discoveryCitation =
+      discoveryEvidence === undefined
+        ? undefined
+        : {
+            citationId: String(discoveryEvidence.observationCitationId),
+            sourceId: "fixture-discovery",
+            sourceVersion: "1",
+            evidenceClass:
+              discoveryEvidence.source === "hot" ? "bgg-hot-observation" : "bgg-search-observation",
+            observedAt: now,
+            canonicalSummary:
+              discoveryEvidence.source === "hot"
+                ? "BGG Hot sample observation"
+                : "BGG title search observation",
+            testimony: false,
+            destination: {
+              operationId: "shelf.analyst.discovery.get",
+              parameters: { citationId: String(discoveryEvidence.observationCitationId) },
+            },
+          };
+    const finalCitations =
+      discoveryCitation === undefined ? citations : [...citations, discoveryCitation];
     const result = {
       outcome: "answered",
       blocks: [
         {
-          text: JSON.stringify(requestBody).includes("**owner literal**")
+          text: ownerText.includes("**owner literal**")
             ? "**bold**\n\n1. First\n2. Second"
-            : "Atlas Equal is supported by current validated collection evidence.",
-          citationIds: ["score-1"],
+            : answerFor(ownerText, previewState),
+          citationIds: finalCitations.map(({ citationId }) => citationId),
         },
       ],
-      citations: [citation],
+      citations: finalCitations,
       usage: { state: "unavailable" },
     };
+    const discoveryIds = discovery?.flatMap((item) =>
+      item.candidates.map(({ bggId }) => ({
+        bggId,
+        source: item.source === "title" ? "search" : "hot",
+      })),
+    );
+    const receiptBatch = ownerText.match(/^receipt-batch-(\d+)$/i);
+    const citationInspections =
+      discoveryCitation === undefined || discoveryEvidence === undefined
+        ? undefined
+        : [
+            {
+              version: 1,
+              conversationId,
+              requestId,
+              turnIndex,
+              citation: discoveryCitation,
+              view: { kind: "discovery", result: discoveryEvidence },
+              attestationDigest: "A".repeat(43),
+              authenticationToken: "fixture-inspection-authentication",
+            },
+          ];
+    const discoveryReceipts =
+      receiptBatch === null
+        ? discovery === undefined
+          ? undefined
+          : discoveryIds?.map(({ bggId }) => `fixture-id-receipt-${bggId}`)
+        : Array.from({ length: 5 }, (_, index) => `fixture-receipt-${receiptBatch[1]}-${index}`);
+    if (
+      ownerText.toLowerCase().includes("eof without terminal") &&
+      !analystEofConversations.has(conversationId)
+    ) {
+      analystEofConversations.add(conversationId);
+      const encoder = new TextEncoder();
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                event(0, {
+                  type: "accepted",
+                  terminal: false,
+                  conversationId,
+                  requestId,
+                  turnIndex,
+                }),
+              ),
+            );
+            controller.close();
+          },
+        }),
+        { headers: { "Content-Type": "text/event-stream" } },
+      );
+    }
     if (
       JSON.stringify(requestBody).includes("cancel me") &&
       !analystCancelledConversations.has(conversationId)
@@ -879,7 +1201,7 @@ async function handle(request: Request): Promise<Response> {
                   terminal: false,
                   conversationId,
                   requestId,
-                  turnIndex: 0,
+                  turnIndex,
                 }),
               ),
             );
@@ -904,6 +1226,14 @@ async function handle(request: Request): Promise<Response> {
                       conversationId,
                       requestId,
                       result,
+                      ...(discovery === undefined
+                        ? {}
+                        : { discovery, discoveryIds, discoveryDigest: "A".repeat(43) }),
+                      ...(discoveryReceipts === undefined ? {} : { discoveryReceipts }),
+                      ...(citationInspections === undefined ? {} : { citationInspections }),
+                      ...(previewState === undefined
+                        ? {}
+                        : { fitnessPreview: [previewFor(previewState, now)] }),
                       noteDependencies: [{ gameId: "game-1", noteVersion: 1 }],
                       validationAttestation: "stale-fixture-attestation",
                     }),
@@ -920,7 +1250,7 @@ async function handle(request: Request): Promise<Response> {
       );
     }
     return new Response(
-      event(0, { type: "accepted", terminal: false, conversationId, requestId, turnIndex: 0 }) +
+      event(0, { type: "accepted", terminal: false, conversationId, requestId, turnIndex }) +
         event(1, {
           type: "evidence-status",
           terminal: false,
@@ -942,6 +1272,14 @@ async function handle(request: Request): Promise<Response> {
           conversationId,
           requestId,
           result,
+          ...(discovery === undefined
+            ? {}
+            : { discovery, discoveryIds, discoveryDigest: "A".repeat(43) }),
+          ...(discoveryReceipts === undefined ? {} : { discoveryReceipts }),
+          ...(citationInspections === undefined ? {} : { citationInspections }),
+          ...(previewState === undefined
+            ? {}
+            : { fitnessPreview: [previewFor(previewState, now)] }),
           noteDependencies: [{ gameId: "game-1", noteVersion: 1 }],
           validationAttestation: "fixture-attestation",
         }),
