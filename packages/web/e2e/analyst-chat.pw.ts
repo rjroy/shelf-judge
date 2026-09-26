@@ -187,9 +187,9 @@ test("Collection Analyst renders bounded discovery, receipts, and preview states
   await expect(zero).toContainText("0 shown · 0 returned");
   await expect(zero).toContainText("No matches in this title search.");
 
-  await ask("hot limited sample", "The checked Hot sample contains two candidates.");
+  await ask("hot limited sample", "The checked Hot sample contains eight candidates.");
   const hot = page.getByRole("region", { name: "BGG Hot sample" }).last();
-  await expect(hot).toContainText("2 shown · 2 returned");
+  await expect(hot).toContainText("8 shown · 8 returned");
   await expect(hot.getByRole("link", { name: /Atlas Equal · BGG 174430/ })).toBeVisible();
 
   await ask("truncated title candidates", "Showing a bounded sample; more results were returned.");
@@ -260,6 +260,44 @@ test("Collection Analyst renders bounded discovery, receipts, and preview states
   await expect(page.getByText("Nothing was saved.")).toBeVisible();
   await expect(page.getByRole("region", { name: "BGG title matches" })).toHaveCount(0);
 });
+
+for (const viewport of [
+  { name: "desktop", width: 1440, height: 900 },
+  { name: "mobile", width: 375, height: 812 },
+]) {
+  test(`Collection Analyst Hot sample and composer scroll into view at ${viewport.name}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.goto("/analyst");
+    await page.getByLabel("Your question").fill("hot limited sample");
+    await page.getByRole("button", { name: "Ask Analyst" }).click();
+    await page.getByRole("button", { name: "Acknowledge and send" }).click();
+
+    const hot = page.getByRole("region", { name: "BGG Hot sample" });
+    const lastCandidate = hot.getByRole("link", { name: /Acquire: Long Candidate Name/ });
+    const composer = page.getByLabel("Your question");
+    await expect(lastCandidate).toBeVisible();
+    await expect(composer).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      viewport.width,
+    );
+
+    const scrollRegion = page.locator(".main-scroll");
+    expect(
+      await scrollRegion.evaluate((element) => element.scrollHeight > element.clientHeight),
+    ).toBe(true);
+    await lastCandidate.scrollIntoViewIfNeeded();
+    await expect(lastCandidate).toBeInViewport();
+    await composer.scrollIntoViewIfNeeded();
+    await composer.focus();
+    await expect(composer).toBeFocused();
+    await expect(composer).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      viewport.width,
+    );
+  });
+}
 
 test("Collection Analyst inspects current, historical, and superseded evidence with strict citation identities", async ({
   page,

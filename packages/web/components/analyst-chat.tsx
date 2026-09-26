@@ -651,7 +651,10 @@ export function AnalystChat() {
 
   return (
     <>
-      <main className="page-content analyst-page" inert={showDisclosure || resetConfirmation}>
+      <main
+        className="main-scroll page-content analyst-page"
+        inert={showDisclosure || resetConfirmation}
+      >
         <header className="page-header">
           <div>
             <h1>Collection Analyst</h1>

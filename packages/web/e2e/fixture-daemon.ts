@@ -211,7 +211,7 @@ function previewFor(state: string, now: string): Record<string, unknown> {
 function answerFor(ownerText: string, previewState?: string): string {
   const text = ownerText.toLowerCase();
   if (text.includes("zero-hit")) return "No matches in this title search.";
-  if (text.includes("hot limited")) return "The checked Hot sample contains two candidates.";
+  if (text.includes("hot limited")) return "The checked Hot sample contains eight candidates.";
   if (text.includes("truncated") || text.includes("partial"))
     return "Showing a bounded sample; more results were returned.";
   if (previewState === "predicted") return "A predicted fitness preview is available.";
@@ -1043,13 +1043,19 @@ async function handle(request: Request): Promise<Response> {
               status: "ok",
               source: "hot",
               observedAt: now,
-              returnedCount: 2,
-              emittedCount: 2,
+              returnedCount: 8,
+              emittedCount: 8,
               truncated: false,
               observationCitationId: "hot-limited",
               candidates: [
                 candidate(174430, "Atlas Equal", "candidate-hot"),
                 candidate(13, "Catan", "candidate-catan"),
+                candidate(1, "Die Macher", "candidate-die-macher"),
+                candidate(2, "Dragonmaster", "candidate-dragonmaster"),
+                candidate(3, "Samurai", "candidate-samurai"),
+                candidate(4, "Tal der Könige", "candidate-tal"),
+                candidate(5, "Acquire", "candidate-acquire"),
+                candidate(6, "Acquire: Long Candidate Name for Narrow Screens", "candidate-long"),
               ],
             },
           ]
