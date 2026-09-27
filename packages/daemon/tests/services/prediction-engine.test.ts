@@ -506,7 +506,7 @@ describe("restored prediction primitive boundaries", () => {
     const matches = findKNearestForAxis(target, candidates, "fun", 5, 0);
     expect(matches.map(({ gameId }) => gameId)).toEqual(["positive-0", "positive-1", "positive-2"]);
     expect(predictAxisRating(matches)).toMatchObject({
-      rating: 7,
+      rating: 149 / 21,
       confidence: "moderate",
       avgSimilarity: 1,
     });
@@ -527,9 +527,14 @@ describe("restored prediction primitive boundaries", () => {
     expect(findKNearestForAxis(vector(), references("theme", 7, 2), "fun", 5, 0)).toEqual([]);
   });
 
-  test("computes the hand-calculated similarity-weighted average", () => {
+  test("computes the hand-calculated rating-weighted similarity estimate", () => {
     const result = predictAxisRating([match("a", 0.8, 8), match("b", 0.6, 6), match("c", 0.4, 4)]);
-    expect(result?.rating).toBeCloseTo(11.6 / 1.8, 4);
+    expect(result?.rating).toBeCloseTo(79.2 / 11.6, 4);
+  });
+
+  test("constant reference ratings remain unchanged regardless of similarity", () => {
+    const result = predictAxisRating([match("a", 0.9, 7), match("b", 0.6, 7), match("c", 0.3, 7)]);
+    expect(result).toMatchObject({ rating: 7, variance: 0, confidence: "moderate" });
   });
 
   test("one match has weak confidence", () => {
@@ -558,7 +563,7 @@ describe("restored prediction primitive boundaries", () => {
   });
 
   test("variance below 1.5 qualifies for strong", () => {
-    const ratings = [5.27, 7, 7, 7, 8.73];
+    const ratings = [6.5, 7, 7, 7, 7.5];
     const result = predictAxisRating(ratings.map((rating, i) => match(String(i), 0.75, rating)));
     expect(result?.variance).toBeLessThan(1.5);
     expect(result?.confidence).toBe("strong");
