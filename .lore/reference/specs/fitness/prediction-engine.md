@@ -56,7 +56,7 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 ### k-NN Estimation
 
-- REQ-PRED-7: For each missing personal or tournament axis on a target game, the system selects the k most similar eligible reference games that have a value on that axis (not the k most similar overall, filtered afterward). Default k = 5. A reference must have BGG data and at least one personal or available tournament-axis value; only references with a value on the target axis and positive similarity meeting the configured threshold are considered. The predicted rating is their similarity-weighted average, so every selected neighbor has positive weight. If fewer than k eligible references remain, all contribute; if none remain—including when all axis-rated references have zero similarity—the axis is insufficient. Tournament is a prediction target and reference source per `.lore/reference/specs/tournament/elo-axis-source.md` REQ-TAXIS-8/17; a missing tournament value may instead be null because the cohort-floor rules there govern whether it is available.
+- REQ-PRED-7: For each missing personal or tournament axis on a target game, the system selects the k most similar eligible reference games that have a value on that axis (not the k most similar overall, filtered afterward). Default k = 5. A reference must have BGG data and at least one personal or available tournament-axis value; only references with a value on the target axis and positive similarity meeting the configured threshold are considered. The predicted rating is the rating-weighted similarity estimate `sum(similarity * rating^2) / sum(similarity * rating)`. Thus similarity weights each neighbor and the neighbor's rating also weights its influence; all selected ratings are positive, so every selected neighbor has positive weight. Equal reference ratings yield that same rating regardless of their similarities. If fewer than k eligible references remain, all contribute; if none remain—including when all axis-rated references have zero similarity—the axis is insufficient. Tournament is a prediction target and reference source per `.lore/reference/specs/tournament/elo-axis-source.md` REQ-TAXIS-8/17; a missing tournament value may instead be null because the cohort-floor rules there govern whether it is available.
 
 - REQ-PRED-8: All BGG-derived axes produce "actual" confidence regardless of whether a utility curve is configured. The raw BGG value is resolved and the curve (or default linear map) produces a deterministic effective rating. This is not a prediction; the mapping from BGG data to effective rating is fully defined by the user's curve configuration or the default normalization.
 
@@ -66,10 +66,10 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 ### Confidence Architecture
 
-- REQ-PRED-11: Each predicted axis in a prediction breakdown carries a confidence level based only on selected positive-similarity neighbors that contribute to its weighted prediction. The code assigns strong when all of these hold: at least 5 selected neighbors, population variance of their ratings around the similarity-weighted predicted mean is < 1.5, and average similarity is > 0.7. Otherwise it assigns moderate when at least 3 neighbors, variance <= 3.0, and average similarity >= 0.4; otherwise any non-empty selected match set is weak. Zero-similarity references do not contribute to the estimate, neighbor count, variance, or average-similarity confidence criteria. No selected matches (including when the threshold is 0 but all axis-rated references have zero similarity) is insufficient and excluded from the predicted score.
+- REQ-PRED-11: Each predicted axis in a prediction breakdown carries a confidence level based only on selected positive-similarity neighbors that contribute to its rating-weighted similarity estimate. The code assigns strong when all of these hold: at least 5 selected neighbors, population variance of their ratings around the rating-weighted similarity estimate is < 1.5, and average similarity is > 0.7. Otherwise it assigns moderate when at least 3 neighbors, variance <= 3.0, and average similarity >= 0.4; otherwise any non-empty selected match set is weak. Zero-similarity references do not contribute to the estimate, neighbor count, variance, or average-similarity confidence criteria. No selected matches (including when the threshold is 0 but all axis-rated references have zero similarity) is insufficient and excluded from the predicted score.
   - **actual**: The rating comes from the user (personal rating) or from deterministic BGG data + curve. Not a prediction.
-  - **strong**: All three conditions met: 5+ reference games contributed, population variance around the similarity-weighted predicted rating is < 1.5, and average similarity of contributing neighbors is > 0.7.
-  - **moderate**: Does not qualify as strong, but has 3+ reference games, population variance around the similarity-weighted predicted rating <= 3.0, and average similarity >= 0.4.
+  - **strong**: All three conditions met: 5+ reference games contributed, population variance around the rating-weighted similarity estimate is < 1.5, and average similarity of contributing neighbors is > 0.7.
+  - **moderate**: Does not qualify as strong, but has 3+ reference games, population variance around the rating-weighted similarity estimate <= 3.0, and average similarity >= 0.4.
   - **weak**: Does not qualify as moderate and has at least 1 reference game with positive similarity at or above the minimum threshold.
   - **insufficient**: No reference games have a rating on this axis, or no positive-similarity neighbor meets the minimum threshold (default 0.2). A zero threshold does not make zero-similarity neighbors eligible. The axis is excluded from the predicted score.
 
@@ -182,7 +182,7 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 - [ ] Feature vector encoding produces correct binary flags for mechanics and categories, correct normalization for weight (1-5 to 0-1) and community rating (1-10 to 0-1)
 - [ ] Prediction similarity is 1.0 for identical factual components, 0.0 at maximum composite distance, and agrees with hand-calculated binary Jaccard + normalized Manhattan values weighted 4/7 and 3/7; changing personal/tournament axis values does not change similarity
-- [ ] k-NN estimation with k=5 returns the similarity-weighted average of the 5 most similar games' ratings on a given axis
+- [ ] k-NN estimation with k=5 returns `sum(similarity * rating^2) / sum(similarity * rating)` for the 5 most similar eligible games' ratings on a given axis; constant reference ratings return that same rating
 - [ ] k-NN estimation correctly excludes reference games that lack a rating on the target axis
 - [ ] BGG-derived axes with curves produce "actual" confidence, not "predicted"
 - [ ] Confidence levels are assigned correctly: strong (5+ refs, population variance < 1.5, average similarity > 0.7), moderate (3+ refs, variance <= 3, average similarity >= 0.4), weak, insufficient
@@ -217,14 +217,15 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 **Custom:**
 
 - Prediction distance/similarity math validated against hand-calculated mechanic/category overlap and normalized continuous distances; axis dimensions are excluded and default factual weights are 4/7 and 3/7
-- k-NN estimation verified with a controlled test collection (5 rated games with known ratings and BGG attributes, predict a 6th, verify the weighted average matches)
+- The prediction estimate uses `sum(similarity * rating^2) / sum(similarity * rating)`; confidence variance is measured around that resulting estimate
+- k-NN estimation verified with a controlled test collection (5 rated games with known ratings and BGG attributes, predict a 6th, verify `sum(similarity * rating^2) / sum(similarity * rating)` matches the hand calculation)
 - Confidence level boundaries tested at exact thresholds (4 vs 5 reference games, variance at 1.5, similarity at 0.7)
 - ~~Revealed preference tension tested with known divergence (> 1.0) and non-divergence (<= 1.0) cases~~ (Superseded by REQ-TAXIS-16; tension surface removed)
 - Type extensions verified as backward-compatible: existing `FitnessResult` consumers (web game detail, CLI scores, collection list) render correctly when prediction fields are null
 
 ## Constraints
 
-- The fitness formula (`sum(effective_rating * weight) / sum(weights)`) does not change. Prediction produces per-axis ratings that feed into the same aggregation. No new aggregation math.
+- The fitness formula (`sum(effective_rating * weight) / sum(weights)`) does not change. Prediction produces per-axis ratings with the rating-weighted similarity estimate in REQ-PRED-7, then feeds them into the same fitness aggregation.
 - Prediction is read-only. It does not modify any stored data: no game ratings, no tournament data, no axis configurations.
 - The feature vector module is designed for reuse. Collection profiling and redundancy scoring will consume the same vectors and similarity computations. The module's API should not be prediction-specific.
 - No external services beyond what the system already uses. Prediction is local math over cached BGG data and stored ratings.

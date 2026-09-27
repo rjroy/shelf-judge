@@ -116,8 +116,8 @@ export function predictAxisRating(matches: SimilarityMatch[]): {
   let similaritySum = 0;
 
   for (const m of matches) {
-    weightedSum += m.rating * m.similarity;
-    weightSum += m.similarity;
+    weightedSum += m.rating * m.rating * m.similarity;
+    weightSum += m.rating * m.similarity;
     similaritySum += m.similarity;
   }
 
