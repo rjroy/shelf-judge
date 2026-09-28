@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function RefreshAllButton() {
+export function RefreshAllButton({
+  onCommittedMutation,
+}: {
+  onCommittedMutation?: () => void | Promise<void>;
+}) {
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [result, setResult] = useState<{ message: string; isError: boolean } | null>(null);
@@ -24,7 +28,8 @@ export function RefreshAllButton() {
       const data = (await res.json()) as { refreshed: number; errors?: string[] };
       const message = `Refreshed ${data.refreshed} game(s)${data.errors?.length ? `, ${data.errors.length} error(s)` : ""}`;
       setResult({ message, isError: false });
-      router.refresh();
+      if (onCommittedMutation) await onCommittedMutation();
+      else router.refresh();
     } catch (err) {
       setResult({
         message: err instanceof Error ? err.message : "Failed to refresh",

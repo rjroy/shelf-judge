@@ -266,7 +266,7 @@ describe("prediction-service", () => {
 
     expect(targeted.map((entry) => entry.game.id)).toEqual(["target"]);
     expect(targeted[0]).toEqual(fullTarget);
-    expect(scored).toEqual(["target", "target"]);
+    expect(scored).toEqual(["target"]);
     expect(targeted[0]?.score?.predictionMeta?.referenceGameCount).toBe(
       fullTarget.score?.predictionMeta?.referenceGameCount,
     );
@@ -285,6 +285,37 @@ describe("prediction-service", () => {
     const targetedActual = await actualService.listGamesWithPredictions(["target"]);
     expect(targetedActual).toEqual(fullActual.filter((entry) => entry.game.id === "target"));
     expect(scored).toEqual(["target"]);
+  });
+
+  test("prepared list context treats an explicit null ordinary score as cached", async () => {
+    const collection = buildRatedCollection(6);
+    const tournamentData = {
+      settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
+      sessions: [],
+      gameStats: {},
+    };
+    const baseFitness = createFitnessService();
+    const scored: string[] = [];
+    const service = createPredictionService({
+      storageService: createStubStorage(collection),
+      fitnessService: {
+        calculateScore(game, axes, tournament) {
+          scored.push(game.id);
+          return baseFitness.calculateScore(game, axes, tournament);
+        },
+      },
+      tournamentService: createStubTournamentService(),
+    });
+    const prepared = await service.preparePredictionListFromSnapshot?.(collection, tournamentData, {
+      ...DEFAULT_PREDICTION_SETTINGS,
+    });
+    if (!prepared) throw new Error("Prediction preparation is unavailable");
+
+    const result = prepared.listGames(new Map([["target", null]]), ["target"]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.score).not.toBeNull();
+    expect(scored).not.toContain("target");
   });
 
   describe("predictGame", () => {

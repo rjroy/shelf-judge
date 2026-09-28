@@ -471,6 +471,17 @@ describe("shelf service", () => {
   });
 
   describe("setConfig", () => {
+    test("an identical update is a shelf and collection no-op", async () => {
+      const unit = await service.addUnit({ name: "Unit", shelves: [] });
+      const priorUpdatedAt = storage.config.updatedAt;
+      const priorCollectionRevision = storage.collection.revision;
+
+      await service.updateUnit(unit.id, { name: unit.name });
+
+      expect(storage.config.updatedAt).toBe(priorUpdatedAt);
+      expect(storage.collection.revision).toBe(priorCollectionRevision);
+    });
+
     test("replaces entire configuration", async () => {
       // Add a unit first
       await service.addUnit({

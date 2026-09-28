@@ -6,9 +6,11 @@ import { useRouter } from "next/navigation";
 export function NicheIgnoreButton({
   type,
   name,
+  onCommittedMutation,
 }: {
   type: "mechanic" | "category" | "family";
   name: string;
+  onCommittedMutation?: () => void | Promise<void>;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -28,7 +30,8 @@ export function NicheIgnoreButton({
         console.error("Failed to ignore niche tag:", data.error);
         return;
       }
-      router.refresh();
+      if (onCommittedMutation) await onCommittedMutation();
+      else router.refresh();
     } catch (err) {
       console.error("Failed to ignore niche tag:", err);
     } finally {
@@ -52,9 +55,11 @@ export function NicheIgnoreButton({
 export function NicheRestoreButton({
   type,
   name,
+  onCommittedMutation,
 }: {
   type: "mechanic" | "category" | "family";
   name: string;
+  onCommittedMutation?: () => void | Promise<void>;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -74,7 +79,8 @@ export function NicheRestoreButton({
         console.error("Failed to restore niche tag:", data.error);
         return;
       }
-      router.refresh();
+      if (onCommittedMutation) await onCommittedMutation();
+      else router.refresh();
     } catch (err) {
       console.error("Failed to restore niche tag:", err);
     } finally {

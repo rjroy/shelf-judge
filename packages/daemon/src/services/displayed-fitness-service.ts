@@ -3,6 +3,7 @@ import type {
   Game,
   GameWithScore,
   PredictionSettings,
+  RedundancyAdjustment,
   RedundancySettings,
   NicheSettings,
   TournamentData,
@@ -72,6 +73,16 @@ function applyRedundancy(
   if (!settings.enabled) return;
 
   const computeGames = universe ?? games;
+  const adjustments = redundancyAdjustmentMap(computeGames, settings, collection, tournamentData);
+  applyAdjustments(games, settings, adjustments);
+}
+
+function redundancyAdjustmentMap(
+  computeGames: readonly GameWithScore[],
+  settings: RedundancySettings,
+  collection: Pick<CollectionProfileCollectionSource, "games" | "axes">,
+  tournamentData: TournamentData,
+) {
   const gamesWithBgg = collection.games.filter((game) => game.bggData);
   const vocabulary = buildVocabulary(gamesWithBgg);
   const ranges = computeContinuousRanges(gamesWithBgg);
@@ -90,7 +101,14 @@ function applyRedundancy(
     return vector;
   };
 
-  const adjustments = computeRedundancyAdjustments(computeGames, settings, getFeatureVector);
+  return computeRedundancyAdjustments([...computeGames], settings, getFeatureVector);
+}
+
+function applyAdjustments(
+  games: GameWithScore[],
+  settings: RedundancySettings,
+  adjustments: ReturnType<typeof computeRedundancyAdjustments>,
+): void {
   for (const entry of games) {
     if (!entry.score) continue;
     const adjustment = adjustments.get(entry.game.id) ?? null;
@@ -99,6 +117,56 @@ function applyRedundancy(
       entry.score.score = adjustment.adjustedScore;
     }
   }
+}
+
+/** Owned pre-redundancy predicted universe used by niche ranking and adjustments. */
+export function ownedPredictedCandidates(entries: readonly GameWithScore[]): GameWithScore[] {
+  return entries.filter((entry) => entry.game.ownership !== "previously-owned");
+}
+
+/** Apply one universe's adjustments to a separate score projection without mutating source scores. */
+export function withRedundancyAdjustments(
+  entries: readonly GameWithScore[],
+  settings: RedundancySettings,
+  collection: Pick<CollectionProfileCollectionSource, "games" | "axes">,
+  tournamentData: TournamentData,
+  universe: readonly GameWithScore[] = entries,
+): GameWithScore[] {
+  const adjustments = settings.enabled
+    ? redundancyAdjustmentMap(universe, settings, collection, tournamentData)
+    : new Map<string, RedundancyAdjustment>();
+  return withRedundancyAdjustmentMap(entries, settings, adjustments);
+}
+
+/** Compute the owned predicted universe once and apply it to both score variants. */
+export function withRedundancyAdjustmentsForVariants(
+  ordinaryEntries: readonly GameWithScore[],
+  predictedEntries: readonly GameWithScore[],
+  settings: RedundancySettings,
+  collection: Pick<CollectionProfileCollectionSource, "games" | "axes">,
+  tournamentData: TournamentData,
+  universe: readonly GameWithScore[],
+): { ordinary: GameWithScore[]; predicted: GameWithScore[] } {
+  const adjustments = settings.enabled
+    ? redundancyAdjustmentMap(universe, settings, collection, tournamentData)
+    : new Map<string, RedundancyAdjustment>();
+  return {
+    ordinary: withRedundancyAdjustmentMap(ordinaryEntries, settings, adjustments),
+    predicted: withRedundancyAdjustmentMap(predictedEntries, settings, adjustments),
+  };
+}
+
+function withRedundancyAdjustmentMap(
+  entries: readonly GameWithScore[],
+  settings: RedundancySettings,
+  adjustments: ReturnType<typeof computeRedundancyAdjustments>,
+): GameWithScore[] {
+  const projected = entries.map((entry) => ({
+    ...entry,
+    score: entry.score === null ? null : { ...entry.score },
+  }));
+  if (settings.enabled) applyAdjustments(projected, settings, adjustments);
+  return projected;
 }
 
 function targetIds(options: DisplayedFitnessOptions): readonly string[] | undefined {

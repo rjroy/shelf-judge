@@ -20,7 +20,7 @@ req-prefix: CFS
 
 ## Overview
 
-Replaces the collection page's hardcoded two-mode sort toggle with a full sort dropdown and adds client-side filtering. The user can sort by any game property (fitness, ELO, name, year, player count, play time, date added, last updated, BGG rating, BGG weight, or any individual axis rating) and filter by text search, rated status, and player count range. All filtering and sorting happens in the browser. No daemon API changes.
+Replaces the collection page's hardcoded two-mode sort toggle with a full sort dropdown and adds client-side filtering. The user can sort by any game property (fitness, ELO, name, year, player count, play time, date added, last updated, BGG rating, BGG weight, or any individual axis rating) and filter by text search, rated status, and player count range. The initial table data is loaded by the client from the daemon's Collection snapshot; filtering and sorting happen in the browser. The snapshot may be reused only after its complete source revisions and identity have been validated. This changes the Collection data-loading/API boundary but does not move filtering or sorting to the daemon.
 
 This resolves two open issues: `collection-page-filter` and `collection-page-sorting`.
 
@@ -35,9 +35,9 @@ This resolves two open issues: `collection-page-filter` and `collection-page-sor
 
 ## Key Decision: Client-Side Only
 
-All games are already loaded by the initial `listGames()` call. Collection sizes are tens to low hundreds. Client-side filtering and sorting is instant (no network round-trip), simple (no new daemon endpoints), and consistent (no redundant re-fetching). If the CLI later needs server-side filtering, daemon params can be added independently.
+Collection sizes are tens to low hundreds, so client-side filtering and sorting is instant and requires no per-interaction network round-trip. The page uses a client-loaded initial table backed by a revision-validated Collection snapshot; the daemon supplies the snapshot, while filtering and sorting remain browser-side. If the CLI later needs server-side filtering, daemon params can be added independently.
 
-**Implementation consequence:** The collection page is currently a server component (`packages/web/app/page.tsx`). The data fetch stays in the server component. The game list rendering, sort controls, and filter controls move into a client component that receives the full game list, axes, and tournament stats as props. This expands the pattern already established by `CollectionSortToggle`.
+**Implementation consequence:** The Collection page provides a lightweight shell and a client data boundary. The client loads and validates the Collection snapshot before rendering the table; game list rendering, sort controls, and filter controls remain in a client component. Sorting and filtering operate locally on the loaded snapshot. The initial data fetch is not performed by the page's server component.
 
 ## Key Decision: Sort Dropdown Replaces Tournament Toggle
 
@@ -163,11 +163,11 @@ The separator label is contextual: "No rating on 'Wife Will Play It'" when sorti
 
 ### Component Architecture
 
-- REQ-CFS-27: A new client component (e.g., `CollectionTable`) MUST be created to own the interactive game list. It receives the full game list (`GameWithScore[]`), axes (`Axis[]`), and tournament stats (`Record<string, TournamentGameStatsDisplay>`) as props from the server component.
+- REQ-CFS-27: A client component (e.g., `CollectionTable`) MUST own the interactive game list. It receives the full game list (`GameWithScore[]`), axes (`Axis[]`), and tournament stats (`Record<string, TournamentGameStatsDisplay>`) from the client-loaded Collection snapshot, not as arrays embedded by the page's server component.
 
 - REQ-CFS-28: The `CollectionSortToggle` component MUST be removed. Its file (`packages/web/components/collection-sort-toggle.tsx`) is deleted.
 
-- REQ-CFS-29: The server component (`packages/web/app/page.tsx`) MUST remain responsible for data fetching. It passes all data to the client component and renders the topbar, empty state, and stats strip shell.
+- REQ-CFS-29: The Collection page's server component MUST render a lightweight shell (including the topbar and loading/empty-state boundary) and MUST NOT fetch or embed the full Collection arrays. A client data boundary loads and validates the Collection snapshot, then supplies its data to the interactive table and stats display.
 
 ### Removal of URL Param Sort
 
@@ -210,4 +210,4 @@ The mockup uses three chip color classes: search (warm gray), rated status (ambe
 7. The `CollectionSortToggle` and `?sort=` URL param are removed without breaking existing functionality.
 8. Mobile layout matches the mockup: sort dropdown as full-width overlay, controls row with search/sort/filter.
 9. Column headers for Score, Game, and Last Rated are clickable and trigger the corresponding sort.
-10. No daemon API changes. All filtering and sorting is client-side.
+10. The client loads the initial table from a revision-validated Collection snapshot; an unchanged snapshot may be reused only after current source revisions and collection identity are validated. Sorting and filtering remain client-side, with no daemon request for each sort or filter interaction.

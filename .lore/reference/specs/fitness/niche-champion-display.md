@@ -97,9 +97,9 @@ interface NicheNeighbor {
 
 ### Daemon API
 
-- REQ-NICHE-12: `GET /games/:id` response gains a `nichePosition` field: `NichePosition | null`. Null when the game has no BGG data or belongs to no niches with 2+ members. This extends the existing game detail response shape. The niche position is computed on demand from the current `Game[]` and their `FitnessResult` scores. It is not cached or persisted.
+- REQ-NICHE-12: `GET /games/:id` response gains a `nichePosition` field: `NichePosition | null`. Null when the game has no BGG data or belongs to no niches with 2+ members. This extends the existing game detail response shape. The standalone game-detail response computes niche position on demand from the current `Game[]` and their `FitnessResult` scores; it is not cached or persisted.
 
-- REQ-NICHE-13: `GET /games` (the collection list endpoint) gains an optional `?includeNiches=true` query parameter. When enabled, each `GameWithScore` in the response includes a `nichePosition` field. This requires computing fitness scores for all games first, then ranking within niches, making it more expensive than the default response. The daemon should compute niche positions in a single pass over all games (not per-game), building the full niche map once and reading from it for each game.
+- REQ-NICHE-13: `GET /games` (the standalone collection list endpoint) gains an optional `?includeNiches=true` query parameter. When enabled, each `GameWithScore` in the response includes a `nichePosition` field. This requires computing fitness scores for all games first, then ranking within niches, making it more expensive than the default response. The daemon should compute niche positions in a single pass over all games (not per-game), building the full niche map once and reading from it for each game. The standalone endpoint continues to use current inputs; the separate Collection snapshot may reuse niche positions only after validating all relevant source revisions and collection identity.
 
 - REQ-NICHE-14: `GET /predictions/bgg/:bggId` response gains a `nicheImpact` field for search preview:
 
@@ -199,7 +199,7 @@ This function computes what niches the candidate game would join and where it wo
 
 - REQ-NICHE-32: Niche position data does not modify the profiling engine's output or the `CollectionProfile` type. Profiling computes BGG clustering; niche display reads that clustering. The profile page may link to niche views in the future, but this spec does not add niche data to the profile response.
 
-- REQ-NICHE-33: When the user adds or removes a game, changes a rating, or refreshes BGG data, niche positions change because fitness scores change. Niche positions are computed on demand (not cached), so they are always current. There is no dirty flag or invalidation mechanism for niches.
+- REQ-NICHE-33: When the user adds or removes a game, changes a rating, or refreshes BGG data, niche positions change because fitness scores or niche membership may change. Standalone endpoints compute niche positions on demand from current inputs and do not reuse cached results. The Collection snapshot MAY reuse niche positions only while validation confirms that all relevant source revisions and collection identity are unchanged; a committed relevant change invalidates that reuse before the next snapshot is served.
 
 ## Scope Exclusions
 
@@ -274,7 +274,7 @@ This function computes what niches the candidate game would join and where it wo
 ## Constraints
 
 - The fitness formula (`sum(effective_rating * weight) / sum(weights)`) does not change. The `FitnessResult` type does not gain new fields. Niche position is a separate data structure returned alongside fitness, not embedded in it.
-- No new persistent files. Niche positions are computed on demand from existing `GameWithScore[]` data. No caching, no dirty flags.
+- No new persistent files. Niche positions are derived from existing `GameWithScore[]` data. Standalone endpoint results are computed on demand; validated Collection snapshot reuse is permitted only under REQ-NICHE-33. No separate niche dirty flag is introduced.
 - No new external service dependencies. Niche computation is local sorting and grouping over existing in-memory data.
 - The niche engine is a pure-function module with no service-layer dependencies. It takes `GameWithScore[]` in, returns `Map<string, NichePosition>` out. It does not read from storage, call other services, or maintain state.
 - The `CollectionProfile` type and profile computation are not modified. Niche display reads from the same BGG attributes that profiling clusters, but through its own independent computation path.

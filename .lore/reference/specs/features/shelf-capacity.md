@@ -224,7 +224,7 @@ interface OverflowEntry {
 
 - REQ-SHELF-24: When no games have box dimensions, the capacity endpoint returns a valid response with `gamesWithDimensions: 0`, `overflowing: false`, `unfittableGames: []`, `overflowGames: []`, and empty `assignments`.
 
-- REQ-SHELF-25: The capacity computation uses current fitness scores and current collection state. It does not cache or snapshot scores. Each call runs the bin-packing algorithm fresh against the current data. The algorithm's similarity function uses the existing composite distance from `feature-vector.ts`.
+- REQ-SHELF-25: Capacity results use current fitness scores and current collection state. Standalone capacity endpoint calls MUST compute the bin-packing result fresh against current inputs; they do not reuse a cached capacity result. The Collection snapshot MAY reuse capacity results only when validation confirms that every relevant input (including collection, scores, axes, tournament data, niche-derived similarity inputs, and shelf configuration) is unchanged. The algorithm's similarity function uses the existing composite distance from `feature-vector.ts`.
 
 ### Web UI: Game Dimensions Display
 
@@ -404,7 +404,7 @@ Bin-packing algorithm integration, capacity endpoint, per-shelf assignments, col
 ## Constraints
 
 - No modification to `FitnessResult`, `CollectionProfile`, `NichePosition`, or any collection-level computation type. Box dimensions, shelf config, and overflow are orthogonal to fitness scoring.
-- Shelf configuration storage follows the same atomic write pattern as all other storage files. The capacity endpoint computes results on demand (no cached capacity state).
+- Shelf configuration storage follows the same atomic write pattern as all other storage files. The standalone capacity endpoint computes results on demand; only the Collection snapshot may reuse derived capacity results, and only under complete source-revision validation.
 - The capacity computation requires fitness scores for overflow ordering and the algorithm's similarity function requires feature vectors from the niche engine. If a game has no fitness score (no axes rated), it receives fitness 0 and is a natural cull candidate. If a game has no feature vector, its similarity to other games is 0 and it will be placed based on spatial fit alone.
 - The bin-packing algorithm is defined in `.lore/reference/designs/similarity-weighted-bin-packing.md`. Layer 3 implements an adapter between Shelf Judge's data model and the algorithm's generic item/bin interface. The algorithm module itself should be implemented as a standalone service with no Shelf Judge domain knowledge, accepting items and bins as inputs.
 - Dimension display uses inches throughout. No unit conversion UI.

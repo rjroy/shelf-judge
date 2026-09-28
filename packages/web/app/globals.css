@@ -133,6 +133,104 @@
   --scrollbar-thumb-hover: var(--text-muted);
 }
 
+/* Collection snapshot loading and recovery feedback */
+.collection-snapshot-status {
+  box-sizing: border-box;
+  width: min(100% - 2rem, 72rem);
+  margin: 1rem auto;
+  padding: 1rem 1.125rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.collection-snapshot-status--loading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.collection-snapshot-status__spinner {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--action);
+  border-radius: 50%;
+  animation: collection-snapshot-spin 0.8s linear infinite;
+}
+
+.collection-snapshot-status--degraded {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-color: var(--warning-border);
+  background: var(--warning-subtle);
+}
+
+.collection-snapshot-status--degraded p,
+.collection-snapshot-status--error p {
+  margin: 0.25rem 0 0;
+}
+
+.collection-snapshot-status--error {
+  max-width: 42rem;
+  border-color: var(--danger-border);
+  background: var(--danger-subtle);
+}
+
+.collection-snapshot-status--error h2 {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.collection-snapshot-status__button {
+  flex: 0 0 auto;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid var(--action);
+  border-radius: 0.375rem;
+  color: white;
+  background: var(--action);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.collection-snapshot-status__button:hover {
+  background: var(--action-hover);
+}
+.collection-snapshot-status__button:focus-visible {
+  outline: 3px solid var(--score-color);
+  outline-offset: 2px;
+}
+
+@keyframes collection-snapshot-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collection-snapshot-status__spinner {
+    animation-duration: 2s;
+  }
+}
+
+@media (max-width: 36rem) {
+  .collection-snapshot-status--degraded {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .collection-snapshot-status--degraded .collection-snapshot-status__button {
+    width: 100%;
+  }
+}
+
 /* Optional reflections remain a nested Profile subsection and wrap at narrow/zoomed widths. */
 .optional-reflections,
 .reflection-card,

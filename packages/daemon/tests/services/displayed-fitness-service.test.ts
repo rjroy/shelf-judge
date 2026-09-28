@@ -12,6 +12,8 @@ import type {
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import {
   createDisplayedFitnessService,
+  ownedPredictedCandidates,
+  withRedundancyAdjustments,
   type DisplayedFitnessOptions,
 } from "../../src/services/displayed-fitness-service.js";
 import type { GameService } from "../../src/services/game-service.js";
@@ -116,6 +118,43 @@ function services(actual: GameWithScore[], predicted: GameWithScore[]) {
 }
 
 describe("DisplayedFitnessService", () => {
+  test("owned predicted candidates exclude previously-owned games", () => {
+    const owned = { game: game("owned"), score: score() };
+    const retired = {
+      game: { ...game("retired"), ownership: "previously-owned" as const },
+      score: score(),
+    };
+
+    expect(ownedPredictedCandidates([owned, retired])).toEqual([owned]);
+  });
+
+  test("redundancy projections never mutate raw ordinary score objects", () => {
+    const raw = { game: game("raw"), score: score({ score: 8 }) };
+    const sourceScore = raw.score;
+    const projected = withRedundancyAdjustments(
+      [raw],
+      {
+        enabled: false,
+        stage: "integrated",
+        similarityThreshold: 0.1,
+        maxPenalty: 2,
+        componentWeights: { binary: 1, continuous: 0, personalAxes: 0 },
+        minNeighbors: 1,
+        expectedNeighbors: 2,
+      },
+      { games: [raw.game], axes: [] },
+      {
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
+        sessions: [],
+        gameStats: {},
+      },
+    );
+
+    expect(projected[0]?.score).not.toBe(sourceScore);
+    expect(raw.score).toBe(sourceScore);
+    expect(sourceScore.score).toBe(8);
+  });
+
   test("selects the requested score mode and marks only contributed predictions", async () => {
     const actual = [{ game: game("actual"), score: score() }];
     const predicted = [

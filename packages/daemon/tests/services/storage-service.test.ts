@@ -685,6 +685,7 @@ describe("StorageService.loadPredictionSettings", () => {
       stageThresholds: [5, 15, 30],
       defaultK: 5,
       minSimilarityThreshold: 0.2,
+      revision: 0,
     });
   });
 });

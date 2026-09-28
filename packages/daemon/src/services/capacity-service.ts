@@ -11,6 +11,7 @@ import type {
   GameWithScore,
   OverflowEntry,
   Shelf,
+  ShelfConfiguration,
   ShelfAssignment,
   ShelfCapacityResult,
   ShelfUnit,
@@ -52,6 +53,15 @@ export interface CapacityServiceDeps {
   packConfig?: Partial<PackConfig>;
 }
 
+export interface CapacityInputs {
+  shelfConfig: ShelfConfiguration;
+  /** Raw gameService.listGames() results, before prediction/redundancy/utilization. */
+  rawOrdinaryGames: GameWithScore[];
+  axes: readonly Axis[];
+  tournament: TournamentData | null;
+  packConfig?: Partial<PackConfig>;
+}
+
 interface ShelfContext {
   shelf: Shelf;
   unit: ShelfUnit;
@@ -63,172 +73,204 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
   return {
     async computeCapacity(): Promise<ShelfCapacityResult> {
       const shelfConfig = await storageService.loadShelfConfig();
-      const shelves = flattenShelves(shelfConfig.units);
-      const packableShelves = shelves.filter((ctx) => !ctx.shelf.dimensionless);
-      const dimensionlessShelfIds = new Set(
-        shelves.filter((ctx) => ctx.shelf.dimensionless).map((ctx) => ctx.shelf.id),
-      );
-
-      const allGames = await gameService.listGames();
-      // Previously-owned games aren't on the shelf; capacity is about physical presence.
-      const ownedGames = allGames.filter((g) => g.game.ownership !== "previously-owned");
-
-      // Games pinned to a dimensionless shelf are pure assignment: they never enter
-      // capacity math or the packing algorithm, and never require box dimensions.
-      const pinnedDimensionless = ownedGames
-        .filter(
-          (gws) =>
-            gws.game.manualShelfId !== null && dimensionlessShelfIds.has(gws.game.manualShelfId),
-        )
-        .sort((a, b) => a.game.id.localeCompare(b.game.id));
-      const dimensionlessAssignments = buildDimensionlessAssignments(
-        shelves.filter((ctx) => ctx.shelf.dimensionless),
-        pinnedDimensionless,
-      );
-      const resolveAssignment = (
-        ctx: ShelfContext,
-        packedAssignment:
-          | {
-              itemIds: string[];
-              grade: string;
-              remainingDimensions: [number, number, number] | null;
-            }
-          | undefined,
-        packableById: Map<string, GameWithScore>,
-      ): ShelfAssignment =>
-        ctx.shelf.dimensionless
-          ? (dimensionlessAssignments.get(ctx.shelf.id) ?? emptyAssignment(ctx))
-          : buildAssignment(ctx, packedAssignment, packableById);
-
-      const packableGames = ownedGames.filter(
-        (gws) =>
-          !(gws.game.manualShelfId !== null && dimensionlessShelfIds.has(gws.game.manualShelfId)),
-      );
-      const dimensioned = packableGames.filter((g) => g.game.boxDimensions !== null);
-      const undimensioned = packableGames.filter((g) => g.game.boxDimensions === null);
-
-      // REQ-SHELF-23: no units configured => configured: false, no algorithm run.
-      if (shelfConfig.units.length === 0 || shelves.length === 0) {
-        const danglingPinned = dimensioned
-          .filter((gws) => gws.game.manualShelfId !== null)
-          .sort((a, b) => a.game.id.localeCompare(b.game.id));
-        if (danglingPinned.length === 0) {
-          return emptyResult(shelfConfig.units.length > 0 ? shelves.length : 0);
-        }
-
-        const result = emptyResult(shelfConfig.units.length > 0 ? shelves.length : 0);
-        result.gamesWithDimensions = dimensioned.length;
-        result.gamesWithoutDimensions = undimensioned.length;
-        result.assignmentConflicts = danglingPinned.map((gws) =>
-          buildAssignmentConflict(gws, "missing-bin", new Map()),
-        );
-        result.hasPlacementProblems = true;
-        return result;
-      }
-
-      // REQ-SHELF-24: no games with dimensions => valid empty-ish response.
-      if (dimensioned.length === 0) {
-        return {
-          configured: true,
-          totalShelfCount: shelves.length,
-          gamesWithDimensions: 0,
-          gamesWithoutDimensions: undimensioned.length,
-          overflowing: false,
-          hasPlacementProblems: false,
-          assignments: shelves.map((ctx) => resolveAssignment(ctx, undefined, new Map())),
-          assignmentConflicts: [],
-          unfittableGames: [],
-          overflowGames: [],
-        };
-      }
-
-      // Resolve config once so the pre-pass and pack() use the same policy.
-      const resolvedConfig: PackConfig = { ...DEFAULT_PACK_CONFIG, ...packConfig };
-
-      const pinned = dimensioned
-        .filter((gws) => gws.game.manualShelfId !== null)
-        .sort((a, b) => a.game.id.localeCompare(b.game.id));
-      const automatic = dimensioned.filter((gws) => gws.game.manualShelfId === null);
-
-      // Manual assignments are fixed intent, so only automatic games participate
-      // in the ordinary geometric unfittable pre-pass.
-      const { unfittable, fittable: automaticFittable } = splitUnfittable(
-        automatic,
-        packableShelves,
-      );
-
-      // Sort unfittable by fitness ascending (REQ-SHELF-20).
-      unfittable.sort((a, b) => a.fitnessScore - b.fitnessScore);
-
-      const [collection, tournamentData] = await Promise.all([
-        storageService.loadCollection(),
-        storageService.loadTournament(),
-      ]);
-
-      // Pre-encode feature vectors once per request; feed the compare closure.
-      const vectorCache = buildVectorCache(
-        ownedGames.map((g) => g.game),
-        [...pinned, ...automaticFittable],
-        collection.axes,
-        tournamentData,
-      );
-
-      // Pinned items are sorted by stable game ID and reserve their selected
-      // shelves before automatic items enter the normal packing phases.
-      const items = [
-        ...pinned.map((gws) => buildPackItem(gws, vectorCache, gws.game.manualShelfId!)),
-        ...automaticFittable.map((gws) => buildPackItem(gws, vectorCache)),
-      ];
-      const bins = packableShelves.map((ctx) => buildPackBin(ctx.shelf));
-
-      const result = pack(items, bins, resolvedConfig);
-
-      const packableById = new Map(
-        [...pinned, ...automaticFittable].map((gws) => [gws.game.id, gws]),
-      );
-      const shelvesById = new Map(shelves.map((ctx) => [ctx.shelf.id, ctx]));
-
-      const assignments = shelves.map((ctx) =>
-        resolveAssignment(ctx, result.assignments.get(ctx.shelf.id), packableById),
-      );
-
-      const assignmentConflicts: AssignmentConflict[] = result.fixedPlacementRejections.flatMap(
-        ({ itemId, reason }): AssignmentConflict[] => {
-          const gws = packableById.get(itemId);
-          if (!gws?.game.boxDimensions || gws.game.manualShelfId === null) return [];
-          return [buildAssignmentConflict(gws, reason, shelvesById)];
-        },
-      );
-
-      const overflowGames: OverflowEntry[] = result.overflow
-        .flatMap((gameId): OverflowEntry[] => {
-          const gws = packableById.get(gameId);
-          if (!gws || !gws.game.boxDimensions) return [];
-          return [
-            {
-              gameId: gws.game.id,
-              gameName: gws.game.name,
-              fitnessScore: fitnessOf(gws),
-              volumeIn3: boxVolume(gws.game.boxDimensions),
-            },
-          ];
-        })
-        .sort((a, b) => a.fitnessScore - b.fitnessScore);
-
-      return {
-        configured: true,
-        totalShelfCount: shelves.length,
-        gamesWithDimensions: dimensioned.length,
-        gamesWithoutDimensions: undimensioned.length,
-        overflowing: overflowGames.length > 0,
-        hasPlacementProblems:
-          assignmentConflicts.length > 0 || unfittable.length > 0 || overflowGames.length > 0,
-        assignments,
-        assignmentConflicts,
-        unfittableGames: unfittable,
-        overflowGames,
-      };
+      const rawOrdinaryGames = await gameService.listGames();
+      const needsScoringInputs = needsCapacityScoringInputs(shelfConfig, rawOrdinaryGames);
+      const [collection, tournament] = needsScoringInputs
+        ? await Promise.all([storageService.loadCollection(), storageService.loadTournament()])
+        : [null, null];
+      return computeCapacityFromInputs({
+        shelfConfig,
+        rawOrdinaryGames,
+        axes: collection?.axes ?? [],
+        tournament,
+        packConfig,
+      });
     },
+  };
+}
+
+function needsCapacityScoringInputs(
+  shelfConfig: ShelfConfiguration,
+  rawOrdinaryGames: GameWithScore[],
+): boolean {
+  const dimensionlessShelfIds = new Set(
+    shelfConfig.units
+      .flatMap((unit) => unit.shelves)
+      .filter((shelf) => shelf.dimensionless)
+      .map((shelf) => shelf.id),
+  );
+  return rawOrdinaryGames.some(
+    ({ game }) =>
+      game.ownership !== "previously-owned" &&
+      game.boxDimensions !== null &&
+      !(game.manualShelfId !== null && dimensionlessShelfIds.has(game.manualShelfId)),
+  );
+}
+
+/** Pure capacity calculation. Inputs must be the raw ordinary-game list. */
+export function computeCapacityFromInputs({
+  shelfConfig,
+  rawOrdinaryGames,
+  axes,
+  tournament,
+  packConfig,
+}: CapacityInputs): ShelfCapacityResult {
+  const shelves = flattenShelves(shelfConfig.units);
+  const packableShelves = shelves.filter((ctx) => !ctx.shelf.dimensionless);
+  const dimensionlessShelfIds = new Set(
+    shelves.filter((ctx) => ctx.shelf.dimensionless).map((ctx) => ctx.shelf.id),
+  );
+
+  // Previously-owned games aren't on the shelf; capacity is about physical presence.
+  const ownedGames = rawOrdinaryGames.filter((g) => g.game.ownership !== "previously-owned");
+
+  // Games pinned to a dimensionless shelf are pure assignment: they never enter
+  // capacity math or the packing algorithm, and never require box dimensions.
+  const pinnedDimensionless = ownedGames
+    .filter(
+      (gws) => gws.game.manualShelfId !== null && dimensionlessShelfIds.has(gws.game.manualShelfId),
+    )
+    .sort((a, b) => a.game.id.localeCompare(b.game.id));
+  const dimensionlessAssignments = buildDimensionlessAssignments(
+    shelves.filter((ctx) => ctx.shelf.dimensionless),
+    pinnedDimensionless,
+  );
+  const resolveAssignment = (
+    ctx: ShelfContext,
+    packedAssignment:
+      | {
+          itemIds: string[];
+          grade: string;
+          remainingDimensions: [number, number, number] | null;
+        }
+      | undefined,
+    packableById: Map<string, GameWithScore>,
+  ): ShelfAssignment =>
+    ctx.shelf.dimensionless
+      ? (dimensionlessAssignments.get(ctx.shelf.id) ?? emptyAssignment(ctx))
+      : buildAssignment(ctx, packedAssignment, packableById);
+
+  const packableGames = ownedGames.filter(
+    (gws) =>
+      !(gws.game.manualShelfId !== null && dimensionlessShelfIds.has(gws.game.manualShelfId)),
+  );
+  const dimensioned = packableGames.filter((g) => g.game.boxDimensions !== null);
+  const undimensioned = packableGames.filter((g) => g.game.boxDimensions === null);
+
+  // REQ-SHELF-23: no units configured => configured: false, no algorithm run.
+  if (shelfConfig.units.length === 0 || shelves.length === 0) {
+    const danglingPinned = dimensioned
+      .filter((gws) => gws.game.manualShelfId !== null)
+      .sort((a, b) => a.game.id.localeCompare(b.game.id));
+    if (danglingPinned.length === 0) {
+      return emptyResult(shelfConfig.units.length > 0 ? shelves.length : 0);
+    }
+
+    const result = emptyResult(shelfConfig.units.length > 0 ? shelves.length : 0);
+    result.gamesWithDimensions = dimensioned.length;
+    result.gamesWithoutDimensions = undimensioned.length;
+    result.assignmentConflicts = danglingPinned.map((gws) =>
+      buildAssignmentConflict(gws, "missing-bin", new Map()),
+    );
+    result.hasPlacementProblems = true;
+    return result;
+  }
+
+  // REQ-SHELF-24: no games with dimensions => valid empty-ish response.
+  if (dimensioned.length === 0) {
+    return {
+      configured: true,
+      totalShelfCount: shelves.length,
+      gamesWithDimensions: 0,
+      gamesWithoutDimensions: undimensioned.length,
+      overflowing: false,
+      hasPlacementProblems: false,
+      assignments: shelves.map((ctx) => resolveAssignment(ctx, undefined, new Map())),
+      assignmentConflicts: [],
+      unfittableGames: [],
+      overflowGames: [],
+    };
+  }
+
+  if (tournament === null) {
+    throw new Error("Tournament data is required when capacity scoring inputs are needed");
+  }
+
+  // Resolve config once so the pre-pass and pack() use the same policy.
+  const resolvedConfig: PackConfig = { ...DEFAULT_PACK_CONFIG, ...packConfig };
+
+  const pinned = dimensioned
+    .filter((gws) => gws.game.manualShelfId !== null)
+    .sort((a, b) => a.game.id.localeCompare(b.game.id));
+  const automatic = dimensioned.filter((gws) => gws.game.manualShelfId === null);
+
+  // Manual assignments are fixed intent, so only automatic games participate
+  // in the ordinary geometric unfittable pre-pass.
+  const { unfittable, fittable: automaticFittable } = splitUnfittable(automatic, packableShelves);
+
+  // Sort unfittable by fitness ascending (REQ-SHELF-20).
+  unfittable.sort((a, b) => a.fitnessScore - b.fitnessScore);
+
+  // Pre-encode feature vectors once per request; feed the compare closure.
+  const vectorCache = buildVectorCache(
+    ownedGames.map((g) => g.game),
+    [...pinned, ...automaticFittable],
+    axes,
+    tournament,
+  );
+
+  // Pinned items are sorted by stable game ID and reserve their selected
+  // shelves before automatic items enter the normal packing phases.
+  const items = [
+    ...pinned.map((gws) => buildPackItem(gws, vectorCache, gws.game.manualShelfId!)),
+    ...automaticFittable.map((gws) => buildPackItem(gws, vectorCache)),
+  ];
+  const bins = packableShelves.map((ctx) => buildPackBin(ctx.shelf));
+
+  const result = pack(items, bins, resolvedConfig);
+
+  const packableById = new Map([...pinned, ...automaticFittable].map((gws) => [gws.game.id, gws]));
+  const shelvesById = new Map(shelves.map((ctx) => [ctx.shelf.id, ctx]));
+
+  const assignments = shelves.map((ctx) =>
+    resolveAssignment(ctx, result.assignments.get(ctx.shelf.id), packableById),
+  );
+
+  const assignmentConflicts: AssignmentConflict[] = result.fixedPlacementRejections.flatMap(
+    ({ itemId, reason }): AssignmentConflict[] => {
+      const gws = packableById.get(itemId);
+      if (!gws?.game.boxDimensions || gws.game.manualShelfId === null) return [];
+      return [buildAssignmentConflict(gws, reason, shelvesById)];
+    },
+  );
+
+  const overflowGames: OverflowEntry[] = result.overflow
+    .flatMap((gameId): OverflowEntry[] => {
+      const gws = packableById.get(gameId);
+      if (!gws || !gws.game.boxDimensions) return [];
+      return [
+        {
+          gameId: gws.game.id,
+          gameName: gws.game.name,
+          fitnessScore: fitnessOf(gws),
+          volumeIn3: boxVolume(gws.game.boxDimensions),
+        },
+      ];
+    })
+    .sort((a, b) => a.fitnessScore - b.fitnessScore);
+
+  return {
+    configured: true,
+    totalShelfCount: shelves.length,
+    gamesWithDimensions: dimensioned.length,
+    gamesWithoutDimensions: undimensioned.length,
+    overflowing: overflowGames.length > 0,
+    hasPlacementProblems:
+      assignmentConflicts.length > 0 || unfittable.length > 0 || overflowGames.length > 0,
+    assignments,
+    assignmentConflicts,
+    unfittableGames: unfittable,
+    overflowGames,
   };
 }
 

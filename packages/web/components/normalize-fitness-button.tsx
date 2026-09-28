@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function NormalizeFitnessButton() {
+export function NormalizeFitnessButton({
+  onCommittedMutation,
+}: {
+  onCommittedMutation?: () => void | Promise<void>;
+}) {
   const router = useRouter();
   const [normalizing, setNormalizing] = useState(false);
   const [result, setResult] = useState<{ message: string; isError: boolean } | null>(null);
@@ -24,7 +28,8 @@ export function NormalizeFitnessButton() {
       const data = (await res.json()) as { normalized: number; errors?: string[] };
       const message = `Normalized fitness for ${data.normalized} game(s)${data.errors?.length ? `, ${data.errors.length} error(s)` : ""}`;
       setResult({ message, isError: false });
-      router.refresh();
+      if (onCommittedMutation) await onCommittedMutation();
+      else router.refresh();
     } catch (err) {
       setResult({
         message: err instanceof Error ? err.message : "Failed to normalize fitness",

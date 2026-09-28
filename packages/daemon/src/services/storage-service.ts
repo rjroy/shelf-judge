@@ -33,7 +33,6 @@ import {
 } from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
 import { atomicWrite, type TemporaryPathForAttempt } from "./file-ops.js";
-import { migrateTournamentData } from "./tournament-migration.js";
 import {
   migrateCollection,
   type CollectionMigrationDependencies,
@@ -44,10 +43,21 @@ import {
   createCollectionArtifactContext,
   type CollectionArtifactDescriptor,
 } from "./collection-artifacts.js";
-import { DEFAULT_PREDICTION_SETTINGS } from "./prediction-engine.js";
-import { DEFAULT_NICHE_SETTINGS } from "./niche-engine.js";
-import { DEFAULT_REDUNDANCY_SETTINGS } from "./redundancy-engine.js";
 import { createLogger, type Logger } from "./logger.js";
+import {
+  decodeStoredSource,
+  prepareMissingStoredSource,
+  prepareStoredSourceUpdate,
+  type DecodedStoredSource,
+  type RevisionedSourceData,
+  type RevisionedSourceKind,
+} from "./stored-source-revision.js";
+import {
+  createSourceVectorService,
+  type SourceVector,
+  type SourceVectorRevisions,
+} from "./source-vector.js";
+import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 
 export interface CollectionReader {
   loadCollection(): Promise<Collection>;
@@ -80,6 +90,8 @@ export interface StorageService extends CollectionReader, CollectionPersistence 
   saveWishlist(entries: WishlistEntry[]): Promise<void>;
   loadShelfConfig(): Promise<ShelfConfiguration>;
   saveShelfConfig(config: ShelfConfiguration): Promise<void>;
+  sourceVector?(): SourceVector;
+  hydrateSourceVector?(): Promise<SourceVector>;
 }
 
 export interface StorageServiceDeps {
@@ -136,20 +148,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isUnknownArray(value: unknown): value is unknown[] {
   return Array.isArray(value);
-}
-
-function normalizePredictionSettings(raw: unknown): {
-  settings: PredictionSettings;
-  migrated: boolean;
-} {
-  if (!isRecord(raw) || !Object.hasOwn(raw, "tournamentStabilityBoost")) {
-    return { settings: PredictionSettingsSchema.parse(raw), migrated: false };
-  }
-
-  const settings = Object.fromEntries(
-    Object.entries(raw).filter(([key]) => key !== "tournamentStabilityBoost"),
-  );
-  return { settings: PredictionSettingsSchema.parse(settings), migrated: true };
 }
 
 function isJsonValue(value: unknown): value is JsonValue {
@@ -226,14 +224,6 @@ export function decodeStoredCollection(raw: unknown, logger: Logger): StoredColl
   return { data: next, normalized };
 }
 
-function createDefaultTournament(): TournamentData {
-  return {
-    settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
-    sessions: [],
-    gameStats: {},
-  };
-}
-
 function defaultConfig(): AppConfig {
   return {
     bggAuthToken: null,
@@ -277,12 +267,22 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   const tournamentPath = path.join(dataDir, "tournament.json");
   const profilePath = path.join(dataDir, "profile.json");
   const attentionCandidatesPath = path.join(dataDir, "attention-candidates.json");
+  const sourcePaths: Record<RevisionedSourceKind, string> = {
+    tournament: tournamentPath,
+    "prediction-settings": path.join(dataDir, "prediction-settings.json"),
+    "niche-settings": path.join(dataDir, "niche-settings.json"),
+    "redundancy-settings": path.join(dataDir, "redundancy-settings.json"),
+    "shelf-config": path.join(dataDir, "shelf-config.json"),
+  };
+  const sourceVector = createSourceVectorService();
 
   // Per-file in-flight load promise. Serializes concurrent first-time loads so
   // two callers don't both race to write `<file>.tmp` and one ends up renaming
   // a missing tmp. Once the file exists on disk, the read path is idempotent
   // and the lock has no observable effect.
   const inFlightLoads = new Map<string, Promise<unknown>>();
+  const sourceOperations = new Map<string, Promise<void>>();
+  const sourceCache = new Map<RevisionedSourceKind, DecodedStoredSource>();
   let profileOperations: Promise<void> = Promise.resolve();
   let attentionCandidateOperations: Promise<void> = Promise.resolve();
   let attentionCandidateSourceGeneration = 0;
@@ -315,6 +315,89 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       () => undefined,
     );
     return operation;
+  }
+
+  function withSourceLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
+    const previous = sourceOperations.get(filePath) ?? Promise.resolve();
+    const operation = previous.then(fn, fn);
+    sourceOperations.set(
+      filePath,
+      operation.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return operation;
+  }
+
+  function publishStoredSource(kind: RevisionedSourceKind, decoded: DecodedStoredSource): void {
+    sourceCache.set(kind, decoded);
+    sourceVector.publish(kind, decoded.revision);
+  }
+
+  async function readStoredSource(kind: RevisionedSourceKind): Promise<DecodedStoredSource> {
+    const filePath = sourcePaths[kind];
+    try {
+      if (!(await fileOps.exists(filePath))) {
+        const prepared = prepareMissingStoredSource(kind, new Date().toISOString());
+        await fileOps.mkdir(dataDir);
+        await writeAtomically(filePath, JSON.stringify(prepared.stored, null, 2));
+        publishStoredSource(kind, prepared);
+        advanceAttentionCandidateSourceGeneration();
+        return prepared;
+      }
+      const decoded = decodeStoredSource(kind, JSON.parse(await fileOps.readFile(filePath)));
+      if (decoded.migrated) {
+        await writeAtomically(filePath, JSON.stringify(decoded.stored, null, 2));
+        advanceAttentionCandidateSourceGeneration();
+      }
+      publishStoredSource(kind, decoded);
+      return decoded;
+    } catch (error) {
+      sourceVector.markUnavailable(kind);
+      throw error;
+    }
+  }
+
+  async function loadStoredSource(kind: RevisionedSourceKind): Promise<DecodedStoredSource> {
+    return withSourceLock(sourcePaths[kind], async () => {
+      const cached = sourceCache.get(kind);
+      const unavailable = sourceVector.read().unavailableSources.includes(kind);
+      if (cached && !unavailable) return cached;
+      if (unavailable) sourceCache.delete(kind);
+      return readStoredSource(kind);
+    });
+  }
+
+  async function saveStoredSource(
+    kind: RevisionedSourceKind,
+    data: RevisionedSourceData,
+  ): Promise<boolean> {
+    return withSourceLock(sourcePaths[kind], async () => {
+      const unavailable = sourceVector.read().unavailableSources.includes(kind);
+      const cached = unavailable ? undefined : sourceCache.get(kind);
+      const current = cached ?? (await readStoredSource(kind));
+      const updated = prepareStoredSourceUpdate(current, data);
+      if (!updated.changed) return false;
+      const decoded: DecodedStoredSource = {
+        data: updated.data,
+        stored: updated.stored,
+        revision: updated.revision,
+        migrated: false,
+      };
+      try {
+        await fileOps.mkdir(dataDir);
+        await writeAtomically(sourcePaths[kind], JSON.stringify(updated.stored, null, 2));
+      } catch (error) {
+        sourceCache.delete(kind);
+        sourceVector.markUnavailable(kind);
+        throw error;
+      }
+      // The atomic source write is authoritative. Publish before disposable invalidation.
+      publishStoredSource(kind, decoded);
+      advanceAttentionCandidateSourceGeneration();
+      return true;
+    });
   }
 
   async function writeAtomically(filePath: string, content: string): Promise<void> {
@@ -376,7 +459,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     return config;
   }
 
-  return {
+  const storage: StorageService = {
     loadCollection(): Promise<Collection> {
       return withLoadLock(collectionPath, async () => {
         const exists = await fileOps.exists(collectionPath);
@@ -384,6 +467,11 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
           const collection = createDefaultCollection(deps.collectionMigrationDependencies);
           await persistCollection(collection);
           advanceAttentionCandidateSourceGeneration();
+          sourceVector.publishCollection({
+            id: collection.id,
+            schemaVersion: collection.schemaVersion,
+            revision: collection.revision,
+          });
           return collection;
         }
 
@@ -436,7 +524,14 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
             }
           : migration.data;
         const validated = validateCollection(candidate);
-        if (!migration.migrated && !decoded.normalized) return validated;
+        if (!migration.migrated && !decoded.normalized) {
+          sourceVector.publishCollection({
+            id: validated.id,
+            schemaVersion: validated.schemaVersion,
+            revision: validated.revision,
+          });
+          return validated;
+        }
 
         if (migration.migrated || normalizedCurrent) {
           const artifactContext = createCollectionArtifactContext(
@@ -468,13 +563,33 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
 
         await persistCollection(validated);
         advanceAttentionCandidateSourceGeneration();
+        sourceVector.publishCollection({
+          id: validated.id,
+          schemaVersion: validated.schemaVersion,
+          revision: validated.revision,
+        });
         return validated;
+      }).catch((error: unknown) => {
+        sourceVector.markUnavailable("collection");
+        throw error;
       });
     },
 
     async saveCollection(collection: Collection): Promise<void> {
-      await persistCollection(collection);
+      try {
+        await persistCollection(collection);
+      } catch (error) {
+        // Atomic replacement may have succeeded even if the operation reported a
+        // later error. Do not reuse either assumed identity until a disk reload.
+        sourceVector.markUnavailable("collection");
+        throw error;
+      }
       advanceAttentionCandidateSourceGeneration();
+      sourceVector.publishCollection({
+        id: collection.id,
+        schemaVersion: collection.schemaVersion,
+        revision: collection.revision,
+      });
     },
 
     loadConfig: loadAppConfig,
@@ -487,35 +602,13 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     },
 
     loadTournament(): Promise<TournamentData> {
-      return withLoadLock(tournamentPath, async () => {
-        const exists = await fileOps.exists(tournamentPath);
-        if (!exists) {
-          const tournament = createDefaultTournament();
-          await fileOps.mkdir(dataDir);
-          await writeAtomically(tournamentPath, JSON.stringify(tournament, null, 2));
-          advanceAttentionCandidateSourceGeneration();
-          return tournament;
-        }
-
-        const raw = await fileOps.readFile(tournamentPath);
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-        const { data, migrated } = migrateTournamentData(parsed);
-        const validated = TournamentDataSchema.parse(data);
-
-        if (migrated) {
-          await writeAtomically(tournamentPath, JSON.stringify(validated, null, 2));
-          advanceAttentionCandidateSourceGeneration();
-        }
-
-        return validated;
-      });
+      return loadStoredSource("tournament").then((source) =>
+        structuredClone(source.data as TournamentData),
+      );
     },
 
     async saveTournament(data: TournamentData): Promise<void> {
-      const validated = TournamentDataSchema.parse(data);
-      await fileOps.mkdir(dataDir);
-      await writeAtomically(tournamentPath, JSON.stringify(validated, null, 2));
-      advanceAttentionCandidateSourceGeneration();
+      await saveStoredSource("tournament", TournamentDataSchema.parse(data));
     },
 
     loadProfile(): Promise<ProfileData | null> {
@@ -604,62 +697,38 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     },
 
     async loadPredictionSettings(): Promise<PredictionSettings> {
-      const predictionSettingsPath = path.join(dataDir, "prediction-settings.json");
-      const exists = await fileOps.exists(predictionSettingsPath);
-      if (!exists) return PredictionSettingsSchema.parse({ ...DEFAULT_PREDICTION_SETTINGS });
-
-      const raw = await fileOps.readFile(predictionSettingsPath);
-      const { settings, migrated } = normalizePredictionSettings(JSON.parse(raw));
-      if (migrated) {
-        await writeAtomically(predictionSettingsPath, JSON.stringify(settings, null, 2));
-        advanceAttentionCandidateSourceGeneration();
-      }
-      return settings;
+      return structuredClone(
+        (await loadStoredSource("prediction-settings")).data as PredictionSettings,
+      );
     },
 
     async savePredictionSettings(settings: PredictionSettings): Promise<void> {
-      const predictionSettingsPath = path.join(dataDir, "prediction-settings.json");
       const validated = PredictionSettingsSchema.parse(settings);
       await withProfileLock(async () => {
-        await fileOps.mkdir(dataDir);
-        await writeAtomically(predictionSettingsPath, JSON.stringify(validated, null, 2));
-        await invalidateProfile("prediction-settings");
-        advanceAttentionCandidateSourceGeneration();
+        const changed = await saveStoredSource("prediction-settings", validated);
+        if (changed) await invalidateProfile("prediction-settings");
       });
     },
 
     async loadNicheSettings(): Promise<NicheSettings> {
-      const nicheSettingsPath = path.join(dataDir, "niche-settings.json");
-      const exists = await fileOps.exists(nicheSettingsPath);
-      if (!exists) return { ...DEFAULT_NICHE_SETTINGS };
-
-      const raw = await fileOps.readFile(nicheSettingsPath);
-      return JSON.parse(raw) as NicheSettings;
+      return structuredClone((await loadStoredSource("niche-settings")).data as NicheSettings);
     },
 
     async saveNicheSettings(settings: NicheSettings): Promise<void> {
-      const nicheSettingsPath = path.join(dataDir, "niche-settings.json");
-      await fileOps.mkdir(dataDir);
-      await writeAtomically(nicheSettingsPath, JSON.stringify(settings, null, 2));
+      await saveStoredSource("niche-settings", settings);
     },
 
     async loadRedundancySettings(): Promise<RedundancySettings> {
-      const redundancySettingsPath = path.join(dataDir, "redundancy-settings.json");
-      const exists = await fileOps.exists(redundancySettingsPath);
-      if (!exists) return RedundancySettingsSchema.parse({ ...DEFAULT_REDUNDANCY_SETTINGS });
-
-      const raw = await fileOps.readFile(redundancySettingsPath);
-      return RedundancySettingsSchema.parse(JSON.parse(raw));
+      return structuredClone(
+        (await loadStoredSource("redundancy-settings")).data as RedundancySettings,
+      );
     },
 
     async saveRedundancySettings(settings: RedundancySettings): Promise<void> {
-      const redundancySettingsPath = path.join(dataDir, "redundancy-settings.json");
       const validated = RedundancySettingsSchema.parse(settings);
       await withProfileLock(async () => {
-        await fileOps.mkdir(dataDir);
-        await writeAtomically(redundancySettingsPath, JSON.stringify(validated, null, 2));
-        await invalidateProfile("redundancy-settings");
-        advanceAttentionCandidateSourceGeneration();
+        const changed = await saveStoredSource("redundancy-settings", validated);
+        if (changed) await invalidateProfile("redundancy-settings");
       });
     },
 
@@ -679,28 +748,90 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     },
 
     async loadShelfConfig(): Promise<ShelfConfiguration> {
-      const shelfConfigPath = path.join(dataDir, "shelf-config.json");
-      const exists = await fileOps.exists(shelfConfigPath);
-      if (!exists) {
-        const now = new Date().toISOString();
-        return { units: [], createdAt: now, updatedAt: now };
+      try {
+        return structuredClone((await loadStoredSource("shelf-config")).data as ShelfConfiguration);
+      } catch (error) {
+        const isDomainSchemaFailure =
+          error instanceof z.ZodError &&
+          !error.issues.some((issue) => issue.path[0] === "revision");
+        if (!isDomainSchemaFailure) throw error;
+        return prepareMissingStoredSource("shelf-config", new Date().toISOString())
+          .data as ShelfConfiguration;
       }
-
-      const raw = await fileOps.readFile(shelfConfigPath);
-      const parsed: unknown = JSON.parse(raw);
-      const result = ShelfConfigurationSchema.safeParse(parsed);
-      if (!result.success) {
-        console.warn(`Invalid shelf-config.json: ${result.error.message}. Returning empty config.`);
-        const now = new Date().toISOString();
-        return { units: [], createdAt: now, updatedAt: now };
-      }
-      return result.data;
     },
 
     async saveShelfConfig(config: ShelfConfiguration): Promise<void> {
-      const shelfConfigPath = path.join(dataDir, "shelf-config.json");
-      await fileOps.mkdir(dataDir);
-      await writeAtomically(shelfConfigPath, JSON.stringify(config, null, 2));
+      await saveStoredSource("shelf-config", ShelfConfigurationSchema.parse(config));
+    },
+
+    sourceVector(): SourceVector {
+      return sourceVector.read();
+    },
+
+    async hydrateSourceVector(): Promise<SourceVector> {
+      try {
+        const collection = await this.loadCollection();
+        const [tournament, predictionSettings, nicheSettings, redundancySettings, shelfConfig] =
+          await Promise.all([
+            loadStoredSource("tournament"),
+            loadStoredSource("prediction-settings"),
+            loadStoredSource("niche-settings"),
+            loadStoredSource("redundancy-settings"),
+            loadStoredSource("shelf-config"),
+          ]);
+        const revisions: SourceVectorRevisions = {
+          tournament: tournament.revision,
+          predictionSettings: predictionSettings.revision,
+          nicheSettings: nicheSettings.revision,
+          redundancySettings: redundancySettings.revision,
+          shelfConfig: shelfConfig.revision,
+        };
+        sourceVector.hydrate(
+          {
+            id: collection.id,
+            schemaVersion: collection.schemaVersion,
+            revision: collection.revision,
+          },
+          revisions,
+        );
+        return sourceVector.read();
+      } catch (error) {
+        sourceVector.markUnavailable("startup-hydration");
+        throw error;
+      }
     },
   };
+
+  // Storage commits share the same serialization domain as coherent source captures.
+  // The coordinator is re-entrant for service and route callers already holding it.
+  const coordinator = profileSourceCoordinatorFor(storage);
+  const coordinate = <Value>(operation: () => Promise<Value>): Promise<Value> =>
+    coordinator.runExclusive(operation);
+  const saveCollection = storage.saveCollection.bind(storage);
+  const saveTournament = storage.saveTournament.bind(storage);
+  const savePredictionSettings = storage.savePredictionSettings.bind(storage);
+  const saveNicheSettings = storage.saveNicheSettings.bind(storage);
+  const saveRedundancySettings = storage.saveRedundancySettings.bind(storage);
+  const saveShelfConfig = storage.saveShelfConfig.bind(storage);
+  const hydrateVector = storage.hydrateSourceVector?.bind(storage);
+  const loadCollection = storage.loadCollection.bind(storage);
+  const loadTournament = storage.loadTournament.bind(storage);
+  const loadPredictionSettings = storage.loadPredictionSettings.bind(storage);
+  const loadNicheSettings = storage.loadNicheSettings.bind(storage);
+  const loadRedundancySettings = storage.loadRedundancySettings.bind(storage);
+  const loadShelfConfig = storage.loadShelfConfig.bind(storage);
+  storage.loadCollection = () => coordinate(loadCollection);
+  storage.loadTournament = () => coordinate(loadTournament);
+  storage.loadPredictionSettings = () => coordinate(loadPredictionSettings);
+  storage.loadNicheSettings = () => coordinate(loadNicheSettings);
+  storage.loadRedundancySettings = () => coordinate(loadRedundancySettings);
+  storage.loadShelfConfig = () => coordinate(loadShelfConfig);
+  storage.saveCollection = (collection) => coordinate(() => saveCollection(collection));
+  storage.saveTournament = (data) => coordinate(() => saveTournament(data));
+  storage.savePredictionSettings = (settings) => coordinate(() => savePredictionSettings(settings));
+  storage.saveNicheSettings = (settings) => coordinate(() => saveNicheSettings(settings));
+  storage.saveRedundancySettings = (settings) => coordinate(() => saveRedundancySettings(settings));
+  storage.saveShelfConfig = (config) => coordinate(() => saveShelfConfig(config));
+  if (hydrateVector) storage.hydrateSourceVector = () => coordinate(hydrateVector);
+  return storage;
 }

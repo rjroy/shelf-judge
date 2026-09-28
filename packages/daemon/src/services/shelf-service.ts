@@ -16,6 +16,7 @@ import {
   CollectionMutationOperation,
   type CollectionMutationOperation as MutationOperation,
 } from "./attention-mutation-impact.js";
+import { canonicalJson } from "./profile-source-coordinator.js";
 
 export interface ShelfInput {
   id?: string;
@@ -120,6 +121,10 @@ export function createShelfService(deps: ShelfServiceDeps): ShelfService {
       async (collection) => {
         const previous = await storageService.loadShelfConfig();
         const { next, value } = update(structuredClone(previous));
+        if (canonicalJson(previous.units) === canonicalJson(next.units)) {
+          // Avoid making timestamps alone look like a committed configuration change.
+          next.updatedAt = previous.updatedAt;
+        }
         const nextShelfIds = new Set(
           next.units.flatMap((unit) => unit.shelves.map((shelf) => shelf.id)),
         );
@@ -148,6 +153,9 @@ export function createShelfService(deps: ShelfServiceDeps): ShelfService {
           async onPersistenceFailure(writeError: unknown) {
             try {
               await storageService.saveShelfConfig(previous);
+              // A failed collection persistence makes its source identity uncertain.
+              // Reload after restoring the shelf source before the vector is reused.
+              await storageService.loadCollection();
             } catch (rollbackError) {
               throw new Error(
                 `Shelf assignment cleanup failed and shelf configuration rollback failed: ${String(writeError)}; rollback: ${String(rollbackError)}`,

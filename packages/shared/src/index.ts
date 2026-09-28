@@ -411,6 +411,20 @@ export { matchesBggTag, normalizeBggTagTokens } from "./bgg-tag-match";
 export { resolveAxisValues } from "./axis-utils";
 
 export {
+  CollectionSnapshotSchema,
+  CollectionSnapshotGameSchema,
+  CollectionSnapshotGameRowSchema,
+  CollectionSnapshotAxisSchema,
+  CollectionSnapshotCapacitySchema,
+} from "./collection-snapshot";
+export type {
+  CollectionSnapshot,
+  CollectionSnapshotGame,
+  CollectionSnapshotGameRow,
+  CollectionSnapshotCapacity,
+} from "./collection-snapshot";
+
+export {
   DERIVED_AXIS_REGISTRY,
   DerivedAxisPayloadSchema,
   createDerivedAxisFromPayload,

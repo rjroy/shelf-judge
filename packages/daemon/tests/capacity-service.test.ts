@@ -11,7 +11,11 @@ import type {
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import type { GameService } from "../src/services/game-service";
-import { createCapacityService } from "../src/services/capacity-service";
+import {
+  computeCapacityFromInputs,
+  createCapacityService,
+  type CapacityInputs,
+} from "../src/services/capacity-service";
 
 const NOW = "2026-04-13T12:00:00.000Z";
 
@@ -178,6 +182,100 @@ const unit = (id: string, name: string, shelves: ShelfUnit["shelves"]): ShelfUni
 });
 
 describe("capacity service", () => {
+  test("pure inputs match the wrapper and are not mutated", async () => {
+    const shelfConfig: ShelfConfiguration = {
+      units: [
+        unit("u1", "Unit", [
+          { id: "s1", name: "Shelf", dimensionless: false, width: 20, height: 20, depth: 20 },
+        ]),
+      ],
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const rawOrdinaryGames = [
+      makeGame("g1", "Game", { boxDimensions: { width: 5, height: 5, depth: 5 }, fitness: 7 }),
+    ];
+    const tournament = {
+      settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
+      sessions: [],
+      gameStats: {},
+    };
+    const inputs: CapacityInputs = {
+      shelfConfig,
+      rawOrdinaryGames,
+      axes: [],
+      tournament,
+    };
+    const freeze = <T>(value: T): T => {
+      if (value && typeof value === "object" && !Object.isFrozen(value)) {
+        Object.freeze(value);
+        for (const child of Object.values(value)) freeze(child);
+      }
+      return value;
+    };
+    freeze(inputs);
+
+    const coreResult = computeCapacityFromInputs(inputs);
+    const wrapperResult = await createCapacityService({
+      storageService: createMockStorage(shelfConfig.units, []),
+      gameService: createMockGameService(rawOrdinaryGames),
+    }).computeCapacity();
+
+    expect(coreResult).toEqual(wrapperResult);
+    expect(rawOrdinaryGames[0]?.score?.score).toBe(7);
+  });
+
+  test("capacity uses raw fitness rather than redundancy-adjusted fitness", () => {
+    const shelfConfig: ShelfConfiguration = {
+      units: [
+        unit("u1", "Unit", [
+          { id: "s1", name: "Shelf", dimensionless: false, width: 6, height: 6, depth: 5 },
+        ]),
+      ],
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const rawOrdinaryGames = [
+      makeGame("raw-winner", "Raw winner", {
+        boxDimensions: { width: 6, height: 5, depth: 5 },
+        fitness: 9,
+      }),
+      makeGame("adjusted-winner", "Adjusted winner", {
+        boxDimensions: { width: 6, height: 5, depth: 5 },
+        fitness: 5,
+      }),
+    ];
+    const tournament = {
+      settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
+      sessions: [],
+      gameStats: {},
+    };
+    const inputs: CapacityInputs = {
+      shelfConfig,
+      rawOrdinaryGames,
+      axes: [],
+      tournament,
+    };
+    const rawResult = computeCapacityFromInputs(inputs);
+    const adjustedResult = computeCapacityFromInputs({
+      ...inputs,
+      rawOrdinaryGames: [
+        makeGame("raw-winner", "Raw winner", {
+          boxDimensions: { width: 6, height: 5, depth: 5 },
+          fitness: 1,
+        }),
+        makeGame("adjusted-winner", "Adjusted winner", {
+          boxDimensions: { width: 6, height: 5, depth: 5 },
+          fitness: 9,
+        }),
+      ],
+    });
+
+    expect(rawResult.assignments[0]?.games[0]?.fitnessScore).toBe(9);
+    expect(rawResult.overflowGames[0]?.fitnessScore).toBe(5);
+    expect(adjustedResult.overflowGames[0]?.fitnessScore).toBe(9);
+  });
+
   describe("edge cases", () => {
     test("returns configured: false when no units exist", async () => {
       const svc = createCapacityService({

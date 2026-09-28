@@ -181,8 +181,14 @@ describe("useful profile persistence", () => {
         JSON.stringify({ ...(await storage.loadPredictionSettings()), defaultK: 0 }),
         "utf8",
       );
+      const restartedForPrediction = createStorageService({
+        dataDir,
+        configPath: path.join(dataDir, "config.json"),
+        fileOps: createFileOps(),
+        logger: { log() {}, warn() {}, error() {} },
+      });
       // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects is thenable
-      await expect(storage.loadPredictionSettings()).rejects.toThrow();
+      await expect(restartedForPrediction.loadPredictionSettings()).rejects.toThrow();
       await fs.writeFile(
         path.join(dataDir, "redundancy-settings.json"),
         JSON.stringify({
@@ -191,8 +197,14 @@ describe("useful profile persistence", () => {
         }),
         "utf8",
       );
+      const restartedForRedundancy = createStorageService({
+        dataDir,
+        configPath: path.join(dataDir, "config.json"),
+        fileOps: createFileOps(),
+        logger: { log() {}, warn() {}, error() {} },
+      });
       // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects is thenable
-      await expect(storage.loadRedundancySettings()).rejects.toThrow();
+      await expect(restartedForRedundancy.loadRedundancySettings()).rejects.toThrow();
     });
   });
 });

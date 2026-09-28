@@ -14,6 +14,7 @@ export interface DaemonFetchOptions {
   body?: unknown;
   signal?: AbortSignal;
   socketPath?: string;
+  ifNoneMatch?: string;
 }
 
 interface NodeDaemonRequest {
@@ -23,7 +24,7 @@ interface NodeDaemonRequest {
 }
 
 function makeRequest(path: string, options: DaemonFetchOptions = {}): Promise<NodeDaemonRequest> {
-  const { method = "GET", body, signal, socketPath = SOCKET_PATH } = options;
+  const { method = "GET", body, signal, socketPath = SOCKET_PATH, ifNoneMatch } = options;
   const bodyStr = body !== undefined ? JSON.stringify(body) : undefined;
 
   return new Promise<NodeDaemonRequest>((resolve, reject) => {
@@ -72,10 +73,12 @@ function makeRequest(path: string, options: DaemonFetchOptions = {}): Promise<No
         socketPath,
         path,
         method,
-        headers:
-          bodyStr !== undefined
+        headers: {
+          ...(bodyStr !== undefined
             ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) }
-            : undefined,
+            : {}),
+          ...(method === "GET" && ifNoneMatch ? { "If-None-Match": ifNoneMatch } : {}),
+        },
       },
       (response) => {
         responseReceived = true;

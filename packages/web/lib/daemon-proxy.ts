@@ -5,6 +5,7 @@ export interface DaemonProxyRequest {
   readonly method: string;
   readonly body?: unknown;
   readonly signal: AbortSignal;
+  readonly ifNoneMatch?: string;
 }
 
 export type DaemonRequest = (
@@ -21,6 +22,7 @@ export async function proxyDaemonRequest(
       method: request.method,
       body: request.body,
       signal: request.signal,
+      ifNoneMatch: request.method === "GET" ? request.ifNoneMatch : undefined,
     });
 
     if (isStream) {

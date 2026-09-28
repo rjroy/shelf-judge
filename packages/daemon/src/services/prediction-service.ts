@@ -73,6 +73,14 @@ export interface PredictionSnapshot {
   tournamentData: TournamentData;
 }
 
+export interface PreparedPredictionList {
+  /** Computes predicted/pre-redundancy rows against the captured prediction context. */
+  listGames(
+    ordinaryScores?: ReadonlyMap<string, FitnessResult | null>,
+    targetGameIds?: readonly string[],
+  ): GameWithScore[];
+}
+
 function contentVersion(value: unknown): string {
   return `sha256-${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
@@ -97,6 +105,11 @@ export interface PredictionService {
     settings: PredictionSettings,
     targetGameIds?: readonly string[],
   ): Promise<GameWithScore[]>;
+  preparePredictionListFromSnapshot?(
+    collection: CollectionProfileCollectionSource,
+    tournamentData: TournamentData,
+    settings: PredictionSettings,
+  ): Promise<PreparedPredictionList>;
   getSettings(): Promise<PredictionSettings>;
   updateSettings(patch: Partial<PredictionSettings>): Promise<PredictionSettings>;
 }
@@ -229,6 +242,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
   function listGamesWithPredictionsFromContext(
     ctx: Awaited<ReturnType<typeof loadPredictionContext>>,
     targetGameIds?: readonly string[],
+    ordinaryScores?: ReadonlyMap<string, FitnessResult | null>,
   ): GameWithScore[] {
     const results: GameWithScore[] = [];
     const targets =
@@ -238,7 +252,10 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
             (game) => game.ownership !== "previously-owned" && new Set(targetGameIds).has(game.id),
           );
     for (const game of targets) {
-      const actualScore = fitnessService.calculateScore(game, ctx.axes, ctx.tournamentData);
+      const mappedScore = ordinaryScores?.has(game.id)
+        ? ordinaryScores.get(game.id)!
+        : fitnessService.calculateScore(game, ctx.axes, ctx.tournamentData);
+      const actualScore = mappedScore === null ? null : { ...mappedScore };
       const allRated = actualScore && actualScore.ratedAxisCount === ctx.axes.length;
       const targetVector = ctx.gameVectors.get(game.id);
       if (allRated || !game.bggData || !targetVector) {
@@ -252,7 +269,10 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         targetVector,
         ctx.settings,
         ctx.readinessStage,
-        (candidate, axes) => fitnessService.calculateScore(candidate, axes, ctx.tournamentData),
+        (candidate, axes) =>
+          candidate.id === game.id
+            ? actualScore
+            : fitnessService.calculateScore(candidate, axes, ctx.tournamentData),
       );
       results.push({ game, score: fitnessResult });
     }
@@ -651,6 +671,14 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
     ) {
       const ctx = await loadPredictionContext({ collection, tournamentData, settings });
       return listGamesWithPredictionsFromContext(ctx, targetGameIds);
+    },
+
+    async preparePredictionListFromSnapshot(collection, tournamentData, settings) {
+      const ctx = await loadPredictionContext({ collection, tournamentData, settings });
+      return {
+        listGames: (ordinaryScores, targetGameIds) =>
+          listGamesWithPredictionsFromContext(ctx, targetGameIds, ordinaryScores),
+      };
     },
 
     async getSettings(): Promise<PredictionSettings> {
