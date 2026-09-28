@@ -99,6 +99,11 @@ export interface GameService {
     collection: CollectionProfileCollectionSource,
     tournamentData: TournamentData,
   ): GameWithScore[];
+  /** Scores every captured game once, before any display-only adjustments. */
+  listRawGamesFromSnapshot?(
+    collection: CollectionProfileCollectionSource,
+    tournamentData: TournamentData,
+  ): GameWithScore[];
   rateGame(id: string, ratings: Record<string, number | null>): Promise<GameWithScore>;
   removeGame(id: string): Promise<void>;
   searchGames(query: string, signal?: AbortSignal): Promise<BggSearchResult[]>;
@@ -551,6 +556,24 @@ export function createGameService(deps: GameServiceDeps): GameService {
     return fitnessService.calculateScore(game, axes, tournamentData);
   }
 
+  function listRawGamesFromSnapshot(
+    collection: CollectionProfileCollectionSource,
+    tournamentData: TournamentData,
+  ): GameWithScore[] {
+    const results = collection.games.map((game) => ({
+      game,
+      score: computeScore(game, collection.axes, tournamentData),
+      bggDataStale: isBggDataStale(game),
+    }));
+    results.sort((left, right) => {
+      if (left.score !== null && right.score !== null) return right.score.score - left.score.score;
+      if (left.score !== null) return -1;
+      if (right.score !== null) return 1;
+      return 0;
+    });
+    return results;
+  }
+
   function assertBggConfigured(): void {
     if (!bggClient || !bggClient.isConfigured()) {
       throw new Error(
@@ -734,19 +757,11 @@ export function createGameService(deps: GameServiceDeps): GameService {
     },
 
     listGamesFromSnapshot(collection, tournamentData): GameWithScore[] {
-      const results = collection.games.map((game) => ({
-        game,
-        score: computeScore(game, collection.axes, tournamentData),
-        bggDataStale: isBggDataStale(game),
-      }));
-      results.sort((left, right) => {
-        if (left.score !== null && right.score !== null)
-          return right.score.score - left.score.score;
-        if (left.score !== null) return -1;
-        if (right.score !== null) return 1;
-        return 0;
-      });
-      return results;
+      return listRawGamesFromSnapshot(collection, tournamentData);
+    },
+
+    listRawGamesFromSnapshot(collection, tournamentData): GameWithScore[] {
+      return listRawGamesFromSnapshot(collection, tournamentData);
     },
 
     async rateGame(id: string, ratings: Record<string, number | null>): Promise<GameWithScore> {

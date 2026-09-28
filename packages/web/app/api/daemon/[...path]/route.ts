@@ -17,7 +17,14 @@ export async function proxyToDaemon(
       : undefined;
 
   const response = await proxyDaemonRequest(
-    { path: fullPath, method: request.method, body, signal: request.signal },
+    {
+      path: fullPath,
+      method: request.method,
+      body,
+      signal: request.signal,
+      ifNoneMatch:
+        request.method === "GET" ? (request.headers.get("if-none-match") ?? undefined) : undefined,
+    },
     requestDaemon,
   );
   return new NextResponse(response.body, {

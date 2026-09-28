@@ -1,0 +1,395 @@
+import type { CollectionSnapshot } from "@shelf-judge/shared";
+import { canonicalSha256 } from "./profile-source-coordinator.js";
+import { createLogger, type Logger } from "./logger.js";
+import { CollectionSnapshotUnavailableError } from "./collection-snapshot-service.js";
+import type { SourceVector } from "./source-vector.js";
+
+export interface BuiltCollectionSnapshot {
+  snapshot: CollectionSnapshot;
+  sourceVector: SourceVector;
+  evaluatedAtMs: number;
+  expiresAtMs: number | null;
+}
+
+export interface CollectionSnapshotBuilder {
+  buildSnapshot(): Promise<BuiltCollectionSnapshot>;
+}
+
+export interface CollectionSnapshotCacheStorage {
+  sourceVector?(): SourceVector | undefined;
+}
+
+export interface CollectionSnapshotCacheCoordinator {
+  runExclusive<Value>(operation: () => Promise<Value>): Promise<Value>;
+}
+
+export interface CollectionSnapshotCacheDeps {
+  builder: CollectionSnapshotBuilder;
+  storageService: CollectionSnapshotCacheStorage;
+  coordinator: CollectionSnapshotCacheCoordinator;
+  clock?: { now(): number };
+  logger?: Logger;
+  serialize?: (snapshot: CollectionSnapshot) => string;
+}
+
+export interface CollectionSnapshotResponseDecision {
+  status: 200 | 304;
+  body: string | null;
+  etag: string | null;
+  cacheable: boolean;
+  snapshotStatus?: CollectionSnapshot["status"];
+  gameCount?: number;
+}
+
+export interface CollectionSnapshotCacheService {
+  resolve(ifNoneMatch?: string | null): Promise<CollectionSnapshotResponseDecision>;
+}
+
+interface CacheEntry {
+  sourceVector: SourceVector;
+  evaluatedAtMs: number;
+  expiresAtMs: number | null;
+  serializedBody: string;
+  etag: string;
+  gameCount: number;
+}
+
+interface BuildFlight {
+  promise: Promise<CompletedBuild>;
+  resolve(value: CompletedBuild): void;
+  reject(error: unknown): void;
+}
+
+interface CompletedBuild {
+  decision: CollectionSnapshotResponseDecision;
+  sourceVector: SourceVector;
+  evaluatedAtMs: number;
+  expiresAtMs: number | null;
+}
+
+type Reservation =
+  | { kind: "hit"; decision: CollectionSnapshotResponseDecision }
+  | { kind: "join"; flight: BuildFlight }
+  | { kind: "build"; flight: BuildFlight };
+
+const DEFAULT_CLOCK = { now: () => Date.now() };
+
+export function createCollectionSnapshotCacheService(
+  deps: CollectionSnapshotCacheDeps,
+): CollectionSnapshotCacheService {
+  const clock = deps.clock ?? DEFAULT_CLOCK;
+  const logger = deps.logger ?? createLogger("collection-snapshot-cache");
+  const serialize = deps.serialize ?? ((snapshot) => JSON.stringify(snapshot));
+  let entry: CacheEntry | null = null;
+  let flight: BuildFlight | null = null;
+
+  function createFlight(): BuildFlight {
+    let resolve!: (value: CompletedBuild) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<CompletedBuild>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  function isUsable(candidate: CacheEntry | null, current: SourceVector | undefined, now: number) {
+    if (
+      !candidate ||
+      !candidate.sourceVector.available ||
+      !current?.available ||
+      !Number.isFinite(now) ||
+      now < candidate.evaluatedAtMs ||
+      (candidate.expiresAtMs !== null && now >= candidate.expiresAtMs)
+    ) {
+      return false;
+    }
+    return sameSourceVector(candidate.sourceVector, current);
+  }
+
+  function decisionForEntry(candidate: CacheEntry, ifNoneMatch?: string | null) {
+    const notModified =
+      ifNoneMatch !== null &&
+      ifNoneMatch !== undefined &&
+      matchesIfNoneMatch(ifNoneMatch, candidate.etag);
+    logger.log("collection snapshot cache hit completed", {
+      outcome: notModified ? "not-modified" : "body",
+      gameCount: candidate.gameCount,
+      bytes: notModified ? 0 : Buffer.byteLength(candidate.serializedBody),
+    });
+    return {
+      status: notModified ? 304 : 200,
+      body: notModified ? null : candidate.serializedBody,
+      etag: candidate.etag,
+      cacheable: true,
+      snapshotStatus: "complete",
+      gameCount: candidate.gameCount,
+    } satisfies CollectionSnapshotResponseDecision;
+  }
+
+  async function reserve(ifNoneMatch?: string | null): Promise<Reservation> {
+    return deps.coordinator.runExclusive(async () => {
+      await Promise.resolve();
+      const current = deps.storageService.sourceVector?.();
+      const now = clock.now();
+      if (isUsable(entry, current, now)) {
+        return { kind: "hit", decision: decisionForEntry(entry!, ifNoneMatch) };
+      }
+      if (entry) {
+        logger.log("collection snapshot cache invalidation", {
+          outcome: "invalidated",
+          cachedChangeToken: entry.sourceVector.changeToken,
+          currentChangeToken: current?.changeToken ?? null,
+          reason: !current?.available ? "sources-unavailable" : "source-or-time-mismatch",
+        });
+        entry = null;
+      }
+      if (flight) {
+        logger.log("collection snapshot cache miss", {
+          outcome: "joined-in-flight",
+          currentChangeToken: current?.changeToken ?? null,
+        });
+        return { kind: "join", flight };
+      }
+      const created = createFlight();
+      flight = created;
+      logger.log("collection snapshot cache miss", {
+        outcome: "build-reserved",
+        currentChangeToken: current?.changeToken ?? null,
+        available: current?.available ?? false,
+      });
+      return { kind: "build", flight: created };
+    });
+  }
+
+  async function finishBuild(buildFlight: BuildFlight): Promise<void> {
+    logger.log("collection snapshot cache build attempt", { outcome: "started" });
+    try {
+      const built = await deps.builder.buildSnapshot();
+      const serializedBody = serialize(built.snapshot);
+      const result = await deps.coordinator.runExclusive(async (): Promise<CompletedBuild> => {
+        await Promise.resolve();
+        const current = deps.storageService.sourceVector?.();
+        if (!sameSourceVector(built.sourceVector, current)) {
+          logger.warn("collection snapshot cache build discarded", {
+            outcome: "source-changed",
+            capturedChangeToken: built.sourceVector.changeToken,
+            currentChangeToken: current?.changeToken ?? null,
+          });
+          throw new CollectionSnapshotUnavailableError(
+            "Collection snapshot sources changed before cache publication",
+          );
+        }
+        if (built.snapshot.status === "complete" && !built.sourceVector.available) {
+          throw new CollectionSnapshotUnavailableError(
+            "Complete collection snapshot has unavailable sources",
+          );
+        }
+        const now = clock.now();
+        if (!freshAt(built.evaluatedAtMs, built.expiresAtMs, now)) {
+          logger.warn("collection snapshot cache build discarded", {
+            outcome: "time-changed",
+            evaluatedAtMs: built.evaluatedAtMs,
+            expiresAtMs: built.expiresAtMs,
+            now,
+          });
+          throw new CollectionSnapshotUnavailableError(
+            "Collection snapshot freshness changed before publication",
+          );
+        }
+        if (built.snapshot.status !== "complete") {
+          if (flight === buildFlight) flight = null;
+          logger.log("collection snapshot cache build completed", {
+            outcome: "degraded-not-cached",
+            gameCount: built.snapshot.games.length,
+            bytes: Buffer.byteLength(serializedBody),
+          });
+          return {
+            decision: {
+              status: 200,
+              body: serializedBody,
+              etag: null,
+              cacheable: false,
+              snapshotStatus: "degraded",
+              gameCount: built.snapshot.games.length,
+            } satisfies CollectionSnapshotResponseDecision,
+            sourceVector: built.sourceVector,
+            evaluatedAtMs: built.evaluatedAtMs,
+            expiresAtMs: built.expiresAtMs,
+          };
+        }
+        const etag = createSnapshotEtag(built);
+        entry = {
+          sourceVector: built.sourceVector,
+          evaluatedAtMs: built.evaluatedAtMs,
+          expiresAtMs: built.expiresAtMs,
+          serializedBody,
+          etag,
+          gameCount: built.snapshot.games.length,
+        };
+        logger.log("collection snapshot cache build completed", {
+          outcome: "published",
+          changeToken: built.sourceVector.changeToken,
+          gameCount: built.snapshot.games.length,
+          bytes: Buffer.byteLength(serializedBody),
+          expiresAtMs: built.expiresAtMs,
+        });
+        if (flight === buildFlight) flight = null;
+        return {
+          decision: {
+            status: 200,
+            body: serializedBody,
+            etag,
+            cacheable: true,
+            snapshotStatus: "complete",
+            gameCount: built.snapshot.games.length,
+          },
+          sourceVector: built.sourceVector,
+          evaluatedAtMs: built.evaluatedAtMs,
+          expiresAtMs: built.expiresAtMs,
+        };
+      });
+      // Publication/removal is atomic with source validation; resolve outside the
+      // lock only after no later caller can join this completed flight.
+      buildFlight.resolve(result);
+    } catch (error) {
+      await deps.coordinator.runExclusive(async () => {
+        await Promise.resolve();
+        if (flight === buildFlight) flight = null;
+      });
+      logger.error("collection snapshot cache build failed", {
+        outcome: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      buildFlight.reject(error);
+    }
+  }
+
+  return {
+    async resolve(ifNoneMatch?: string | null): Promise<CollectionSnapshotResponseDecision> {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const reservation = await reserve(ifNoneMatch);
+        if (reservation.kind === "hit") return reservation.decision;
+        if (reservation.kind === "build") {
+          // Launch after reserve's coordinator callback to avoid ALS reentrancy.
+          void finishBuild(reservation.flight);
+        }
+        let completed: CompletedBuild;
+        try {
+          completed = await reservation.flight.promise;
+        } catch (error) {
+          if (error instanceof CollectionSnapshotUnavailableError && attempt === 0) continue;
+          throw error;
+        }
+        const decision = await deps.coordinator.runExclusive(async () => {
+          await Promise.resolve();
+          const current = deps.storageService.sourceVector?.();
+          const now = clock.now();
+          if (
+            !sameSourceVector(completed.sourceVector, current) ||
+            !freshAt(completed.evaluatedAtMs, completed.expiresAtMs, now)
+          ) {
+            if (entry && !sameSourceVector(entry.sourceVector, current)) entry = null;
+            logger.warn("collection snapshot cache result superseded", {
+              outcome: "retry",
+              capturedChangeToken: completed.sourceVector.changeToken,
+              currentChangeToken: current?.changeToken ?? null,
+              now,
+            });
+            return null;
+          }
+          if (completed.decision.snapshotStatus === "degraded") {
+            return completed.decision;
+          }
+          if (!current?.available || !entry || !sameSourceVector(entry.sourceVector, current)) {
+            return null;
+          }
+          return decisionForEntry(entry, ifNoneMatch);
+        });
+        if (decision) return decision;
+      }
+      throw new CollectionSnapshotUnavailableError(
+        "Collection snapshot sources or freshness changed repeatedly",
+      );
+    },
+  };
+}
+
+function freshAt(evaluatedAtMs: number, expiresAtMs: number | null, now: number): boolean {
+  return (
+    Number.isFinite(now) &&
+    Number.isFinite(evaluatedAtMs) &&
+    now >= evaluatedAtMs &&
+    (expiresAtMs === null || (Number.isFinite(expiresAtMs) && now < expiresAtMs))
+  );
+}
+
+function sameSourceVector(left: SourceVector, right: SourceVector | undefined): boolean {
+  return (
+    !!right &&
+    left.available === right.available &&
+    left.processEpoch === right.processEpoch &&
+    left.changeToken === right.changeToken &&
+    left.collectionId === right.collectionId &&
+    left.collectionSchemaVersion === right.collectionSchemaVersion &&
+    left.collectionRevision === right.collectionRevision &&
+    left.tournamentRevision === right.tournamentRevision &&
+    left.predictionSettingsRevision === right.predictionSettingsRevision &&
+    left.nicheSettingsRevision === right.nicheSettingsRevision &&
+    left.redundancySettingsRevision === right.redundancySettingsRevision &&
+    left.shelfConfigRevision === right.shelfConfigRevision &&
+    left.representationVersion === right.representationVersion &&
+    left.algorithmVersion === right.algorithmVersion
+  );
+}
+
+function createSnapshotEtag(built: BuiltCollectionSnapshot): string {
+  const vector = built.sourceVector;
+  const hash = canonicalSha256({
+    processEpoch: vector.processEpoch,
+    collectionId: vector.collectionId,
+    collectionSchemaVersion: vector.collectionSchemaVersion,
+    collectionRevision: vector.collectionRevision,
+    tournamentRevision: vector.tournamentRevision,
+    predictionSettingsRevision: vector.predictionSettingsRevision,
+    nicheSettingsRevision: vector.nicheSettingsRevision,
+    redundancySettingsRevision: vector.redundancySettingsRevision,
+    shelfConfigRevision: vector.shelfConfigRevision,
+    changeToken: vector.changeToken,
+    representationVersion: vector.representationVersion,
+    algorithmVersion: vector.algorithmVersion,
+    nextTimeTransition: built.expiresAtMs,
+  });
+  return `W/"cs1-${hash}"`;
+}
+
+function matchesIfNoneMatch(header: string, etag: string): boolean {
+  if (header.trim() === "*") return true;
+  const tags = splitEntityTagList(header);
+  if (tags.length === 0 || tags.some((tag) => !isEntityTag(tag))) return false;
+  const target = weakComparable(etag);
+  return tags.some((tag) => weakComparable(tag) === target);
+}
+
+function splitEntityTagList(header: string): string[] {
+  const tags: string[] = [];
+  let start = 0;
+  let quoted = false;
+  for (let index = 0; index < header.length; index += 1) {
+    if (header[index] === '"') quoted = !quoted;
+    else if (header[index] === "," && !quoted) {
+      tags.push(header.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  tags.push(header.slice(start).trim());
+  return tags.filter((tag) => tag.length > 0);
+}
+
+function isEntityTag(value: string): boolean {
+  return /^(?:W\/)?"[\x21\x23-\x7E\x80-\xFF]*"$/.test(value);
+}
+
+function weakComparable(value: string): string {
+  return value.startsWith("W/") ? value.slice(2) : value;
+}

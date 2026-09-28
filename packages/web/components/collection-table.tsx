@@ -213,6 +213,7 @@ interface CollectionTableProps {
   collectionContext?: string;
   collectionOrigin?: string;
   collectionReturnAttempt: boolean;
+  onCommittedMutation?: () => void | Promise<void>;
 }
 
 interface CollectionViewState {
@@ -248,6 +249,7 @@ export function CollectionTable({
   collectionContext,
   collectionOrigin,
   collectionReturnAttempt,
+  onCommittedMutation,
 }: CollectionTableProps) {
   const router = useRouter();
   const [view, setView] = useState<CollectionViewState>(() => ({
@@ -265,6 +267,7 @@ export function CollectionTable({
   const [menuOpen, setMenuOpen] = useState(false);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const hydratedScopeRef = useRef<string | null>(null);
 
   const { sort, filters, playerCountInput, predictionsOn, nichesOn, nicheViewMode, hydrated } =
     view;
@@ -383,6 +386,14 @@ export function CollectionTable({
 
   useEffect(() => {
     let cancelled = false;
+    const hydrationScope = JSON.stringify({
+      collectionContext: collectionContext ?? null,
+      collectionOrigin: collectionOrigin ?? null,
+      collectionReturnAttempt,
+      showPreviouslyOwned,
+      missingDimensionsOnly,
+    });
+    if (hydratedScopeRef.current === hydrationScope) return;
 
     async function hydrateCollection(): Promise<void> {
       if (
@@ -421,6 +432,7 @@ export function CollectionTable({
             })
           ) {
             persistCollectionPreferences(context.projection);
+            hydratedScopeRef.current = hydrationScope;
             setView({
               status: "ready",
               hydrated: true,
@@ -463,6 +475,7 @@ export function CollectionTable({
         games.length === 0,
       );
       if (games.length > 0) saveSort(loadedSort);
+      hydratedScopeRef.current = hydrationScope;
       setView({
         status: "ready",
         hydrated: true,
@@ -1195,6 +1208,7 @@ export function CollectionTable({
                   <NicheIgnoreButton
                     type={group.type as NicheTagFilter["type"]}
                     name={group.name}
+                    onCommittedMutation={onCommittedMutation}
                   />
                 </div>
                 {group.games.map((gws, i) => {
@@ -1234,7 +1248,11 @@ export function CollectionTable({
                   <span key={`${tag.type}:${tag.name}`} className="niche-ignored-chip">
                     <span className="niche-ignored-chip-name">{tag.name}</span>
                     <span className={`niche-type-badge niche-type-${tag.type}`}>{tag.type}</span>
-                    <NicheRestoreButton type={tag.type} name={tag.name} />
+                    <NicheRestoreButton
+                      type={tag.type}
+                      name={tag.name}
+                      onCommittedMutation={onCommittedMutation}
+                    />
                   </span>
                 ))}
               </div>

@@ -110,6 +110,26 @@ describe("niche settings routes", () => {
   });
 
   describe("POST /api/niches/settings/ignore", () => {
+    test("serializes concurrent ignores so neither update is lost", async () => {
+      const responses = await Promise.all([
+        app.request("/api/niches/settings/ignore", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "mechanic", name: "Deck Building" }),
+        }),
+        app.request("/api/niches/settings/ignore", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "category", name: "Economic" }),
+        }),
+      ]);
+      expect(responses.map((response) => response.status)).toEqual([200, 200]);
+      expect(storage.settings.ignoredTags).toEqual([
+        { type: "mechanic", name: "Deck Building" },
+        { type: "category", name: "Economic" },
+      ]);
+    });
+
     test("adds a single tag", async () => {
       const res = await app.request("/api/niches/settings/ignore", {
         method: "POST",

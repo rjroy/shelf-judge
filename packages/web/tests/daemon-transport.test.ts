@@ -114,6 +114,85 @@ describe("web daemon transport ownership", () => {
     expect(await response.text()).toBe("");
   });
 
+  test("forwards If-None-Match on GET and preserves conditional response headers and bodies", async () => {
+    const request = new NextRequest("http://localhost/api/daemon/games?limit=10", {
+      headers: { "If-None-Match": '"games-v1"', Authorization: "must-not-forward" },
+    });
+    const captured: { path?: string; options?: Parameters<typeof daemonRequest>[1] } = {};
+    const response = await proxyToDaemon(
+      request,
+      Promise.resolve({ path: ["games"] }),
+      (path, options) => {
+        captured.path = path;
+        captured.options = options;
+        return Promise.resolve({
+          response: new Response('{"games":[]}', {
+            headers: { ETag: '"games-v1"', "Cache-Control": "private, max-age=0" },
+          }),
+          isStream: false,
+        });
+      },
+    );
+
+    expect(captured.path).toBe("/api/games?limit=10");
+    expect(captured.options?.ifNoneMatch).toBe('"games-v1"');
+    expect(captured.options).not.toHaveProperty("headers");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("etag")).toBe('"games-v1"');
+    expect(response.headers.get("cache-control")).toBe("private, max-age=0");
+    expect(await response.text()).toBe('{"games":[]}');
+  });
+
+  test("preserves conditional 304 without a body and degraded no-store responses", async () => {
+    const controller = new AbortController();
+    const notModified = await proxyDaemonRequest(
+      { path: "/api/games", method: "GET", signal: controller.signal, ifNoneMatch: '"games-v1"' },
+      (_path, options) => {
+        expect(options?.ifNoneMatch).toBe('"games-v1"');
+        return Promise.resolve({
+          response: new Response(null, {
+            status: 304,
+            headers: { ETag: '"games-v1"', "Cache-Control": "private, max-age=0" },
+          }),
+          isStream: false,
+        });
+      },
+    );
+    expect(notModified.status).toBe(304);
+    expect(notModified.body).toBeNull();
+    expect(notModified.headers.get("etag")).toBe('"games-v1"');
+    expect(notModified.headers.get("cache-control")).toBe("private, max-age=0");
+
+    const degraded = await proxyDaemonRequest(
+      { path: "/api/games", method: "GET", signal: controller.signal },
+      () =>
+        Promise.resolve({
+          response: Response.json({ degraded: true }, { headers: { "Cache-Control": "no-store" } }),
+          isStream: false,
+        }),
+    );
+    expect(degraded.status).toBe(200);
+    expect(degraded.headers.get("cache-control")).toBe("no-store");
+    expect(await degraded.text()).toBe('{"degraded":true}');
+  });
+
+  test("does not forward conditional validators for unrelated methods", async () => {
+    const response = await proxyDaemonRequest(
+      {
+        path: "/api/games",
+        method: "POST",
+        body: {},
+        signal: new AbortController().signal,
+        ifNoneMatch: '"should-not-forward"',
+      },
+      (_path, options) => {
+        expect(options?.ifNoneMatch).toBeUndefined();
+        return Promise.resolve({ response: Response.json({ ok: true }), isStream: false });
+      },
+    );
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
   test("forwards daemon-validated public event bytes without projection", async () => {
     const publicBytes =
       'event: complete\nid: 0\ndata: {"version":1,"operationId":"public","sequence":0,"occurredAt":"2026-08-30T00:00:00.000Z","type":"complete","terminal":true,"answer":"safe"}\n\n';
@@ -127,6 +206,30 @@ describe("web daemon transport ownership", () => {
 
     expect(isStream).toBe(true);
     expect(await response.text()).toBe(publicBytes);
+    close(server);
+  });
+
+  test("sends only If-None-Match across the Unix socket for GET requests", async () => {
+    let capturedHeaders: http.IncomingHttpHeaders | undefined;
+    const server = http.createServer((request, response) => {
+      capturedHeaders = request.headers;
+      response.writeHead(304, { ETag: '"games-v1"', "Cache-Control": "private, max-age=0" });
+      response.end();
+    });
+    const socketPath = await listen(server);
+
+    const { response } = await daemonRequest("/api/games", {
+      socketPath,
+      method: "GET",
+      ifNoneMatch: '"games-v1"',
+    });
+
+    expect(capturedHeaders?.["if-none-match"]).toBe('"games-v1"');
+    expect(capturedHeaders?.authorization).toBeUndefined();
+    expect(response.status).toBe(304);
+    expect(response.headers.get("etag")).toBe('"games-v1"');
+    expect(response.headers.get("cache-control")).toBe("private, max-age=0");
+    expect(response.body).toBeNull();
     close(server);
   });
 

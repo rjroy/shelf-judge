@@ -60,6 +60,8 @@ import { createAnalystTranscriptValidator } from "./services/analyst-transcript-
 import { createAnalystTurnService } from "./services/analyst-turn-service.js";
 import type { ProfileSourceCoordinator } from "./services/profile-source-coordinator.js";
 import type { AttentionDispositionService } from "./services/attention-disposition-service.js";
+import type { CollectionSnapshotCacheService } from "./services/collection-snapshot-cache-service.js";
+import { createCollectionSnapshotRoutes } from "./routes/collection-snapshot.js";
 
 export interface AppDeps {
   storageService: StorageService;
@@ -72,6 +74,7 @@ export interface AppDeps {
   displayedFitnessService: DisplayedFitnessService;
   intentionService: IntentionService;
   attentionDispositionService: AttentionDispositionService;
+  collectionSnapshotService?: CollectionSnapshotCacheService;
   ownerGameNoteService: OwnerGameNoteService;
   groundedAnalysisProvider: GroundedAnalysisProvider;
   reflectionRuntime: ReflectionRuntime;
@@ -135,6 +138,9 @@ export function createApp(deps: AppDeps): AppResult {
     ownerGameNoteService,
   });
   const collectionRouteModule = createCollectionRoutes({ purchaseUtilizationService });
+  const collectionSnapshotRouteModule = deps.collectionSnapshotService
+    ? createCollectionSnapshotRoutes(deps.collectionSnapshotService)
+    : null;
   const axisRouteModule = createAxisRoutes({ axisService });
   const scoreRouteModule = createScoreRoutes({ gameService });
   const importRouteModule = createImportRoutes({ gameService, bggClient });
@@ -338,6 +344,7 @@ export function createApp(deps: AppDeps): AppResult {
     ...wishlistRouteModule.operations,
     ...shelfRouteModule.operations,
     ...collectionRouteModule.operations,
+    ...(collectionSnapshotRouteModule?.operations ?? []),
     ...groundedAnalysisRouteModule.operations,
     ...reflectionRouteModule.operations,
     ...analystRouteModule.operations,
@@ -376,6 +383,7 @@ export function createApp(deps: AppDeps): AppResult {
   app.route("/api", wishlistRouteModule.routes);
   app.route("/api", shelfRouteModule.routes);
   app.route("/api", collectionRouteModule.routes);
+  if (collectionSnapshotRouteModule) app.route("/api", collectionSnapshotRouteModule.routes);
   app.route("/api", groundedAnalysisRouteModule.routes);
   app.route("/api", reflectionRouteModule.routes);
   app.route("/api", analystRouteModule.routes);

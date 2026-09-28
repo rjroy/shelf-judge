@@ -1378,6 +1378,7 @@ describe("GameService BGG Integration", () => {
         fitnessService: createFitnessService(),
       });
       const { game } = await seed.addGame({ name: "Migrated Game", bggId: 42 });
+      const revisionBeforeRefresh = (await storageService.loadCollection()).revision;
       const failureAt = "2026-08-26T11:00:00.000Z";
       const service = createGameService({
         storageService,
@@ -1391,7 +1392,9 @@ describe("GameService BGG Integration", () => {
 
       // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(service.refreshBggData(game.id)).rejects.toThrow("still unavailable");
-      const persisted = (await storageService.loadCollection()).games[0];
+      const persistedCollection = await storageService.loadCollection();
+      expect(persistedCollection.revision).toBe(revisionBeforeRefresh + 1);
+      const persisted = persistedCollection.games[0];
       if (persisted === undefined) throw new Error("Expected persisted game");
       for (const metadata of Object.values(persisted.entityMetadata)) {
         expect(metadata.state).toBe("refresh-needed");

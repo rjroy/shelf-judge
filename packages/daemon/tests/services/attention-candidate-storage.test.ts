@@ -102,23 +102,30 @@ describe("attention candidate storage", () => {
     await service.loadTournament();
     expect(generation()).toBe(3);
     await service.saveTournament(await service.loadTournament());
-    expect(generation()).toBe(4);
+    expect(generation()).toBe(3);
     await service.savePredictionSettings(await service.loadPredictionSettings());
-    expect(generation()).toBe(5);
+    expect(generation()).toBe(4);
     await service.saveRedundancySettings(await service.loadRedundancySettings());
-    expect(generation()).toBe(6);
+    expect(generation()).toBe(5);
     await service.saveConfig(await service.loadConfig());
     await service.saveAttentionCandidates?.(data());
-    expect(generation()).toBe(6);
+    expect(generation()).toBe(5);
 
     fileOps.rename = () => Promise.reject(new Error("durable write failed"));
+    const tournament = await service.loadTournament();
     let failure: Error | null = null;
     try {
-      await service.saveTournament(await service.loadTournament());
+      await service.saveTournament({
+        ...tournament,
+        settings: {
+          ...tournament.settings,
+          kFactorThreshold: tournament.settings.kFactorThreshold + 1,
+        },
+      });
     } catch (error) {
       if (error instanceof Error) failure = error;
     }
     expect(failure?.message).toBe("durable write failed");
-    expect(generation()).toBe(6);
+    expect(generation()).toBe(5);
   });
 });

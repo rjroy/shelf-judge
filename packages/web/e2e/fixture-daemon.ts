@@ -6,6 +6,7 @@ import {
   AnalystCitationInspectResultSchema,
   AnalystConfigurationSchema,
   AnalystTurnRequestSchema,
+  CollectionSnapshotSchema,
   CollectionProfileResultSchema,
   GameDetailWithPurchaseUtilizationSchema,
   IntentionMutationResultSchema,
@@ -113,6 +114,9 @@ let history: ResolvedPlayIntentionHistory = [];
 let staleOnce = false;
 let intentionSequence = 1;
 let collectionState: CollectionFixtureState = createCollectionState();
+const collectionIgnoredTags = new Set<string>();
+let refreshMutationCount = 0;
+let normalizeMutationCount = 0;
 let manualValuesState: ManualValuesFixtureState = createManualValuesState();
 let ownerNoteState: OwnerNoteFixtureState = createOwnerNoteState();
 let reflectionState: ReflectionGetResult = createReflectionState();
@@ -292,6 +296,9 @@ function reset(next: Scenario): void {
   active = next === "active" || next === "stale" || next === "profile" ? activeIntention() : null;
   intentionSequence = 1;
   collectionState = createCollectionState();
+  collectionIgnoredTags.clear();
+  refreshMutationCount = 0;
+  normalizeMutationCount = 0;
   manualValuesState = createManualValuesState();
   rmSync(ownerNotePersistencePath, { force: true });
   ownerNoteState = createOwnerNoteState();
@@ -672,6 +679,194 @@ async function handle(request: Request): Promise<Response> {
 
   if (path === "/api/collection/entertainment-benchmark" && request.method === "GET") {
     return json({ entertainmentBenchmark: null });
+  }
+
+  if (path === "/api/games/refresh" && request.method === "POST") {
+    refreshMutationCount++;
+    return json({ refreshed: collectionEntries(collectionState, axis).length, errors: [] });
+  }
+
+  if (path === "/api/tournament/normalize-fitness" && request.method === "POST") {
+    normalizeMutationCount++;
+    return json({ normalized: collectionEntries(collectionState, axis).length, errors: [] });
+  }
+
+  if (path === "/api/test/collection-mutation-state" && request.method === "GET") {
+    return json({ refreshMutationCount, normalizeMutationCount });
+  }
+
+  if (path === "/api/collection/snapshot" && request.method === "GET") {
+    const entries = collectionEntries(collectionState, axis);
+    const predictedEntries = collectionState.predictionsAvailable
+      ? collectionEntries(collectionState, axis, { predicted: true })
+      : [];
+    const predictedById = new Map(predictedEntries.map((entry) => [entry.game.id, entry]));
+    const nicheEntries = collectionState.nichesAvailable
+      ? collectionEntries(collectionState, axis, { niches: true })
+      : [];
+    const statsById = new Map(
+      collectionDefinitions.map((definition) => [definition.id, tournamentStats(definition)]),
+    );
+    const unavailableFeatures = [
+      ...(!collectionState.axesAvailable
+        ? [{ feature: "axes", reason: "Fixture axes source unavailable" }]
+        : []),
+      ...(!collectionState.tournamentAvailable
+        ? [{ feature: "tournament-display", reason: "Fixture tournament display unavailable" }]
+        : []),
+      ...(!collectionState.predictionsAvailable
+        ? [{ feature: "predictions", reason: "Fixture prediction source unavailable" }]
+        : []),
+      ...(!collectionState.nichesAvailable
+        ? [{ feature: "niches", reason: "Fixture niche source unavailable" }]
+        : []),
+    ];
+    const scoreDelta = (refreshMutationCount + normalizeMutationCount) / 2;
+    const etag = `"fixture-collection-${collectionState.empty ? "empty" : "populated"}-${[...collectionState.previouslyOwnedIds].sort().join(",")}-${[...collectionState.deletedIds].sort().join(",")}-${Number(collectionState.axesAvailable)}-${Number(collectionState.tournamentAvailable)}-${Number(collectionState.predictionsAvailable)}-${Number(collectionState.nichesAvailable)}-${Number(collectionState.integratedRedundancy)}-${[...collectionIgnoredTags].sort().join(",")}-${scoreDelta}"`;
+    if (unavailableFeatures.length === 0 && request.headers.get("if-none-match") === etag) {
+      return new Response(null, {
+        status: 304,
+        headers: { ETag: etag, "Cache-Control": "private, no-cache" },
+      });
+    }
+    const snapshot = CollectionSnapshotSchema.parse({
+      representationVersion: 1,
+      collectionId: "fixture-collection",
+      serverId: "fixture-server",
+      status: unavailableFeatures.length === 0 ? "complete" : "degraded",
+      unavailableFeatures,
+      axes: collectionState.axesAvailable
+        ? [
+            {
+              id: axis.id,
+              name: axis.name,
+              source: axis.source,
+              enabled: axis.source === "legacy" ? false : axis.enabled,
+              weight: axis.weight,
+              ...(axis.preferenceShape === undefined
+                ? {}
+                : { preferenceShape: axis.preferenceShape }),
+              ...(axis.idealValue === undefined ? {} : { idealValue: axis.idealValue }),
+              ...(axis.veto === undefined ? {} : { veto: axis.veto }),
+            },
+          ]
+        : [],
+      ignoredTags: [...collectionIgnoredTags],
+      redundancyMode: collectionState.integratedRedundancy ? "integrated" : "off",
+      games: entries.map((entry) => {
+        const predicted = predictedById.get(entry.game.id);
+        const withScoreDelta = (fitness: typeof entry.score) =>
+          fitness === null ? null : { ...fitness, score: fitness.score + scoreDelta };
+        const definition = collectionDefinitions.find(
+          (candidate) => candidate.id === entry.game.id,
+        );
+        const tournament =
+          collectionState.tournamentAvailable && definition
+            ? statsById.get(entry.game.id)
+            : undefined;
+        return {
+          game: {
+            id: entry.game.id,
+            name: entry.game.name,
+            bggId: entry.game.bggId,
+            yearPublished: entry.game.yearPublished,
+            imageUrl: entry.game.imageUrl,
+            numPlays: entry.game.numPlays,
+            createdAt: entry.game.createdAt,
+            updatedAt: entry.game.updatedAt,
+            ratings: entry.game.ratings,
+            bggData: entry.game.bggData
+              ? {
+                  presence: "present" as const,
+                  communityRating: entry.game.bggData.communityRating,
+                  weight: entry.game.bggData.weight,
+                }
+              : null,
+            boxDimensions: entry.game.boxDimensions,
+            minPlayers: entry.game.minPlayers,
+            maxPlayers: entry.game.maxPlayers,
+            bestPlayers: entry.game.bestPlayers,
+            playingTime: entry.game.playingTime,
+            ownership: entry.game.ownership,
+          },
+          ordinary: {
+            score: withScoreDelta(entry.score),
+            displayScore: entry.score === null ? null : (entry.score.score + scoreDelta).toFixed(1),
+            purchaseUtilization: entry.purchaseUtilization,
+          },
+          predicted: predicted
+            ? {
+                availability: "available" as const,
+                score: withScoreDelta(predicted.score),
+                displayScore:
+                  predicted.score === null ? null : (predicted.score.score + scoreDelta).toFixed(1),
+                purchaseUtilization: predicted.purchaseUtilization,
+              }
+            : { availability: "unavailable" as const, reason: "Prediction unavailable" },
+          hasTournamentData: tournament !== undefined,
+          tournament: tournament
+            ? {
+                eloRating: tournament.eloRating,
+                comparisonCount: tournament.comparisonCount,
+                normalizedScore: tournament.normalizedScore,
+                displayLabel: tournament.displayLabel,
+                wins: tournament.wins,
+                losses: tournament.losses,
+              }
+            : null,
+        };
+      }),
+      nichePositions: collectionState.nichesAvailable
+        ? {
+            availability: "available",
+            positions: nicheEntries.flatMap((entry) =>
+              entry.nichePosition ? [{ gameId: entry.game.id, position: entry.nichePosition }] : [],
+            ),
+          }
+        : { availability: "unavailable", reason: "Fixture niche source unavailable" },
+      capacity: { availability: "available", result: null },
+      counts: {
+        total: entries.length,
+        rated: entries.filter(
+          (entry) => entry.game.ownership !== "previously-owned" && entry.score !== null,
+        ).length,
+        predicted: predictedEntries.filter(
+          (entry) => entry.score?.predictionMeta?.predictedAxisCount,
+        ).length,
+        unavailablePredictions: predictedEntries.length === 0 ? entries.length : 0,
+      },
+      averageScore: null,
+    });
+    return new Response(JSON.stringify(snapshot), {
+      headers:
+        snapshot.status === "complete"
+          ? {
+              "Content-Type": "application/json",
+              ETag: etag,
+              "Cache-Control": "private, no-cache",
+            }
+          : { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    });
+  }
+
+  if (
+    path === "/api/niches/settings/ignore" &&
+    (request.method === "POST" || request.method === "DELETE")
+  ) {
+    const requestBody = await body(request);
+    const type = requestBody.type;
+    const name = requestBody.name;
+    if (
+      (type !== "mechanic" && type !== "category" && type !== "family") ||
+      typeof name !== "string" ||
+      name.length === 0
+    ) {
+      return json({ error: "Invalid niche tag" }, 400);
+    }
+    const key = `${type}:${name}`;
+    if (request.method === "POST") collectionIgnoredTags.add(key);
+    else collectionIgnoredTags.delete(key);
+    return json({ ignoredTags: [...collectionIgnoredTags] });
   }
 
   if (path === "/api/test/owner-note-state") {

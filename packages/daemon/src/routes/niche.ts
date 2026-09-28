@@ -3,6 +3,7 @@ import { toErrorMessage } from "@shelf-judge/shared";
 import type { NicheSettings, NicheTagFilter } from "@shelf-judge/shared";
 import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
+import { profileSourceCoordinatorFor } from "../services/profile-source-coordinator.js";
 
 export interface NicheRoutesDeps {
   storageService: StorageService;
@@ -23,6 +24,7 @@ function isValidTagFilter(value: unknown): value is NicheTagFilter {
 
 export function createNicheRoutes(deps: NicheRoutesDeps): RouteModule {
   const { storageService } = deps;
+  const sourceCoordinator = profileSourceCoordinatorFor(storageService);
   const routes = new Hono();
 
   // GET /niches/settings
@@ -68,13 +70,16 @@ export function createNicheRoutes(deps: NicheRoutesDeps): RouteModule {
     }
 
     try {
-      const current = await storageService.loadNicheSettings();
-      // Only merge known keys to prevent arbitrary property injection
-      const updated = { ...current };
-      if ("ignoredTags" in patch) {
-        updated.ignoredTags = patch.ignoredTags as NicheSettings["ignoredTags"];
-      }
-      await storageService.saveNicheSettings(updated);
+      const updated = await sourceCoordinator.runExclusive(async () => {
+        const current = await storageService.loadNicheSettings();
+        // Only merge known keys to prevent arbitrary property injection.
+        const next = { ...current };
+        if ("ignoredTags" in patch) {
+          next.ignoredTags = patch.ignoredTags as NicheSettings["ignoredTags"];
+        }
+        await storageService.saveNicheSettings(next);
+        return next;
+      });
       return c.json(updated);
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
@@ -100,14 +105,17 @@ export function createNicheRoutes(deps: NicheRoutesDeps): RouteModule {
     }
 
     try {
-      const settings = await storageService.loadNicheSettings();
-      const alreadyIgnored = settings.ignoredTags.some(
-        (t) => t.type === body.type && t.name === body.name,
-      );
-      if (!alreadyIgnored) {
-        settings.ignoredTags.push({ type: body.type, name: body.name });
-        await storageService.saveNicheSettings(settings);
-      }
+      const settings = await sourceCoordinator.runExclusive(async () => {
+        const current = await storageService.loadNicheSettings();
+        const alreadyIgnored = current.ignoredTags.some(
+          (t) => t.type === body.type && t.name === body.name,
+        );
+        if (!alreadyIgnored) {
+          current.ignoredTags.push({ type: body.type, name: body.name });
+          await storageService.saveNicheSettings(current);
+        }
+        return current;
+      });
       return c.json(settings);
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
@@ -133,11 +141,14 @@ export function createNicheRoutes(deps: NicheRoutesDeps): RouteModule {
     }
 
     try {
-      const settings = await storageService.loadNicheSettings();
-      settings.ignoredTags = settings.ignoredTags.filter(
-        (t) => !(t.type === body.type && t.name === body.name),
-      );
-      await storageService.saveNicheSettings(settings);
+      const settings = await sourceCoordinator.runExclusive(async () => {
+        const current = await storageService.loadNicheSettings();
+        current.ignoredTags = current.ignoredTags.filter(
+          (t) => !(t.type === body.type && t.name === body.name),
+        );
+        await storageService.saveNicheSettings(current);
+        return current;
+      });
       return c.json(settings);
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);

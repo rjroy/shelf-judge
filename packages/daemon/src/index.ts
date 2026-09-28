@@ -33,6 +33,9 @@ import {
 } from "./services/attention-disposition-maintenance.js";
 import { createAttentionDispositionService } from "./services/attention-disposition-service.js";
 import type { DisplayedFitnessService } from "./services/displayed-fitness-service.js";
+import { createPurchaseUtilizationService } from "./services/purchase-utilization-service.js";
+import { createCollectionSnapshotService } from "./services/collection-snapshot-service.js";
+import { createCollectionSnapshotCacheService } from "./services/collection-snapshot-cache-service.js";
 
 const logger = createLogger("daemon");
 
@@ -237,6 +240,21 @@ export async function main() {
     predictionService,
     storageService,
   });
+  const purchaseUtilizationService = createPurchaseUtilizationService({
+    storageService,
+    collectionMutationService,
+  });
+  const collectionSnapshotBuilder = createCollectionSnapshotService({
+    storageService,
+    gameService,
+    predictionService,
+    purchaseUtilizationService,
+  });
+  const collectionSnapshotService = createCollectionSnapshotCacheService({
+    builder: collectionSnapshotBuilder,
+    storageService,
+    coordinator: profileSourceCoordinatorFor(storageService),
+  });
   let tournamentReconciliationChanged = false;
   logger.log("tournament reconciliation started", { trigger: "startup" });
   try {
@@ -252,6 +270,20 @@ export async function main() {
   }
   if (!tournamentReconciliationChanged)
     await maintainCandidateSource({ kind: "global", reason: "tournament" });
+  logger.log("source vector hydration started", { trigger: "startup" });
+  try {
+    const vector = await storageService.hydrateSourceVector?.();
+    logger.log("source vector hydration completed", {
+      trigger: "startup",
+      available: vector?.available ?? false,
+      changeToken: vector?.changeToken ?? null,
+    });
+  } catch (error) {
+    logger.error("source vector hydration failed", {
+      trigger: "startup",
+      error: toErrorMessage(error),
+    });
+  }
   await recoverAttentionCandidatesOnStartup(attentionCandidateRecovery, logger);
 
   const profileService = createProfileService({
@@ -276,6 +308,7 @@ export async function main() {
     displayedFitnessService,
     intentionService,
     attentionDispositionService,
+    collectionSnapshotService,
     ownerGameNoteService,
     groundedAnalysisProvider,
     reflectionRuntime,

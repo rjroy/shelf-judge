@@ -184,17 +184,24 @@ describe("Surfaces that must remain unchanged", () => {
 describe("Collection contextual game links", () => {
   test("parses only singular return transport and always mounts CollectionTable", async () => {
     const source = await Bun.file("packages/web/app/collection/page.tsx").text();
+    const boundary = await Bun.file(
+      "packages/web/components/collection-snapshot-boundary.tsx",
+    ).text();
     expect(source).toContain('typeof value === "string" ? value : undefined');
     expect(source).toContain("params.collectionContext !== undefined");
     expect(source).toContain("params.collectionOrigin !== undefined");
-    expect(source).toContain("collectionReturnAttempt={collectionReturnAttempt}");
+    expect(boundary).toContain("collectionReturnAttempt={props.collectionReturnAttempt}");
     expect(source).not.toContain("if (games.length === 0 && previouslyOwnedCount === 0)");
   });
 
   test("uses a semantic stable Collection heading and neutral restore state", async () => {
-    const page = await Bun.file("packages/web/app/collection/page.tsx").text();
+    const boundary = await Bun.file(
+      "packages/web/components/collection-snapshot-boundary.tsx",
+    ).text();
     const table = await Bun.file("packages/web/components/collection-table.tsx").text();
-    expect(page).toContain('<h1 id="collection-heading" className="topbar-title" tabIndex={-1}>');
+    expect(boundary).toContain(
+      '<h1 id="collection-heading" className="topbar-title" tabIndex={-1}>',
+    );
     expect(table).toContain("Restoring collection...");
     expect(table).toContain('role="status"');
   });
