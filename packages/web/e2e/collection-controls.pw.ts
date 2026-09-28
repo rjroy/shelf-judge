@@ -15,6 +15,43 @@ test.beforeEach(async ({ page }) => {
   expect(response.ok()).toBe(true);
 });
 
+test("niche groups collapse independently and retain their state while filtering", async ({
+  page,
+}) => {
+  await page.goto("/collection");
+  await page.getByRole("button", { name: "Niches", exact: true }).click();
+  await page.getByRole("button", { name: "Group", exact: true }).click();
+
+  const shared = page.locator(".niche-group").filter({ hasText: "Shared Strategy" });
+  const duplicate = page.locator(".niche-group").filter({ hasText: "Duplicate Membership" });
+  const collapse = shared.getByRole("button", { name: "Collapse Shared Strategy niche" });
+  await expect(collapse).toHaveAttribute("aria-expanded", "true");
+  await expect(shared.locator(".game-row")).toHaveCount(5);
+  await expect(duplicate.locator(".game-row")).toHaveCount(2);
+
+  await tabTo(page, collapse);
+  await page.keyboard.press("Enter");
+  const expand = shared.getByRole("button", { name: "Expand Shared Strategy niche" });
+  await expect(expand).toHaveAttribute("aria-expanded", "false");
+  await expect(shared.locator(".game-row")).toHaveCount(0);
+  await expect(duplicate.locator(".game-row")).toHaveCount(2);
+  await expect(shared.getByRole("button", { name: "Hide Shared Strategy niche" })).toBeVisible();
+
+  const search = page.getByRole("textbox", { name: "Search games by name" });
+  await search.fill("Atlas");
+  await expect(shared).toHaveCount(0);
+  await search.fill("");
+  await expect(expand).toHaveAttribute("aria-expanded", "false");
+  await page.getByRole("button", { name: "Group", exact: true }).click();
+  await page.getByRole("button", { name: "Group", exact: true }).click();
+  await expect(expand).toHaveAttribute("aria-expanded", "false");
+
+  await expand.focus();
+  await page.keyboard.press("Space");
+  await expect(collapse).toHaveAttribute("aria-expanded", "true");
+  await expect(shared.locator(".game-row")).toHaveCount(5);
+});
+
 test("collection toggles and sorting expose state and respond to Enter and Space", async ({
   page,
 }, testInfo) => {

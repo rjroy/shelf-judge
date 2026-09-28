@@ -266,6 +266,7 @@ export function CollectionTable({
   }));
   const [menuOpen, setMenuOpen] = useState(false);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [collapsedNiches, setCollapsedNiches] = useState<ReadonlySet<string>>(() => new Set());
   const menuRef = useRef<HTMLDivElement>(null);
   const hydratedScopeRef = useRef<string | null>(null);
 
@@ -306,6 +307,14 @@ export function CollectionTable({
       ...current,
       nicheViewMode: typeof next === "function" ? next(current.nicheViewMode) : next,
     }));
+  }, []);
+  const toggleNiche = useCallback((key: string) => {
+    setCollapsedNiches((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -1197,44 +1206,77 @@ export function CollectionTable({
         /* Group by Niche view (REQ-NICHE-24, REQ-NICHE-25) */
         <>
           {nicheGroups.length > 0 ? (
-            nicheGroups.map((group) => (
-              <div key={`${group.type}:${group.name}`} className="niche-group">
-                <div className="niche-group-header">
-                  <span className="niche-group-name">{group.name}</span>
-                  <span className={`niche-type-badge niche-type-${group.type}`}>{group.type}</span>
-                  <span className="niche-group-count">
-                    {group.games.length} game{group.games.length !== 1 ? "s" : ""}
-                  </span>
-                  <NicheIgnoreButton
-                    type={group.type as NicheTagFilter["type"]}
-                    name={group.name}
-                    onCommittedMutation={onCommittedMutation}
-                  />
-                </div>
-                {group.games.map((gws, i) => {
-                  const nicheEntry = gws.nichePosition?.niches.find(
-                    (n) => n.type === group.type && n.name === group.name,
-                  );
-                  return (
-                    <GameRow
-                      key={gws.game.id}
-                      gws={gws}
-                      rank={i + 1}
-                      sortField={sort.field}
-                      tournamentStats={tournamentStats}
-                      axisMap={axisMap}
-                      axes={axes}
-                      isAxisSort={isAxisSort}
-                      showConfidence={usePredictions}
-                      nicheHighlight={nicheEntry?.isChampion ? "champion" : undefined}
-                      nicheSummary={null}
-                      isIntegratedRedundancy={isIntegratedRedundancy}
-                      href={buildCollectionGameHref(gws.game.id, null)}
+            nicheGroups.map((group) => {
+              const key = JSON.stringify([group.type, group.name]);
+              const rowsId = `niche-group-games-${encodeURIComponent(key)}`;
+              const expanded = !collapsedNiches.has(key);
+              return (
+                <div key={key} className="niche-group">
+                  <div className="niche-group-header">
+                    <button
+                      type="button"
+                      className="niche-group-toggle"
+                      aria-expanded={expanded}
+                      aria-controls={rowsId}
+                      aria-label={`${expanded ? "Collapse" : "Expand"} ${group.name} niche`}
+                      onClick={() => toggleNiche(key)}
+                    >
+                      <svg
+                        className="niche-group-chevron"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="m4 6 4 4 4-4"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      <span className="niche-group-name">{group.name}</span>
+                      <span className={`niche-type-badge niche-type-${group.type}`}>
+                        {group.type}
+                      </span>
+                      <span className="niche-group-count">
+                        {group.games.length} game{group.games.length !== 1 ? "s" : ""}
+                      </span>
+                    </button>
+                    <NicheIgnoreButton
+                      type={group.type as NicheTagFilter["type"]}
+                      name={group.name}
+                      onCommittedMutation={onCommittedMutation}
                     />
-                  );
-                })}
-              </div>
-            ))
+                  </div>
+                  <div id={rowsId} hidden={!expanded}>
+                    {expanded &&
+                      group.games.map((gws, i) => {
+                        const nicheEntry = gws.nichePosition?.niches.find(
+                          (n) => n.type === group.type && n.name === group.name,
+                        );
+                        return (
+                          <GameRow
+                            key={gws.game.id}
+                            gws={gws}
+                            rank={i + 1}
+                            sortField={sort.field}
+                            tournamentStats={tournamentStats}
+                            axisMap={axisMap}
+                            axes={axes}
+                            isAxisSort={isAxisSort}
+                            showConfidence={usePredictions}
+                            nicheHighlight={nicheEntry?.isChampion ? "champion" : undefined}
+                            nicheSummary={null}
+                            isIntegratedRedundancy={isIntegratedRedundancy}
+                            href={buildCollectionGameHref(gws.game.id, null)}
+                          />
+                        );
+                      })}
+                  </div>
+                </div>
+              );
+            })
           ) : (
             <div className="niche-empty">
               No niches found with 2 or more games in the filtered set.
