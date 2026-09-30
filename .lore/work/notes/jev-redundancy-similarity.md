@@ -1,7 +1,7 @@
 ---
 title: Implementation notes for Jev redundancy similarity
 date: 2026-09-29
-status: in_progress
+status: complete
 tags: [implementation, notes, jev, redundancy, privacy]
 source: .lore/work/plans/jev-redundancy-similarity.md
 modules: [shared, daemon, web, cli]
@@ -20,7 +20,21 @@ related: [.lore/work/design/jev-redundancy-similarity.md, .lore/work/design/jev-
 - [x] **Phase 6 — Note and artifact lifecycle (accepted):** invalidate dependent cache/generation and derived artifacts safely on note/source changes; preserve factual-only wishlist snapshots and candidate behavior. Accepted based on the evidence recorded below. Semantic reads remain off until Step 7.
 - [x] **Phase 7 — Daemon API (accepted):** expose strict settings, disclosure, manifest, authorization, refresh, status, and cancellation operations without provider access from ordinary reads or mutations. Accepted based on the evidence recorded below; UI/CLI and quality/calibration remain incomplete.
 - [x] **Phase 8 — Web and CLI (accepted):** implement consent/disclosure/status controls and factual-only/semantic provenance across supported surfaces, with browser and CLI coverage.
-- [ ] **Phase 9 — Release, quality, and calibration:** reconcile cross-lane evidence; run required quality gates and independent boundary review; calibrate with fictional or separately owner-approved pairs before any real-data enablement.
+- [x] **Phase 9 — Engineering implementation and checkpoint quality (accepted):** cross-lane implementation, final quality gates, and independent boundary review are complete for the engineering checkpoint. This does **not** complete semantic calibration or release-quality approval: representative owner-expected judgments and thresholds remain uncalibrated as a separate future task. Semantic mode defaults off; no new live calls are authorized. This is not a claim that manual opt-in is technically impossible.
+
+### Accepted changed-file manifest
+
+The accepted Step 9 checkpoint includes these seven pending files; this note records the engineering scope, not a claim that all listed files are newly authored by Step 9:
+
+- `.lore/work/notes/jev-redundancy-similarity.md` — implementation progress and final evidence.
+- `.lore/work/notes/jev-redundancy-calibration.md` — historical fictional calibration disclosure, corrected to distinguish version 1 evidence from current version 2.
+- `packages/cli/tests/commands/redundancy.test.ts`
+- `packages/daemon/src/services/semantic-redundancy-state-service.ts`
+- `packages/daemon/tests/services/semantic-redundancy-state-service.test.ts`
+- `packages/web/app/redundancy/page.tsx`
+- `packages/web/e2e/redundancy-controls.pw.ts`
+
+The exact pending porcelain state and content hashes are recorded in the handoff after the documentation edits. `.beads/issues.jsonl` was observed dirty separately and is outside this manifest and scope.
 
 ## Obligation-to-phase and executable validation
 
@@ -52,3 +66,4 @@ The checks below are planned validation targets from the approved plan, not resu
 - **2026-09-30 — Phase 6 accepted:** Targeted pre-persistence profile/attention artifact purge is performed on evidence, consent, or generation changes; wishlist artifacts remain untouched. Preview, profile, restart, and failure tests cover the lifecycle. Validation evidence: 394 tests passed across 25 files; both typechecks; full `format:check`; and `git diff --check`. Independent Bun review accepted. No live provider was used. Semantic reads remain off until Step 7; Phase 7 and later remain incomplete.
 - **2026-09-30 — Phase 7 accepted:** The production daemon boundary now provides strict settings, disclosure, start, status, and cancel APIs. The one-shot runtime is guarded; production semantic scoring is source-coherent, while factual candidate behavior and wishlist snapshots remain preserved. Eligible generation IDs are immutable and publication uses the shared validator. Default limits are capped at 19,900 requests, an estimated 250 million tokens, and 24 hours; these are safeguards, not a guaranteed price. Independent Bun review closed S7-I1 and S7-I2. Full validation passed: `bun run typecheck`, `bun run typecheck:browser`, `bun run lint`, `bun run format:check`, `bun test` (3,555 passed, 1 skipped, 20,696 expects across 216 files), `bun run build`, and diff check. No real provider calls were made. Phase 8 UI/CLI and Phase 9 quality/calibration remain incomplete.
 - **2026-09-30 — Phase 8 accepted:** Web consent/disclosure, manifest inspection, status/progress, cancellation, and preview labels are implemented; CLI discovery, controls, and factual-only/semantic provenance are covered. Independent Bun CLI review C8-01–03 is resolved; web findings W8-01–04 and independent UX review are accepted. Validation passed: `bun run typecheck`, `bun run typecheck:browser`, `bun run lint`, `bun run format:check`, `bun test` (3,566 passed, 1 skipped, 20,730 expects across 218 files), `bun run build`, final `bun run test:browser` (284 passed, 60 skipped, 0 failed across four projects), and `git diff --check`. No live provider was used. Phase 9 remains incomplete: calibrate with fictional or separately approved pairs, then complete final boundary review and quality.
+- **2026-09-30 — Step 9 engineering accepted/checkpoint-ready:** Final-state gates passed: `bun run typecheck`, `bun run typecheck:browser`, `bun run lint`, `bun run format:check`, `bun test` (3,569 passed, 1 skipped), `bun run build`, and `bun run test:browser` (284 passed, 60 skipped). Independent Bun review finding S9-03 fixed the future-relative browser fixture; the targeted browser run passed across all four projects. The current v2 request contract asks one D Score and has neither a Noul/relevance gate nor a confidence gate (confidence is metadata). The single historical fictional live call used v1's Noul gate and cannot calibrate v2. No new live calls are authorized. Semantic mode defaults off; this checkpoint does not assert a technical ban on manual opt-in. Engineering implementation and checkpoint quality are accepted; representative owner-expected calibration and any release-quality decision remain a separate unresolved future task. No Beads or code edits were made by this documentation update.

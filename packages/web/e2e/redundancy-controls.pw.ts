@@ -3,13 +3,12 @@ import { expect, test } from "@playwright/test";
 test("redundancy disclosure is inspectable, C-only can be declined, and layout fits", async ({
   page,
 }, testInfo) => {
-  await page.addInitScript(() => {
+  await page.context().addInitScript(() => {
+    const fixtureExpiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     const target = window as typeof window & {
       __redundancyCalls: Array<{ url: string; method: string; body?: unknown }>;
     };
     target.__redundancyCalls = [];
-    let started = false;
-    let cancelled = false;
     let disclosureAttempts = 0;
     const originalFetch = window.fetch.bind(window);
     window.fetch = Object.assign(
@@ -48,21 +47,50 @@ test("redundancy disclosure is inspectable, C-only can be declined, and layout f
               status: { status: "not-ready", publicationStatus: "not-ready" },
             },
           };
-        else if (url.pathname.endsWith("/refresh-status"))
-          response = started
-            ? {
-                status: cancelled ? "not-ready" : "not-ready",
-                publicationStatus: "not-ready",
-                pairCount: 2,
-                execution: {
-                  status: cancelled ? "cancelled" : "running",
-                  attemptCount: 1,
-                  completedPairCount: cancelled ? 0 : 0,
-                  failedPairCount: 0,
-                },
-              }
-            : { status: "not-ready", publicationStatus: "not-ready" };
-        else if (url.pathname.endsWith("/disclosure")) {
+        else if (url.pathname.endsWith("/refresh-status")) {
+          const state = localStorage.getItem("fixture-refresh-state");
+          const id = localStorage.getItem("fixture-status-id");
+          const digest = localStorage.getItem("fixture-status-digest");
+          response =
+            state === "running" || state === "cancelled"
+              ? {
+                  status: "not-ready",
+                  publicationStatus: "not-ready",
+                  manifest: {
+                    id,
+                    digest,
+                    signalScope: "description-only",
+                    expiresAt: fixtureExpiresAt,
+                  },
+                  pairCount: 2,
+                  execution: {
+                    commandId: id,
+                    status: state,
+                    attemptCount: 1,
+                    completedPairCount: 0,
+                    failedPairCount: 0,
+                  },
+                }
+              : { status: "not-ready", publicationStatus: "not-ready" };
+        } else if (url.pathname.endsWith("/summary")) {
+          const state = localStorage.getItem("fixture-refresh-state");
+          const id = localStorage.getItem("fixture-summary-id");
+          const digest = localStorage.getItem("fixture-summary-digest");
+          response = {
+            status: "not-ready",
+            generation: null,
+            disclosure:
+              state && id
+                ? {
+                    id,
+                    digest,
+                    pairCount: 2,
+                    notePairCount: 1,
+                    expiresAt: fixtureExpiresAt,
+                  }
+                : null,
+          };
+        } else if (url.pathname.endsWith("/disclosure")) {
           disclosureAttempts += 1;
           if (disclosureAttempts === 3)
             return new Response(JSON.stringify({ error: "Simulated disclosure interruption" }), {
@@ -76,7 +104,7 @@ test("redundancy disclosure is inspectable, C-only can be declined, and layout f
             providerId: "jev",
             modelId: "pinned-model",
             budget: { maxRequests: 20, maxTokens: 4000, maxDurationMs: 60000 },
-            expiresAt: "2026-10-01T00:00:00.000Z",
+            expiresAt: fixtureExpiresAt,
             pairCount: 2,
             notePairCount: 1,
             pageSize: 100,
@@ -110,15 +138,19 @@ test("redundancy disclosure is inspectable, C-only can be declined, and layout f
             receipt: "receipt",
           };
         else if (url.pathname.endsWith("/acknowledge-and-start")) {
-          started = true;
+          localStorage.setItem("fixture-refresh-state", "running");
+          localStorage.setItem("fixture-status-id", "manifest-1");
+          localStorage.setItem("fixture-status-digest", "digest-1");
+          localStorage.setItem("fixture-summary-id", "manifest-1");
+          localStorage.setItem("fixture-summary-digest", "digest-1");
           response = {
             disposition: "REPLAYED",
             status: "running",
-            commandId: "command-1",
-            deadlineAt: "2026-10-01T00:00:00.000Z",
+            commandId: "manifest-1",
+            deadlineAt: fixtureExpiresAt,
           };
         } else if (url.pathname.endsWith("/cancel")) {
-          cancelled = true;
+          localStorage.setItem("fixture-refresh-state", "cancelled");
           response = { outcome: "accepted" };
         }
         return new Response(JSON.stringify(response), {
@@ -235,4 +267,41 @@ test("redundancy disclosure is inspectable, C-only can be declined, and layout f
   await page.getByRole("button", { name: "Prepare exact pair list" }).click();
   await expect(page.getByLabel(/permit transmitting owner notes/)).not.toBeChecked();
   await expect(page.getByLabel(/permit use of cached note-derived judgments/)).not.toBeChecked();
+
+  // First request reads A from status then B from summary with colliding counts
+  // and expiry. Cancellation must remain closed until the IDs and digests match.
+  await page.evaluate(() => {
+    localStorage.setItem("fixture-refresh-state", "running");
+    localStorage.setItem("fixture-status-id", "run-a");
+    localStorage.setItem("fixture-status-digest", "digest-a");
+    localStorage.setItem("fixture-summary-id", "run-b");
+    localStorage.setItem("fixture-summary-digest", "digest-b");
+  });
+  const freshPage = await page.context().newPage();
+  await freshPage.goto("/redundancy");
+  await expect(freshPage.getByRole("heading", { name: "Refresh progress" })).toBeVisible();
+  await expect(freshPage.getByRole("button", { name: "Cancel refresh" })).toBeDisabled();
+  await expect(freshPage.getByText(/does not match the current disclosure/i)).toBeVisible();
+  expect(await freshPage.evaluate(() => sessionStorage.length)).toBe(0);
+  await freshPage.evaluate(() =>
+    sessionStorage.setItem("shelf-judge:redundancy-refresh-command", "stale-session-run"),
+  );
+  await page.evaluate(() => {
+    localStorage.setItem("fixture-status-id", "run-b");
+    localStorage.setItem("fixture-status-digest", "digest-b");
+  });
+  await freshPage.reload();
+  const cancelButton = freshPage.getByRole("button", { name: "Cancel refresh" });
+  await expect(cancelButton).toBeEnabled();
+  await cancelButton.focus();
+  await freshPage.keyboard.press("Enter");
+  await expect(freshPage.getByText(/Refresh: cancelled/)).toBeVisible();
+  const recoveredCancel = await freshPage.evaluate(() =>
+    (
+      window as typeof window & {
+        __redundancyCalls: Array<{ url: string; body?: { commandId?: string } }>;
+      }
+    ).__redundancyCalls.find((call) => call.url.endsWith("/cancel")),
+  );
+  expect(recoveredCancel?.body?.commandId).toBe("run-b");
 });

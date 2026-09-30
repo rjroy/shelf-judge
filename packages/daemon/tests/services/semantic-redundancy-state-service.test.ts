@@ -289,6 +289,17 @@ describe("semantic redundancy disclosure state", () => {
     expect(JSON.stringify(persisted.disclosureManifest)).not.toContain("description text");
 
     const restartedService = h.service();
+    const replayedFirstPage = await restartedService.deliverDisclosurePage(page(value, 0));
+    expect(replayedFirstPage).toMatchObject({
+      outcome: "accepted",
+      value: { offset: 0, nextOffset: 100, complete: false, receipt: { complete: false } },
+    });
+    const replayedFinalPage = await restartedService.deliverDisclosurePage(page(value, 200));
+    expect(replayedFinalPage).toMatchObject({
+      outcome: "accepted",
+      value: { offset: 200, nextOffset: 300, complete: true, receipt: { complete: true } },
+    });
+    expect(h.read().semanticRedundancy.manifestDelivery?.deliveredPageIndexes).toEqual([0, 1, 2]);
     const started = await restartedService.startExecution(startInput(value));
     expect(started.outcome).toBe("accepted");
     const replay = await restartedService.startExecution(startInput(value));

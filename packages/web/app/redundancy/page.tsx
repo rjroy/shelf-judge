@@ -32,7 +32,14 @@ type SettingsResponse = RedundancySettings & { semantic: Semantic; migrationNoti
 type Refresh = {
   status: string;
   publicationStatus: string;
+  manifest?: {
+    id: string;
+    digest: string;
+    signalScope: Manifest["signalScope"];
+    expiresAt: string;
+  };
   execution?: {
+    commandId?: string;
     status: string;
     attemptCount: number;
     completedPairCount: number;
@@ -40,6 +47,59 @@ type Refresh = {
   };
   pairCount?: number;
 };
+type SemanticSummary = {
+  disclosure?: { id: string; digest: string; pairCount: number; expiresAt: string } | null;
+};
+
+function activeCommandFromDaemon(refresh: Refresh, summary: SemanticSummary): string | undefined {
+  const execution = refresh.execution;
+  const disclosure = summary.disclosure;
+  const manifest = refresh.manifest;
+  if (
+    !execution ||
+    !["running", "queued"].includes(execution.status) ||
+    !disclosure ||
+    !manifest ||
+    !manifest.id ||
+    !manifest.digest ||
+    manifest.id !== disclosure.id ||
+    manifest.digest !== disclosure.digest ||
+    disclosure.pairCount !== refresh.pairCount ||
+    disclosure.expiresAt !== manifest.expiresAt ||
+    (execution.commandId !== undefined && execution.commandId !== manifest.id) ||
+    Date.parse(disclosure.expiresAt) <= Date.now()
+  ) {
+    return undefined;
+  }
+  // The daemon starts each execution under its immutable manifest ID; only the
+  // current summary disclosure is used, never a tab-local cached command ID.
+  return manifest.id;
+}
+
+async function readRefreshSnapshot(): Promise<{
+  refresh: Refresh;
+  commandId?: string;
+  identityMessage?: string;
+}> {
+  const refresh = await request<Refresh>("/api/daemon/redundancy/semantic/refresh-status");
+  const summary = await request<SemanticSummary>("/api/daemon/redundancy/semantic/summary").catch(
+    () => null,
+  );
+  const commandId = summary ? activeCommandFromDaemon(refresh, summary) : undefined;
+  const active = ["running", "queued"].includes(refresh.execution?.status ?? "");
+  const identityMessage = active
+    ? summary === null
+      ? "Could not read the current disclosure identity. Cancellation is disabled until status can be verified."
+      : commandId === undefined
+        ? "The active refresh identity does not match the current disclosure. Cancellation is disabled; reload status before retrying."
+        : undefined
+    : undefined;
+  return {
+    refresh,
+    ...(commandId ? { commandId } : {}),
+    ...(identityMessage ? { identityMessage } : {}),
+  };
+}
 
 const statusCopy: Record<string, string> = {
   ready: "Ready",
@@ -96,13 +156,17 @@ export default function RedundancyPage() {
   const reload = useCallback(async () => {
     const [data, status] = await Promise.all([
       request<SettingsResponse>("/api/daemon/redundancy/settings"),
-      request<Refresh>("/api/daemon/redundancy/semantic/refresh-status").catch(() => null),
+      readRefreshSnapshot().catch(() => null),
     ]);
     setSettings(data);
     setSaved(data);
     setSemantic(data.semantic);
     setMigrationNotice(data.migrationNotice);
-    if (status) setRefresh(status);
+    if (status) {
+      setRefresh(status.refresh);
+      setCommandId(status.commandId);
+      setStatusError(status.identityMessage);
+    }
   }, []);
   useEffect(() => {
     void reload()
@@ -110,22 +174,15 @@ export default function RedundancyPage() {
       .finally(() => setLoading(false));
   }, [reload]);
   useEffect(() => {
-    const pendingCommand = window.sessionStorage.getItem("shelf-judge:redundancy-refresh-command");
-    if (pendingCommand) setCommandId(pendingCommand);
-  }, []);
-  useEffect(() => {
-    if (!commandId) return;
+    if (!commandId && !["running", "queued"].includes(refresh?.execution?.status ?? "")) return;
     let alive = true;
     const poll = async () => {
       try {
-        const latest = await request<Refresh>("/api/daemon/redundancy/semantic/refresh-status");
+        const latest = await readRefreshSnapshot();
         if (!alive) return;
-        setRefresh(latest);
-        setStatusError(undefined);
-        if (latest.execution && !["running", "queued"].includes(latest.execution.status)) {
-          setCommandId(undefined);
-          window.sessionStorage.removeItem("shelf-judge:redundancy-refresh-command");
-        }
+        setRefresh(latest.refresh);
+        setCommandId(latest.commandId);
+        setStatusError(latest.identityMessage);
       } catch (e) {
         if (alive)
           setStatusError(
@@ -139,7 +196,7 @@ export default function RedundancyPage() {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [commandId]);
+  }, [commandId, refresh?.execution?.status]);
 
   const saveFactual = async () => {
     if (!settings) return;
@@ -281,7 +338,6 @@ export default function RedundancyPage() {
         }),
       );
       setCommandId(result.commandId);
-      window.sessionStorage.setItem("shelf-judge:redundancy-refresh-command", result.commandId);
       setMessage(
         result.disposition === "REPLAYED"
           ? "The daemon recognized this request as a replay; showing its existing refresh status."
@@ -291,8 +347,10 @@ export default function RedundancyPage() {
       setManifest(null);
       setPairs([]);
       setDeliveryComplete(false);
-      const status = await request<Refresh>("/api/daemon/redundancy/semantic/refresh-status");
-      setRefresh(status);
+      const status = await readRefreshSnapshot();
+      setRefresh(status.refresh);
+      setCommandId(status.commandId);
+      setStatusError(status.identityMessage);
       void result;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Refresh was not started");
@@ -304,13 +362,21 @@ export default function RedundancyPage() {
     setBusy(true);
     setError(undefined);
     try {
-      if (commandId) await request("/api/daemon/redundancy/semantic/cancel", json({ commandId }));
-      const latest = await request<Refresh>("/api/daemon/redundancy/semantic/refresh-status");
-      setRefresh(latest);
-      if (latest.execution && !["running", "queued"].includes(latest.execution.status)) {
-        setCommandId(undefined);
-        window.sessionStorage.removeItem("shelf-judge:redundancy-refresh-command");
-      }
+      const latest = await readRefreshSnapshot();
+      setRefresh(latest.refresh);
+      setCommandId(latest.commandId);
+      setStatusError(latest.identityMessage);
+      if (!latest.commandId)
+        throw new Error(
+          "No current running refresh could be verified. Reload status before cancelling.",
+        );
+      await request(
+        "/api/daemon/redundancy/semantic/cancel",
+        json({ commandId: latest.commandId }),
+      );
+      const afterCancel = await readRefreshSnapshot();
+      setRefresh(afterCancel.refresh);
+      setCommandId(afterCancel.commandId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not cancel refresh");
     } finally {
@@ -755,6 +821,12 @@ export default function RedundancyPage() {
                   </>
                 ) : (
                   <p>Waiting for daemon progress…</p>
+                )}
+                {["running", "queued"].includes(refresh?.execution?.status ?? "") && !commandId && (
+                  <p>
+                    The daemon reports an active refresh. Confirming its current cancellation ID;
+                    cancellation stays disabled until that ID matches the active disclosure.
+                  </p>
                 )}
                 {statusError && (
                   <p role="alert">

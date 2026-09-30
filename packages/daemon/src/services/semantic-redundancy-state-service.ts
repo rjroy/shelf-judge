@@ -614,6 +614,8 @@ export function createSemanticRedundancyStateService(deps: {
           const expectedIndex = delivery.deliveredPageIndexes.length;
           if (pageIndex < expectedIndex && delivery.deliveredPageIndexes[pageIndex] === pageIndex) {
             const pairs = manifest.pairs.slice(page.offset, page.offset + delivery.pageSize);
+            const nextOffset = page.offset + pairs.length;
+            const pageComplete = nextOffset >= manifest.pairs.length;
             return {
               changed: false,
               value: {
@@ -622,13 +624,13 @@ export function createSemanticRedundancyStateService(deps: {
                   manifestId: manifest.id,
                   manifestDigest: manifest.digest,
                   offset: page.offset,
-                  nextOffset: page.offset + pairs.length,
-                  complete: delivery.complete,
+                  nextOffset,
+                  complete: pageComplete,
                   pairs,
                   receipt: {
                     pageIndex,
-                    nextOffset: page.offset + pairs.length,
-                    complete: delivery.complete,
+                    nextOffset,
+                    complete: pageComplete,
                   },
                 },
                 current: currentEpoch(collection),

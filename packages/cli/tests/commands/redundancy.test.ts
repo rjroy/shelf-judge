@@ -174,6 +174,55 @@ describe("semantic redundancy CLI consent boundary", () => {
     });
   });
 
+  test("re-inspects a frozen 101-pair manifest after all pages were already delivered", async () => {
+    const pairs = Array.from({ length: 101 }, (_, index) => ({
+      gameA: `a${String(index).padStart(3, "0")}`,
+      gameB: `b${String(index).padStart(3, "0")}`,
+      hasDescriptionA: true,
+      hasDescriptionB: true,
+      hasOwnerNoteA: false,
+      hasOwnerNoteB: false,
+    }));
+    const deliveredOffsets: number[] = [];
+    let deliveryComplete = false;
+    const client = createMockClient({
+      routes: {
+        "POST /api/redundancy/semantic/disclosure/page": {
+          response: (body) => {
+            const { offset } = body as { offset: number };
+            deliveredOffsets.push(offset);
+            const pagePairs = pairs.slice(offset, offset + 100);
+            if (offset === 100) deliveryComplete = true;
+            return {
+              ok: true,
+              status: 200,
+              data: {
+                manifestId: "frozen",
+                manifestDigest: "digest",
+                offset,
+                nextOffset: offset + pagePairs.length,
+                // A replay's complete value describes this page, not aggregate receipt state.
+                complete: offset + pagePairs.length === pairs.length,
+                deliveryComplete,
+                pairs: pagePairs,
+              },
+            };
+          },
+        },
+      },
+    });
+
+    for (let inspection = 0; inspection < 2; inspection += 1) {
+      const result = JSON.parse(
+        await redundancySemanticInspect(client, ["frozen", "digest", "101"], { json: true }),
+      ) as { pairCount: number; pairs: Array<{ gameA: string; gameB: string }> };
+      expect(result.pairCount).toBe(101);
+      expect(result.pairs).toHaveLength(101);
+    }
+    expect(deliveredOffsets).toEqual([0, 100, 0, 100]);
+    expect(deliveryComplete).toBe(true);
+  });
+
   test("inspects a zero-pair manifest with final numeric nextOffset", async () => {
     const client = createMockClient({
       routes: {
@@ -197,6 +246,42 @@ describe("semantic redundancy CLI consent boundary", () => {
     expect(
       await redundancySemanticInspect(client, ["empty", "digest", "0"], { json: true }),
     ).toContain('"pairCount": 0');
+  });
+
+  test("treats exactly 100 pairs as one complete page", async () => {
+    const pairs = Array.from({ length: 100 }, (_, index) => ({
+      gameA: `a${String(index).padStart(3, "0")}`,
+      gameB: `b${String(index).padStart(3, "0")}`,
+      hasDescriptionA: true,
+      hasDescriptionB: true,
+      hasOwnerNoteA: false,
+      hasOwnerNoteB: false,
+    }));
+    const client = createMockClient({
+      routes: {
+        "POST /api/redundancy/semantic/disclosure/page": {
+          response: {
+            ok: true,
+            status: 200,
+            data: {
+              manifestId: "exact-boundary",
+              manifestDigest: "digest",
+              offset: 0,
+              nextOffset: 100,
+              complete: true,
+              pairs,
+            },
+          },
+        },
+      },
+    });
+    const result = JSON.parse(
+      await redundancySemanticInspect(client, ["exact-boundary", "digest", "100"], {
+        json: true,
+      }),
+    ) as { pairCount: number; pairs: unknown[] };
+    expect(result.pairCount).toBe(100);
+    expect(result.pairs).toHaveLength(100);
   });
 
   test("refuses stale disclosure and requires explicit authorization", async () => {
