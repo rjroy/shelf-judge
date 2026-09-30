@@ -44,7 +44,16 @@ export function projectGameDetail(game: DurableGame): GameDetailGame {
 export function projectGameWithScore(entry: GameWithScore): GameWithScore {
   return GameWithScoreSchema.parse({
     game: projectPublicGame(entry.game),
-    score: entry.score,
+    score:
+      entry.score === null
+        ? null
+        : {
+            ...entry.score,
+            redundancySimilarityInfo: entry.score.redundancySimilarityInfo ?? {
+              status: "disabled",
+              generationId: null,
+            },
+          },
     bggDataStale: entry.bggDataStale,
     nichePosition: entry.nichePosition,
   });
@@ -132,8 +141,10 @@ export function projectTournamentNextPair(
 export function projectProfileCollectionSource(
   collection: Collection,
 ): CollectionProfileCollectionSource {
+  const { semanticRedundancy, ...publicCollection } = collection;
+  void semanticRedundancy;
   const projected = {
-    ...collection,
+    ...publicCollection,
     games: collection.games.map(projectPublicGame),
   };
   return CollectionProfileCollectionSourceSchema.parse(projected);
@@ -143,6 +154,8 @@ export interface GameDetailSnapshot {
   collectionRevision: number;
   game: GameDetailGame;
   collection: CollectionProfileCollectionSource;
+  /** Captured note-free semantic mode status; private semantic state is not projected. */
+  redundancySimilarityStatus: "not-ready" | "stale" | null;
 }
 
 export function createGameDetailSnapshot(
@@ -155,6 +168,11 @@ export function createGameDetailSnapshot(
     collectionRevision: collection.revision,
     game: projectGameDetail(game),
     collection: projectProfileCollectionSource(collection),
+    redundancySimilarityStatus: collection.semanticRedundancy.settings.enabled
+      ? collection.semanticRedundancy.publishedGeneration
+        ? "stale"
+        : "not-ready"
+      : null,
   };
 }
 

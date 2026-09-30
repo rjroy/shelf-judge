@@ -18,6 +18,7 @@ import {
   type PurchaseUtilizationService,
 } from "../../src/services/purchase-utilization-service.js";
 import { createApp, type AppResult } from "../../src/app.js";
+import { createInitialSemanticRedundancyState } from "@shelf-judge/shared";
 import {
   createCollectionMutationService,
   type CollectionMutationService,
@@ -53,7 +54,13 @@ import {
   productionAttentionCandidateDependenciesForGame,
   type AttentionCandidateService,
 } from "../../src/services/attention-candidate-service.js";
-import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
+import {
+  canonicalSha256,
+  profileSourceCoordinatorFor,
+} from "../../src/services/profile-source-coordinator.js";
+import { semanticGenerationSourceIdentity } from "../../src/services/source-vector.js";
+import { resolveSemanticRedundancyPairTable } from "../../src/services/semantic-redundancy-pair-resolver.js";
+import { JEV_MODEL_ID, JEV_RUBRIC_VERSION } from "../../src/services/jev/jev-gateway.js";
 import {
   createAttentionCandidateMaintenanceRecovery,
   createAttentionDispositionGlobalMaintenance,
@@ -62,6 +69,8 @@ import {
 } from "../../src/services/attention-disposition-maintenance.js";
 import type { AttentionDispositionWinner } from "../../src/services/attention-disposition-compatibility.js";
 import type { AttentionDisposition } from "@shelf-judge/shared";
+import type { SemanticRefreshRuntime } from "../../src/services/semantic-refresh-runtime.js";
+import type { SemanticRedundancyStateService } from "../../src/services/semantic-redundancy-state-service.js";
 import {
   createAttentionDispositionService,
   type AttentionDispositionService,
@@ -91,6 +100,7 @@ export interface TestAppContext<TFileOps extends FileOps = MockFileOps> {
   groundedAnalysisProvider: GroundedAnalysisProvider;
   groundedAnalysisTransportController: GroundedAnalysisTransportController;
   reflectionRuntime: ReflectionRuntime;
+  semanticRefreshRuntime?: SemanticRefreshRuntime;
   fileOps: TFileOps;
 }
 
@@ -108,6 +118,8 @@ export interface TestAppOptions<TFileOps extends FileOps = MockFileOps> {
   storedRuleMatches?: (
     dispositions: readonly AttentionDisposition[],
   ) => Promise<readonly AttentionDispositionWinner[]>;
+  semanticRefreshRuntime?: SemanticRefreshRuntime;
+  semanticRedundancyStateService?: SemanticRedundancyStateService;
 }
 
 export function createTestPurchaseUtilizationService(
@@ -116,7 +128,7 @@ export function createTestPurchaseUtilizationService(
   const fallbackStorage = {
     loadCollection: () =>
       Promise.resolve({
-        schemaVersion: 8 as const,
+        schemaVersion: 9 as const,
         revision: 0,
         id: "test-collection",
         name: "Test Collection",
@@ -126,6 +138,7 @@ export function createTestPurchaseUtilizationService(
         attentionDispositions: [],
         commandReceipts: [],
         entertainmentBenchmark: null,
+        semanticRedundancy: createInitialSemanticRedundancyState(),
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       }),
@@ -209,10 +222,56 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     bggClient,
     afterSourceSave: maintainCandidateSource,
   });
+  const resolvePublishedRedundancy = (
+    input: Parameters<
+      NonNullable<
+        import("../../src/services/displayed-fitness-service.js").DisplayedFitnessServiceDeps["resolveRedundancyPairTable"]
+      >
+    >[0],
+  ) => {
+    const sourceIdentity = input.sourceVector
+      ? semanticGenerationSourceIdentity(input.sourceVector)
+      : null;
+    if (!sourceIdentity) return undefined;
+    return resolveSemanticRedundancyPairTable({
+      collection: input.collection,
+      universe: input.universe,
+      generation: input.collection.semanticRedundancy.publishedGeneration,
+      factualSettings: input.settings,
+      sourceIdentity,
+      support: {
+        modelId: JEV_MODEL_ID,
+        rubricVersion: JEV_RUBRIC_VERSION,
+        scoringVersion: 1,
+        sourceIdentity: {
+          collectionId: sourceIdentity.collectionId,
+          collectionSchemaVersion: 9,
+          collectionRevision: 0,
+          evidenceEpoch: sourceIdentity.evidenceEpoch,
+          consentEpoch: sourceIdentity.consentEpoch,
+          factualWeightsEpoch: sourceIdentity.factualWeightsEpoch,
+          factualWeightsFingerprint: sourceIdentity.currentFactualWeightsFingerprint,
+          tournamentHash: canonicalSha256({
+            revision: sourceIdentity.tournamentRevision,
+            data: input.tournament,
+          }),
+          predictionSettingsHash: canonicalSha256({
+            revision: sourceIdentity.predictionSettingsRevision,
+            settings: input.predictionSettings,
+          }),
+          redundancySettingsHash: canonicalSha256({
+            currentFactualWeightsFingerprint: sourceIdentity.currentFactualWeightsFingerprint,
+            settings: input.settings,
+          }),
+        },
+      },
+    });
+  };
   const displayedFitnessService = createDisplayedFitnessService({
     gameService,
     predictionService,
     storageService,
+    resolveRedundancyPairTable: resolvePublishedRedundancy,
   });
   attentionCandidateService = createAttentionCandidateService({
     coordinator: profileSourceCoordinatorFor(storageService),
@@ -345,6 +404,8 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     ownerGameNoteService,
     groundedAnalysisProvider,
     reflectionRuntime,
+    semanticRefreshRuntime: options?.semanticRefreshRuntime,
+    semanticRedundancyStateService: options?.semanticRedundancyStateService,
     bggClient,
     profileSourceCoordinator: profileSourceCoordinatorFor(storageService),
     afterCandidateSourceSave: maintainCandidateSource,
@@ -373,6 +434,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     groundedAnalysisProvider,
     groundedAnalysisTransportController,
     reflectionRuntime,
+    semanticRefreshRuntime: options?.semanticRefreshRuntime,
     fileOps,
   };
 }

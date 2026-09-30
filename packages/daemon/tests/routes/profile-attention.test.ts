@@ -9,7 +9,11 @@ import {
   canonicalUtilizationCases,
   UTILIZATION_OBSERVED_AT,
 } from "../../../../test-fixtures/purchase-utilization-responses.js";
-import { createInitialEntityMetadata, type DurableGame } from "@shelf-judge/shared";
+import {
+  createInitialEntityMetadata,
+  createInitialSemanticRedundancyState,
+  type DurableGame,
+} from "@shelf-judge/shared";
 
 const command = {
   commandId: "11111111-1111-4111-8111-111111111111",
@@ -70,7 +74,7 @@ describe("profile attention routes", () => {
         updatedAt: UTILIZATION_OBSERVED_AT,
       };
       await context.storageService.saveCollection({
-        schemaVersion: 8,
+        schemaVersion: 9,
         revision: 0,
         id: "route-underused-fixture",
         name: "Route underused fixture",
@@ -89,6 +93,7 @@ describe("profile attention routes", () => {
         ],
         games: [game],
         entertainmentBenchmark: fixture.input.entertainmentBenchmark,
+        semanticRedundancy: createInitialSemanticRedundancyState(),
         intentions: [],
         attentionDispositions: [],
         commandReceipts: [],

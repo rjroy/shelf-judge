@@ -13,7 +13,7 @@ function artifact() {
     indexVersion: ATTENTION_CANDIDATE_ARTIFACT_INDEX_VERSION,
     identity: {
       collectionId: "collection",
-      collectionSchemaVersion: 8,
+      collectionSchemaVersion: 9,
       collectionRevision: 1,
       tournamentHash: hash,
       predictionSettingsHash: hash,

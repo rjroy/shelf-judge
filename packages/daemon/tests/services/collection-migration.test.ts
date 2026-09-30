@@ -295,7 +295,7 @@ describe("migrateCollection", () => {
     const result = migrateCollection(raw, dependencies);
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 1 });
-    expect(result.data.schemaVersion).toBe(8);
+    expect(result.data.schemaVersion).toBe(9);
     expect(result.data.axes).toEqual(expectedAxes);
     expect(result.data.games.map(({ bestPlayers }) => bestPlayers)).toEqual([3, 4, null]);
     expect(result.data.games[0]?.bestPlayersInvalidEvidence).toBeNull();
@@ -597,7 +597,7 @@ describe("migrateCollection", () => {
     ]);
   });
 
-  test("chains v0 through v8, inserts Tournament once, and is byte-stable at v8", () => {
+  test("chains v0 through v9, inserts Tournament once, and is byte-stable at v9", () => {
     expect(
       COLLECTION_MIGRATION_STEPS.map(({ fromVersion, toVersion }) => ({ fromVersion, toVersion })),
     ).toEqual([
@@ -609,6 +609,7 @@ describe("migrateCollection", () => {
       { fromVersion: 5, toVersion: 6 },
       { fromVersion: 6, toVersion: 7 },
       { fromVersion: 7, toVersion: 8 },
+      { fromVersion: 8, toVersion: 9 },
     ]);
     const first = migrateCollection(historicalCollection(), dependencies);
     expect(first.data.axes.filter((axis) => axis.source === "tournament")).toHaveLength(1);
@@ -624,9 +625,10 @@ describe("migrateCollection", () => {
     const current = migrateCollection(historicalCollection(), dependencies).data;
     const v5 = {
       ...(() => {
-        const { attentionDispositions, bggPlaySessions, ...v6 } = current;
+        const { attentionDispositions, bggPlaySessions, semanticRedundancy, ...v6 } = current;
         void attentionDispositions;
         void bggPlaySessions;
+        void semanticRedundancy;
         return v6;
       })(),
       schemaVersion: 5 as const,
@@ -726,9 +728,10 @@ describe("migrateCollection", () => {
     });
     const result = migrateCollection({
       ...(() => {
-        const { attentionDispositions, bggPlaySessions, ...v6 } = current;
+        const { attentionDispositions, bggPlaySessions, semanticRedundancy, ...v6 } = current;
         void attentionDispositions;
         void bggPlaySessions;
+        void semanticRedundancy;
         return v6;
       })(),
       schemaVersion: 4,
@@ -746,10 +749,11 @@ describe("migrateCollection", () => {
 
   test("validates current collections on every pass and rejects malformed or future current data", () => {
     const current = migrateCollection(historicalCollection(), dependencies).data;
-    expect(CollectionSchema.parse(migrateCollection(current, dependencies).data)).toEqual(current);
+    const parsed: unknown = CollectionSchema.parse(migrateCollection(current, dependencies).data);
+    expect(parsed).toEqual(current);
     expect(() => migrateCollection({ ...current, unexpected: true }, dependencies)).toThrow();
-    expect(() => migrateCollection({ ...current, schemaVersion: 9 }, dependencies)).toThrow(
-      "Unsupported collection schema version 9; current version is 8",
+    expect(() => migrateCollection({ ...current, schemaVersion: 10 }, dependencies)).toThrow(
+      "Unsupported collection schema version 10; current version is 9",
     );
     expect(() =>
       migrateCollection(
@@ -771,7 +775,7 @@ describe("migrateCollection", () => {
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 3 });
     expect(result.data).toMatchObject({
-      schemaVersion: 8,
+      schemaVersion: 9,
       revision: 0,
       intentions: [],
       attentionDispositions: [],
@@ -791,4 +795,57 @@ describe("migrateCollection", () => {
     expect(result.data.games[1]?.entityMetadata.mechanic.state).toBe("unrefreshable");
     expect(migrateCollection(result.data, dependencies).data).toEqual(result.data);
   });
+
+  test("migrates v8 collections into empty, semantic-off collection-owned state", () => {
+    const current = migrateCollection(historicalCollection(), dependencies).data;
+    const { semanticRedundancy, ...v8Collection } = current;
+    void semanticRedundancy;
+    const result = migrateCollection({ ...v8Collection, schemaVersion: 8 }, dependencies);
+
+    expect(result).toMatchObject({ migrated: true, sourceVersion: 8 });
+    expect(result.data.semanticRedundancy).toEqual({
+      settings: {
+        enabled: false,
+        weights: { factual: 7, description: 0, ownerNote: 0 },
+        cachedOwnerNoteUse: false,
+      },
+      evidenceEpoch: 0,
+      consentEpoch: 0,
+      factualWeightsEpoch: 0,
+      factualWeightsFingerprint: null,
+      firstOptInInitialized: false,
+      disclosure: null,
+      disclosureManifest: null,
+      manifestDelivery: null,
+      authorization: null,
+      execution: null,
+      pairJudgments: [],
+      publishedGeneration: null,
+    });
+  });
+
+  test.each([6, 7] as const)(
+    "keeps semantic state out of v%s intermediates while completing sequential migration",
+    (sourceVersion) => {
+      const current = migrateCollection(historicalCollection(), dependencies).data;
+      const { attentionDispositions, bggPlaySessions, semanticRedundancy, ...legacyCollection } =
+        current;
+      void attentionDispositions;
+      void bggPlaySessions;
+      void semanticRedundancy;
+
+      const source = {
+        ...legacyCollection,
+        ...(sourceVersion === 6 ? {} : { bggPlaySessions: [] }),
+        schemaVersion: sourceVersion,
+      };
+      const migrated = migrateCollection(source, dependencies);
+
+      expect(migrated).toMatchObject({ migrated: true, sourceVersion });
+      expect(migrated.data.games).toEqual(current.games);
+      expect(migrated.data.intentions).toEqual(current.intentions);
+      expect(migrated.data.commandReceipts).toEqual(current.commandReceipts);
+      expect(migrated.data.semanticRedundancy.settings.enabled).toBe(false);
+    },
+  );
 });

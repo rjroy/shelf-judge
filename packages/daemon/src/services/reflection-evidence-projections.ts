@@ -745,6 +745,22 @@ function candidateConfounders(
     );
 }
 
+function profileGameEvidence(game: {
+  gameId: string;
+  gameName: string;
+  currentFitness: number;
+  vetoed: boolean;
+}) {
+  // Similarity readiness participates in Profile freshness, not Reflection
+  // evidence; construct the approved shape instead of forwarding Profile rows.
+  return {
+    gameId: game.gameId,
+    gameName: game.gameName,
+    currentFitness: game.currentFitness,
+    vetoed: game.vetoed,
+  };
+}
+
 function patternSources(
   profile: CollectionProfile,
   gamesById: ReadonlyMap<string, Game>,
@@ -770,12 +786,12 @@ function patternSources(
         comparator: {
           gameCount: classResult.comparator.gameCount,
           meanCurrentFitness: classResult.comparator.meanCurrentFitness,
-          games: classResult.comparator.games,
+          games: classResult.comparator.games.map(profileGameEvidence),
         },
         metadataReadiness: classResult.metadataReadiness,
         refreshWarnings: classResult.refreshWarnings,
         differenceFromComparator: entity.differenceFromComparator,
-        games: entity.games,
+        games: entity.games.map(profileGameEvidence),
         exclusions: classResult.exclusions.map((exclusion) => {
           const metadata = gamesById.get(exclusion.gameId)?.entityMetadata[entityClass];
           const associationKnown = metadata?.state === "complete";

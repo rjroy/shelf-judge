@@ -93,7 +93,7 @@ function futureSourceCollection(
   commandReceipts: unknown[] = [],
 ) {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     id: "collection",
     name: "Collection",
     axes: [],
@@ -1009,6 +1009,7 @@ describe("collection profile identity contract", () => {
       gameName: "Gamma",
       currentFitness: 0,
       vetoed: true,
+      redundancySimilarityInfo: { status: "disabled", generationId: null },
     });
   });
 
@@ -1403,7 +1404,7 @@ describe("collection profile attention contract", () => {
       publicationIdentity: {
         source: {
           collectionId: "collection",
-          collectionSchemaVersion: 8,
+          collectionSchemaVersion: 9,
           collectionRevision: 1,
           tournamentHash: "a".repeat(64),
           predictionSettingsHash: "b".repeat(64),
@@ -1416,7 +1417,7 @@ describe("collection profile attention contract", () => {
           evaluatedAt: "2026-08-27T12:00:00.000Z",
           identity: {
             collectionId: "collection",
-            collectionSchemaVersion: 8,
+            collectionSchemaVersion: 9,
             collectionRevision: 1,
             tournamentHash: "a".repeat(64),
             predictionSettingsHash: "b".repeat(64),

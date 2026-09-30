@@ -11,6 +11,7 @@ import type {
 import {
   createFreshCollectionDerivedAxes,
   createInitialEntityMetadata,
+  createInitialSemanticRedundancyState,
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
   TournamentDataSchema,
@@ -39,7 +40,7 @@ function makeService(initialFiles?: Record<string, string>) {
 
 function currentCollection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     revision: 0,
     id: "col-1",
     name: "Test",
@@ -49,6 +50,7 @@ function currentCollection(overrides: Partial<Collection> = {}): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
+    semanticRedundancy: createInitialSemanticRedundancyState(),
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
@@ -102,7 +104,7 @@ describe("StorageService.loadCollection", () => {
     const collection = await service.loadCollection();
 
     expect(collection.name).toBe("My Collection");
-    expect(collection.schemaVersion).toBe(8);
+    expect(collection.schemaVersion).toBe(9);
     expect(collection.axes).toHaveLength(3);
     expect(collection.games).toHaveLength(0);
 
@@ -277,6 +279,7 @@ describe("StorageService.loadCollection", () => {
       delete rawCollection.intentions;
       delete rawCollection.attentionDispositions;
       delete rawCollection.commandReceipts;
+      delete rawCollection.semanticRedundancy;
       const entries: string[] = [];
       const fileOps = createMockFileOps({ [COLLECTION_PATH]: JSON.stringify(rawCollection) });
       const service = createStorageService({
@@ -324,6 +327,7 @@ describe("StorageService.loadCollection", () => {
     delete rawCollection.intentions;
     delete rawCollection.attentionDispositions;
     delete rawCollection.commandReceipts;
+    delete rawCollection.semanticRedundancy;
     expect(rawGame).not.toHaveProperty("acquisition");
     expect(rawCollection).not.toHaveProperty("entertainmentBenchmark");
     const normalizedInvalid = {
@@ -755,7 +759,7 @@ function makeEmptyProfileData(computedAt = "2026-01-01T00:00:00.000Z"): ProfileD
     stage: "annotation" as const,
     similarityThreshold: 0.6,
     maxPenalty: 2,
-    componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
+    componentWeights: { binary: 0.4, continuous: 0.3 },
     minNeighbors: 1,
     expectedNeighbors: 5,
   };

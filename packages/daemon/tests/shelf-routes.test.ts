@@ -1,5 +1,6 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Hono } from "hono";
+import { createInitialSemanticRedundancyState } from "@shelf-judge/shared";
 import type {
   Collection,
   ShelfCapacityResult,
@@ -24,7 +25,7 @@ function createMockStorage(): StorageService & {
       updatedAt: NOW,
     } as ShelfConfiguration,
     collection: {
-      schemaVersion: 8,
+      schemaVersion: 9,
       revision: 0,
       id: "collection-1",
       name: "Test",
@@ -34,6 +35,7 @@ function createMockStorage(): StorageService & {
       attentionDispositions: [],
       commandReceipts: [],
       entertainmentBenchmark: null,
+      semanticRedundancy: createInitialSemanticRedundancyState(),
       createdAt: NOW,
       updatedAt: NOW,
     } as Collection,

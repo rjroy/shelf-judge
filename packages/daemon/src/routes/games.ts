@@ -503,7 +503,11 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
           redundancySettings,
           nicheSettings,
         },
-        { includePredicted, includeNiches: true },
+        {
+          includePredicted,
+          includeNiches: true,
+          redundancySimilarityStatus: detailSnapshot.redundancySimilarityStatus ?? undefined,
+        },
       );
       const assembledResult = assembled.find((entry) => entry.game.id === id);
       if (!assembledResult) throw new NotFoundError(`Game not found: ${id}`);

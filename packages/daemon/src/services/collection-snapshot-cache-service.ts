@@ -333,6 +333,11 @@ function sameSourceVector(left: SourceVector, right: SourceVector | undefined): 
     left.collectionId === right.collectionId &&
     left.collectionSchemaVersion === right.collectionSchemaVersion &&
     left.collectionRevision === right.collectionRevision &&
+    left.semanticEvidenceEpoch === right.semanticEvidenceEpoch &&
+    left.semanticConsentEpoch === right.semanticConsentEpoch &&
+    left.factualWeightsEpoch === right.factualWeightsEpoch &&
+    left.factualWeightsFingerprint === right.factualWeightsFingerprint &&
+    left.redundancyWeightsFingerprint === right.redundancyWeightsFingerprint &&
     left.tournamentRevision === right.tournamentRevision &&
     left.predictionSettingsRevision === right.predictionSettingsRevision &&
     left.nicheSettingsRevision === right.nicheSettingsRevision &&
@@ -350,6 +355,11 @@ function createSnapshotEtag(built: BuiltCollectionSnapshot): string {
     collectionId: vector.collectionId,
     collectionSchemaVersion: vector.collectionSchemaVersion,
     collectionRevision: vector.collectionRevision,
+    semanticEvidenceEpoch: vector.semanticEvidenceEpoch ?? null,
+    semanticConsentEpoch: vector.semanticConsentEpoch ?? null,
+    factualWeightsEpoch: vector.factualWeightsEpoch ?? null,
+    factualWeightsFingerprint: vector.factualWeightsFingerprint ?? null,
+    redundancyWeightsFingerprint: vector.redundancyWeightsFingerprint ?? null,
     tournamentRevision: vector.tournamentRevision,
     predictionSettingsRevision: vector.predictionSettingsRevision,
     nicheSettingsRevision: vector.nicheSettingsRevision,

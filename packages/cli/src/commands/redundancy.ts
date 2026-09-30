@@ -5,9 +5,11 @@ import { responseError } from "../errors.js";
 import type { OutputOptions } from "../output.js";
 import { formatTable, printOutput } from "../output.js";
 
-function formatSettings(settings: RedundancySettings): string {
+type RedundancySettingsResponse = RedundancySettings & { migrationNotice?: string | null };
+
+function formatSettings(settings: RedundancySettingsResponse): string {
   const cw = settings.componentWeights;
-  return formatTable(
+  const table = formatTable(
     ["Setting", "Value"],
     [
       ["enabled", String(settings.enabled)],
@@ -18,9 +20,9 @@ function formatSettings(settings: RedundancySettings): string {
       ["expectedNeighbors", String(settings.expectedNeighbors)],
       ["componentWeights.binary", String(cw.binary)],
       ["componentWeights.continuous", String(cw.continuous)],
-      ["componentWeights.personalAxes", String(cw.personalAxes)],
     ],
   );
+  return settings.migrationNotice ? `${table}\n\nNotice: ${settings.migrationNotice}` : table;
 }
 
 export async function redundancySettings(
@@ -28,7 +30,7 @@ export async function redundancySettings(
   _args: string[],
   opts: OutputOptions,
 ): Promise<string> {
-  const { ok, data } = await client.get<RedundancySettings>("/api/redundancy/settings");
+  const { ok, data } = await client.get<RedundancySettingsResponse>("/api/redundancy/settings");
 
   if (!ok) {
     throw responseError(data, "Failed to load redundancy settings");

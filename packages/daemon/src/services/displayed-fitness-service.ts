@@ -1,9 +1,10 @@
 import type {
+  Collection,
   CollectionProfileCollectionSource,
-  Game,
   GameWithScore,
   PredictionSettings,
   RedundancyAdjustment,
+  RedundancySimilarityInfo,
   RedundancySettings,
   NicheSettings,
   TournamentData,
@@ -12,16 +13,14 @@ import type { GameService } from "./game-service.js";
 import type { PredictionService } from "./prediction-service.js";
 import type { StorageService } from "./storage-service.js";
 import { computeNichePositions } from "./niche-engine.js";
-import { computeRedundancyAdjustments } from "./redundancy-engine.js";
 import {
-  buildVocabulary,
-  computeContinuousRanges,
-  encodeGame,
-  getOrderedVectorAxes,
-  getVectorAxisValues,
-  type FeatureVector,
-} from "./feature-vector.js";
-import { deriveDisplayStats } from "./tournament-service.js";
+  computeRedundancyAnalysis,
+  type RedundancyPairTable,
+  type RedundancySimilarityStatus,
+} from "./redundancy-engine.js";
+import { createRedundancyFactualContext } from "./redundancy-factual.js";
+import type { SourceVector } from "./source-vector.js";
+import { canonicalSha256 } from "./profile-source-coordinator.js";
 
 export interface DisplayedGameFitness extends GameWithScore {
   hasPredictedContribution: boolean;
@@ -33,6 +32,8 @@ export interface DisplayedFitnessOptions {
   includeNiches?: boolean;
   /** Limits returned work to owned games. Omitted retains the established full result. */
   targetGameIds?: readonly string[];
+  /** Internal snapshot/profile status override; never sourced from provider/cache data. */
+  redundancySimilarityStatus?: Exclude<RedundancySimilarityStatus, "ready">;
 }
 
 export interface DisplayedFitnessService {
@@ -44,6 +45,7 @@ export interface DisplayedFitnessService {
       predictionSettings: PredictionSettings;
       redundancySettings: RedundancySettings;
       nicheSettings?: NicheSettings;
+      sourceVector?: SourceVector;
     },
     options: DisplayedFitnessOptions,
   ): Promise<DisplayedGameFitness[]>;
@@ -53,6 +55,33 @@ export interface DisplayedFitnessServiceDeps {
   gameService: GameService;
   predictionService?: PredictionService;
   storageService?: StorageService;
+  /** Validated-generation seam. Production does not configure this until Step 5 publication. */
+  resolveRedundancyPairTable?: (input: {
+    universe: readonly GameWithScore[];
+    settings: RedundancySettings;
+    /** Captured inputs for a pure resolver; no storage access is required. */
+    collection: Collection;
+    tournament: TournamentData;
+    /** Captured authoritative prediction input and its semantic identity. */
+    predictionSettings: PredictionSettings;
+    predictionSettingsHash: string;
+    /** Authoritative freshness vector for validating the publication. */
+    sourceVector?: SourceVector;
+  }) => RedundancyPairTable | undefined;
+}
+
+export function semanticFallbackStatus(
+  collection: {
+    semanticRedundancy?: {
+      settings: { enabled: boolean };
+      publishedGeneration: { id: string } | null;
+    };
+  },
+  factualEnabled: boolean,
+): Exclude<RedundancySimilarityStatus, "ready"> {
+  const semantic = collection.semanticRedundancy;
+  if (!semantic?.settings.enabled) return factualEnabled ? "factual" : "disabled";
+  return semantic.publishedGeneration ? "stale" : "not-ready";
 }
 
 function hasPredictedContribution(entry: GameWithScore): boolean {
@@ -69,45 +98,72 @@ function applyRedundancy(
   collection: Pick<CollectionProfileCollectionSource, "games" | "axes">,
   tournamentData: TournamentData,
   universe?: GameWithScore[],
+  pairTable?: RedundancyPairTable,
+  fallbackStatus?: Exclude<RedundancySimilarityStatus, "ready">,
 ): void {
-  if (!settings.enabled) return;
-
   const computeGames = universe ?? games;
-  const adjustments = redundancyAdjustmentMap(computeGames, settings, collection, tournamentData);
-  applyAdjustments(games, settings, adjustments);
+  const effectiveStatus =
+    pairTable?.status === "not-ready" || pairTable?.status === "stale"
+      ? pairTable.status
+      : fallbackStatus;
+  const analysis = redundancyAnalysis(
+    computeGames,
+    settings,
+    collection,
+    tournamentData,
+    pairTable,
+    effectiveStatus,
+  );
+  applyAdjustments(games, settings, analysis.adjustments);
+  applySimilarityInfo(games, analysis.similarityInfo, analysis.defaultSimilarityInfo);
 }
 
-function redundancyAdjustmentMap(
+function redundancyAnalysis(
   computeGames: readonly GameWithScore[],
   settings: RedundancySettings,
   collection: Pick<CollectionProfileCollectionSource, "games" | "axes">,
   tournamentData: TournamentData,
+  pairTable?: RedundancyPairTable,
+  fallbackStatus?: Exclude<RedundancySimilarityStatus, "ready">,
 ) {
-  const gamesWithBgg = collection.games.filter((game) => game.bggData);
-  const vocabulary = buildVocabulary(gamesWithBgg);
-  const ranges = computeContinuousRanges(gamesWithBgg);
-  const vectorAxes = getOrderedVectorAxes(collection.axes);
-  const vectorCache = new Map<string, FeatureVector>();
-  const getFeatureVector = (game: Game): FeatureVector => {
-    const cached = vectorCache.get(game.id);
-    if (cached) return cached;
-    const values = getVectorAxisValues(
-      game,
-      vectorAxes,
-      deriveDisplayStats(game.id, tournamentData).normalizedScore,
-    );
-    const vector = encodeGame(game, vocabulary, vectorAxes, values, ranges);
-    vectorCache.set(game.id, vector);
-    return vector;
-  };
+  // Factual similarity intentionally excludes personal/tournament axes. Sharing the
+  // same context factory keeps pair-table validation aligned with display scoring.
+  void tournamentData;
+  const factualContext = createRedundancyFactualContext(
+    collection.games,
+    settings.componentWeights,
+  );
+  const getFeatureVector = (game: Parameters<typeof factualContext.getFeatureVector>[0]) =>
+    factualContext.getFeatureVector(game);
 
-  return computeRedundancyAdjustments([...computeGames], settings, getFeatureVector);
+  const effectiveStatus =
+    pairTable?.status === "not-ready" || pairTable?.status === "stale"
+      ? pairTable.status
+      : fallbackStatus;
+  return computeRedundancyAnalysis(
+    [...computeGames],
+    settings,
+    getFeatureVector,
+    pairTable,
+    effectiveStatus,
+  );
+}
+
+function applySimilarityInfo(
+  games: GameWithScore[],
+  info: Map<string, RedundancySimilarityInfo>,
+  defaultInfo: RedundancySimilarityInfo,
+): void {
+  for (const entry of games) {
+    if (!entry.score) continue;
+    entry.score.redundancySimilarityInfo = info.get(entry.game.id) ?? defaultInfo;
+  }
 }
 
 function applyAdjustments(
   games: GameWithScore[],
   settings: RedundancySettings,
-  adjustments: ReturnType<typeof computeRedundancyAdjustments>,
+  adjustments: Map<string, RedundancyAdjustment>,
 ): void {
   for (const entry of games) {
     if (!entry.score) continue;
@@ -131,11 +187,24 @@ export function withRedundancyAdjustments(
   collection: Pick<CollectionProfileCollectionSource, "games" | "axes">,
   tournamentData: TournamentData,
   universe: readonly GameWithScore[] = entries,
+  pairTable?: RedundancyPairTable,
+  fallbackStatus?: Exclude<RedundancySimilarityStatus, "ready">,
 ): GameWithScore[] {
-  const adjustments = settings.enabled
-    ? redundancyAdjustmentMap(universe, settings, collection, tournamentData)
-    : new Map<string, RedundancyAdjustment>();
-  return withRedundancyAdjustmentMap(entries, settings, adjustments);
+  const analysis = redundancyAnalysis(
+    universe,
+    settings,
+    collection,
+    tournamentData,
+    pairTable,
+    fallbackStatus,
+  );
+  return withRedundancyMaps(
+    entries,
+    settings,
+    analysis.adjustments,
+    analysis.similarityInfo,
+    analysis.defaultSimilarityInfo,
+  );
 }
 
 /** Compute the owned predicted universe once and apply it to both score variants. */
@@ -146,26 +215,48 @@ export function withRedundancyAdjustmentsForVariants(
   collection: Pick<CollectionProfileCollectionSource, "games" | "axes">,
   tournamentData: TournamentData,
   universe: readonly GameWithScore[],
+  pairTable?: RedundancyPairTable,
+  fallbackStatus?: Exclude<RedundancySimilarityStatus, "ready">,
 ): { ordinary: GameWithScore[]; predicted: GameWithScore[] } {
-  const adjustments = settings.enabled
-    ? redundancyAdjustmentMap(universe, settings, collection, tournamentData)
-    : new Map<string, RedundancyAdjustment>();
+  const analysis = redundancyAnalysis(
+    universe,
+    settings,
+    collection,
+    tournamentData,
+    pairTable,
+    fallbackStatus,
+  );
   return {
-    ordinary: withRedundancyAdjustmentMap(ordinaryEntries, settings, adjustments),
-    predicted: withRedundancyAdjustmentMap(predictedEntries, settings, adjustments),
+    ordinary: withRedundancyMaps(
+      ordinaryEntries,
+      settings,
+      analysis.adjustments,
+      analysis.similarityInfo,
+      analysis.defaultSimilarityInfo,
+    ),
+    predicted: withRedundancyMaps(
+      predictedEntries,
+      settings,
+      analysis.adjustments,
+      analysis.similarityInfo,
+      analysis.defaultSimilarityInfo,
+    ),
   };
 }
 
-function withRedundancyAdjustmentMap(
+function withRedundancyMaps(
   entries: readonly GameWithScore[],
   settings: RedundancySettings,
-  adjustments: ReturnType<typeof computeRedundancyAdjustments>,
+  adjustments: Map<string, RedundancyAdjustment>,
+  similarityInfo: Map<string, RedundancySimilarityInfo>,
+  defaultSimilarityInfo: RedundancySimilarityInfo,
 ): GameWithScore[] {
   const projected = entries.map((entry) => ({
     ...entry,
     score: entry.score === null ? null : { ...entry.score },
   }));
-  if (settings.enabled) applyAdjustments(projected, settings, adjustments);
+  applyAdjustments(projected, settings, adjustments);
+  applySimilarityInfo(projected, similarityInfo, defaultSimilarityInfo);
   return projected;
 }
 
@@ -189,10 +280,11 @@ function targetEntries(
 export function createDisplayedFitnessService(
   deps: DisplayedFitnessServiceDeps,
 ): DisplayedFitnessService {
-  const { gameService, predictionService, storageService } = deps;
+  const { gameService, predictionService, storageService, resolveRedundancyPairTable } = deps;
 
   return {
     async listGames(options): Promise<DisplayedGameFitness[]> {
+      const initialSourceVector = storageService?.sourceVector?.();
       const targets = targetIds(options);
       let predictedGames: GameWithScore[] | undefined;
       const getPredictedGames = async (
@@ -232,19 +324,58 @@ export function createDisplayedFitnessService(
 
       if (storageService) {
         const redundancySettings = await storageService.loadRedundancySettings();
+        const predictionSettings = await storageService
+          .loadPredictionSettings()
+          .catch(() => undefined);
         const universe =
           (!options.includePredicted || targets !== undefined) && predictionService
             ? (await getPredictedGames()).filter(
                 (entry) => entry.game.ownership !== "previously-owned",
               )
             : undefined;
-        if (redundancySettings.enabled) {
-          const [collection, tournament] = await Promise.all([
-            storageService.loadCollection(),
-            storageService.loadTournament(),
-          ]);
-          applyRedundancy(ownedGames, redundancySettings, collection, tournament, universe);
-        }
+        const collection = await storageService.loadCollection();
+        const tournament = redundancySettings.enabled
+          ? await storageService.loadTournament()
+          : {
+              settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
+              sessions: [],
+              gameStats: {},
+            };
+        const pairUniverse = universe ?? ownedGames;
+        const eligiblePairUniverse = pairUniverse.filter(
+          ({ score }) => score !== null && !score.vetoed && score.score > 0,
+        );
+        const vectorAfter = storageService.sourceVector?.();
+        const coherentCapture =
+          predictionSettings !== undefined &&
+          initialSourceVector !== undefined &&
+          vectorAfter !== undefined &&
+          initialSourceVector.processEpoch === vectorAfter.processEpoch &&
+          initialSourceVector.changeToken === vectorAfter.changeToken &&
+          vectorAfter.available;
+        const pairTable = redundancySettings.enabled
+          ? coherentCapture
+            ? resolveRedundancyPairTable?.({
+                universe: eligiblePairUniverse,
+                settings: redundancySettings,
+                collection,
+                tournament,
+                predictionSettings,
+                predictionSettingsHash: canonicalSha256(predictionSettings),
+                sourceVector: vectorAfter,
+              })
+            : undefined
+          : undefined;
+        applyRedundancy(
+          ownedGames,
+          redundancySettings,
+          collection,
+          tournament,
+          pairUniverse,
+          pairTable,
+          options.redundancySimilarityStatus ??
+            semanticFallbackStatus(collection, redundancySettings.enabled),
+        );
       }
 
       return allGames.map((entry) => ({
@@ -255,6 +386,7 @@ export function createDisplayedFitnessService(
     },
 
     async listGamesFromSnapshot(snapshot, options): Promise<DisplayedGameFitness[]> {
+      const capturedSourceVector = snapshot.sourceVector ?? storageService?.sourceVector?.();
       const targets = targetIds(options);
       const collection = structuredClone(snapshot.collection);
       const tournament = structuredClone(snapshot.tournament);
@@ -330,12 +462,34 @@ export function createDisplayedFitnessService(
                   .listGamesFromSnapshot(collection, tournament)
                   .filter((entry) => entry.game.ownership !== "previously-owned");
               })();
+      const currentSourceVector = storageService?.sourceVector?.();
+      const sourceVectorIsCurrent =
+        capturedSourceVector !== undefined &&
+        currentSourceVector !== undefined &&
+        capturedSourceVector.processEpoch === currentSourceVector.processEpoch &&
+        capturedSourceVector.changeToken === currentSourceVector.changeToken &&
+        currentSourceVector.available;
       applyRedundancy(
         ownedGames,
         structuredClone(snapshot.redundancySettings),
         collection,
         tournament,
         redundancyUniverse,
+        snapshot.redundancySettings.enabled && sourceVectorIsCurrent
+          ? resolveRedundancyPairTable?.({
+              universe: (redundancyUniverse ?? ownedGames).filter(
+                ({ score }) => score !== null && !score.vetoed && score.score > 0,
+              ),
+              settings: snapshot.redundancySettings,
+              collection: collection as unknown as Collection,
+              tournament,
+              predictionSettings: structuredClone(snapshot.predictionSettings),
+              predictionSettingsHash: canonicalSha256(snapshot.predictionSettings),
+              sourceVector: capturedSourceVector,
+            })
+          : undefined,
+        options.redundancySimilarityStatus ??
+          (snapshot.redundancySettings.enabled ? "factual" : "disabled"),
       );
       return allGames.map((entry) => ({
         ...entry,

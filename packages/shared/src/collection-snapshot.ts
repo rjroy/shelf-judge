@@ -10,6 +10,13 @@ const NonNegativeFinite = Finite.nonnegative();
 const PositiveFinite = Finite.positive();
 const NonNegativeInteger = z.number().int().nonnegative().safe();
 const Id = z.string().min(1);
+const RedundancySimilarityInfoSchema = z
+  .object({
+    status: z.enum(["disabled", "factual", "not-ready", "stale", "ready"]),
+    generationId: Id.nullable(),
+  })
+  .strict()
+  .default({ status: "disabled", generationId: null });
 const BoxDimensionsSchema = z
   .object({ width: PositiveFinite, height: PositiveFinite, depth: PositiveFinite })
   .strict()
@@ -91,6 +98,7 @@ export const CollectionSnapshotGameRowSchema = z
   .object({
     game: CollectionSnapshotGameSchema,
     ordinary: VariantResultSchema,
+    redundancySimilarityInfo: RedundancySimilarityInfoSchema,
     predicted: z.union([
       VariantResultSchema.extend({ availability: z.literal("available") }).strict(),
       z.object({ availability: z.literal("unavailable"), reason: z.string().min(1) }).strict(),

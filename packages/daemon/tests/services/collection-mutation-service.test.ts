@@ -1,21 +1,49 @@
 import { describe, expect, test } from "bun:test";
+import {
+  createInitialEntityMetadata,
+  createInitialSemanticRedundancyState,
+  type SemanticPairJudgment,
+  type SemanticPublishedSignalJudgment,
+} from "@shelf-judge/shared";
 import type { Collection } from "@shelf-judge/shared";
+import {
+  SEMANTIC_FIXTURE_FINGERPRINT,
+  emptySemanticManifestFixture,
+  semanticGenerationFixture,
+  semanticSourceIdentityFixture,
+} from "../helpers/semantic-redundancy-fixtures.js";
 import {
   collectionMutationServiceFor,
   createCollectionMutationService,
   collectionRevisionStrategy,
 } from "../../src/services/collection-mutation-service.js";
+import {
+  createSemanticRedundancyStateService,
+  semanticDescriptionSourceFingerprint,
+  semanticOwnerNoteSourceFingerprint,
+} from "../../src/services/semantic-redundancy-state-service.js";
 import type { Logger } from "../../src/services/logger.js";
 import type {
   CollectionPersistence,
   CollectionReader,
 } from "../../src/services/storage-service.js";
+import { createCollectionArtifactContext } from "../../src/services/collection-artifacts.js";
+import { createMockFileOps } from "../helpers/mock-file-ops.js";
 
 const initialTime = "2026-01-01T00:00:00.000Z";
 
+function publishedSignal(
+  judgment: SemanticPairJudgment["description"],
+): SemanticPublishedSignalJudgment | null {
+  if (judgment === null || judgment.status === "scored" || judgment.status === "unavailable") {
+    return judgment;
+  }
+  throw new Error("Published semantic outcomes must be terminal");
+}
+
 function collection(): Collection {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     revision: 0,
     id: "collection-1",
     name: "Private collection name",
@@ -25,9 +53,207 @@ function collection(): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
+    semanticRedundancy: createInitialSemanticRedundancyState(),
     createdAt: initialTime,
     updatedAt: initialTime,
   };
+}
+
+function withActiveSemanticRefresh(source: Collection): Collection {
+  const digest = SEMANTIC_FIXTURE_FINGERPRINT;
+  const sourceIdentity = semanticSourceIdentityFixture({
+    collectionId: source.id,
+    collectionRevision: source.revision,
+    evidenceEpoch: source.semanticRedundancy.evidenceEpoch,
+    consentEpoch: source.semanticRedundancy.consentEpoch,
+  });
+  source.semanticRedundancy.disclosure = {
+    id: "authorization-1",
+    manifestDigest: digest,
+    evidenceEpoch: source.semanticRedundancy.evidenceEpoch,
+    consentEpoch: source.semanticRedundancy.consentEpoch,
+    pairCount: source.semanticRedundancy.pairJudgments.length,
+    notePairCount: source.semanticRedundancy.pairJudgments.filter(
+      ({ description, ownerNote }) =>
+        (description?.status === "scored" && description.noteVersionA !== null) ||
+        ownerNote?.status === "scored",
+    ).length,
+    expiresAt: "2099-01-02T00:00:00.000Z",
+  };
+  source.semanticRedundancy.authorization = {
+    ...source.semanticRedundancy.disclosure,
+    state: "active",
+  };
+  source.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
+    id: "generation-0",
+    manifestDigest: digest,
+    sourceIdentity,
+    eligibleGameIds: source.games.map(({ id }) => id).sort(),
+    pairOutcomes: source.semanticRedundancy.pairJudgments.map((pair) => ({
+      gameA: pair.gameA,
+      gameB: pair.gameB,
+      description: publishedSignal(pair.description),
+      ownerNote: publishedSignal(pair.ownerNote),
+    })),
+  });
+  return source;
+}
+
+function semanticGame(id: string, name: string, description: string, ownerNoteVersion = 1) {
+  return {
+    id,
+    bggId: null,
+    name,
+    yearPublished: 2020,
+    minPlayers: 2,
+    maxPlayers: 4,
+    bestPlayers: 3,
+    playingTime: 60,
+    imageUrl: null,
+    bggData: {
+      communityRating: 7,
+      bayesAverage: 7,
+      weight: 2,
+      numWeightVotes: 10,
+      description,
+      mechanics: [],
+      categories: [],
+      families: [],
+      subdomains: [],
+      bestPlayerCount: 3,
+      fetchedAt: initialTime,
+    },
+    numPlays: 4,
+    acquisition: { state: "unknown" as const },
+    playCountEvidence: {
+      status: "valid" as const,
+      value: 4,
+      source: "manual" as const,
+      observedAt: initialTime,
+    },
+    durationEvidence: {
+      status: "valid" as const,
+      value: 60,
+      source: "manual" as const,
+      observedAt: initialTime,
+    },
+    playerRangeEvidence: {
+      status: "valid" as const,
+      value: { minPlayers: 2, maxPlayers: 4 },
+      source: "manual" as const,
+      observedAt: initialTime,
+    },
+    suggestedPlayerPoll: {
+      status: "valid" as const,
+      state: "absent" as const,
+      buckets: [] as [],
+      source: "manual" as const,
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
+    entityMetadata: createInitialEntityMetadata(null),
+    latestPlayCountCheck: null,
+    ownership: "owned" as const,
+    boxDimensions: null,
+    manualShelfId: null,
+    ratings: {},
+    ownerNote: {
+      state: "present" as const,
+      version: ownerNoteVersion,
+      updatedAt: initialTime,
+      text: `Owner note for ${id}`,
+    },
+    createdAt: initialTime,
+    updatedAt: initialTime,
+  };
+}
+
+function scoredPair(
+  gameA: ReturnType<typeof semanticGame>,
+  gameB: ReturnType<typeof semanticGame>,
+  mode: "description-only" | "description-and-owner-notes" | "owner-notes-only",
+): SemanticPairJudgment {
+  const descriptionA = semanticDescriptionSourceFingerprint(gameA);
+  const descriptionB = semanticDescriptionSourceFingerprint(gameB);
+  const ownerNoteA = semanticOwnerNoteSourceFingerprint(gameA);
+  const ownerNoteB = semanticOwnerNoteSourceFingerprint(gameB);
+  if (!descriptionA || !descriptionB || !ownerNoteA || !ownerNoteB)
+    throw new Error("Test games must have all semantic sources");
+  const context =
+    mode === "description-only"
+      ? { kind: mode, descriptionRepresentationVersion: 1 as const }
+      : mode === "description-and-owner-notes"
+        ? {
+            kind: mode,
+            descriptionRepresentationVersion: 1 as const,
+            ownerNoteRepresentationVersion: 1 as const,
+            descriptionFingerprintA: descriptionA,
+            descriptionFingerprintB: descriptionB,
+          }
+        : { kind: mode, ownerNoteRepresentationVersion: 1 as const };
+  const description =
+    mode === "owner-notes-only"
+      ? null
+      : {
+          status: "scored" as const,
+          score: 0.75,
+          confidence: null,
+          modelId: "jev-pinned",
+          rubricVersion: 1,
+          sourceFingerprintA: descriptionA,
+          sourceFingerprintB: descriptionB,
+          noteVersionA: mode === "description-only" ? null : gameA.ownerNote.version,
+          noteVersionB: mode === "description-only" ? null : gameB.ownerNote.version,
+          requestContext: context,
+        };
+  const ownerNote =
+    mode === "description-only"
+      ? null
+      : {
+          status: "scored" as const,
+          score: 0.5,
+          confidence: null,
+          modelId: "jev-pinned",
+          rubricVersion: 1,
+          sourceFingerprintA: ownerNoteA,
+          sourceFingerprintB: ownerNoteB,
+          noteVersionA: gameA.ownerNote.version,
+          noteVersionB: gameB.ownerNote.version,
+          requestContext: context,
+        };
+  return {
+    gameA: gameA.id,
+    gameB: gameB.id,
+    description,
+    ownerNote,
+  };
+}
+
+function collectionWithSemanticPairs(): Collection {
+  const a = semanticGame("game-a", "A", "Description A");
+  const b = semanticGame("game-b", "B", "Description B");
+  const c = semanticGame("game-c", "C", "Description C");
+  const source = collection();
+  source.games = [a, b, c];
+  source.semanticRedundancy.settings = {
+    enabled: true,
+    weights: { factual: 7, description: 5, ownerNote: 10 },
+    cachedOwnerNoteUse: true,
+  };
+  source.semanticRedundancy.firstOptInInitialized = true;
+  source.semanticRedundancy.pairJudgments = [
+    {
+      ...scoredPair(a, b, "description-only"),
+      ownerNote: scoredPair(a, b, "owner-notes-only").ownerNote,
+    },
+    scoredPair(a, c, "description-and-owner-notes"),
+    {
+      ...scoredPair(b, c, "description-only"),
+      ownerNote: scoredPair(b, c, "owner-notes-only").ownerNote,
+    },
+  ];
+  return withActiveSemanticRefresh(source);
 }
 
 function controlledStorage(options: { failFirstSave?: boolean } = {}) {
@@ -71,7 +297,7 @@ describe("CollectionMutationService", () => {
 
     expect(collectionRevisionStrategy.identity(source)).toEqual({
       collectionId: "collection-1",
-      schemaVersion: 8,
+      schemaVersion: 9,
       revision: 7,
     });
     expect(collectionRevisionStrategy.advance(source, source).revision).toBe(8);
@@ -135,9 +361,596 @@ describe("CollectionMutationService", () => {
       outcome: "no-op",
       changed: false,
       value: "collection-1",
-      collection: { schemaVersion: 8, revision: 0, id: "collection-1", updatedAt: initialTime },
+      collection: { schemaVersion: 9, revision: 0, id: "collection-1", updatedAt: initialTime },
     });
     expect(ctx.saveCount()).toBe(0);
+  });
+
+  test("purges semantic display artifacts after validation and before persistence hooks", async () => {
+    const ctx = controlledStorage();
+    const fileOps = createMockFileOps({
+      "/test/data/profile.json": "stale profile",
+      "/test/data/attention-candidates.json": "stale candidates",
+      "/test/data/wishlist.json": "wishlist bytes",
+    });
+    const service = createCollectionMutationService({
+      storageService: ctx.storage,
+      semanticDisplayArtifactContext: createCollectionArtifactContext("/test/data", fileOps, {
+        log: () => {},
+        warn: () => {},
+        error: () => {},
+      }),
+    });
+
+    const mutation = service.mutate(
+      { operation: "purchase.benchmark.set", trigger: "owner" },
+      (candidate) => {
+        candidate.entertainmentBenchmark = {
+          state: "configured",
+          amount: { hundredths: 500, source: "manual", confirmedAt: initialTime },
+        };
+        return {
+          changed: true,
+          value: undefined,
+          beforePersistence() {
+            expect(fileOps.files.has("/test/data/profile.json")).toBe(false);
+            expect(fileOps.files.has("/test/data/attention-candidates.json")).toBe(false);
+          },
+        };
+      },
+    );
+    await ctx.firstSaveStarted;
+    ctx.releaseFirstSave();
+    await mutation;
+
+    expect(fileOps.files.get("/test/data/wishlist.json")).toBe("wishlist bytes");
+    expect(ctx.saveCount()).toBe(1);
+  });
+
+  test("does not purge on no-op or semantic bookkeeping-only checkpoint writes", async () => {
+    const initial = withActiveSemanticRefresh(collection());
+    let stored = structuredClone(initial);
+    const storage: CollectionReader & CollectionPersistence = {
+      loadCollection: () => Promise.resolve(structuredClone(stored)),
+      saveCollection: (next) => {
+        stored = structuredClone(next);
+        return Promise.resolve();
+      },
+    };
+    const fileOps = createMockFileOps({
+      "/test/data/profile.json": "profile",
+      "/test/data/attention-candidates.json": "candidates",
+    });
+    const service = createCollectionMutationService({
+      storageService: storage,
+      semanticDisplayArtifactContext: createCollectionArtifactContext("/test/data", fileOps, {
+        log: () => {},
+        warn: () => {},
+        error: () => {},
+      }),
+    });
+
+    await service.mutate({ operation: "test.read", trigger: "test" }, () => ({
+      changed: false,
+      value: undefined,
+    }));
+    expect(fileOps.files.has("/test/data/profile.json")).toBe(true);
+    await service.mutate(
+      { operation: "semantic-redundancy.judgments.checkpoint", trigger: "refresh" },
+      (candidate) => {
+        candidate.semanticRedundancy.pairJudgments = structuredClone(
+          candidate.semanticRedundancy.pairJudgments,
+        );
+        return { changed: true, value: undefined };
+      },
+    );
+    expect(fileOps.files.has("/test/data/profile.json")).toBe(true);
+    expect(fileOps.files.has("/test/data/attention-candidates.json")).toBe(true);
+  });
+
+  test("purges when accepted consent changes invalidate the published semantic display", async () => {
+    let stored = withActiveSemanticRefresh(collection());
+    const storage: CollectionReader & CollectionPersistence = {
+      loadCollection: () => Promise.resolve(structuredClone(stored)),
+      saveCollection: (next) => {
+        stored = structuredClone(next);
+        return Promise.resolve();
+      },
+    };
+    const fileOps = createMockFileOps({
+      "/test/data/profile.json": "profile",
+      "/test/data/attention-candidates.json": "candidates",
+    });
+    const mutations = createCollectionMutationService({
+      storageService: storage,
+      semanticDisplayArtifactContext: createCollectionArtifactContext("/test/data", fileOps, {
+        log: () => {},
+        warn: () => {},
+        error: () => {},
+      }),
+    });
+    const semantic = createSemanticRedundancyStateService({ collectionMutationService: mutations });
+
+    const result = await semantic.updateSettings(
+      { evidenceEpoch: 0, consentEpoch: 0 },
+      {
+        enabled: true,
+        weights: { factual: 7, description: 5, ownerNote: 10 },
+        cachedOwnerNoteUse: false,
+      },
+    );
+
+    expect(result.outcome).toBe("accepted");
+    expect(stored.semanticRedundancy.consentEpoch).toBe(1);
+    expect(fileOps.files.has("/test/data/profile.json")).toBe(false);
+    expect(fileOps.files.has("/test/data/attention-candidates.json")).toBe(false);
+  });
+
+  test("purges when a published generation is withdrawn", async () => {
+    let stored = withActiveSemanticRefresh(collection());
+    const storage: CollectionReader & CollectionPersistence = {
+      loadCollection: () => Promise.resolve(structuredClone(stored)),
+      saveCollection: (next) => {
+        stored = structuredClone(next);
+        return Promise.resolve();
+      },
+    };
+    const fileOps = createMockFileOps({
+      "/test/data/profile.json": "profile",
+      "/test/data/attention-candidates.json": "candidates",
+    });
+    const service = createCollectionMutationService({
+      storageService: storage,
+      semanticDisplayArtifactContext: createCollectionArtifactContext("/test/data", fileOps, {
+        log: () => {},
+        warn: () => {},
+        error: () => {},
+      }),
+    });
+
+    await service.mutate(
+      { operation: "semantic-redundancy.generation.publish", trigger: "refresh" },
+      (candidate) => {
+        candidate.semanticRedundancy.publishedGeneration = null;
+        return { changed: true, value: undefined };
+      },
+    );
+
+    expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
+    expect(fileOps.files.has("/test/data/profile.json")).toBe(false);
+    expect(fileOps.files.has("/test/data/attention-candidates.json")).toBe(false);
+  });
+
+  test("aborts collection persistence when a semantic display purge fails", async () => {
+    const ctx = controlledStorage();
+    const fileOps = createMockFileOps({ "/test/data/profile.json": "stale profile" });
+    fileOps.unlink = (filePath) => {
+      if (filePath.endsWith("profile.json")) return Promise.reject(new Error("purge unavailable"));
+      return Promise.resolve();
+    };
+    const service = createCollectionMutationService({
+      storageService: ctx.storage,
+      semanticDisplayArtifactContext: createCollectionArtifactContext("/test/data", fileOps, {
+        log: () => {},
+        warn: () => {},
+        error: () => {},
+      }),
+    });
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(
+      service.mutate({ operation: "purchase.benchmark.set", trigger: "owner" }, (candidate) => {
+        candidate.entertainmentBenchmark = {
+          state: "configured",
+          amount: { hundredths: 500, source: "manual", confirmedAt: initialTime },
+        };
+        return { changed: true, value: undefined };
+      }),
+    ).rejects.toThrow("purge unavailable");
+    expect(ctx.saveCount()).toBe(0);
+    expect(ctx.stored()).toEqual(collection());
+  });
+
+  test("leaves purged display artifacts absent when collection persistence fails", async () => {
+    const ctx = controlledStorage({ failFirstSave: true });
+    const fileOps = createMockFileOps({
+      "/test/data/profile.json": "stale profile",
+      "/test/data/attention-candidates.json": "stale candidates",
+    });
+    const service = createCollectionMutationService({
+      storageService: ctx.storage,
+      semanticDisplayArtifactContext: createCollectionArtifactContext("/test/data", fileOps, {
+        log: () => {},
+        warn: () => {},
+        error: () => {},
+      }),
+    });
+    const mutation = service.mutate(
+      { operation: "purchase.benchmark.set", trigger: "owner" },
+      (candidate) => {
+        candidate.entertainmentBenchmark = {
+          state: "configured",
+          amount: { hundredths: 500, source: "manual", confirmedAt: initialTime },
+        };
+        return { changed: true, value: undefined };
+      },
+    );
+    await ctx.firstSaveStarted;
+    ctx.releaseFirstSave();
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(mutation).rejects.toThrow("disk unavailable");
+
+    expect(fileOps.files.has("/test/data/profile.json")).toBe(false);
+    expect(fileOps.files.has("/test/data/attention-candidates.json")).toBe(false);
+    expect(ctx.stored()).toEqual(collection());
+  });
+
+  test("advances evidence epoch and withdraws semantic state only for evidence changes", async () => {
+    const initial = withActiveSemanticRefresh(collection());
+    let stored = structuredClone(initial);
+    const storage: CollectionReader & CollectionPersistence = {
+      loadCollection: () => Promise.resolve(structuredClone(stored)),
+      saveCollection: (next) => {
+        stored = structuredClone(next);
+        return Promise.resolve();
+      },
+    };
+    const mutations = createCollectionMutationService({ storageService: storage });
+
+    await mutations.mutate({ operation: "game.rate", trigger: "owner" }, (candidate) => {
+      candidate.updatedAt = "2026-01-01T00:01:00.000Z";
+      return { changed: true, value: undefined };
+    });
+    expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
+    expect(stored.semanticRedundancy.authorization?.state).toBe("active");
+    expect(stored.semanticRedundancy.publishedGeneration?.id).toBe("generation-0");
+
+    await mutations.mutate(
+      { operation: "purchase.benchmark.set", trigger: "owner" },
+      (candidate) => {
+        candidate.entertainmentBenchmark = {
+          state: "configured",
+          amount: { hundredths: 500, source: "manual", confirmedAt: initialTime },
+        };
+        return { changed: true, value: undefined };
+      },
+    );
+    expect(stored.semanticRedundancy.evidenceEpoch).toBe(1);
+    expect(stored.semanticRedundancy.consentEpoch).toBe(0);
+    expect(stored.semanticRedundancy.disclosure).toBeNull();
+    expect(stored.semanticRedundancy.authorization?.state).toBe("revoked");
+    expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
+  });
+
+  test("rejects an evidence change when the semantic epoch cannot advance safely", async () => {
+    const initial = collection();
+    initial.semanticRedundancy.evidenceEpoch = Number.MAX_SAFE_INTEGER;
+    let stored = structuredClone(initial);
+    let saves = 0;
+    const storage: CollectionReader & CollectionPersistence = {
+      loadCollection: () => Promise.resolve(structuredClone(stored)),
+      saveCollection: (next) => {
+        saves += 1;
+        stored = structuredClone(next);
+        return Promise.resolve();
+      },
+    };
+    const mutations = createCollectionMutationService({ storageService: storage });
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(
+      mutations.mutate({ operation: "purchase.benchmark.set", trigger: "owner" }, (candidate) => {
+        candidate.entertainmentBenchmark = {
+          state: "configured",
+          amount: { hundredths: 500, source: "manual", confirmedAt: initialTime },
+        };
+        return { changed: true, value: undefined };
+      }),
+    ).rejects.toThrow("Semantic evidence epoch cannot advance beyond the safe integer range");
+    expect(saves).toBe(0);
+    expect(stored).toEqual(initial);
+  });
+
+  test("semantic settings advance consent epoch; publication remains disabled without a manifest", async () => {
+    const initial = withActiveSemanticRefresh(collection());
+    let stored = structuredClone(initial);
+    const storage: CollectionReader & CollectionPersistence = {
+      loadCollection: () => Promise.resolve(structuredClone(stored)),
+      saveCollection: (next) => {
+        stored = structuredClone(next);
+        return Promise.resolve();
+      },
+    };
+    const mutations = createCollectionMutationService({ storageService: storage });
+    const semantic = createSemanticRedundancyStateService({ collectionMutationService: mutations });
+
+    expect(
+      (
+        await semantic.updateSettings(
+          { evidenceEpoch: 1, consentEpoch: 0 },
+          {
+            enabled: true,
+            weights: { factual: 7, description: 5, ownerNote: 10 },
+            cachedOwnerNoteUse: false,
+          },
+        )
+      ).outcome,
+    ).toBe("stale");
+    const settingsUpdate = await semantic.updateSettings(
+      { evidenceEpoch: 0, consentEpoch: 0 },
+      {
+        enabled: true,
+        weights: { factual: 7, description: 5, ownerNote: 10 },
+        cachedOwnerNoteUse: false,
+      },
+    );
+    expect(settingsUpdate.outcome).toBe("accepted");
+    expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
+    expect(stored.semanticRedundancy.consentEpoch).toBe(1);
+    expect(stored.semanticRedundancy.firstOptInInitialized).toBe(true);
+    expect(stored.semanticRedundancy.authorization?.state).toBe("revoked");
+    expect(
+      (
+        await semantic.updateSettings(
+          { evidenceEpoch: 0, consentEpoch: 1 },
+          {
+            enabled: true,
+            weights: { factual: 7, description: 5, ownerNote: 10 },
+            cachedOwnerNoteUse: false,
+          },
+        )
+      ).outcome,
+    ).toBe("accepted");
+    expect(stored.semanticRedundancy.consentEpoch).toBe(1);
+
+    const authorized = withActiveSemanticRefresh(stored);
+    // A new authorization is tied to the current stable evidence/consent identity.
+    authorized.semanticRedundancy.authorization!.evidenceEpoch = 0;
+    authorized.semanticRedundancy.authorization!.consentEpoch = 1;
+    authorized.semanticRedundancy.disclosure!.evidenceEpoch = 0;
+    authorized.semanticRedundancy.disclosure!.consentEpoch = 1;
+    stored = authorized;
+
+    const epochs = { evidenceEpoch: 0, consentEpoch: 1 };
+    expect(
+      (
+        await semantic.checkpointJudgments({
+          expected: epochs,
+          authorizationId: "authorization-1",
+          judgments: [],
+        })
+      ).outcome,
+    ).toBe("invalid-state");
+    expect(
+      (
+        await semantic.publishGeneration({
+          expected: epochs,
+          authorizationId: "authorization-1",
+          manifest: emptySemanticManifestFixture(
+            semanticSourceIdentityFixture({
+              collectionId: stored.id,
+              collectionRevision: 0,
+              evidenceEpoch: epochs.evidenceEpoch,
+              consentEpoch: epochs.consentEpoch,
+            }),
+          ),
+          eligibleGameIds: [],
+          sourceIdentity: semanticSourceIdentityFixture({
+            collectionId: stored.id,
+            collectionRevision: 0,
+            evidenceEpoch: epochs.evidenceEpoch,
+            consentEpoch: epochs.consentEpoch,
+          }),
+          generation: {
+            id: "generation-1",
+            evidenceEpoch: epochs.evidenceEpoch,
+            consentEpoch: epochs.consentEpoch,
+            manifestDigest: SEMANTIC_FIXTURE_FINGERPRINT,
+            modelId: "jev-pinned",
+            rubricVersion: 1,
+            scoringVersion: 1,
+            sourceIdentity: semanticSourceIdentityFixture({
+              collectionId: stored.id,
+              collectionRevision: 0,
+              evidenceEpoch: epochs.evidenceEpoch,
+              consentEpoch: epochs.consentEpoch,
+            }),
+            signalScope: "description-only",
+            publishedAt: "2026-01-01T00:02:00.000Z",
+          },
+        })
+      ).outcome,
+    ).toBe("not-authorized");
+    expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
+    expect(stored.semanticRedundancy.consentEpoch).toBe(1);
+    expect(stored.semanticRedundancy.authorization?.state).toBe("active");
+    expect(stored.semanticRedundancy.publishedGeneration).toMatchObject({ id: "generation-0" });
+  });
+
+  test("factual-weight invalidation advances its own collection epoch without changing semantic epochs", async () => {
+    let stored = withActiveSemanticRefresh(collection());
+    const storage: CollectionReader & CollectionPersistence = {
+      loadCollection: () => Promise.resolve(structuredClone(stored)),
+      saveCollection: (next) => {
+        stored = structuredClone(next);
+        return Promise.resolve();
+      },
+    };
+    const mutations = createCollectionMutationService({ storageService: storage });
+    const semantic = createSemanticRedundancyStateService({ collectionMutationService: mutations });
+    const first = await semantic.invalidateForFactualWeights("b".repeat(64));
+    expect(first.outcome).toBe("accepted");
+    expect(stored.semanticRedundancy.factualWeightsEpoch).toBe(1);
+    expect(stored.semanticRedundancy.factualWeightsFingerprint).toBe("b".repeat(64));
+    expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
+    expect(stored.semanticRedundancy.consentEpoch).toBe(0);
+    expect(stored.semanticRedundancy.authorization?.state).toBe("revoked");
+    expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
+    const revisionAfterFirst = stored.revision;
+
+    await semantic.invalidateForFactualWeights("b".repeat(64));
+    expect(stored.revision).toBe(revisionAfterFirst);
+    await semantic.invalidateForFactualWeights("a".repeat(64));
+    expect(stored.semanticRedundancy.factualWeightsEpoch).toBe(2);
+    expect(stored.semanticRedundancy.factualWeightsFingerprint).toBe("a".repeat(64));
+  });
+
+  test("reconciles mixed cached signals against each pair's source dependencies", async () => {
+    let stored = collectionWithSemanticPairs();
+    const storage: CollectionReader & CollectionPersistence = {
+      loadCollection: () => Promise.resolve(structuredClone(stored)),
+      saveCollection: (next) => {
+        stored = structuredClone(next);
+        return Promise.resolve();
+      },
+    };
+    const mutations = createCollectionMutationService({ storageService: storage });
+    const initialEpoch = stored.semanticRedundancy.evidenceEpoch;
+
+    await mutations.mutate(
+      { operation: "game.note.set", trigger: "owner", gameIds: ["game-a"] },
+      (candidate) => {
+        const game = candidate.games.find(({ id }) => id === "game-a")!;
+        // Identical text is still a new source version and invalidates dependent requests.
+        if (game.ownerNote.state !== "present") throw new Error("Expected a present owner note");
+        const note = game.ownerNote;
+        game.ownerNote = {
+          state: "present",
+          version: note.version + 1,
+          updatedAt: note.updatedAt,
+          text: note.text,
+        };
+        return { changed: true, value: undefined };
+      },
+    );
+    expect(stored.semanticRedundancy.evidenceEpoch).toBe(initialEpoch + 1);
+    expect(stored.semanticRedundancy.authorization?.state).toBe("revoked");
+    expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
+    expect(stored.semanticRedundancy.pairJudgments).toMatchObject([
+      {
+        gameA: "game-a",
+        gameB: "game-b",
+        description: { status: "scored" },
+        ownerNote: null,
+      },
+      {
+        gameA: "game-b",
+        gameB: "game-c",
+        description: { status: "scored" },
+        ownerNote: { status: "scored" },
+      },
+    ]);
+
+    const semantic = createSemanticRedundancyStateService({ collectionMutationService: mutations });
+    expect(
+      (
+        await semantic.checkpointJudgments({
+          expected: { evidenceEpoch: initialEpoch, consentEpoch: 0 },
+          authorizationId: "authorization-1",
+          judgments: [
+            scoredPair(
+              semanticGame("game-a", "A", "Description A"),
+              semanticGame("game-b", "B", "Description B"),
+              "description-only",
+            ),
+          ],
+        })
+      ).outcome,
+    ).toBe("stale");
+
+    await mutations.mutate(
+      { operation: "game.bgg.refresh", trigger: "owner", gameIds: ["game-b"] },
+      (candidate) => {
+        candidate.games.find(({ id }) => id === "game-b")!.bggData!.description =
+          "Changed description B";
+        return { changed: true, value: undefined };
+      },
+    );
+    expect(stored.semanticRedundancy.pairJudgments).toMatchObject([
+      {
+        gameA: "game-b",
+        gameB: "game-c",
+        description: null,
+        ownerNote: { status: "scored" },
+      },
+    ]);
+
+    await mutations.mutate(
+      { operation: "game.ownership.set", trigger: "owner", gameIds: ["game-c"] },
+      (candidate) => {
+        candidate.games.find(({ id }) => id === "game-c")!.ownership = "previously-owned";
+        return { changed: true, value: undefined };
+      },
+    );
+    expect(stored.semanticRedundancy.pairJudgments).toHaveLength(1);
+    const afterOwnershipEpoch = stored.semanticRedundancy.evidenceEpoch;
+
+    await mutations.mutate(
+      { operation: "game.rate", trigger: "owner", gameIds: ["game-c"] },
+      (candidate) => {
+        candidate.games.find(({ id }) => id === "game-c")!.bggData!.communityRating = 8;
+        return { changed: true, value: undefined };
+      },
+    );
+    expect(stored.semanticRedundancy.evidenceEpoch).toBe(afterOwnershipEpoch + 1);
+    expect(stored.semanticRedundancy.pairJudgments).toHaveLength(1);
+
+    await mutations.mutate(
+      { operation: "game.remove", trigger: "owner", gameIds: ["game-b"] },
+      (candidate) => {
+        candidate.games = candidate.games.filter(({ id }) => id !== "game-b");
+        return { changed: true, value: undefined };
+      },
+    );
+    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
+
+    const restarted = createCollectionMutationService({ storageService: storage });
+    const reopened = await restarted.mutate(
+      { operation: "test.read", trigger: "test" },
+      (candidate) => ({
+        changed: false,
+        value: candidate.semanticRedundancy.pairJudgments,
+      }),
+    );
+    expect(reopened.value).toEqual([]);
+  });
+
+  test("revoking cached owner-note use purges D and shared C while retaining C-only scores", async () => {
+    let stored = collectionWithSemanticPairs();
+    const storage: CollectionReader & CollectionPersistence = {
+      loadCollection: () => Promise.resolve(structuredClone(stored)),
+      saveCollection: (next) => {
+        stored = structuredClone(next);
+        return Promise.resolve();
+      },
+    };
+    const mutations = createCollectionMutationService({ storageService: storage });
+    const semantic = createSemanticRedundancyStateService({ collectionMutationService: mutations });
+    const result = await semantic.updateSettings(
+      { evidenceEpoch: 0, consentEpoch: 0 },
+      {
+        enabled: true,
+        weights: { factual: 7, description: 5, ownerNote: 10 },
+        cachedOwnerNoteUse: false,
+      },
+    );
+    expect(result.outcome).toBe("accepted");
+    expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
+    expect(stored.semanticRedundancy.consentEpoch).toBe(1);
+    expect(stored.semanticRedundancy.pairJudgments).toMatchObject([
+      {
+        gameA: "game-a",
+        gameB: "game-b",
+        description: { status: "scored" },
+        ownerNote: null,
+      },
+      {
+        gameA: "game-b",
+        gameB: "game-c",
+        description: { status: "scored" },
+        ownerNote: null,
+      },
+    ]);
   });
 
   test("isolates rejected and invalid candidates from active state", async () => {
@@ -155,7 +968,7 @@ describe("CollectionMutationService", () => {
     await expect(
       service.mutate({ operation: "axis.create", trigger: "owner" }, (candidate) => {
         candidate.name = "";
-        candidate.schemaVersion = 99 as 8;
+        candidate.schemaVersion = 99 as 9;
         return { changed: true, value: undefined };
       }),
     ).rejects.toThrow();

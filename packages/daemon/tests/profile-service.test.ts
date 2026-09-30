@@ -203,6 +203,197 @@ describe("ProfileService", () => {
     expect(computations).toBe(5);
   });
 
+  test("does not serve a persisted Profile after a note change on restart", async () => {
+    const ctx = createTestApp();
+    const created = await ctx.gameService.addGame({ name: "Note-dependent source" });
+    let computations = 0;
+    let timestamp = 0;
+    const service = createProfileService({
+      storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
+      displayedFitnessService: {
+        ...ctx.displayedFitnessService,
+        async listGamesFromSnapshot(snapshot, options) {
+          computations += 1;
+          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+      },
+      now: () => `2026-08-28T00:00:0${timestamp++}.000Z`,
+    });
+
+    const beforeNote = await service.getProfile();
+    expect(beforeNote.status).toBe("available");
+    const oldCache = await ctx.storageService.loadProfile();
+    if (!oldCache) throw new Error("Expected Profile cache before note change");
+    expect(computations).toBe(1);
+
+    const changed = await ctx.ownerGameNoteService.set(created.game.id, {
+      commandId: "44000000-0000-4000-8000-000000000011",
+      expectedVersion: 0,
+      text: "A private note that must not enter Profile output",
+    });
+    expect(changed.ok).toBe(true);
+
+    // Constructing a new service exercises the persisted-cache path as after restart.
+    const restartedService = createProfileService({
+      storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
+      displayedFitnessService: {
+        ...ctx.displayedFitnessService,
+        async listGamesFromSnapshot(snapshot, options) {
+          computations += 1;
+          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+      },
+      now: () => `2026-08-28T00:00:0${timestamp++}.000Z`,
+    });
+    const afterNote = await restartedService.getProfile();
+    expect(afterNote.status).toBe("available");
+    expect(computations).toBe(2);
+    const currentCache = await ctx.storageService.loadProfile();
+    if (!currentCache) throw new Error("Expected refreshed Profile cache");
+    expect(currentCache.publicationIdentity.source.collectionRevision).toBeGreaterThan(
+      oldCache.publicationIdentity.source.collectionRevision,
+    );
+    expect(currentCache.computedAt).not.toBe(oldCache.computedAt);
+    expect(JSON.stringify(afterNote)).not.toContain("private note");
+  });
+
+  test("serializes an in-flight Profile write before an accepted note change", async () => {
+    const ctx = createTestApp();
+    const created = await ctx.gameService.addGame({ name: "Concurrent note source" });
+    let releaseComputation!: () => void;
+    let computationStarted!: () => void;
+    const release = new Promise<void>((resolve) => (releaseComputation = resolve));
+    const started = new Promise<void>((resolve) => (computationStarted = resolve));
+    let computations = 0;
+    const service = createProfileService({
+      storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
+      displayedFitnessService: {
+        ...ctx.displayedFitnessService,
+        async listGamesFromSnapshot(snapshot, options) {
+          computations += 1;
+          computationStarted();
+          await release;
+          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+      },
+    });
+
+    const pendingProfile = service.getProfile();
+    await started;
+    let noteMutationFinished = false;
+    const pendingNote = ctx.ownerGameNoteService
+      .set(created.game.id, {
+        commandId: "44000000-0000-4000-8000-000000000012",
+        expectedVersion: 0,
+        text: "Concurrent note change",
+      })
+      .then((result) => {
+        noteMutationFinished = true;
+        return result;
+      });
+    await Promise.resolve();
+    expect(noteMutationFinished).toBe(false);
+
+    releaseComputation();
+    expect((await pendingProfile).status).toBe("available");
+    expect((await pendingNote).ok).toBe(true);
+    expect(noteMutationFinished).toBe(true);
+    expect(computations).toBe(1);
+
+    // The serialized write-before-note order leaves a cache for the prior revision;
+    // a subsequent process must reject it rather than return it as current.
+    const restartedService = createProfileService({
+      storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
+      displayedFitnessService: {
+        ...ctx.displayedFitnessService,
+        async listGamesFromSnapshot(snapshot, options) {
+          computations += 1;
+          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+      },
+    });
+    expect((await restartedService.getProfile()).status).toBe("available");
+    expect(computations).toBe(2);
+  });
+
+  test("recomputes a persisted Profile when semantic consent changes", async () => {
+    const ctx = createTestApp();
+    let computations = 0;
+    const service = createProfileService({
+      storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
+      displayedFitnessService: {
+        ...ctx.displayedFitnessService,
+        async listGamesFromSnapshot(snapshot, options) {
+          computations += 1;
+          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+      },
+    });
+
+    expect((await service.getProfile()).status).toBe("available");
+    const oldCache = await ctx.storageService.loadProfile();
+    if (!oldCache) throw new Error("Expected Profile cache before consent change");
+    const collection = await ctx.storageService.loadCollection();
+    collection.semanticRedundancy.consentEpoch += 1;
+    collection.revision += 1;
+    await ctx.storageService.saveCollection(collection);
+
+    // A new service models process restart; old profile.json must fail source identity.
+    const restartedService = createProfileService({
+      storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
+      displayedFitnessService: {
+        ...ctx.displayedFitnessService,
+        async listGamesFromSnapshot(snapshot, options) {
+          computations += 1;
+          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+      },
+    });
+    expect((await restartedService.getProfile()).status).toBe("available");
+    expect(computations).toBe(2);
+    const currentCache = await ctx.storageService.loadProfile();
+    if (!currentCache) throw new Error("Expected refreshed Profile cache");
+    expect(currentCache.publicationIdentity.source.collectionRevision).toBeGreaterThan(
+      oldCache.publicationIdentity.source.collectionRevision,
+    );
+  });
+
+  test("keeps private semantic collection state for snapshot fitness without exposing it", async () => {
+    const ctx = createTestApp();
+    await ctx.gameService.addGame({ name: "Factual Profile source" });
+    const enabled = await jsonRequest(ctx.app, "PATCH", "/api/redundancy/settings", {
+      enabled: true,
+    });
+    expect(enabled.status).toBe(200);
+
+    let snapshotCollectionHadSemanticState = false;
+    const profileService = createProfileService({
+      storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
+      displayedFitnessService: {
+        ...ctx.displayedFitnessService,
+        async listGamesFromSnapshot(snapshot, options) {
+          snapshotCollectionHadSemanticState =
+            "semanticRedundancy" in snapshot.collection &&
+            snapshot.collection.semanticRedundancy !== undefined;
+          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+      },
+    });
+
+    const result = await profileService.getProfile();
+    expect(result.status).toBe("available");
+    expect(snapshotCollectionHadSemanticState).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("semanticRedundancy");
+    expect(ctx.fileOps.files.get("/test/data/profile.json")).not.toContain("semanticRedundancy");
+  });
+
   test("discards older and malformed attention Profile caches", async () => {
     const ctx = createTestApp();
     const created = await ctx.gameService.addGame({ name: "Unplayed intention" });

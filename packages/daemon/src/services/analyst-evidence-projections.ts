@@ -719,6 +719,22 @@ function candidateConfounders(
     );
 }
 
+function profileGameEvidence(game: {
+  gameId: string;
+  gameName: string;
+  currentFitness: number;
+  vetoed: boolean;
+}) {
+  // Similarity readiness is useful to the Profile calculation, but is not
+  // authorized evidence for Analyst projections.
+  return {
+    gameId: game.gameId,
+    gameName: game.gameName,
+    currentFitness: game.currentFitness,
+    vetoed: game.vetoed,
+  };
+}
+
 function profileSources(
   profile: CollectionProfile,
   gamesById: ReadonlyMap<string, Game>,
@@ -761,7 +777,11 @@ function profileSources(
         entityId: null,
         name: classLabel,
         entityAssociations: [],
-        comparatorCohort: result.comparator,
+        comparatorCohort: {
+          gameCount: result.comparator.gameCount,
+          meanCurrentFitness: result.comparator.meanCurrentFitness,
+          games: result.comparator.games.map(profileGameEvidence),
+        },
         support: null,
         dispersion: null,
         supportingGames: [],
@@ -788,14 +808,18 @@ function profileSources(
           entityClass,
           entityId: entity.entityId,
           name: entity.name,
-          entityAssociations: entity.games,
-          comparatorCohort: result.comparator,
+          entityAssociations: entity.games.map(profileGameEvidence),
+          comparatorCohort: {
+            gameCount: result.comparator.gameCount,
+            meanCurrentFitness: result.comparator.meanCurrentFitness,
+            games: result.comparator.games.map(profileGameEvidence),
+          },
           support: entity.support,
           dispersion: {
             populationStandardDeviation: entity.populationStandardDeviation,
             range: entity.range,
           },
-          supportingGames: entity.games,
+          supportingGames: entity.games.map(profileGameEvidence),
           exclusions: result.exclusions,
           activeIntentions,
           evidenceWarnings: result.refreshWarnings,

@@ -43,6 +43,7 @@ export interface DecodedStoredSource<T extends RevisionedSourceData = Revisioned
   stored: Record<string, unknown>;
   revision: number;
   migrated: boolean;
+  redundancyWeightsMigrated?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -63,10 +64,31 @@ function parseSource(kind: RevisionedSourceKind, value: unknown): RevisionedSour
     case "niche-settings":
       return NicheSettingsSchema.parse(value);
     case "redundancy-settings":
-      return RedundancySettingsSchema.parse(value);
+      return RedundancySettingsSchema.parse(normalizeRedundancySettings(value));
     case "shelf-config":
       return ShelfConfigurationSchema.parse(value);
   }
+}
+
+/** Remove the historical personal-axis weight while retaining the factual ratio. */
+function normalizeRedundancySettings(value: unknown): unknown {
+  if (!isRecord(value) || !isRecord(value.componentWeights)) return value;
+  const {
+    binary,
+    continuous,
+    personalAxes: _personalAxes,
+    ...unknownWeights
+  } = value.componentWeights;
+  void _personalAxes;
+  const fallback = binary === 0 && continuous === 0;
+  return {
+    ...value,
+    componentWeights: {
+      ...unknownWeights,
+      binary: fallback ? 4 / 7 : binary,
+      continuous: fallback ? 3 / 7 : continuous,
+    },
+  };
 }
 
 function parseDefault(kind: RevisionedSourceKind, now: string): RevisionedSourceData {
@@ -105,6 +127,13 @@ export function decodeStoredSource(kind: RevisionedSourceKind, raw: unknown): De
     data = parseSource(kind, sourceValue);
   }
 
+  const redundancyWeightsMigrated =
+    kind === "redundancy-settings" &&
+    isRecord(sourceValue.componentWeights) &&
+    (Object.hasOwn(sourceValue.componentWeights, "personalAxes") ||
+      ((sourceValue.componentWeights.binary as number) === 0 &&
+        (sourceValue.componentWeights.continuous as number) === 0));
+
   // This also detects old-field removal, defaults applied by schemas, tournament
   // migration, and stripped non-domain metadata. Revisionless files start at 0;
   // already-versioned files advance once if the accepted stored representation
@@ -114,7 +143,13 @@ export function decodeStoredSource(kind: RevisionedSourceKind, raw: unknown): De
   if (hasRevision && normalized) revision = nextSourceRevision(revision);
 
   const stored = { ...(data as unknown as Record<string, unknown>), revision };
-  return { data, stored, revision, migrated };
+  return {
+    data,
+    stored,
+    revision,
+    migrated,
+    ...(redundancyWeightsMigrated ? { redundancyWeightsMigrated: true } : {}),
+  };
 }
 
 function nextSourceRevision(revision: number): number {

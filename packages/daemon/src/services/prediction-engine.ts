@@ -393,6 +393,7 @@ export function computePredictedFitness(
         hypotheticalScore,
         predictionMeta,
         redundancyAdjustment: null,
+        redundancySimilarityInfo: { status: "disabled", generationId: null },
       }
     : {
         score: combinedCount > 0 ? score : 0,
@@ -404,6 +405,7 @@ export function computePredictedFitness(
         hypotheticalScore: null,
         predictionMeta,
         redundancyAdjustment: null,
+        redundancySimilarityInfo: { status: "disabled", generationId: null },
       };
 
   return {

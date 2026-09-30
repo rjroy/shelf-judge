@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type {
-  CollectionV8,
+  Collection,
   DurableGame,
   GameDetailWithPurchaseUtilization,
   GameWithPurchaseUtilization,
@@ -51,6 +51,9 @@ describe("game projections", () => {
     }
     expect(detail.displayScore).toBe(listEntry.displayScore);
     expect(detail.purchaseUtilization).toEqual(listEntry.purchaseUtilization);
+    expect(detail.score?.redundancySimilarityInfo).toEqual(
+      listEntry.score?.redundancySimilarityInfo,
+    );
   });
 
   test("physically removes owner notes from every broad game-bearing shape", async () => {
@@ -187,15 +190,40 @@ describe("game projections", () => {
       profileSourceIdentity({ collection: sourceB, ...commonSources }),
     );
     expect(JSON.stringify(sourceA)).not.toContain(SENTINEL);
+    expect(sourceA).not.toHaveProperty("semanticRedundancy");
+  });
+
+  test("omits private semantic consent, judgments, and generation from Profile source", async () => {
+    const context = createTestApp();
+    const collection = await context.storageService.loadCollection();
+    const projected = projectProfileCollectionSource({
+      ...collection,
+      semanticRedundancy: {
+        ...collection.semanticRedundancy,
+        authorization: {
+          id: "PRIVATE-AUTHORIZATION-SENTINEL",
+          manifestDigest: "a".repeat(64),
+          evidenceEpoch: 0,
+          consentEpoch: 0,
+          pairCount: 0,
+          notePairCount: 0,
+          expiresAt: "2026-09-29T00:00:00.000Z",
+          state: "active" as const,
+        },
+      },
+    });
+
+    expect(projected).not.toHaveProperty("semanticRedundancy");
+    expect(JSON.stringify(projected)).not.toContain("PRIVATE-AUTHORIZATION-SENTINEL");
   });
 
   test("prepares a complete-note detail snapshot without exposing notes to computation inputs", async () => {
     const context = createTestApp();
     const game = (await context.gameService.addGame({ name: "Detail Game" })).game;
     const collection = await context.storageService.loadCollection();
-    const durable: CollectionV8 = {
+    const durable: Collection = {
       ...collection,
-      schemaVersion: 8,
+      schemaVersion: 9,
       games: [
         {
           ...game,
@@ -221,9 +249,9 @@ describe("game projections", () => {
     const context = createTestApp();
     const game = (await context.gameService.addGame({ name: "Serialized Detail" })).game;
     const collection = await context.storageService.loadCollection();
-    const durable: CollectionV8 = {
+    const durable: Collection = {
       ...collection,
-      schemaVersion: 8,
+      schemaVersion: 9,
       games: [
         {
           ...game,

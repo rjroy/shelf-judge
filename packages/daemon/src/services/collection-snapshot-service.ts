@@ -5,7 +5,7 @@ import {
   NichePositionResponseSchema,
   PurchaseUtilizationResultSchema,
   type CollectionSnapshot,
-  type CollectionProfileCollectionSource,
+  type Collection,
   type GameWithScore,
   type GameWithPurchaseUtilization,
   type NicheSettings,
@@ -20,6 +20,7 @@ import type { PurchaseUtilizationService } from "./purchase-utilization-service.
 import { computeCapacityFromInputs } from "./capacity-service.js";
 import {
   ownedPredictedCandidates,
+  semanticFallbackStatus,
   withRedundancyAdjustmentsForVariants,
 } from "./displayed-fitness-service.js";
 import { computeNichePositions } from "./niche-engine.js";
@@ -29,15 +30,18 @@ import { createLogger, type Logger } from "./logger.js";
 import { toErrorMessage } from "@shelf-judge/shared";
 import type { SourceVector } from "./source-vector.js";
 import { createCollectionSnapshotTimePolicy } from "./collection-snapshot-time-policy.js";
+import type { RedundancyPairTable } from "./redundancy-engine.js";
+import { canonicalSha256 } from "./profile-source-coordinator.js";
 
 interface CapturedInputs {
   sourceVector: SourceVector;
   token: number;
   serverId: string;
-  collection: CollectionProfileCollectionSource;
+  collection: Collection;
   tournament: TournamentData;
   predictionSettings?: PredictionSettings;
   redundancySettings?: RedundancySettings;
+  redundancySimilarityStatus?: "disabled" | "factual" | "not-ready" | "stale";
   nicheSettings?: NicheSettings;
   shelfConfig?: Awaited<ReturnType<StorageService["loadShelfConfig"]>>;
 }
@@ -67,6 +71,18 @@ export interface CollectionSnapshotServiceDeps {
   purchaseUtilizationService: PurchaseUtilizationService;
   logger?: Logger;
   clock?: { now(): number };
+  /** Test seam for a caller-validated complete generation; production remains factual-only. */
+  resolveRedundancyPairTable?: (input: {
+    universe: readonly GameWithScore[];
+    settings: RedundancySettings;
+    /** Captured source context for a pure resolver; no storage access is required. */
+    collection: Collection;
+    tournament: TournamentData;
+    predictionSettings: PredictionSettings;
+    predictionSettingsHash: string;
+    /** Captured authoritative vector used to validate publication freshness. */
+    sourceVector?: SourceVector;
+  }) => RedundancyPairTable | undefined;
 }
 
 function errorReason(error: unknown): string {
@@ -223,7 +239,13 @@ export function createCollectionSnapshotService(
           ? { predictionSettings: predictionResult.value }
           : {}),
         ...(redundancyResult.status === "fulfilled"
-          ? { redundancySettings: redundancyResult.value }
+          ? {
+              redundancySettings: redundancyResult.value,
+              redundancySimilarityStatus: semanticFallbackStatus(
+                collectionResult.value,
+                redundancyResult.value.enabled,
+              ),
+            }
           : {}),
         ...(nicheResult.status === "fulfilled" ? { nicheSettings: nicheResult.value } : {}),
         ...(shelfResult.status === "fulfilled" && !optionalFailures.has("shelf-config")
@@ -347,7 +369,7 @@ export function createCollectionSnapshotService(
       let redundancyMode: "off" | "annotation" | "integrated" = input.redundancySettings?.enabled
         ? input.redundancySettings.stage
         : "off";
-      if (input.redundancySettings?.enabled && predicted) {
+      if (input.redundancySettings?.enabled && predicted && input.predictionSettings) {
         try {
           const adjusted = withRedundancyAdjustmentsForVariants(
             ordinary.filter((entry) => entry.game.ownership !== "previously-owned"),
@@ -356,6 +378,18 @@ export function createCollectionSnapshotService(
             input.collection,
             input.tournament,
             predictedCandidates,
+            deps.resolveRedundancyPairTable?.({
+              universe: predictedCandidates.filter(
+                ({ score }) => score !== null && !score.vetoed && score.score > 0,
+              ),
+              settings: input.redundancySettings,
+              collection: input.collection,
+              tournament: input.tournament,
+              predictionSettings: input.predictionSettings,
+              predictionSettingsHash: canonicalSha256(input.predictionSettings),
+              sourceVector: input.sourceVector,
+            }),
+            input.redundancySimilarityStatus ?? "factual",
           );
           for (const entry of [...adjusted.ordinary, ...adjusted.predicted]) {
             if (entry.score !== null) FitnessResultResponseSchema.parse(entry.score);
@@ -472,6 +506,13 @@ export function createCollectionSnapshotService(
             displayScore: ordinaryEntry.displayScore,
             purchaseUtilization: ordinaryEntry.purchaseUtilization,
           },
+          redundancySimilarityInfo: predictedEntry?.score?.redundancySimilarityInfo ??
+            ordinaryEntry.score?.redundancySimilarityInfo ?? {
+              status:
+                input.redundancySimilarityStatus ??
+                (input.redundancySettings?.enabled ? "factual" : "disabled"),
+              generationId: null,
+            },
           predicted: predictedEntry
             ? {
                 availability: "available" as const,

@@ -14,6 +14,7 @@ import {
   summarizeDerivedAxisConfiguration,
   validateDerivedAxisPayload,
 } from "../src/derived-axis-registry";
+import { createInitialSemanticRedundancyState } from "../src/validation";
 import { AXIS_VALIDATION_CODES } from "../src/errors";
 import { createInitialEntityMetadata } from "../src/useful-profile-source";
 import type {
@@ -932,7 +933,7 @@ describe("current-axis helpers", () => {
 
   test("supports the active versioned persisted collection contract", () => {
     const collection: Collection = {
-      schemaVersion: 8,
+      schemaVersion: 9,
       revision: 0,
       id: "collection",
       name: "Collection",
@@ -947,10 +948,11 @@ describe("current-axis helpers", () => {
       attentionDispositions: [],
       commandReceipts: [],
       entertainmentBenchmark: null,
+      semanticRedundancy: createInitialSemanticRedundancyState(),
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-01T00:00:00Z",
     };
-    expect(collection.schemaVersion).toBe(8);
+    expect(collection.schemaVersion).toBe(9);
     expect(collection.axes).toEqual([personal, tournament, derived, disabled]);
   });
 });

@@ -399,7 +399,7 @@ function makeUsefulCollection(
   intentions: Collection["intentions"] = [],
 ): CollectionProfileCollectionSource {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     revision: 1,
     id: "collection",
     name: "Collection",

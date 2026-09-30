@@ -5,6 +5,7 @@ import {
   ExactRational,
   calculatePurchaseUtilization,
   createInitialEntityMetadata,
+  createInitialSemanticRedundancyState,
   type Collection,
   type DurableGame,
   type PurchaseUtilizationResult,
@@ -84,7 +85,7 @@ function game(overrides: Partial<DurableGame> & { id: string; name?: string }): 
 
 function collection(games: DurableGame[], overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     revision: 1,
     id: "collection",
     name: "Collection",
@@ -95,6 +96,7 @@ function collection(games: DurableGame[], overrides: Partial<Collection> = {}): 
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
+    semanticRedundancy: createInitialSemanticRedundancyState(),
     createdAt: observedAt,
     updatedAt: observedAt,
     ...overrides,

@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { Collection, DurableGame, GameWithPurchaseUtilization } from "@shelf-judge/shared";
-import { createInitialEntityMetadata } from "@shelf-judge/shared";
+import {
+  createInitialEntityMetadata,
+  createInitialSemanticRedundancyState,
+} from "@shelf-judge/shared";
 import {
   canonicalUtilizationCases,
   componentContract,
@@ -59,7 +62,7 @@ describe("canonical purchase utilization response parity", () => {
       updatedAt: UTILIZATION_OBSERVED_AT,
     }));
     const collection: Collection = {
-      schemaVersion: 8,
+      schemaVersion: 9,
       revision: 0,
       id: "parity-collection",
       name: "Parity",
@@ -78,6 +81,7 @@ describe("canonical purchase utilization response parity", () => {
       ],
       games,
       entertainmentBenchmark: canonicalUtilizationCases[0].input.entertainmentBenchmark,
+      semanticRedundancy: createInitialSemanticRedundancyState(),
       intentions: [],
       attentionDispositions: [],
       commandReceipts: [],
@@ -120,6 +124,7 @@ describe("canonical purchase utilization response parity", () => {
       suggestedPlayerPoll: fixture.input.suggestedPlayerPoll,
       fitness: { source: "current-fitness", observedAt: null },
     });
+    expect(fixture.result.evidence).not.toHaveProperty("semanticRedundancy");
   });
 
   test("retains component-specific reasons instead of broadening unavailable results", () => {

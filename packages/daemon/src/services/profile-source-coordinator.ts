@@ -22,6 +22,11 @@ export interface ProfileSourceCoordinator {
 const coordinators = new WeakMap<object, ProfileSourceCoordinator>();
 const activeCoordinator = new AsyncLocalStorage<ProfileSourceCoordinator>();
 
+/** Run work without inheriting a coordinator token from the caller's async context. */
+export function runOutsideProfileSourceCoordinator<Value>(operation: () => Value): Value {
+  return activeCoordinator.exit(operation);
+}
+
 function canonicalize(value: unknown): string {
   if (value === null || typeof value === "string" || typeof value === "boolean") {
     return JSON.stringify(value);

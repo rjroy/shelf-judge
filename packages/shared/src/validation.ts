@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { parseAmountInput } from "./amount";
 import { getPreferenceCurveInvalidFields } from "./curve-math";
 import {
@@ -27,6 +28,8 @@ import type {
   AttentionDisposition,
   ToleranceLevel,
   JsonValue,
+  SemanticRedundancyState,
+  SemanticDisclosureManifest,
 } from "./types";
 import { DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY } from "./collection-profile-entity-policy";
 import { OwnerGameNoteSchema } from "./owner-game-note";
@@ -95,7 +98,7 @@ export {
   CollectionProfileResultSchema,
 };
 
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 8 as const;
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 9 as const;
 export const CURRENT_PROFILE_CONTRACT_VERSION = 11 as const;
 export const CURRENT_PROFILE_ALGORITHM_VERSION = 13 as const;
 const AmountInputSchema = z.string().superRefine((value, context) => {
@@ -1322,7 +1325,661 @@ export const AttentionCandidateEvaluationSchema = z
   })
   .strict();
 
-export const CollectionSchema = CollectionSchemaV8;
+const SafeEpochSchema = z.number().int().safe().min(0);
+const SemanticWeightSchema = z.number().finite().min(0).max(100);
+const SemanticFingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
+const SemanticSignalScopeSchema = z.enum([
+  "description-only",
+  "owner-notes-only",
+  "description-and-owner-notes",
+]);
+const SemanticSourceIdentitySchema = z
+  .object({
+    collectionId: z.string().min(1).max(200),
+    collectionSchemaVersion: z.literal(9),
+    collectionRevision: SafeEpochSchema,
+    evidenceEpoch: SafeEpochSchema,
+    consentEpoch: SafeEpochSchema,
+    factualWeightsEpoch: SafeEpochSchema,
+    factualWeightsFingerprint: SemanticFingerprintSchema.nullable(),
+    tournamentHash: SemanticFingerprintSchema,
+    predictionSettingsHash: SemanticFingerprintSchema,
+    redundancySettingsHash: SemanticFingerprintSchema,
+  })
+  .strict();
+const SemanticManifestPairSchema = z
+  .object({
+    gameA: z.string().min(1).max(200),
+    gameB: z.string().min(1).max(200),
+    hasDescriptionA: z.boolean(),
+    hasDescriptionB: z.boolean(),
+    hasOwnerNoteA: z.boolean(),
+    hasOwnerNoteB: z.boolean(),
+    descriptionFingerprintA: SemanticFingerprintSchema.nullable(),
+    descriptionFingerprintB: SemanticFingerprintSchema.nullable(),
+    noteVersionA: SafeEpochSchema.nullable(),
+    noteVersionB: SafeEpochSchema.nullable(),
+  })
+  .strict()
+  .superRefine((pair, context) => {
+    if (pair.gameA >= pair.gameB)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["gameA"],
+        message: "Pair IDs must be canonical",
+      });
+    if (
+      pair.hasDescriptionA !== (pair.descriptionFingerprintA !== null) ||
+      pair.hasDescriptionB !== (pair.descriptionFingerprintB !== null)
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Description flags and frozen source references must agree",
+      });
+    if (
+      pair.hasOwnerNoteA !== (pair.noteVersionA !== null && pair.noteVersionA > 0) ||
+      pair.hasOwnerNoteB !== (pair.noteVersionB !== null && pair.noteVersionB > 0)
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Note flags and frozen note versions must agree",
+      });
+  });
+export function semanticDisclosureManifestDigest(
+  value: Omit<SemanticDisclosureManifest, "digest" | "id">,
+): string {
+  const canonicalIdentity = {
+    sourceIdentity: {
+      collectionId: value.sourceIdentity.collectionId,
+      collectionSchemaVersion: value.sourceIdentity.collectionSchemaVersion,
+      collectionRevision: value.sourceIdentity.collectionRevision,
+      evidenceEpoch: value.sourceIdentity.evidenceEpoch,
+      consentEpoch: value.sourceIdentity.consentEpoch,
+      factualWeightsEpoch: value.sourceIdentity.factualWeightsEpoch,
+      factualWeightsFingerprint: value.sourceIdentity.factualWeightsFingerprint,
+      tournamentHash: value.sourceIdentity.tournamentHash,
+      predictionSettingsHash: value.sourceIdentity.predictionSettingsHash,
+      redundancySettingsHash: value.sourceIdentity.redundancySettingsHash,
+    },
+    scoringVersion: value.scoringVersion,
+    signalScope: value.signalScope,
+    providerId: value.providerId,
+    modelId: value.modelId,
+    rubricVersion: value.rubricVersion,
+    budget: {
+      maxRequests: value.budget.maxRequests,
+      maxTokens: value.budget.maxTokens,
+      maxDurationMs: value.budget.maxDurationMs,
+    },
+    expiresAt: value.expiresAt,
+    eligibleGameIds: value.eligibleGameIds,
+    pairs: value.pairs.map((pair) => ({
+      gameA: pair.gameA,
+      gameB: pair.gameB,
+      hasDescriptionA: pair.hasDescriptionA,
+      hasDescriptionB: pair.hasDescriptionB,
+      hasOwnerNoteA: pair.hasOwnerNoteA,
+      hasOwnerNoteB: pair.hasOwnerNoteB,
+      descriptionFingerprintA: pair.descriptionFingerprintA,
+      descriptionFingerprintB: pair.descriptionFingerprintB,
+      noteVersionA: pair.noteVersionA,
+      noteVersionB: pair.noteVersionB,
+    })),
+  };
+  return createHash("sha256").update(JSON.stringify(canonicalIdentity), "utf8").digest("hex");
+}
+export const SemanticDisclosureManifestSchema = z
+  .object({
+    id: z.string().min(1).max(200),
+    digest: SemanticFingerprintSchema,
+    sourceIdentity: SemanticSourceIdentitySchema,
+    scoringVersion: z.number().int().safe().positive(),
+    signalScope: SemanticSignalScopeSchema,
+    providerId: z.string().min(1).max(200),
+    modelId: z.string().min(1).max(200),
+    rubricVersion: z.number().int().safe().positive(),
+    budget: z
+      .object({
+        maxRequests: z.number().int().safe().min(0).max(19_900),
+        maxTokens: SafeEpochSchema,
+        maxDurationMs: z.number().int().safe().positive(),
+      })
+      .strict(),
+    expiresAt: z.string().datetime({ offset: true }),
+    eligibleGameIds: z.array(z.string().min(1).max(200)).max(200),
+    pairs: z.array(SemanticManifestPairSchema).max(19_900),
+  })
+  .strict()
+  .superRefine((manifest, context) => {
+    const sortedIds = [...manifest.eligibleGameIds].sort();
+    if (
+      new Set(manifest.eligibleGameIds).size !== manifest.eligibleGameIds.length ||
+      manifest.eligibleGameIds.some((id, i) => id !== sortedIds[i])
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["eligibleGameIds"],
+        message: "Eligible game IDs must be unique and sorted",
+      });
+    const expectedPairs =
+      (manifest.eligibleGameIds.length * (manifest.eligibleGameIds.length - 1)) / 2;
+    if (manifest.pairs.length !== expectedPairs)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pairs"],
+        message: "Manifest must include the complete eligible unordered pair set",
+      });
+    const keys = manifest.pairs.map(({ gameA, gameB }) => `${gameA}\u0000${gameB}`);
+    if (new Set(keys).size !== keys.length || keys.some((key, i) => i > 0 && keys[i - 1] >= key))
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pairs"],
+        message: "Manifest pairs must be unique and canonically sorted",
+      });
+    if (
+      manifest.pairs.some(
+        ({ gameA, gameB }) =>
+          !manifest.eligibleGameIds.includes(gameA) || !manifest.eligibleGameIds.includes(gameB),
+      )
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pairs"],
+        message: "Manifest pair references must belong to its eligible set",
+      });
+    if (
+      manifest.digest !==
+      semanticDisclosureManifestDigest({
+        sourceIdentity: manifest.sourceIdentity,
+        scoringVersion: manifest.scoringVersion,
+        signalScope: manifest.signalScope,
+        providerId: manifest.providerId,
+        modelId: manifest.modelId,
+        rubricVersion: manifest.rubricVersion,
+        budget: manifest.budget,
+        expiresAt: manifest.expiresAt,
+        eligibleGameIds: manifest.eligibleGameIds,
+        pairs: manifest.pairs,
+      })
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["digest"],
+        message:
+          "Manifest digest must bind the complete source, signal, model, budget, expiry, and pair identity",
+      });
+  });
+const SemanticManifestDeliverySchema = z
+  .object({
+    manifestDigest: SemanticFingerprintSchema,
+    pageSize: z.number().int().safe().positive().max(500),
+    deliveredPageIndexes: z.array(z.number().int().safe().min(0)).max(40),
+    complete: z.boolean(),
+  })
+  .strict()
+  .superRefine((delivery, context) => {
+    if (
+      new Set(delivery.deliveredPageIndexes).size !== delivery.deliveredPageIndexes.length ||
+      delivery.deliveredPageIndexes.some(
+        (page, index, pages) => index > 0 && pages[index - 1] >= page,
+      )
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["deliveredPageIndexes"],
+        message: "Delivered page indexes must be unique and sorted",
+      });
+  });
+export const SemanticExecutionSchema = z
+  .object({
+    commandId: z.string().min(1).max(200),
+    manifestDigest: SemanticFingerprintSchema,
+    sourceIdentity: SemanticSourceIdentitySchema,
+    signalScope: SemanticSignalScopeSchema,
+    noteTransmissionAuthorized: z.boolean(),
+    cachedOwnerNoteUseAuthorized: z.boolean(),
+    status: z.enum([
+      "disclosed",
+      "running",
+      "completed",
+      "cached-only",
+      "cancelled",
+      "stale",
+      "failed",
+      "interrupted",
+    ]),
+    attemptCount: SafeEpochSchema,
+    completedPairCount: z.number().int().safe().min(0).max(19_900),
+    failedPairCount: z.number().int().safe().min(0).max(19_900),
+    deadlineAt: z.string().datetime({ offset: true }),
+    startedAt: z.string().datetime({ offset: true }).nullable(),
+    endedAt: z.string().datetime({ offset: true }).nullable(),
+  })
+  .strict();
+export const SemanticSignalRequestContextSchema = z.discriminatedUnion("kind", [
+  z
+    .object({ kind: z.literal("description-only"), descriptionRepresentationVersion: z.literal(1) })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("description-and-owner-notes"),
+      descriptionRepresentationVersion: z.literal(1),
+      ownerNoteRepresentationVersion: z.literal(1),
+      descriptionFingerprintA: SemanticFingerprintSchema,
+      descriptionFingerprintB: SemanticFingerprintSchema,
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal("owner-notes-only"), ownerNoteRepresentationVersion: z.literal(1) })
+    .strict(),
+]);
+const SemanticScoredJudgmentSchema = z
+  .object({
+    status: z.literal("scored"),
+    score: z.number().finite().min(0).max(1),
+    confidence: z.number().finite().min(0).max(1).nullable(),
+    modelId: z.string().min(1).max(200),
+    rubricVersion: z.number().int().safe().positive(),
+    sourceFingerprintA: SemanticFingerprintSchema,
+    sourceFingerprintB: SemanticFingerprintSchema,
+    noteVersionA: SafeEpochSchema.nullable(),
+    noteVersionB: SafeEpochSchema.nullable(),
+    requestContext: SemanticSignalRequestContextSchema,
+  })
+  .strict();
+const SemanticUnavailableJudgmentSchema = z
+  .object({
+    status: z.literal("unavailable"),
+    reason: z.enum(["missing-source", "insufficient-evidence"]),
+    modelId: z.string().min(1).max(200),
+    rubricVersion: z.number().int().safe().positive(),
+    sourceFingerprintA: SemanticFingerprintSchema,
+    sourceFingerprintB: SemanticFingerprintSchema,
+    requestContext: SemanticSignalRequestContextSchema,
+  })
+  .strict();
+const SemanticSignalJudgmentSchema = z.discriminatedUnion("status", [
+  SemanticScoredJudgmentSchema,
+  SemanticUnavailableJudgmentSchema,
+  z.object({ status: z.literal("pending") }).strict(),
+  z
+    .object({
+      status: z.literal("failed"),
+      reason: z.enum(["provider", "invalid-response", "budget"]),
+    })
+    .strict(),
+]);
+
+const SemanticPublishedSignalJudgmentSchema = z.discriminatedUnion("status", [
+  SemanticScoredJudgmentSchema,
+  SemanticUnavailableJudgmentSchema,
+]);
+
+export const SemanticPublishedPairOutcomeSchema = z
+  .object({
+    gameA: z.string().min(1).max(200),
+    gameB: z.string().min(1).max(200),
+    description: SemanticPublishedSignalJudgmentSchema.nullable(),
+    ownerNote: SemanticPublishedSignalJudgmentSchema.nullable(),
+  })
+  .strict()
+  .superRefine(({ gameA, gameB }, context) => {
+    if (gameA >= gameB)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["gameA"],
+        message: "Pair IDs must use canonical ascending order",
+      });
+  });
+
+export const SemanticRedundancyGenerationSchema = z
+  .object({
+    id: z.string().min(1).max(200),
+    evidenceEpoch: SafeEpochSchema,
+    consentEpoch: SafeEpochSchema,
+    manifestDigest: SemanticFingerprintSchema,
+    modelId: z.string().min(1).max(200),
+    rubricVersion: z.number().int().safe().positive(),
+    scoringVersion: z.number().int().safe().positive(),
+    sourceIdentity: SemanticSourceIdentitySchema,
+    signalScope: SemanticSignalScopeSchema,
+    eligibleGameIds: z.array(z.string().min(1).max(200)).max(200),
+    weights: z
+      .object({
+        factual: SemanticWeightSchema,
+        description: SemanticWeightSchema,
+        ownerNote: SemanticWeightSchema,
+      })
+      .strict(),
+    pairOutcomes: z.array(SemanticPublishedPairOutcomeSchema).max(19_900),
+    publishedAt: z.string().datetime({ offset: true }),
+  })
+  .strict()
+  .superRefine((generation, context) => {
+    // Feature data is not released before schema v9. Older v9 snapshots that
+    // contain a generation without this immutable set intentionally fail closed.
+    const sortedIds = [...generation.eligibleGameIds].sort();
+    if (
+      new Set(generation.eligibleGameIds).size !== generation.eligibleGameIds.length ||
+      generation.eligibleGameIds.some((id, index) => id !== sortedIds[index])
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["eligibleGameIds"],
+        message: "Eligible game IDs must be unique and sorted",
+      });
+    const expected = new Set<string>();
+    for (let i = 0; i < generation.eligibleGameIds.length; i += 1) {
+      for (let j = i + 1; j < generation.eligibleGameIds.length; j += 1) {
+        const [a, b] = [generation.eligibleGameIds[i], generation.eligibleGameIds[j]].sort();
+        expected.add(`${a}\u0000${b}`);
+      }
+    }
+    const actual = generation.pairOutcomes.map(({ gameA, gameB }) => `${gameA}\u0000${gameB}`);
+    if (
+      actual.length !== expected.size ||
+      new Set(actual).size !== actual.length ||
+      actual.some((key) => !expected.has(key))
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pairOutcomes"],
+        message: "Published outcomes must cover the exact eligible unordered pair set",
+      });
+  });
+
+export const SemanticRedundancyStateSchema = z
+  .object({
+    settings: z
+      .object({
+        enabled: z.boolean(),
+        weights: z
+          .object({
+            factual: SemanticWeightSchema,
+            description: SemanticWeightSchema,
+            ownerNote: SemanticWeightSchema,
+          })
+          .strict(),
+        cachedOwnerNoteUse: z.boolean(),
+      })
+      .strict(),
+    evidenceEpoch: SafeEpochSchema,
+    consentEpoch: SafeEpochSchema,
+    factualWeightsEpoch: SafeEpochSchema.default(0),
+    factualWeightsFingerprint: SemanticFingerprintSchema.nullable().default(null),
+    firstOptInInitialized: z.boolean(),
+    disclosure: z
+      .object({
+        id: z.string().min(1).max(200),
+        manifestDigest: SemanticFingerprintSchema,
+        evidenceEpoch: SafeEpochSchema,
+        consentEpoch: SafeEpochSchema,
+        pairCount: z.number().int().safe().min(0),
+        notePairCount: z.number().int().safe().min(0),
+        expiresAt: z.string().datetime({ offset: true }),
+      })
+      .strict()
+      .nullable(),
+    disclosureManifest: SemanticDisclosureManifestSchema.nullable().default(null),
+    manifestDelivery: SemanticManifestDeliverySchema.nullable().default(null),
+    authorization: z
+      .object({
+        id: z.string().min(1).max(200),
+        manifestDigest: SemanticFingerprintSchema,
+        evidenceEpoch: SafeEpochSchema,
+        consentEpoch: SafeEpochSchema,
+        pairCount: z.number().int().safe().min(0),
+        notePairCount: z.number().int().safe().min(0),
+        expiresAt: z.string().datetime({ offset: true }),
+        state: z.enum(["active", "consumed", "revoked"]),
+      })
+      .strict()
+      .nullable(),
+    execution: SemanticExecutionSchema.nullable().default(null),
+    pairJudgments: z
+      .array(
+        z
+          .object({
+            gameA: z.string().min(1),
+            gameB: z.string().min(1),
+            description: SemanticSignalJudgmentSchema.nullable(),
+            ownerNote: SemanticSignalJudgmentSchema.nullable(),
+          })
+          .strict()
+          .superRefine((pair, context) => {
+            if (pair.gameA >= pair.gameB)
+              context.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["gameA"],
+                message: "Pair IDs must use canonical ascending order",
+              });
+            const description = pair.description;
+            if (description?.status === "scored") {
+              const requestContext = description.requestContext;
+              const noteDependent = requestContext.kind === "description-and-owner-notes";
+              if (
+                requestContext.kind === "owner-notes-only" ||
+                (noteDependent
+                  ? description.noteVersionA === null ||
+                    description.noteVersionB === null ||
+                    description.noteVersionA === 0 ||
+                    description.noteVersionB === 0 ||
+                    description.sourceFingerprintA !== requestContext.descriptionFingerprintA ||
+                    description.sourceFingerprintB !== requestContext.descriptionFingerprintB
+                  : description.noteVersionA !== null || description.noteVersionB !== null)
+              )
+                context.addIssue({
+                  code: z.ZodIssueCode.custom,
+                  path: ["description"],
+                  message: "Description judgment request provenance is inconsistent",
+                });
+            }
+            const ownerNote = pair.ownerNote;
+            if (ownerNote?.status === "scored") {
+              const requestContext = ownerNote.requestContext;
+              if (
+                requestContext.kind === "description-only" ||
+                ownerNote.noteVersionA === null ||
+                ownerNote.noteVersionB === null ||
+                ownerNote.noteVersionA === 0 ||
+                ownerNote.noteVersionB === 0
+              )
+                context.addIssue({
+                  code: z.ZodIssueCode.custom,
+                  path: ["ownerNote"],
+                  message: "Owner-note judgment requires two versioned present notes",
+                });
+            }
+          }),
+      )
+      .max(19_900),
+    publishedGeneration: SemanticRedundancyGenerationSchema.nullable().default(null),
+  })
+  .strict()
+  .superRefine((state, context) => {
+    const ids = state.pairJudgments.map(({ gameA, gameB }) => `${gameA}\u0000${gameB}`);
+    if (new Set(ids).size !== ids.length)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pairJudgments"],
+        message: "Pair judgments must have unique unordered pair keys",
+      });
+    if (state.disclosure !== null && state.disclosure.notePairCount > state.disclosure.pairCount)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["disclosure", "notePairCount"],
+        message: "Note-pair count cannot exceed pair count",
+      });
+    if (
+      state.authorization !== null &&
+      state.authorization.notePairCount > state.authorization.pairCount
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["authorization", "notePairCount"],
+        message: "Note-pair count cannot exceed pair count",
+      });
+    const manifest = state.disclosureManifest;
+    if (manifest !== null) {
+      if (
+        state.disclosure === null ||
+        state.disclosure.manifestDigest !== manifest.digest ||
+        state.disclosure.pairCount !== manifest.pairs.length ||
+        state.disclosure.notePairCount !==
+          manifest.pairs.filter(
+            ({ hasOwnerNoteA, hasOwnerNoteB }) => hasOwnerNoteA && hasOwnerNoteB,
+          ).length
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["disclosureManifest"],
+          message: "Disclosure summary must bind to the complete frozen manifest",
+        });
+      if (
+        manifest.sourceIdentity.evidenceEpoch !== state.evidenceEpoch ||
+        manifest.sourceIdentity.consentEpoch !== state.consentEpoch
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["disclosureManifest", "sourceIdentity"],
+          message: "Manifest source identity must match current collection semantic epochs",
+        });
+    }
+    if (
+      state.manifestDelivery !== null &&
+      state.manifestDelivery.manifestDigest !== manifest?.digest
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["manifestDelivery"],
+        message: "Delivery progress must bind to the current immutable manifest",
+      });
+    if (
+      state.execution !== null &&
+      (manifest === null ||
+        state.execution.manifestDigest !== manifest.digest ||
+        JSON.stringify(state.execution.sourceIdentity) !==
+          JSON.stringify(manifest.sourceIdentity) ||
+        state.execution.signalScope !== manifest.signalScope ||
+        (state.execution.noteTransmissionAuthorized && manifest.signalScope === "description-only"))
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["execution"],
+        message: "Execution must be bound to one disclosed manifest and exact signal scope",
+      });
+    if (
+      state.execution !== null &&
+      manifest !== null &&
+      (state.execution.completedPairCount + state.execution.failedPairCount >
+        manifest.pairs.length ||
+        state.execution.attemptCount > manifest.budget.maxRequests)
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["execution"],
+        message: "Execution progress cannot exceed its disclosed pair or request budget",
+      });
+    const generation = state.publishedGeneration;
+    if (generation !== null) {
+      const keys = generation.pairOutcomes.map(({ gameA, gameB }) => `${gameA}\u0000${gameB}`);
+      if (
+        new Set(keys).size !== keys.length ||
+        keys.some((key, index) => index > 0 && keys[index - 1] >= key)
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["publishedGeneration", "pairOutcomes"],
+          message: "Published outcomes must be unique and canonically sorted",
+        });
+      if (
+        generation.evidenceEpoch !== generation.sourceIdentity.evidenceEpoch ||
+        generation.consentEpoch !== generation.sourceIdentity.consentEpoch
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["publishedGeneration", "sourceIdentity"],
+          message: "Generation epochs must match copied source identity",
+        });
+      if (manifest !== null && generation.manifestDigest === manifest.digest) {
+        const outcomeKeys = generation.pairOutcomes.map(
+          ({ gameA, gameB }) => `${gameA}\u0000${gameB}`,
+        );
+        const manifestKeys = manifest.pairs.map(({ gameA, gameB }) => `${gameA}\u0000${gameB}`);
+        if (
+          outcomeKeys.length !== manifestKeys.length ||
+          outcomeKeys.some((key, index) => key !== manifestKeys[index])
+        )
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["publishedGeneration", "pairOutcomes"],
+            message: "Published generation must copy complete manifest pair coverage",
+          });
+        if (
+          JSON.stringify(generation.sourceIdentity) !== JSON.stringify(manifest.sourceIdentity) ||
+          generation.modelId !== manifest.modelId ||
+          generation.rubricVersion !== manifest.rubricVersion ||
+          generation.scoringVersion !== manifest.scoringVersion ||
+          generation.signalScope !== manifest.signalScope
+        )
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["publishedGeneration"],
+            message: "Published generation must preserve the exact manifest and source identity",
+          });
+      }
+    }
+  });
+
+export function createInitialSemanticRedundancyState(): SemanticRedundancyState {
+  return {
+    settings: {
+      enabled: false,
+      weights: { factual: 7, description: 0, ownerNote: 0 },
+      cachedOwnerNoteUse: false,
+    },
+    evidenceEpoch: 0,
+    consentEpoch: 0,
+    factualWeightsEpoch: 0,
+    factualWeightsFingerprint: null,
+    firstOptInInitialized: false,
+    disclosure: null,
+    disclosureManifest: null,
+    manifestDelivery: null,
+    authorization: null,
+    execution: null,
+    pairJudgments: [],
+    publishedGeneration: null,
+  };
+}
+
+const CollectionSchemaV9Base = CollectionSchemaV6Base.omit({ schemaVersion: true })
+  .extend({
+    schemaVersion: z.literal(9),
+    bggPlaySessions: z.array(BggPlaySessionSchema).optional(),
+    attentionDispositions: z.array(AttentionDispositionSchema),
+    commandReceipts: z.array(AttentionCommandReceiptUnionSchema),
+    semanticRedundancy: SemanticRedundancyStateSchema,
+  })
+  .strict();
+
+export const CollectionSchemaV9 = CollectionSchemaV9Base.strict().superRefine((source, context) => {
+  const { semanticRedundancy, ...v8Source } = source;
+  void semanticRedundancy;
+  const prior = CollectionSchemaV8.safeParse({ ...v8Source, schemaVersion: 8 });
+  if (!prior.success) for (const issue of prior.error.issues) context.addIssue(issue);
+  const gameIds = new Set(source.games.map(({ id }) => id));
+  for (const [index, pair] of source.semanticRedundancy.pairJudgments.entries()) {
+    if (!gameIds.has(pair.gameA) || !gameIds.has(pair.gameB))
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["semanticRedundancy", "pairJudgments", index],
+        message: "Pair judgments must reference existing collection games",
+      });
+  }
+});
+
+export const CollectionSchema = CollectionSchemaV9;
 
 const CollectionProfileCollectionSourceV7Base = CollectionSchemaV6Base.omit({
   schemaVersion: true,
@@ -1375,7 +2032,7 @@ export const CollectionProfileCollectionSourceSchema = CollectionProfileCollecti
   { schemaVersion: true, commandReceipts: true },
 )
   .extend({
-    schemaVersion: z.literal(8),
+    schemaVersion: z.literal(9),
     attentionDispositions: z.array(AttentionDispositionSchema),
     commandReceipts: z.array(AttentionCommandReceiptUnionSchema),
   })
@@ -1942,6 +2599,13 @@ export const FitnessResultResponseSchema = z
       .strict()
       .nullable(),
     redundancyAdjustment: RedundancyAdjustmentResponseSchema.nullable(),
+    redundancySimilarityInfo: z
+      .object({
+        status: z.enum(["disabled", "factual", "not-ready", "stale", "ready"]),
+        generationId: z.string().min(1).nullable(),
+      })
+      .strict()
+      .default({ status: "disabled", generationId: null }),
   })
   .strict();
 
@@ -2175,14 +2839,16 @@ export const RedundancySettingsSchema = z
     maxPenalty: z.number().min(0.5).max(5),
     componentWeights: z
       .object({
-        binary: z.number().nonnegative(),
-        continuous: z.number().nonnegative(),
-        personalAxes: z.number().nonnegative(),
+        binary: z.number().finite().nonnegative(),
+        continuous: z.number().finite().nonnegative(),
       })
       .strict()
-      .refine(({ binary, continuous, personalAxes }) => binary + continuous + personalAxes > 0, {
-        message: "Redundancy component weights must have a positive sum",
-      }),
+      .refine(
+        ({ binary, continuous }) => Number.isFinite(binary + continuous) && binary + continuous > 0,
+        {
+          message: "Redundancy component weights must have a positive sum",
+        },
+      ),
     minNeighbors: z.number().int().positive(),
     expectedNeighbors: z.number().int().positive(),
   })

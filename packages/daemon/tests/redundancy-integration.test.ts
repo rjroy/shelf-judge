@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { semanticGenerationFixture } from "./helpers/semantic-redundancy-fixtures";
 import { Hono } from "hono";
 import { createGameRoutes } from "../src/routes/games";
 import { createPredictionRoutes } from "../src/routes/prediction";
@@ -13,7 +14,10 @@ import type {
   PredictedGameResponse,
   DurableGame,
 } from "@shelf-judge/shared";
-import { createInitialEntityMetadata } from "@shelf-judge/shared";
+import {
+  createInitialEntityMetadata,
+  createInitialSemanticRedundancyState,
+} from "@shelf-judge/shared";
 import type { GameService } from "../src/services/game-service";
 import type { PredictionService } from "../src/services/prediction-service";
 import type { StorageService } from "../src/services/storage-service";
@@ -147,7 +151,7 @@ const allGamesWithScores: GameWithScore[] = [
 ];
 
 const defaultCollection: Collection = {
-  schemaVersion: 8,
+  schemaVersion: 9,
   revision: 0,
   id: "collection-1",
   name: "Test",
@@ -179,6 +183,7 @@ const defaultCollection: Collection = {
   ],
   games: [gameA, gameB, gameC],
   entertainmentBenchmark: null,
+  semanticRedundancy: createInitialSemanticRedundancyState(),
   intentions: [],
   attentionDispositions: [],
   commandReceipts: [],
@@ -221,23 +226,24 @@ function createMockStorageService(
   };
 }
 
-function createMockGameService(): Partial<GameService> {
+function createMockGameService(games: GameWithScore[] = allGamesWithScores): Partial<GameService> {
   return {
     getGame: (id: string) => {
-      const gws = allGamesWithScores.find((g) => g.game.id === id);
+      const gws = games.find((g) => g.game.id === id);
       if (!gws) return Promise.reject(new Error(`Game not found: ${id}`));
       return Promise.resolve(structuredClone(gws));
     },
-    listGames: () => Promise.resolve(structuredClone(allGamesWithScores)),
-    listGamesFromSnapshot: () => structuredClone(allGamesWithScores),
+    listGames: () => Promise.resolve(structuredClone(games)),
+    listGamesFromSnapshot: () => structuredClone(games),
   };
 }
 
-function createMockPredictionService(): Partial<PredictionService> {
+function createMockPredictionService(
+  games: GameWithScore[] = allGamesWithScores,
+): Partial<PredictionService> {
   return {
-    listGamesWithPredictions: () => Promise.resolve(structuredClone(allGamesWithScores)),
-    listGamesWithPredictionsFromSnapshot: () =>
-      Promise.resolve(structuredClone(allGamesWithScores)),
+    listGamesWithPredictions: () => Promise.resolve(structuredClone(games)),
+    listGamesWithPredictionsFromSnapshot: () => Promise.resolve(structuredClone(games)),
     predictBggGame: () => {
       // Return a candidate sharing the same mechanics (high similarity)
       const candidateGame = makeGame(
@@ -275,16 +281,17 @@ const enabledIntegrated: RedundancySettings = {
 function buildApp(
   redundancySettings: RedundancySettings,
   collection: Collection = defaultCollection,
+  games: GameWithScore[] = allGamesWithScores,
 ) {
   const storage = createMockStorageService(redundancySettings, undefined, collection);
   const gameRoutes = createGameRoutes({
-    gameService: createMockGameService() as GameService,
-    predictionService: createMockPredictionService() as PredictionService,
+    gameService: createMockGameService(games) as GameService,
+    predictionService: createMockPredictionService(games) as PredictionService,
     storageService: storage as StorageService,
     purchaseUtilizationService: createTestPurchaseUtilizationService(storage as StorageService),
   });
   const predictionRoutes = createPredictionRoutes({
-    predictionService: createMockPredictionService() as PredictionService,
+    predictionService: createMockPredictionService(games) as PredictionService,
     storageService: storage as StorageService,
   });
   const app = new Hono();
@@ -314,6 +321,89 @@ describe("redundancy integration: GET /games/:id", () => {
     expect(body.score!.redundancyAdjustment).toBeNull();
   });
 
+  test("vetoed scored games retain collection status on list and detail without pair eligibility", async () => {
+    const collection = structuredClone(defaultCollection);
+    collection.semanticRedundancy.settings.enabled = true;
+    const games = structuredClone(allGamesWithScores);
+    const vetoed = games.find(({ game }) => game.id === "a");
+    if (!vetoed?.score) throw new Error("Expected vetoed-game fixture score");
+    vetoed.score.score = 0;
+    vetoed.score.vetoed = true;
+    vetoed.score.vetoedBy = {
+      axisId: "fun",
+      axisName: "Fun",
+      threshold: 2,
+      direction: "below",
+      rawValue: 1,
+    };
+    vetoed.score.hypotheticalScore = 8;
+    const app = buildApp(enabledAnnotation, collection, games);
+    const listResponse = await app.request("/api/games");
+    const detailResponse = await app.request("/api/games/a");
+    const list = (await listResponse.json()) as GameWithPurchaseUtilization[];
+    const detail = (await detailResponse.json()) as GameWithPurchaseUtilization;
+    const listEntry = list.find(({ game }) => game.id === "a");
+    if (!listEntry?.score || !detail.score) throw new Error("Expected vetoed scored entries");
+    expect(listEntry.score.vetoed).toBe(true);
+    expect(detail.score.vetoed).toBe(true);
+    expect(listEntry.score.redundancyAdjustment).toBeNull();
+    expect(detail.score.redundancyAdjustment).toBeNull();
+    expect(listEntry.score.redundancySimilarityInfo).toEqual({
+      status: "not-ready",
+      generationId: null,
+    });
+    expect(detail.score.redundancySimilarityInfo).toEqual(listEntry.score.redundancySimilarityInfo);
+  });
+
+  test("semantic enabled without a published generation reports the same note-free status on list and detail", async () => {
+    const collection = structuredClone(defaultCollection);
+    collection.semanticRedundancy.settings.enabled = true;
+    const settings = { ...enabledAnnotation, similarityThreshold: 1.01 };
+    const app = buildApp(settings, collection);
+    const listResponse = await app.request("/api/games");
+    const detailResponse = await app.request("/api/games/c");
+    expect(listResponse.status).toBe(200);
+    expect(detailResponse.status).toBe(200);
+    const list = (await listResponse.json()) as GameWithPurchaseUtilization[];
+    const detail = (await detailResponse.json()) as GameWithPurchaseUtilization;
+    const listEntry = list.find(({ game }) => game.id === "c");
+    if (!listEntry?.score || !detail.score) throw new Error("Expected scored list/detail entries");
+    expect(listEntry.score.redundancyAdjustment).toBeNull();
+    expect(detail.score.redundancyAdjustment).toBeNull();
+    expect(listEntry.score.redundancySimilarityInfo).toEqual({
+      status: "not-ready",
+      generationId: null,
+    });
+    expect(detail.score.redundancySimilarityInfo).toEqual(listEntry.score.redundancySimilarityInfo);
+    expect(JSON.stringify(listEntry)).not.toContain("ownerNote");
+    expect(detail.game).toHaveProperty("ownerNote");
+    expect(JSON.stringify(detail.score.redundancySimilarityInfo)).not.toContain("ownerNote");
+
+    // This valid-shaped generation intentionally carries the fixture source identity and is stale.
+    collection.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
+      id: "published-generation",
+      evidenceEpoch: collection.semanticRedundancy.evidenceEpoch,
+      consentEpoch: collection.semanticRedundancy.consentEpoch,
+      modelId: "pinned-model",
+      publishedAt: now,
+    });
+    const staleApp = buildApp(settings, collection);
+    const staleListResponse = await staleApp.request("/api/games");
+    const staleDetailResponse = await staleApp.request("/api/games/c");
+    const staleList = (await staleListResponse.json()) as GameWithPurchaseUtilization[];
+    const staleDetail = (await staleDetailResponse.json()) as GameWithPurchaseUtilization;
+    const staleEntry = staleList.find(({ game }) => game.id === "c");
+    if (!staleEntry?.score || !staleDetail.score)
+      throw new Error("Expected scored stale list/detail entries");
+    expect(staleEntry.score.redundancySimilarityInfo).toEqual({
+      status: "stale",
+      generationId: null,
+    });
+    expect(staleDetail.score.redundancySimilarityInfo).toEqual(
+      staleEntry.score.redundancySimilarityInfo,
+    );
+  });
+
   test("annotation mode: score.score unchanged, adjustedScore reflects penalty", async () => {
     const app = buildApp(enabledAnnotation);
     // Game C (score 4.0) has two better neighbors, should get a penalty
@@ -336,6 +426,53 @@ describe("redundancy integration: GET /games/:id", () => {
     const adj = body.score!.redundancyAdjustment!;
     expect(adj).not.toBeNull();
     expect(body.score!.score).toBe(adj.adjustedScore);
+  });
+});
+
+describe("redundancy integration: BGG candidate preview", () => {
+  test("semantic-enabled current C/D generation does not change the factual candidate preview", async () => {
+    const withoutSemanticGeneration = structuredClone(defaultCollection);
+    const factualApp = buildApp(enabledAnnotation, withoutSemanticGeneration);
+    const factualResponse = await factualApp.request("/api/predictions/bgg/12345");
+    expect(factualResponse.status).toBe(200);
+    const factualBody = (await factualResponse.json()) as PredictedGameResponse;
+
+    const semanticCollection = structuredClone(defaultCollection);
+    semanticCollection.semanticRedundancy.settings.enabled = true;
+    semanticCollection.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
+      id: "current-c-d-generation",
+      signalScope: "description-and-owner-notes",
+      weights: { factual: 0, description: 100, ownerNote: 100 },
+      pairOutcomes: [
+        {
+          gameA: "a",
+          gameB: "candidate",
+          description: null,
+          ownerNote: {
+            status: "scored",
+            score: 0,
+            confidence: 1,
+            modelId: "fixture-model",
+            rubricVersion: 1,
+            sourceFingerprintA: "a".repeat(64),
+            sourceFingerprintB: "b".repeat(64),
+            noteVersionA: 1,
+            noteVersionB: null,
+            requestContext: { kind: "owner-notes-only", ownerNoteRepresentationVersion: 1 },
+          },
+        },
+      ],
+    });
+    const semanticApp = buildApp(enabledAnnotation, semanticCollection);
+    const semanticResponse = await semanticApp.request("/api/predictions/bgg/12345");
+    expect(semanticResponse.status).toBe(200);
+    const semanticBody = (await semanticResponse.json()) as PredictedGameResponse;
+
+    expect(factualBody.redundancyPreview).not.toBeNull();
+    expect(factualBody.redundancyPreview?.penalty).toBeGreaterThan(0);
+    expect(semanticBody.redundancyPreview).toEqual(factualBody.redundancyPreview);
+    expect(JSON.stringify(semanticBody)).not.toContain("ownerNote");
+    expect(JSON.stringify(semanticBody)).not.toContain("Private");
   });
 });
 
@@ -410,6 +547,9 @@ describe("redundancy integration: penalty consistency across routes", () => {
     const listEntry = list.find((entry) => entry.game.id === "c");
     expect(listEntry).toBeDefined();
     expect(listEntry?.score?.score).toBe(detail.score?.score);
+    expect(listEntry?.score?.redundancySimilarityInfo).toEqual(
+      detail.score?.redundancySimilarityInfo,
+    );
     expect(listEntry?.displayScore).toBe(detail.displayScore);
     expect(listEntry?.purchaseUtilization).toEqual(detail.purchaseUtilization);
     expect(detail.score?.score).toBe(detail.score?.redundancyAdjustment?.adjustedScore);
@@ -460,6 +600,7 @@ describe("redundancy integration: penalty consistency across routes", () => {
       expect(detail.score!.redundancyAdjustment!.adjustedScore).toBe(
         gws.score.redundancyAdjustment.adjustedScore,
       );
+      expect(detail.score!.redundancySimilarityInfo).toEqual(gws.score.redundancySimilarityInfo);
     }
   });
 

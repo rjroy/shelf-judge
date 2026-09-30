@@ -163,7 +163,7 @@ function fixture() {
     game("game-4", "Heat", []),
   ];
   const collection: CollectionProfileCollectionSource = {
-    schemaVersion: 8,
+    schemaVersion: 9,
     revision: 9,
     id: "collection-1",
     name: "Collection",
@@ -223,6 +223,60 @@ function fixture() {
 }
 
 describe("Reflection deterministic evidence projections", () => {
+  test("strips ready similarity status from Analyst and Reflection profile evidence", () => {
+    const input = fixture();
+    const scoredGames = input.displayedGames.map((entry) => ({
+      ...entry,
+      score:
+        entry.score === null
+          ? null
+          : {
+              ...entry.score,
+              redundancySimilarityInfo: { status: "ready" as const, generationId: "generation-1" },
+            },
+    }));
+    input.displayedGames = scoredGames;
+    input.profile = computeCollectionProfile({
+      collection: input.collection,
+      fitnessResults: new Map(
+        scoredGames.flatMap(({ game: entry, score }) =>
+          score === null ? [] : [[entry.id, score] as const],
+        ),
+      ),
+      computedAt: "2026-08-27T12:00:00.000Z",
+    });
+
+    const analyst = buildAnalystProjectionSnapshot(input);
+    const reflection = buildReflectionProjectionSnapshot(input);
+    const analystProfile = analyst.sources.find(
+      ({ sourceId }) => sourceId === "profile:mechanic:101",
+    );
+    const reflectionProfile = reflection.projections["pattern-exceptions"].evidence.entries.find(
+      ({ sourceId }) => sourceId === "profile:mechanic:101",
+    );
+    const analystProfilePayload = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[
+      "profile-evidence"
+    ].parse(analystProfile?.payload);
+    const reflectionProfilePayload = REFLECTION_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[
+      "profile-evidence"
+    ].parse(reflectionProfile?.payload);
+
+    expect(
+      analystProfilePayload.entityAssociations.some(
+        ({ gameId, currentFitness }) => gameId === "game-1" && currentFitness === 8,
+      ),
+    ).toBe(true);
+    expect(
+      reflectionProfilePayload.games.some(
+        ({ gameId, currentFitness }) => gameId === "game-1" && currentFitness === 8,
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(analystProfile?.payload)).not.toContain("redundancySimilarityInfo");
+    expect(JSON.stringify(reflectionProfile?.payload)).not.toContain("redundancySimilarityInfo");
+    expect(JSON.stringify(analystProfile?.payload)).not.toContain("generation-1");
+    expect(JSON.stringify(reflectionProfile?.payload)).not.toContain("generation-1");
+  });
+
   test("projects exact Analyst evidence without broad durable fields", () => {
     const analyst = buildAnalystProjectionSnapshot(fixture());
     const scoring = analyst.sources.find(({ sourceId }) => sourceId === "game:game-1:scoring");

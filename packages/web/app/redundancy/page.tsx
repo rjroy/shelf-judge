@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { RedundancySettings, ComponentWeights } from "@shelf-judge/shared";
+import type { RedundancySettings, RedundancyComponentWeights } from "@shelf-judge/shared";
 
 const DEFAULT_SETTINGS: RedundancySettings = {
   enabled: false,
   stage: "annotation",
   similarityThreshold: 0.6,
   maxPenalty: 2.0,
-  componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
+  componentWeights: { binary: 4 / 7, continuous: 3 / 7 },
   minNeighbors: 1,
   expectedNeighbors: 5,
 };
@@ -21,7 +21,6 @@ function settingsEqual(a: RedundancySettings, b: RedundancySettings): boolean {
     a.maxPenalty === b.maxPenalty &&
     a.componentWeights.binary === b.componentWeights.binary &&
     a.componentWeights.continuous === b.componentWeights.continuous &&
-    a.componentWeights.personalAxes === b.componentWeights.personalAxes &&
     a.minNeighbors === b.minNeighbors &&
     a.expectedNeighbors === b.expectedNeighbors
   );
@@ -59,7 +58,7 @@ export default function RedundancyPage() {
     setSuccess(null);
   }, []);
 
-  const updateWeight = useCallback((key: keyof ComponentWeights, value: number) => {
+  const updateWeight = useCallback((key: keyof RedundancyComponentWeights, value: number) => {
     setSettings((prev) => {
       if (!prev) return prev;
       return { ...prev, componentWeights: { ...prev.componentWeights, [key]: value } };
@@ -230,7 +229,7 @@ export default function RedundancyPage() {
                   type="range"
                   min="0"
                   max="1"
-                  step="0.1"
+                  step="any"
                   value={settings.componentWeights.binary}
                   onChange={(e) => updateWeight("binary", parseFloat(e.target.value))}
                   className="redundancy-slider"
@@ -244,23 +243,9 @@ export default function RedundancyPage() {
                   type="range"
                   min="0"
                   max="1"
-                  step="0.1"
+                  step="any"
                   value={settings.componentWeights.continuous}
                   onChange={(e) => updateWeight("continuous", parseFloat(e.target.value))}
-                  className="redundancy-slider"
-                />
-              </div>
-              <div className="redundancy-weight-row">
-                <label>
-                  Your Personal Ratings: {settings.componentWeights.personalAxes.toFixed(1)}
-                </label>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  value={settings.componentWeights.personalAxes}
-                  onChange={(e) => updateWeight("personalAxes", parseFloat(e.target.value))}
                   className="redundancy-slider"
                 />
               </div>

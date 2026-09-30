@@ -30,6 +30,7 @@ import {
   TournamentDataSchema,
   ShelfConfigurationSchema,
   AttentionCandidateArtifactSchema,
+  createInitialSemanticRedundancyState,
 } from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
 import { atomicWrite, type TemporaryPathForAttempt } from "./file-ops.js";
@@ -54,10 +55,11 @@ import {
 } from "./stored-source-revision.js";
 import {
   createSourceVectorService,
+  type CollectionSourceIdentity,
   type SourceVector,
   type SourceVectorRevisions,
 } from "./source-vector.js";
-import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
+import { canonicalSha256, profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 
 export interface CollectionReader {
   loadCollection(): Promise<Collection>;
@@ -85,6 +87,10 @@ export interface StorageService extends CollectionReader, CollectionPersistence 
   loadNicheSettings(): Promise<NicheSettings>;
   saveNicheSettings(settings: NicheSettings): Promise<void>;
   loadRedundancySettings(): Promise<RedundancySettings>;
+  loadRedundancySettingsRead?(): Promise<{
+    settings: RedundancySettings;
+    migrationNotice: string | null;
+  }>;
   saveRedundancySettings(settings: RedundancySettings): Promise<void>;
   loadWishlist(): Promise<WishlistEntry[]>;
   saveWishlist(entries: WishlistEntry[]): Promise<void>;
@@ -92,6 +98,15 @@ export interface StorageService extends CollectionReader, CollectionPersistence 
   saveShelfConfig(config: ShelfConfiguration): Promise<void>;
   sourceVector?(): SourceVector;
   hydrateSourceVector?(): Promise<SourceVector>;
+}
+
+export class DurableSourcePostCommitError extends Error {
+  readonly durable = true;
+
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "DurableSourcePostCommitError";
+  }
 }
 
 export interface StorageServiceDeps {
@@ -132,9 +147,23 @@ function createDefaultCollection(dependencies?: CollectionMigrationDependencies)
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
+    semanticRedundancy: createInitialSemanticRedundancyState(),
     createdAt: now,
     updatedAt: now,
   });
+}
+
+function sourceIdentityForCollection(collection: Collection): CollectionSourceIdentity {
+  const semantic = collection.semanticRedundancy;
+  return {
+    id: collection.id,
+    schemaVersion: collection.schemaVersion,
+    revision: collection.revision,
+    semanticEvidenceEpoch: semantic.evidenceEpoch,
+    semanticConsentEpoch: semantic.consentEpoch,
+    factualWeightsEpoch: semantic.factualWeightsEpoch,
+    factualWeightsFingerprint: semantic.factualWeightsFingerprint,
+  };
 }
 
 export interface StoredCollectionDecodeResult {
@@ -170,7 +199,7 @@ export function decodeStoredCollection(raw: unknown, logger: Logger): StoredColl
       raw.schemaVersion !== 4 &&
       raw.schemaVersion !== 5 &&
       // V7 was current when this recovery boundary was introduced. Keep that
-      // established eligibility while it is migrated sequentially to V8.
+      // established eligibility while it is migrated sequentially to V9.
       raw.schemaVersion !== 7 &&
       raw.schemaVersion !== CURRENT_COLLECTION_SCHEMA_VERSION)
   ) {
@@ -333,6 +362,11 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   function publishStoredSource(kind: RevisionedSourceKind, decoded: DecodedStoredSource): void {
     sourceCache.set(kind, decoded);
     sourceVector.publish(kind, decoded.revision);
+    if (kind === "redundancy-settings") {
+      sourceVector.publishRedundancyWeightsFingerprint(
+        canonicalSha256((decoded.data as RedundancySettings).componentWeights),
+      );
+    }
   }
 
   async function readStoredSource(kind: RevisionedSourceKind): Promise<DecodedStoredSource> {
@@ -467,11 +501,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
           const collection = createDefaultCollection(deps.collectionMigrationDependencies);
           await persistCollection(collection);
           advanceAttentionCandidateSourceGeneration();
-          sourceVector.publishCollection({
-            id: collection.id,
-            schemaVersion: collection.schemaVersion,
-            revision: collection.revision,
-          });
+          sourceVector.publishCollection(sourceIdentityForCollection(collection));
           return collection;
         }
 
@@ -525,11 +555,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
           : migration.data;
         const validated = validateCollection(candidate);
         if (!migration.migrated && !decoded.normalized) {
-          sourceVector.publishCollection({
-            id: validated.id,
-            schemaVersion: validated.schemaVersion,
-            revision: validated.revision,
-          });
+          sourceVector.publishCollection(sourceIdentityForCollection(validated));
           return validated;
         }
 
@@ -563,11 +589,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
 
         await persistCollection(validated);
         advanceAttentionCandidateSourceGeneration();
-        sourceVector.publishCollection({
-          id: validated.id,
-          schemaVersion: validated.schemaVersion,
-          revision: validated.revision,
-        });
+        sourceVector.publishCollection(sourceIdentityForCollection(validated));
         return validated;
       }).catch((error: unknown) => {
         sourceVector.markUnavailable("collection");
@@ -585,11 +607,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         throw error;
       }
       advanceAttentionCandidateSourceGeneration();
-      sourceVector.publishCollection({
-        id: collection.id,
-        schemaVersion: collection.schemaVersion,
-        revision: collection.revision,
-      });
+      sourceVector.publishCollection(sourceIdentityForCollection(collection));
     },
 
     loadConfig: loadAppConfig,
@@ -724,11 +742,30 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       );
     },
 
+    async loadRedundancySettingsRead() {
+      const source = await loadStoredSource("redundancy-settings");
+      return {
+        settings: structuredClone(source.data as RedundancySettings),
+        migrationNotice: source.redundancyWeightsMigrated
+          ? "Legacy redundancy weights were migrated to factual binary/continuous weights (4:3)."
+          : null,
+      };
+    },
+
     async saveRedundancySettings(settings: RedundancySettings): Promise<void> {
       const validated = RedundancySettingsSchema.parse(settings);
       await withProfileLock(async () => {
         const changed = await saveStoredSource("redundancy-settings", validated);
-        if (changed) await invalidateProfile("redundancy-settings");
+        if (changed) {
+          try {
+            await invalidateProfile("redundancy-settings");
+          } catch (error) {
+            throw new DurableSourcePostCommitError(
+              "Factual redundancy settings were saved, but profile cache invalidation failed",
+              { cause: error },
+            );
+          }
+        }
       });
     },
 
@@ -791,6 +828,10 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
             id: collection.id,
             schemaVersion: collection.schemaVersion,
             revision: collection.revision,
+            semanticEvidenceEpoch: collection.semanticRedundancy.evidenceEpoch,
+            semanticConsentEpoch: collection.semanticRedundancy.consentEpoch,
+            factualWeightsEpoch: collection.semanticRedundancy.factualWeightsEpoch,
+            factualWeightsFingerprint: collection.semanticRedundancy.factualWeightsFingerprint,
           },
           revisions,
         );
@@ -819,12 +860,15 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   const loadPredictionSettings = storage.loadPredictionSettings.bind(storage);
   const loadNicheSettings = storage.loadNicheSettings.bind(storage);
   const loadRedundancySettings = storage.loadRedundancySettings.bind(storage);
+  const loadRedundancySettingsRead = storage.loadRedundancySettingsRead?.bind(storage);
   const loadShelfConfig = storage.loadShelfConfig.bind(storage);
   storage.loadCollection = () => coordinate(loadCollection);
   storage.loadTournament = () => coordinate(loadTournament);
   storage.loadPredictionSettings = () => coordinate(loadPredictionSettings);
   storage.loadNicheSettings = () => coordinate(loadNicheSettings);
   storage.loadRedundancySettings = () => coordinate(loadRedundancySettings);
+  if (loadRedundancySettingsRead)
+    storage.loadRedundancySettingsRead = () => coordinate(loadRedundancySettingsRead);
   storage.loadShelfConfig = () => coordinate(loadShelfConfig);
   storage.saveCollection = (collection) => coordinate(() => saveCollection(collection));
   storage.saveTournament = (data) => coordinate(() => saveTournament(data));

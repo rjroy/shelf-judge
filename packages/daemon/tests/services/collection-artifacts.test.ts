@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   COLLECTION_ARTIFACTS,
   createCollectionArtifactContext,
+  purgeSemanticDisplayArtifacts,
   type CollectionArtifactDescriptor,
 } from "../../src/services/collection-artifacts.js";
 import type { Logger } from "../../src/services/logger.js";
@@ -85,6 +86,22 @@ describe("collection artifact manifest", () => {
         redundancyPreview: null,
       },
     ]);
+  });
+
+  test("semantic display purge deletes only profile and attention candidates", async () => {
+    const wishlist = '[{"factual":"snapshot bytes"}]';
+    const fileOps = createMockFileOps({
+      [PROFILE_PATH]: "profile cache",
+      [ATTENTION_CANDIDATES_PATH]: "candidate cache",
+      [WISHLIST_PATH]: wishlist,
+    });
+    await purgeSemanticDisplayArtifacts(
+      createCollectionArtifactContext(DATA_DIR, fileOps, logger()),
+    );
+
+    expect(fileOps.files.has(PROFILE_PATH)).toBe(false);
+    expect(fileOps.files.has(ATTENTION_CANDIDATES_PATH)).toBe(false);
+    expect(fileOps.files.get(WISHLIST_PATH)).toBe(wishlist);
   });
 
   test("retains valid core fields when only prediction data is malformed", async () => {

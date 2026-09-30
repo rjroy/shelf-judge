@@ -1,7 +1,10 @@
 /* eslint-disable @typescript-eslint/await-thenable */
 import { describe, expect, test, beforeEach } from "bun:test";
 import type { Collection, DurableGame, ShelfConfiguration } from "@shelf-judge/shared";
-import { createInitialEntityMetadata } from "@shelf-judge/shared";
+import {
+  createInitialEntityMetadata,
+  createInitialSemanticRedundancyState,
+} from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import {
   createShelfService,
@@ -27,7 +30,7 @@ function createMockStorage(): StorageService & {
       updatedAt: NOW,
     } as ShelfConfiguration,
     collection: {
-      schemaVersion: 8,
+      schemaVersion: 9,
       revision: 0,
       id: "collection-1",
       name: "Test",
@@ -37,6 +40,7 @@ function createMockStorage(): StorageService & {
       attentionDispositions: [],
       commandReceipts: [],
       entertainmentBenchmark: null,
+      semanticRedundancy: createInitialSemanticRedundancyState(),
       createdAt: NOW,
       updatedAt: NOW,
     } as Collection,

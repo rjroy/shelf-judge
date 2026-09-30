@@ -52,7 +52,7 @@ function fixture(
 ) {
   const vectorService = createSourceVectorService();
   vectorService.hydrate(
-    { id: "collection-id", schemaVersion: 8, revision: 1 },
+    { id: "collection-id", schemaVersion: 9, revision: 1 },
     {
       tournament: 1,
       predictionSettings: 1,
@@ -171,6 +171,32 @@ describe("CollectionSnapshotCacheService", () => {
     expect(refreshed.etag).not.toBe(first.etag);
   });
 
+  test("serves 200 then 304, then returns a fresh 200 after a semantic factual-weight edit", async () => {
+    const f = fixture();
+    const first = await f.route.request("/collection/snapshot");
+    expect(first.status).toBe(200);
+    const oldEtag = first.headers.get("etag")!;
+    const unchanged = await f.route.request("/collection/snapshot", {
+      headers: { "If-None-Match": oldEtag },
+    });
+    expect(unchanged.status).toBe(304);
+
+    f.vector.publishCollection({
+      id: "collection-id",
+      schemaVersion: 9,
+      revision: 2,
+      semanticEvidenceEpoch: 0,
+      semanticConsentEpoch: 0,
+      factualWeightsEpoch: 1,
+      factualWeightsFingerprint: "a".repeat(64),
+    });
+    const afterEdit = await f.route.request("/collection/snapshot", {
+      headers: { "If-None-Match": oldEtag },
+    });
+    expect(afterEdit.status).toBe(200);
+    expect(afterEdit.headers.get("etag")).not.toBe(oldEtag);
+  });
+
   test("each revisioned source, collection identity, and a new process epoch produce a new validator", async () => {
     const f = fixture();
     let previous = await f.cache.resolve();
@@ -180,7 +206,7 @@ describe("CollectionSnapshotCacheService", () => {
       () => f.vector.publish("niche-settings", 2),
       () => f.vector.publish("redundancy-settings", 2),
       () => f.vector.publish("shelf-config", 2),
-      () => f.vector.publishCollection({ id: "collection-id", schemaVersion: 8, revision: 2 }),
+      () => f.vector.publishCollection({ id: "collection-id", schemaVersion: 9, revision: 2 }),
     ];
     for (const update of publish) {
       update();
@@ -324,7 +350,7 @@ describe("CollectionSnapshotCacheService", () => {
   test("a reader queued after degraded completion and a source mutation cannot join the old flight", async () => {
     const vector = createSourceVectorService();
     vector.hydrate(
-      { id: "collection-id", schemaVersion: 8, revision: 1 },
+      { id: "collection-id", schemaVersion: 9, revision: 1 },
       {
         tournament: 1,
         predictionSettings: 1,

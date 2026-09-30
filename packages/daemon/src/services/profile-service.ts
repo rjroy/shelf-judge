@@ -1,4 +1,5 @@
 import type {
+  Collection,
   AttentionCandidateArtifact,
   CollectionProfile,
   CollectionProfileAttentionActionId,
@@ -17,7 +18,10 @@ import {
 } from "@shelf-judge/shared";
 import { ZodError } from "zod";
 import type { StorageService } from "./storage-service.js";
-import type { DisplayedFitnessService } from "./displayed-fitness-service.js";
+import {
+  semanticFallbackStatus,
+  type DisplayedFitnessService,
+} from "./displayed-fitness-service.js";
 import { computeCollectionProfile } from "./collection-profile-engine.js";
 import { projectProfileCollectionSource } from "./game-projection.js";
 import {
@@ -306,6 +310,8 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         let artifact: AttentionCandidateArtifact;
         let cardLimit: number;
         let entityPolicy: CollectionProfile["entityPolicy"];
+        let fitnessCollection: Collection;
+        let redundancySimilarityStatus: "disabled" | "factual" | "not-ready" | "stale" = "disabled";
         try {
           const [collection, config, tournament, predictionSettings, redundancySettings] =
             await Promise.all([
@@ -315,6 +321,13 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
               storageService.loadPredictionSettings(),
               storageService.loadRedundancySettings(),
             ]);
+          redundancySimilarityStatus = semanticFallbackStatus(
+            collection,
+            redundancySettings.enabled,
+          );
+          // Keep the private captured collection for snapshot-backed fitness and
+          // semantic resolution. The Profile source itself remains projected.
+          fitnessCollection = structuredClone(collection);
           sources = structuredClone({
             collection: projectProfileCollectionSource(collection),
             tournament,
@@ -372,9 +385,13 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         try {
           if (!displayedFitnessService.listGamesFromSnapshot)
             throw new Error("Snapshot-backed displayed fitness is not configured");
-          const games = await displayedFitnessService.listGamesFromSnapshot(sources, {
-            includePredicted: true,
-          });
+          const games = await displayedFitnessService.listGamesFromSnapshot(
+            { ...sources, collection: fitnessCollection },
+            {
+              includePredicted: true,
+              redundancySimilarityStatus,
+            },
+          );
           const fitnessResults = new Map<string, FitnessResult>();
           for (const entry of games) {
             if (entry.score !== null && entry.hasScoringContribution)

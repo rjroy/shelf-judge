@@ -21,9 +21,27 @@ export const activeIntentionFixture: PlayIntention = {
 };
 
 const comparatorGames = [
-  { gameId: "game-1", gameName: "Alpha", currentFitness: 8, vetoed: false },
-  { gameId: "game-2", gameName: "Beta", currentFitness: 6, vetoed: false },
-  { gameId: "game-3", gameName: "Gamma", currentFitness: 0, vetoed: true },
+  {
+    gameId: "game-1",
+    gameName: "Alpha",
+    currentFitness: 8,
+    vetoed: false,
+    redundancySimilarityInfo: { status: "disabled" as const, generationId: null },
+  },
+  {
+    gameId: "game-2",
+    gameName: "Beta",
+    currentFitness: 6,
+    vetoed: false,
+    redundancySimilarityInfo: { status: "disabled" as const, generationId: null },
+  },
+  {
+    gameId: "game-3",
+    gameName: "Gamma",
+    currentFitness: 0,
+    vetoed: true,
+    redundancySimilarityInfo: { status: "disabled" as const, generationId: null },
+  },
 ];
 
 const comparatorMean = 14 / 3;

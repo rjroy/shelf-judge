@@ -15,13 +15,26 @@ import {
 import type { AttentionDispositionWinner } from "./attention-disposition-compatibility.js";
 import { clearIncompatibleAttentionDispositions } from "./attention-disposition-compatibility.js";
 import type { AttentionMutationImpact } from "./attention-candidate-service.js";
+import { applySemanticEvidenceTransition } from "./semantic-redundancy-state-service.js";
+import type { CollectionArtifactContext } from "./collection-artifacts.js";
+import { purgeSemanticDisplayArtifacts } from "./collection-artifacts.js";
 
 export interface CollectionMutationContext {
   operation:
     | CollectionMutationOperation
     | TestCollectionMutationOperation
     | "attention-disposition"
-    | "attention-disposition-maintenance";
+    | "attention-disposition-maintenance"
+    | "semantic-redundancy.settings.update"
+    | "semantic-redundancy.disclosure.create"
+    | "semantic-redundancy.disclosure.deliver"
+    | "semantic-redundancy.execution.start"
+    | "semantic-redundancy.execution.cancel"
+    | "semantic-redundancy.execution.reserve-attempt"
+    | "semantic-redundancy.execution.finish"
+    | "semantic-redundancy.judgments.checkpoint"
+    | "semantic-redundancy.generation.publish"
+    | "semantic-redundancy.factual-weights.invalidate";
   trigger: string;
   gameIds?: readonly string[];
   intentionIds?: readonly string[];
@@ -57,7 +70,7 @@ export type CollectionMutationDecision<Value> =
   | {
       changed: true;
       value: Value;
-      beforePersistence?: () => Promise<void> | void;
+      beforePersistence?: (accepted: Collection, prior: Collection) => Promise<void> | void;
       onPersistenceFailure?: (error: unknown) => Promise<void> | void;
       onPersistenceSuccess?: () => Promise<void> | void;
       classifyPersistenceOutcome?: boolean;
@@ -114,6 +127,8 @@ export interface CollectionMutationServiceDeps {
     context: CollectionMutationContext,
     affectedGameIds: readonly string[],
   ) => Promise<readonly AttentionDispositionWinner[]>;
+  /** Optional production wiring for purging persisted D-derived display caches. */
+  semanticDisplayArtifactContext?: CollectionArtifactContext;
 }
 
 const coordinators = new WeakMap<object, CollectionMutationService>();
@@ -130,12 +145,40 @@ function isAttentionDispositionOperation(
   return operation === "attention-disposition";
 }
 
+type SemanticRedundancyMutationOperation =
+  | "semantic-redundancy.settings.update"
+  | "semantic-redundancy.disclosure.create"
+  | "semantic-redundancy.disclosure.deliver"
+  | "semantic-redundancy.execution.start"
+  | "semantic-redundancy.execution.cancel"
+  | "semantic-redundancy.execution.reserve-attempt"
+  | "semantic-redundancy.execution.finish"
+  | "semantic-redundancy.judgments.checkpoint"
+  | "semantic-redundancy.generation.publish"
+  | "semantic-redundancy.factual-weights.invalidate";
+
+function isSemanticRedundancyOperation(
+  operation: CollectionMutationContext["operation"],
+): operation is SemanticRedundancyMutationOperation {
+  return operation.startsWith("semantic-redundancy.");
+}
+
 function mutationImpact(context: CollectionMutationContext) {
+  if (isSemanticRedundancyOperation(context.operation)) return null;
   if (context.operation === "attention-disposition-maintenance")
     return context.maintenanceImpact ?? null;
   if (context.operation === "attention-disposition")
     return { kind: "games" as const, gameIds: [...(context.gameIds ?? [])] };
   return attentionImpactForCollectionMutation(context.operation, context.gameIds);
+}
+
+function invalidatesSemanticDisplayArtifacts(prior: Collection, accepted: Collection): boolean {
+  return (
+    prior.semanticRedundancy.evidenceEpoch !== accepted.semanticRedundancy.evidenceEpoch ||
+    prior.semanticRedundancy.consentEpoch !== accepted.semanticRedundancy.consentEpoch ||
+    canonicalSha256(prior.semanticRedundancy.publishedGeneration) !==
+      canonicalSha256(accepted.semanticRedundancy.publishedGeneration)
+  );
 }
 
 export function collectionMutationServiceFor(
@@ -250,7 +293,8 @@ export function createCollectionMutationService(
           if (
             dispositionWinners &&
             !isAttentionDispositionOperation(context.operation) &&
-            context.operation !== "attention-disposition-maintenance"
+            context.operation !== "attention-disposition-maintenance" &&
+            !isSemanticRedundancyOperation(context.operation)
           ) {
             const impact = mutationImpact(context);
             const affectedGameIds =
@@ -265,6 +309,7 @@ export function createCollectionMutationService(
               new Set(affectedGameIds),
             );
           }
+          applySemanticEvidenceTransition(current, candidate);
           accepted = CollectionSchema.parse(revisionStrategy.advance(candidate, current));
         } catch (error) {
           logger.warn("collection mutation rejected", {
@@ -276,10 +321,31 @@ export function createCollectionMutationService(
         }
 
         const after = revisionStrategy.identity(accepted);
+        if (
+          deps.semanticDisplayArtifactContext &&
+          invalidatesSemanticDisplayArtifacts(current, accepted)
+        ) {
+          logger.log("collection semantic display artifact purge attempt", { ...fields, after });
+          try {
+            await purgeSemanticDisplayArtifacts(deps.semanticDisplayArtifactContext);
+            logger.log("collection semantic display artifact purge completed", {
+              ...fields,
+              after,
+            });
+          } catch (error) {
+            logger.error("collection semantic display artifact purge failed", {
+              ...fields,
+              after,
+              outcome: "pre-persistence-failed",
+            });
+            await compensate({ ...fields, after }, decision.onPersistenceFailure, error);
+            throw error;
+          }
+        }
         if (decision.beforePersistence) {
           logger.log("collection mutation pre-persistence attempt", { ...fields, after });
           try {
-            await decision.beforePersistence();
+            await decision.beforePersistence(accepted, current);
             logger.log("collection mutation pre-persistence completed", { ...fields, after });
           } catch (error) {
             logger.error("collection mutation pre-persistence failed", {
@@ -348,7 +414,8 @@ export function createCollectionMutationService(
         if (
           deps.postCommitObserver &&
           !isAttentionDispositionOperation(context.operation) &&
-          context.operation !== "attention-disposition-maintenance"
+          context.operation !== "attention-disposition-maintenance" &&
+          !isSemanticRedundancyOperation(context.operation)
         ) {
           await deps.postCommitObserver({
             context,

@@ -167,6 +167,23 @@ const attentionCandidatesDescriptor: CollectionArtifactDescriptor = {
   },
 };
 
+/** Remove disposable D-derived profile/display caches before accepting a semantic transition. */
+export async function purgeSemanticDisplayArtifacts(
+  context: CollectionArtifactContext,
+): Promise<void> {
+  const paths = [profilePath(context.dataDir), attentionCandidatesPath(context.dataDir)];
+  for (const artifactPath of paths) {
+    context.logger.log(`semantic display artifact purge attempt path=${artifactPath}`);
+    try {
+      await context.fileOps.unlink(artifactPath);
+      context.logger.log(`semantic display artifact purge completed path=${artifactPath}`);
+    } catch (error) {
+      context.logger.error(`semantic display artifact purge failed path=${artifactPath}`, error);
+      throw error;
+    }
+  }
+}
+
 export const COLLECTION_ARTIFACTS: readonly CollectionArtifactDescriptor[] = [
   profileDescriptor,
   wishlistDescriptor,

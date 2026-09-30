@@ -73,6 +73,7 @@ function validDetail(): GameDetailWithPurchaseUtilization {
       hypotheticalScore: null,
       predictionMeta: null,
       redundancyAdjustment: null,
+      redundancySimilarityInfo: { status: "disabled", generationId: null },
     },
     bggDataStale: false,
     nichePosition: null,

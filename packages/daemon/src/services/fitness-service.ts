@@ -188,6 +188,7 @@ export function createFitnessService(): FitnessService {
         hypotheticalScore: vetoInfo === null ? null : hypotheticalScore,
         predictionMeta: null,
         redundancyAdjustment: null,
+        redundancySimilarityInfo: { status: "disabled", generationId: null },
       };
     },
   };

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { RedundancySettings } from "@shelf-judge/shared";
 import {
   decodeStoredSource,
   prepareMissingStoredSource,
@@ -11,6 +12,15 @@ const prediction = {
   stageThresholds: [5, 15, 30] as [number, number, number],
   defaultK: 5,
   minSimilarityThreshold: 0.2,
+};
+const redundancy = {
+  enabled: true,
+  stage: "integrated" as const,
+  similarityThreshold: 0.6,
+  maxPenalty: 2,
+  componentWeights: { binary: 0.8, continuous: 0.6, personalAxes: 0.4 },
+  minNeighbors: 1,
+  expectedNeighbors: 5,
 };
 
 describe("stored source revisions", () => {
@@ -62,6 +72,37 @@ describe("stored source revisions", () => {
     const roundTrip = decodeStoredSource("tournament", decoded.stored);
     expect(roundTrip.migrated).toBe(false);
     expect(roundTrip.data).toEqual(decoded.data);
+  });
+
+  test("migrates saved three-weight redundancy ratios to factual binary/continuous only", () => {
+    const decoded = decodeStoredSource("redundancy-settings", { ...redundancy, revision: 9 });
+    expect(decoded.data).toMatchObject({
+      enabled: true,
+      stage: "integrated",
+      componentWeights: { binary: 0.8, continuous: 0.6 },
+    });
+    expect(decoded.revision).toBe(10);
+    expect(decoded.redundancyWeightsMigrated).toBe(true);
+    expect(decoded.stored).not.toHaveProperty("componentWeights.personalAxes");
+    const restarted = decodeStoredSource("redundancy-settings", decoded.stored);
+    expect(restarted.migrated).toBe(false);
+    expect(restarted.revision).toBe(10);
+    expect(restarted.data).toEqual(decoded.data);
+  });
+
+  test("recovers saved zero/zero factual weights with normalized 4:3 weights", () => {
+    const decoded = decodeStoredSource("redundancy-settings", {
+      ...redundancy,
+      componentWeights: { binary: 0, continuous: 0, personalAxes: 1 },
+      revision: 4,
+    });
+    const migrated = decoded.data as RedundancySettings;
+    expect(decoded.data).toMatchObject({
+      componentWeights: { binary: 4 / 7, continuous: 3 / 7 },
+    });
+    expect(migrated.componentWeights.binary + migrated.componentWeights.continuous).toBe(1);
+    expect(migrated.componentWeights.binary / migrated.componentWeights.continuous).toBe(4 / 3);
+    expect(decoded.revision).toBe(5);
   });
 
   test("preserves legacy shelf dimensionless normalization", () => {

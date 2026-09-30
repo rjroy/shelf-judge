@@ -971,6 +971,13 @@ const CollectionProfileGameFitnessEvidenceSchema = z
     gameName: z.string().min(1),
     currentFitness: FiniteNumberSchema.min(0).max(10),
     vetoed: z.boolean(),
+    redundancySimilarityInfo: z
+      .object({
+        status: z.enum(["disabled", "factual", "not-ready", "stale", "ready"]),
+        generationId: IdSchema.nullable(),
+      })
+      .strict()
+      .default({ status: "disabled", generationId: null }),
   })
   .strict()
   .superRefine((evidence, context) => {

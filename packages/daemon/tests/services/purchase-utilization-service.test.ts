@@ -7,7 +7,10 @@ import type {
   GameWithScore,
   DurableGame,
 } from "@shelf-judge/shared";
-import { createInitialEntityMetadata } from "@shelf-judge/shared";
+import {
+  createInitialEntityMetadata,
+  createInitialSemanticRedundancyState,
+} from "@shelf-judge/shared";
 import {
   createPurchaseUtilizationService,
   PurchaseUtilizationValidationError,
@@ -75,7 +78,7 @@ function game(overrides: Partial<DurableGame> = {}): DurableGame {
 
 function collection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     revision: 0,
     id: "collection-1",
     name: "Test",
@@ -85,6 +88,7 @@ function collection(overrides: Partial<Collection> = {}): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
+    semanticRedundancy: createInitialSemanticRedundancyState(),
     createdAt: initialTime,
     updatedAt: initialTime,
     ...overrides,

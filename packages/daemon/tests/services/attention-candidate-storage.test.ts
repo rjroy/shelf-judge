@@ -14,7 +14,7 @@ function data(): AttentionCandidateArtifact {
     indexVersion: ATTENTION_CANDIDATE_ARTIFACT_INDEX_VERSION,
     identity: {
       collectionId: "c",
-      collectionSchemaVersion: 8,
+      collectionSchemaVersion: 9,
       collectionRevision: 1,
       tournamentHash: "a".repeat(64),
       predictionSettingsHash: "b".repeat(64),

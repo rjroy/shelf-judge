@@ -6,6 +6,8 @@ import {
   CollectionSchemaV5,
   CollectionSchemaV6,
   CollectionSchemaV7,
+  CollectionSchemaV8,
+  createInitialSemanticRedundancyState,
   createInitialEntityMetadata,
   isUsableSuggestedPlayerPoll,
   type Axis,
@@ -727,6 +729,19 @@ function migrateVersionSevenToEight(raw: unknown): CollectionMigrationStepResult
   };
 }
 
+function migrateVersionEightToNine(raw: unknown): CollectionMigrationStepResult {
+  const historical = CollectionSchemaV8.parse(raw);
+  return {
+    data: {
+      ...historical,
+      schemaVersion: 9,
+      semanticRedundancy: createInitialSemanticRedundancyState(),
+    },
+    convertedAxisCount: 0,
+    disabledAxisCount: 0,
+  };
+}
+
 export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
   {
     fromVersion: 0,
@@ -767,6 +782,11 @@ export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
     fromVersion: 7,
     toVersion: 8,
     migrate: migrateVersionSevenToEight,
+  },
+  {
+    fromVersion: 8,
+    toVersion: 9,
+    migrate: migrateVersionEightToNine,
   },
 ];
 

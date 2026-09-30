@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ProfileData } from "@shelf-judge/shared";
 import {
+  CollectionProfileResultSchema,
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
 } from "@shelf-judge/shared";
@@ -81,7 +82,9 @@ async function currentEntityData(
   storage: ReturnType<typeof createStorageService>,
 ): Promise<ProfileData> {
   const data = await currentData(storage);
-  const profile = structuredClone(usefulProfileFixture);
+  const parsedProfile = CollectionProfileResultSchema.parse(structuredClone(usefulProfileFixture));
+  if (parsedProfile.status !== "available") throw new Error("Expected useful profile fixture");
+  const profile = parsedProfile;
   profile.computedAt = data.computedAt;
   return {
     ...data,
@@ -172,7 +175,7 @@ describe("useful profile persistence", () => {
       await expect(
         storage.saveRedundancySettings({
           ...(await storage.loadRedundancySettings()),
-          componentWeights: { binary: 0, continuous: 0, personalAxes: 0 },
+          componentWeights: { binary: 0, continuous: 0 },
         }),
       ).rejects.toThrow();
 
