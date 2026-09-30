@@ -20,6 +20,7 @@ import type {
 } from "@shelf-judge/shared";
 import { NicheIgnoreButton, NicheRestoreButton } from "@/components/niche-ignore-button";
 import { CapacityIndicator } from "@/components/capacity-indicator";
+import { RedundancyStatus } from "@/components/redundancy-status";
 import { scoreRangeClass } from "@/lib/score-utils";
 import { relativeDate } from "@/lib/date-utils";
 import {
@@ -1527,6 +1528,9 @@ function GameRow({
                 isIntegrated={isIntegratedRedundancy}
               />
             )}
+          {display?.isFitnessValue && score?.redundancySimilarityInfo && (
+            <RedundancyStatus info={score.redundancySimilarityInfo} />
+          )}
         </div>
       </div>
     </Link>

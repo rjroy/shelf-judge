@@ -102,13 +102,17 @@ export async function predictBggGame(
     throw new Error(err.error ?? "Prediction failed");
   }
 
-  if (opts.json) return printOutput(data, opts);
+  if (opts.json) return printOutput({ ...data, redundancyPreviewMode: "factual-only" }, opts);
 
   const lines: string[] = [];
   const { game, score, predictionUnavailable } = data;
 
   const isInCollection = !game.id.startsWith("preview-");
   lines.push(`${game.name}${isInCollection ? " (already in collection)" : ""}`);
+  lines.push(
+    `Redundancy similarity: ${score.redundancySimilarityInfo?.status ?? "unknown"} (generation: ${score.redundancySimilarityInfo?.generationId ?? "none"})`,
+  );
+  lines.push("Candidate redundancy preview: factual-only; it does not use semantic cache.");
 
   if (predictionUnavailable) {
     lines.push(

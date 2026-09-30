@@ -63,7 +63,7 @@ describe("wishlist redundancy preview", () => {
     }
   });
 
-  test("null preview does not imply a reduction and JSON passes the entry through", async () => {
+  test("null preview does not imply a reduction and JSON labels its factual-only semantics", async () => {
     const noPreview = { ...entry, redundancyPreview: null };
     const client = createMockClient({
       routes: {
@@ -76,6 +76,6 @@ describe("wishlist redundancy preview", () => {
     const addedJson = await wishlistAdd(client, ["123"], { json: true });
     expect(listed).toContain("---");
     expect(listed).not.toContain("penalty");
-    expect(JSON.parse(addedJson)).toEqual(noPreview);
+    expect(JSON.parse(addedJson)).toEqual({ ...noPreview, redundancyPreviewMode: "factual-only" });
   });
 });

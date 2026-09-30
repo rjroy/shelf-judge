@@ -19,6 +19,10 @@ async function fixtureState(page: Page): Promise<FixtureState> {
   return (await response.json()) as FixtureState;
 }
 
+function manualValueStatuses(page: Page) {
+  return page.locator(".manual-game-values-form").getByRole("status");
+}
+
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(
     testInfo.project.name !== "chromium-desktop",
@@ -49,7 +53,7 @@ test("serializes mounted controls through transition refresh and reconciles new 
   await controlFixture(page, { blockNextMutation: true });
   await savePlayingTime.click();
   await expect(playingTime).toBeDisabled();
-  await expect(page.getByRole("status")).toHaveText("Saving Play Time...");
+  await expect(manualValueStatuses(page)).toHaveText("Saving Play Time...");
   await expect(playerCount).toBeEnabled();
   await expect(savePlayerCount).toBeDisabled();
   await expect(clearPlayerCount).toBeDisabled();
@@ -61,14 +65,14 @@ test("serializes mounted controls through transition refresh and reconciles new 
     externalPlayerCount: 5,
     releaseMutation: true,
   });
-  await expect(page.getByRole("status")).toHaveText("Refreshing Play Time...");
+  await expect(manualValueStatuses(page)).toHaveText("Refreshing Play Time...");
   await expect(playingTime).toBeDisabled();
   await expect(savePlayerCount).toBeDisabled();
   await expect(clearPlayerCount).toBeDisabled();
   expect((await fixtureState(page)).mutationBodies).toEqual([{ playingTime: 120 }]);
 
   await controlFixture(page, { releaseDetail: true });
-  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(manualValueStatuses(page)).toHaveCount(0);
   await expect(playingTime).toHaveValue("120");
   await expect(playingTime).toBeEnabled();
   await expect(playerCount).toHaveValue("5");
@@ -79,17 +83,17 @@ test("serializes mounted controls through transition refresh and reconciles new 
 
   await controlFixture(page, { blockNextMutation: true });
   await savePlayerCount.click();
-  await expect(page.getByRole("status")).toHaveText("Saving Player Count...");
+  await expect(manualValueStatuses(page)).toHaveText("Saving Player Count...");
   await playingTime.fill("125");
   await controlFixture(page, { blockNextDetail: true, releaseMutation: true });
-  await expect(page.getByRole("status")).toHaveText("Refreshing Player Count...");
+  await expect(manualValueStatuses(page)).toHaveText("Refreshing Player Count...");
   await expect(savePlayingTime).toBeDisabled();
   await controlFixture(page, {
     externalPlayingTime: 130,
     externalPlayerCount: 7,
     releaseDetail: true,
   });
-  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(manualValueStatuses(page)).toHaveCount(0);
   await expect(playingTime).toHaveValue("125");
   await expect(playerCount).toHaveValue("6");
   await expect(savePlayingTime).toBeEnabled();
@@ -147,10 +151,10 @@ test("reconciles a successful save against a newer same-scalar authoritative wri
   await savePlayingTime.click();
   await expect(savePlayerCount).toBeDisabled();
   await controlFixture(page, { releaseMutation: true });
-  await expect(page.getByRole("status")).toHaveText("Refreshing Play Time...");
+  await expect(manualValueStatuses(page)).toHaveText("Refreshing Play Time...");
 
   await controlFixture(page, { externalPlayingTime: 90, releaseDetail: true });
-  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(manualValueStatuses(page)).toHaveCount(0);
   await expect(playingTime).toHaveValue("120");
   await expect(savePlayingTime).toBeEnabled();
   await expect(clearPlayingTime).toBeEnabled();
@@ -166,7 +170,7 @@ test("reconciles a successful save against a newer same-scalar authoritative wri
   await expect
     .poll(async () => (await fixtureState(page)).mutationBodies)
     .toEqual([{ playingTime: 120 }, { playerCount: 5 }]);
-  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(manualValueStatuses(page)).toHaveCount(0);
   await expect(savePlayerCount).toBeDisabled();
   await expect(playingTime).toHaveValue("120");
   await expect(savePlayingTime).toBeEnabled();
@@ -191,10 +195,10 @@ test("reconciles a successful clear against a newer same-scalar authoritative wr
   await clearPlayingTime.click();
   await expect(savePlayerCount).toBeDisabled();
   await controlFixture(page, { releaseMutation: true });
-  await expect(page.getByRole("status")).toHaveText("Refreshing Play Time...");
+  await expect(manualValueStatuses(page)).toHaveText("Refreshing Play Time...");
 
   await controlFixture(page, { externalPlayingTime: 90, releaseDetail: true });
-  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(manualValueStatuses(page)).toHaveCount(0);
   await expect(playingTime).toHaveValue("");
   await expect(clearPlayingTime).toBeEnabled();
   await expect(playerCount).toHaveValue("5");
@@ -212,7 +216,7 @@ test("reconciles a successful clear against a newer same-scalar authoritative wr
   await expect
     .poll(async () => (await fixtureState(page)).mutationBodies)
     .toEqual([{ playingTime: null }, { playerCount: 5 }]);
-  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(manualValueStatuses(page)).toHaveCount(0);
   await expect(savePlayerCount).toBeDisabled();
   await expect(playingTime).toHaveValue("90");
   await expect(savePlayingTime).toBeDisabled();

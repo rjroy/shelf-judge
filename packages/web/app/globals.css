@@ -7909,6 +7909,108 @@ body {
   margin-top: 4px;
 }
 
+.redundancy-settings-body > section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+}
+.redundancy-settings-body h1,
+.redundancy-settings-body h2,
+.redundancy-settings-body h3 {
+  margin: 0;
+}
+.redundancy-settings-body h1 {
+  font-size: 24px;
+}
+.redundancy-settings-body h2 {
+  font-size: var(--text-lg);
+}
+.redundancy-settings-body h3 {
+  font-size: 15px;
+}
+.redundancy-disclosure {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+}
+.redundancy-manifest {
+  max-height: 380px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+.redundancy-manifest table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.redundancy-manifest th,
+.redundancy-manifest td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.redundancy-manifest th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-subtle);
+}
+.redundancy-manifest :focus-visible,
+.redundancy-settings-body :focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.redundancy-status,
+.preview-redundancy-provenance {
+  margin: 4px 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.redundancy-settings-body input[type="range"] {
+  accent-color: var(--action);
+  min-width: 140px;
+}
+.redundancy-settings-body input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--action);
+  flex: 0 0 auto;
+}
+.redundancy-settings-body select {
+  max-width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+}
+@media (max-width: 600px) {
+  .redundancy-settings-body {
+    padding-inline: 16px;
+  }
+  .redundancy-setting-row,
+  .redundancy-weight-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .redundancy-setting-row > input[type="range"],
+  .redundancy-weight-row > input[type="range"] {
+    max-width: none;
+    width: 100%;
+  }
+  .redundancy-manifest {
+    max-height: 320px;
+  }
+}
+
 /* ===== Wishlist Button (search page) ===== */
 
 .btn-wishlist {

@@ -414,7 +414,10 @@ export async function gameAdd(
 
 interface GameListItem {
   game: { id: string; name: string; yearPublished: number | null; ownership?: OwnershipStatus };
-  score: { score: number } | null;
+  score: {
+    score: number;
+    redundancySimilarityInfo?: { status: string; generationId: string | null };
+  } | null;
   displayScore: string | null;
 }
 
@@ -454,7 +457,7 @@ export async function gameList(
     ? ["ID", "Name", "Year", "Score", "Rank"]
     : ["ID", "Name", "Year", "Score"];
 
-  return formatTable(
+  const table = formatTable(
     headers,
     data.map((g) => {
       const displayName =
@@ -471,6 +474,15 @@ export async function gameList(
       return row;
     }),
   );
+  const modes = [
+    ...new Set(
+      data
+        .map((entry) => entry.score?.redundancySimilarityInfo)
+        .filter(Boolean)
+        .map((info) => `${info?.status} (generation: ${info?.generationId ?? "none"})`),
+    ),
+  ];
+  return modes.length ? `${table}\n\nRedundancy similarity: ${modes.join(", ")}` : table;
 }
 
 export async function gameAcquisition(

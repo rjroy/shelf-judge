@@ -21,14 +21,18 @@ export async function wishlistList(
     throw new Error(err.error ?? "Failed to load wishlist");
   }
 
-  if (opts.json) return printOutput(data, opts);
+  if (opts.json)
+    return printOutput(
+      data.map((entry) => ({ ...entry, redundancyPreviewMode: "factual-only" })),
+      opts,
+    );
 
   if (data.length === 0) {
     return "Wishlist is empty.";
   }
 
   return formatTable(
-    ["Name", "Year", "Score", "Confidence", "Redundancy", "Added"],
+    ["Name", "Year", "Score", "Confidence", "Factual-only redundancy", "Added"],
     data.map((e) => [
       e.name,
       e.yearPublished != null ? String(e.yearPublished) : "---",
@@ -64,14 +68,14 @@ export async function wishlistAdd(
     throw new Error(err.error ?? "Failed to add to wishlist");
   }
 
-  if (opts.json) return printOutput(data.entry, opts);
+  if (opts.json) return printOutput({ ...data.entry, redundancyPreviewMode: "factual-only" }, opts);
 
   const score =
     data.entry.predictedScore != null
       ? `predicted: ${data.entry.predictedScore.toFixed(1)}`
       : "no prediction";
 
-  const preview = formatWishlistRedundancyDetail(data.entry.redundancyPreview);
+  const preview = `Factual-only preview.\n${formatWishlistRedundancyDetail(data.entry.redundancyPreview)}`;
   return [`Added ${data.entry.name} (${score})`, preview].filter(Boolean).join("\n");
 }
 
@@ -151,12 +155,13 @@ export async function wishlistRefresh(
       throw new Error(err.error ?? "Failed to refresh wishlist entry");
     }
 
-    if (opts.json) return printOutput(data.entry, opts);
+    if (opts.json)
+      return printOutput({ ...data.entry, redundancyPreviewMode: "factual-only" }, opts);
 
     const score =
       data.entry.predictedScore != null ? data.entry.predictedScore.toFixed(1) : "no prediction";
 
-    const preview = formatWishlistRedundancyDetail(data.entry.redundancyPreview);
+    const preview = `Factual-only preview.\n${formatWishlistRedundancyDetail(data.entry.redundancyPreview)}`;
     return [`Refreshed ${data.entry.name}: ${score}`, preview].filter(Boolean).join("\n");
   }
 

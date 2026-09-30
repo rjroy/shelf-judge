@@ -20,6 +20,59 @@ interface LocalCommandHelp {
 // One API operation can intentionally back multiple CLI commands. Keep those
 // CLI-only aliases here instead of advertising duplicate daemon operations.
 const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
+  "shelf.redundancy.update-semantic-settings": [
+    {
+      name: "semantic-settings",
+      usage:
+        "shelf-judge redundancy semantic-settings <enabled|factual|description|ownerNote|cachedOwnerNoteUse> <value>",
+      description: "Update opt-in semantic settings without transmitting source text",
+    },
+  ],
+  "shelf.redundancy.get-semantic-summary": [
+    {
+      name: "status",
+      usage: "shelf-judge redundancy status [--json]",
+      description: "Show semantic mode, generation, refresh, and publication status",
+    },
+  ],
+  "shelf.redundancy.create-semantic-disclosure": [
+    {
+      name: "disclose",
+      usage:
+        "shelf-judge redundancy disclose <description-only|owner-notes-only|description-and-owner-notes>",
+      description: "Create an explicit scoped manifest; this does not start a refresh",
+    },
+  ],
+  "shelf.redundancy.deliver-semantic-disclosure-page": [
+    {
+      name: "inspect",
+      usage: "shelf-judge redundancy inspect <manifest-id> <digest> <pair-count> [--json]",
+      description: "Retrieve and display the complete exact pair manifest before authorization",
+    },
+  ],
+  "shelf.redundancy.acknowledge-and-start-semantic-refresh": [
+    {
+      name: "refresh",
+      usage:
+        "shelf-judge redundancy refresh <manifest-id> <digest> <pair-count> --authorize [--authorize-notes|--decline-notes] [--use-cached-notes]",
+      description:
+        "Explicitly authorize one bounded refresh; fresh note transmission and cached-note use are independent permissions",
+    },
+  ],
+  "shelf.redundancy.get-semantic-refresh-status": [
+    {
+      name: "progress",
+      usage: "shelf-judge redundancy progress [--json]",
+      description: "Show active or latest semantic refresh progress",
+    },
+  ],
+  "shelf.redundancy.cancel-semantic-refresh": [
+    {
+      name: "cancel",
+      usage: "shelf-judge redundancy cancel <command-id> [--json]",
+      description: "Cancel an explicitly authorized refresh",
+    },
+  ],
   "shelf.analyst.turn.stream": [
     {
       name: "ask",

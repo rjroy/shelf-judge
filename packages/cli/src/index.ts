@@ -63,6 +63,14 @@ import {
   redundancyDisable,
   redundancyStage,
   redundancySet,
+  redundancySemanticSettings,
+  redundancySemanticStatus,
+  redundancySemanticProgress,
+  redundancySemanticDisclosure,
+  redundancySemanticInspect,
+  redundancySemanticStart,
+  redundancySemanticCancel,
+  redundancySemanticRevoke,
 } from "./commands/redundancy.js";
 import {
   shelfList,
@@ -120,6 +128,14 @@ const COMMANDS: Record<string, number> = {
   "redundancy disable": 2,
   "redundancy stage": 2,
   "redundancy set": 2,
+  "redundancy semantic-settings": 2,
+  "redundancy status": 2,
+  "redundancy progress": 2,
+  "redundancy disclose": 2,
+  "redundancy inspect": 2,
+  "redundancy refresh": 2,
+  "redundancy cancel": 2,
+  "redundancy revoke": 2,
   "wishlist list": 2,
   "wishlist add": 2,
   "wishlist remove": 2,
@@ -582,6 +598,30 @@ async function main(): Promise<void> {
       break;
     case "redundancy set":
       output = await redundancySet(client, args, opts);
+      break;
+    case "redundancy semantic-settings":
+      output = await redundancySemanticSettings(client, args, opts);
+      break;
+    case "redundancy status":
+      output = await redundancySemanticStatus(client, args, opts);
+      break;
+    case "redundancy progress":
+      output = await redundancySemanticProgress(client, args, opts);
+      break;
+    case "redundancy disclose":
+      output = await redundancySemanticDisclosure(client, args, opts);
+      break;
+    case "redundancy inspect":
+      output = await redundancySemanticInspect(client, args, opts);
+      break;
+    case "redundancy refresh":
+      output = await redundancySemanticStart(client, args, opts);
+      break;
+    case "redundancy cancel":
+      output = await redundancySemanticCancel(client, args, opts);
+      break;
+    case "redundancy revoke":
+      output = await redundancySemanticRevoke(client, args, opts);
       break;
     case "wishlist list":
       output = await wishlistList(client, args, opts);

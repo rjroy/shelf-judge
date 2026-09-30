@@ -118,34 +118,43 @@ function PreviewPanel({ data }: { data: PredictedGameResponse }) {
       )}
 
       {/* Redundancy preview (REQ-REDUN-36) */}
-      {data.redundancyPreview && (
-        <div className="preview-redundancy">
-          <div className="preview-redundancy-title">Redundancy</div>
-          <div className="preview-redundancy-score">
-            With redundancy: <strong>{data.redundancyPreview.adjustedScore.toFixed(1)}</strong>
-            {data.redundancyPreview.penalty > 0 && (
-              <span className="preview-redundancy-penalty">
-                {" "}
-                (-{data.redundancyPreview.penalty.toFixed(1)})
-              </span>
-            )}
-          </div>
-          {data.redundancyPreview.nicheNeighbors.length > 0 ? (
-            <div className="preview-redundancy-neighbors">
-              {data.redundancyPreview.nicheNeighbors.slice(0, 3).map((n) => (
-                <div key={n.gameId} className="preview-redundancy-neighbor">
-                  <span className="preview-redundancy-neighbor-name">{n.gameName}</span>
-                  <span className="preview-redundancy-neighbor-sim">
-                    {(n.similarity * 100).toFixed(0)}%
-                  </span>
-                </div>
-              ))}
+      <div className="preview-redundancy">
+        <div className="preview-redundancy-title">Redundancy</div>
+        <p className="preview-redundancy-provenance">
+          Factual-only candidate preview. Owner-note comparison is unavailable for candidates.
+        </p>
+        {data.redundancyPreview ? (
+          <>
+            <div className="preview-redundancy-score">
+              With redundancy: <strong>{data.redundancyPreview.adjustedScore.toFixed(1)}</strong>
+              {data.redundancyPreview.penalty > 0 && (
+                <span className="preview-redundancy-penalty">
+                  {" "}
+                  (-{data.redundancyPreview.penalty.toFixed(1)})
+                </span>
+              )}
             </div>
-          ) : (
-            <div className="preview-redundancy-empty">No similar games in collection.</div>
-          )}
-        </div>
-      )}
+            {data.redundancyPreview.nicheNeighbors.length > 0 ? (
+              <div className="preview-redundancy-neighbors">
+                {data.redundancyPreview.nicheNeighbors.slice(0, 3).map((n) => (
+                  <div key={n.gameId} className="preview-redundancy-neighbor">
+                    <span className="preview-redundancy-neighbor-name">{n.gameName}</span>
+                    <span className="preview-redundancy-neighbor-sim">
+                      {(n.similarity * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="preview-redundancy-empty">No similar games in collection.</div>
+            )}
+          </>
+        ) : (
+          <div className="preview-redundancy-empty">
+            No factual redundancy adjustment is available for this candidate.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

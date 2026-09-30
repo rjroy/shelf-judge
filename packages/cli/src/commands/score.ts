@@ -192,6 +192,12 @@ export async function scoreGet(
     lines.push(formatBreakdown(data.breakdown));
   }
 
+  const similarity = detailRes.data.score?.redundancySimilarityInfo;
+  if (similarity)
+    lines.push(
+      `Redundancy similarity: ${similarity.status} (generation: ${similarity.generationId ?? "none"})`,
+    );
+
   const adj = detailRes.data.score?.redundancyAdjustment;
   if (adj && detailRes.data.score) {
     lines.push("");
@@ -263,6 +269,15 @@ async function scoreListWithPredictions(
         }),
       ),
     );
+    const modes = [
+      ...new Set(
+        scored
+          .map((entry) => entry.score?.redundancySimilarityInfo)
+          .filter(Boolean)
+          .map((info) => `${info?.status} (generation: ${info?.generationId ?? "none"})`),
+      ),
+    ];
+    if (modes.length) lines.push(`Redundancy similarity: ${modes.join(", ")}`);
   }
 
   if (unscored.length > 0) {
