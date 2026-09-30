@@ -18,7 +18,7 @@ import { semanticSourceIdentityFixture } from "../helpers/semantic-redundancy-fi
 const identity = semanticSourceIdentityFixture({ collectionId: "refresh-collection" });
 const now = Date.parse("2026-01-01T00:00:00.000Z");
 
-function pair(gameA: string, gameB: string) {
+function pair(gameA: string, gameB: string): SemanticDisclosureManifest["pairs"][number] {
   return {
     gameA,
     gameB,
@@ -43,7 +43,7 @@ function manifest(
     signalScope: scope,
     providerId: "fake-provider",
     modelId: JEV_MODEL_ID,
-    rubricVersion: 1,
+    rubricVersion: 2,
     budget: { maxRequests: 10, maxTokens: 10_000, maxDurationMs: 600_000 },
     expiresAt: "2026-01-02T00:00:00.000Z",
     eligibleGameIds: [...new Set(pairs.flatMap(({ gameA, gameB }) => [gameA, gameB]))].sort(),
@@ -222,11 +222,9 @@ function setup(
                     score: 0.7,
                     confidence: 0.9,
                     modelId: JEV_MODEL_ID,
-                    rubricVersion: 1,
-                    questionVersion: 1,
+                    rubricVersion: 2,
+                    questionVersion: 2,
                   },
-            ownerNotesRelevant: request.mode === "description-only" ? null : true,
-            ownerNotesRelevanceProbability: request.mode === "description-only" ? null : 0.95,
             ownerNote:
               request.mode === "description-only"
                 ? null
@@ -234,8 +232,8 @@ function setup(
                     score: 0.6,
                     confidence: 0.8,
                     modelId: JEV_MODEL_ID,
-                    rubricVersion: 1,
-                    questionVersion: 1,
+                    rubricVersion: 2,
+                    questionVersion: 2,
                   },
             usage: { inputTokens: 12, outputTokens: 2 },
           };
@@ -339,6 +337,30 @@ describe("semantic refresh worker", () => {
     });
   });
 
+  test("missing owner notes keep the authorized request description-only", async () => {
+    const noNotesPair = {
+      ...pair("a", "b"),
+      hasOwnerNoteA: false,
+      hasOwnerNoteB: false,
+      noteVersionA: null,
+      noteVersionB: null,
+    };
+    const source = {
+      ...sourceFor(manifest("description-and-owner-notes", [noNotesPair])),
+      ownerNoteA: null,
+      ownerNoteB: null,
+    };
+    const h = setup({
+      scope: "description-and-owner-notes",
+      noteTransmissionAuthorized: true,
+      pairs: [noNotesPair],
+      source,
+    });
+    await h.service.run(h.manifest.id);
+    expect(h.requests[0].mode).toBe("description-only");
+    expect(h.posts).toBe(1);
+  });
+
   test("stops a 429 retry after owner-note authority changes during backoff", async () => {
     const h = setup({
       scope: "owner-notes-only",
@@ -349,8 +371,6 @@ describe("semantic refresh worker", () => {
         await retry();
         return {
           description: null,
-          ownerNotesRelevant: true,
-          ownerNotesRelevanceProbability: 0.9,
           ownerNote: null,
           usage: { inputTokens: 1, outputTokens: 1 },
         };
@@ -384,14 +404,12 @@ describe("semantic refresh worker", () => {
     h.setSource({ ...sourceFor(h.manifest), ownerNoteA: null });
     finishGateway.resolve({
       description: null,
-      ownerNotesRelevant: true,
-      ownerNotesRelevanceProbability: 0.9,
       ownerNote: {
         score: 0.6,
         confidence: 0.8,
         modelId: JEV_MODEL_ID,
-        rubricVersion: 1,
-        questionVersion: 1,
+        rubricVersion: 2,
+        questionVersion: 2,
       },
       usage: { inputTokens: 1, outputTokens: 1 },
     });
@@ -401,24 +419,29 @@ describe("semantic refresh worker", () => {
     expect(h.finished).toBe("failed");
   });
 
-  test("persists provenance-bound unavailable when the note relevance gate fails", async () => {
+  test("persists an independent note score even with low confidence", async () => {
     const h = setup({
       scope: "owner-notes-only",
       noteTransmissionAuthorized: true,
       gateway: () =>
         Promise.resolve({
           description: null,
-          ownerNotesRelevant: false,
-          ownerNotesRelevanceProbability: 0.2,
-          ownerNote: null,
+          ownerNote: {
+            score: 0.6,
+            confidence: 0.1,
+            modelId: JEV_MODEL_ID,
+            rubricVersion: 2,
+            questionVersion: 2,
+          },
           usage: { inputTokens: 3, outputTokens: 1 },
         }),
     });
     await h.service.run(h.manifest.id);
     const judgment = (h.checkpoints[0] as { judgments: SemanticPairJudgment[] }).judgments[0];
     expect(judgment.ownerNote).toMatchObject({
-      status: "unavailable",
-      reason: "insufficient-evidence",
+      status: "scored",
+      score: 0.6,
+      confidence: 0.1,
       sourceFingerprintA: "c".repeat(64),
       sourceFingerprintB: "d".repeat(64),
     });

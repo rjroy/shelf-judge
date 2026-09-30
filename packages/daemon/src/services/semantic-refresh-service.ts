@@ -160,31 +160,19 @@ function judgmentsFor(
       }
     : null;
   let ownerNote: SemanticPairJudgment["ownerNote"] = null;
-  if (mode !== "description-only") {
-    if (!result.ownerNotesRelevant) {
-      ownerNote = {
-        status: "unavailable",
-        reason: "insufficient-evidence",
-        modelId: manifest.modelId,
-        rubricVersion: manifest.rubricVersion,
-        sourceFingerprintA: source.ownerNoteA!.fingerprint,
-        sourceFingerprintB: source.ownerNoteB!.fingerprint,
-        requestContext,
-      };
-    } else if (result.ownerNote) {
-      ownerNote = {
-        status: "scored",
-        score: result.ownerNote.score,
-        confidence: result.ownerNote.confidence,
-        modelId: result.ownerNote.modelId,
-        rubricVersion: result.ownerNote.rubricVersion,
-        sourceFingerprintA: source.ownerNoteA!.fingerprint,
-        sourceFingerprintB: source.ownerNoteB!.fingerprint,
-        noteVersionA: source.ownerNoteA!.version,
-        noteVersionB: source.ownerNoteB!.version,
-        requestContext,
-      };
-    }
+  if (mode !== "description-only" && result.ownerNote) {
+    ownerNote = {
+      status: "scored",
+      score: result.ownerNote.score,
+      confidence: result.ownerNote.confidence,
+      modelId: result.ownerNote.modelId,
+      rubricVersion: result.ownerNote.rubricVersion,
+      sourceFingerprintA: source.ownerNoteA!.fingerprint,
+      sourceFingerprintB: source.ownerNoteB!.fingerprint,
+      noteVersionA: source.ownerNoteA!.version,
+      noteVersionB: source.ownerNoteB!.version,
+      requestContext,
+    };
   }
   return { gameA: pair.gameA, gameB: pair.gameB, description, ownerNote };
 }
@@ -196,10 +184,7 @@ function validatePairResult(
 ): void {
   if (
     (mode !== "owner-notes-only" && result.description === null) ||
-    (mode !== "description-only" &&
-      (result.ownerNotesRelevant === null ||
-        (result.ownerNotesRelevant && result.ownerNote === null) ||
-        (!result.ownerNotesRelevant && result.ownerNote !== null))) ||
+    (mode !== "description-only" && result.ownerNote === null) ||
     (result.description !== null &&
       (result.description.modelId !== manifest.modelId ||
         result.description.rubricVersion !== manifest.rubricVersion ||

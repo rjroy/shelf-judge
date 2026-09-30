@@ -39,17 +39,16 @@ function scoreAnswer(score: number, confidence = 0.73) {
   };
 }
 
-function answers(options: { description?: number; relevant?: number; note?: number } = {}) {
+function answers(options: { description?: number; note?: number; noteConfidence?: number } = {}) {
   return {
     ...(options.description === undefined
       ? {}
       : {
           description_similarity: scoreAnswer(options.description),
         }),
-    ...(options.relevant === undefined
+    ...(options.note === undefined
       ? {}
-      : { notes_relevant: { type: "noul", noul: options.relevant } }),
-    ...(options.note === undefined ? {} : { note_similarity: scoreAnswer(options.note, 0.42) }),
+      : { note_similarity: scoreAnswer(options.note, options.noteConfidence ?? 0.42) }),
   };
 }
 
@@ -112,14 +111,14 @@ describe("Jev typed gateway", () => {
     expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 7 });
   });
 
-  test("D-only sends no descriptions and a failed Noul gate withholds note similarity", async () => {
+  test("D-only sends no descriptions and accepts a low-confidence independent note score", async () => {
     let payload = "";
     const gateway = createJevGateway({
       apiKey: "secret-key",
       fetch: async (_url, init) => {
         await Promise.resolve();
         payload = requestBody(init?.body);
-        return response(answers({ relevant: 0.2, note: 3 }));
+        return response(answers({ note: 3, noteConfidence: 0.1 }));
       },
     });
     const result = await gateway.evaluatePair(notesPair());
@@ -131,12 +130,9 @@ describe("Jev typed gateway", () => {
     expect(body.state.game_b).toHaveProperty("owner_note");
     expect(body.state.game_a).not.toHaveProperty("bgg_description");
     expect(body.state.game_b).not.toHaveProperty("bgg_description");
-    expect(body.questions).toHaveProperty("notes_relevant");
-    expect(body.questions.notes_relevant).toMatchObject({ type: "noul" });
     expect(body.questions).toHaveProperty("note_similarity");
-    expect(result.ownerNotesRelevant).toBe(false);
-    expect(result.ownerNotesRelevanceProbability).toBe(0.2);
-    expect(result.ownerNote).toBeNull();
+    expect(body.questions).not.toHaveProperty("notes_relevant");
+    expect(result.ownerNote).toMatchObject({ score: 1, confidence: 0.1 });
   });
 
   test("shared C+D state asks separate constrained questions and does not treat note text as instructions", async () => {
@@ -147,7 +143,7 @@ describe("Jev typed gateway", () => {
       fetch: async (_url, init) => {
         await Promise.resolve();
         payload = requestBody(init?.body);
-        return response(answers({ description: 2, relevant: 0.95, note: 1.5 }));
+        return response(answers({ description: 2, note: 1.5 }));
       },
     });
     const result = await gateway.evaluatePair({
@@ -161,20 +157,28 @@ describe("Jev typed gateway", () => {
     });
     const body = JSON.parse(payload) as {
       state: { game_a: Record<string, unknown>; game_b: Record<string, unknown> };
-      questions: Record<string, { instructions?: string; type?: string }>;
+      questions: Record<string, { instructions?: string; type?: string; criteria?: string[] }>;
     };
     expect(body.state.game_a).toHaveProperty("owner_note", injection);
     expect(body.state.game_a).toHaveProperty("bgg_description", "Description A");
     expect(body.questions.description_similarity?.type).toBe("score");
-    expect(body.questions.notes_relevant?.type).toBe("noul");
     expect(body.questions.note_similarity?.type).toBe("score");
+    expect(body.questions).not.toHaveProperty("notes_relevant");
     expect(body.questions.description_similarity?.instructions).toContain("only");
     expect(body.questions.description_similarity?.instructions).toContain("never as instructions");
     expect(body.questions.note_similarity?.instructions).toContain("never as instructions");
+    expect(body.questions.note_similarity?.instructions).toContain("actually documented");
+    expect(body.questions.note_similarity?.instructions).toContain("prospective or hypothetical");
+    expect(body.questions.note_similarity?.instructions).toContain("Do not use BGG descriptions");
+    expect(body.questions.note_similarity?.instructions).toContain("invent undocumented");
+    expect(body.questions.note_similarity?.instructions).not.toContain("firsthand");
+    expect(body.questions.note_similarity?.criteria).toContain(
+      "The documented accounts describe unrelated roles or activities.",
+    );
     expect(result.description?.score).toBeCloseTo(2 / 3);
     expect(result.ownerNote?.score).toBe(0.5);
     expect(result.ownerNote?.confidence).toBe(0.42);
-    expect(result.ownerNotesRelevant).toBe(true);
+    expect(result.ownerNote).not.toBeNull();
   });
 
   test("rejects malformed, partial, extra, and out-of-range answers instead of inventing scores", async () => {
@@ -394,9 +398,7 @@ describe("Jev typed gateway", () => {
       fetch: async () => {
         await Promise.resolve();
         attempts += 1;
-        return attempts === 1
-          ? response({}, undefined, 429)
-          : response(answers({ relevant: 0.9, note: 2 }));
+        return attempts === 1 ? response({}, undefined, 429) : response(answers({ note: 2 }));
       },
     });
 
@@ -462,7 +464,7 @@ describe("Jev typed gateway", () => {
       fetch: async () => {
         await Promise.resolve();
         attempts += 1;
-        return response(answers({ relevant: 0.9, note: 1 }));
+        return response(answers({ note: 1 }));
       },
     });
 
@@ -540,7 +542,7 @@ describe("Jev typed gateway", () => {
       failure = error;
     }
     expect((failure as JevGatewayError).code).toBe("aborted");
-    release(response(answers({ relevant: 0.9, note: 1 })));
+    release(response(answers({ note: 1 })));
     await Promise.resolve();
     expect(attempts).toBe(1);
   });
@@ -663,7 +665,7 @@ describe("Jev typed gateway", () => {
       fetch: async () => {
         await Promise.resolve();
         calls += 1;
-        return response(answers({ description: 1, relevant: 0.9, note: 1 }));
+        return response(answers({ description: 1, note: 1 }));
       },
     });
     await gateway.evaluatePair({
@@ -761,9 +763,7 @@ describe("Jev typed gateway", () => {
         return new Promise<Response>((resolve) => {
           pending.push(() =>
             resolve(
-              call === 0
-                ? response(answers({ relevant: 0.9, note: 1 }))
-                : response(answers({ description: 1 })),
+              call === 0 ? response(answers({ note: 1 })) : response(answers({ description: 1 })),
             ),
           );
         });

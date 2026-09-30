@@ -9,7 +9,11 @@ import {
   type TournamentData,
 } from "@shelf-judge/shared";
 import { createCollectionMutationService } from "../../src/services/collection-mutation-service.js";
-import { createJevGateway, JEV_MODEL_ID } from "../../src/services/jev/jev-gateway.js";
+import {
+  createJevGateway,
+  JEV_MODEL_ID,
+  JEV_RUBRIC_VERSION,
+} from "../../src/services/jev/jev-gateway.js";
 import {
   createSemanticRedundancyStateService,
   semanticDescriptionSourceFingerprint,
@@ -253,7 +257,7 @@ function makeHarness(
     options: {
       providerId: "fake-typesafe",
       modelId: JEV_MODEL_ID,
-      rubricVersion: 1,
+      rubricVersion: JEV_RUBRIC_VERSION,
       scoringVersion: 1,
       maxSourceTextChars: 1000,
     },
@@ -575,7 +579,7 @@ describe("semantic refresh durable integration", () => {
                 score: 0.5,
                 confidence: 0.8,
                 modelId: JEV_MODEL_ID,
-                rubricVersion: 1,
+                rubricVersion: JEV_RUBRIC_VERSION,
                 sourceFingerprintA: currentPair.descriptionFingerprintA!,
                 sourceFingerprintB: currentPair.descriptionFingerprintB!,
                 noteVersionA: null,

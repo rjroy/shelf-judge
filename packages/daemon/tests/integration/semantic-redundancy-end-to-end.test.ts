@@ -11,7 +11,11 @@ import { Hono } from "hono";
 import { createRedundancyRoutes } from "../../src/routes/redundancy.js";
 import { createCollectionMutationService } from "../../src/services/collection-mutation-service.js";
 import { createOwnerGameNoteService } from "../../src/services/owner-game-note-service.js";
-import { createJevGateway, JEV_MODEL_ID } from "../../src/services/jev/jev-gateway.js";
+import {
+  createJevGateway,
+  JEV_MODEL_ID,
+  JEV_RUBRIC_VERSION,
+} from "../../src/services/jev/jev-gateway.js";
 import { createSemanticRedundancyStateService } from "../../src/services/semantic-redundancy-state-service.js";
 import { createSemanticRefreshCaptureService } from "../../src/services/semantic-refresh-capture-service.js";
 import { createSemanticRefreshService } from "../../src/services/semantic-refresh-service.js";
@@ -220,7 +224,7 @@ function harness(
     options: {
       providerId: "fake-typesafe",
       modelId: JEV_MODEL_ID,
-      rubricVersion: 1,
+      rubricVersion: JEV_RUBRIC_VERSION,
       scoringVersion: 1,
       maxSourceTextChars: 1000,
     },
@@ -259,7 +263,7 @@ function harness(
           const requestBody = typeof init?.body === "string" ? init.body : "";
           outboundPayloads.push(requestBody);
           if (harnessOptions.fetch) return harnessOptions.fetch(init?.signal ?? null);
-          const isNotesRequest = requestBody.includes("notes_relevant");
+          const isNotesRequest = requestBody.includes("note_similarity");
           return new Response(
             JSON.stringify({
               model: JEV_MODEL_ID,
@@ -273,7 +277,6 @@ function harness(
                 },
                 ...(isNotesRequest
                   ? {
-                      notes_relevant: { type: "noul", noul: 0.9 },
                       note_similarity: {
                         type: "score",
                         score: 2,
@@ -515,7 +518,6 @@ describe("semantic redundancy route-to-worker integration", () => {
     expect(Object.keys(payload.questions).sort()).toEqual([
       "description_similarity",
       "note_similarity",
-      "notes_relevant",
     ]);
   });
 
