@@ -11,21 +11,24 @@ related:
   - .lore/reference/specs/fitness/prediction-engine.md
   - .lore/archive/specs/collection/collection-profiling.md
   - .lore/reference/designs/mvp-fitness-model.md
+  - .lore/work/design/jev-redundancy-similarity.md
   - .lore/work/issues/deferred-redundancy-scoring.md
   - .lore/reference/vision.md
 ---
 
 # Spec: Redundancy Scoring Penalty
 
+> **Authority and delivery status:** This maintained reference defines the approved target contract for factual-plus-optional-semantic redundancy. The implementation status in the front matter describes the original factual redundancy feature; it does **not** mean Jev similarity, personal-axis removal/migration, semantic settings, or generation publication is delivered. Until those amendments are implemented, running behavior remains the factual/personally weighted behavior described by the original implementation and must not be represented as providing the target contract below. The [approved Jev similarity design](.lore/work/design/jev-redundancy-similarity.md) informs this amendment; it does not itself establish delivered behavior. Prediction, shelf placement, and niche-cluster contracts are unchanged.
+
 ## Overview
 
 The niche champion display (Stage 1) shows where each game sits within its niches. This spec builds the next two stages: a redundancy penalty that quantifies how much a game's fitness is reduced by the presence of higher-scoring niche neighbors. Stage 2 shows the penalty as a "what if" annotation alongside the unmodified primary score. Stage 3 applies the penalty to the primary fitness score. The user escalates between stages via settings, with the system defaulting to the least invasive mode.
 
-The penalty mechanism uses pairwise cosine similarity on flattened feature vectors (Proposal 1 from the brainstorm), not cluster-based grouping. Pairwise similarity captures the gradient of overlap between games rather than forcing discrete niche boundaries. The niche champion display's cluster-based niches and this spec's pairwise similarity-based penalties are complementary: cluster niches answer "what mechanic/category groups do I own?", pairwise penalties answer "how much of this game's overall profile is covered by better-scoring games?"
+The factual baseline uses pairwise cosine similarity on flattened feature vectors (Proposal 1 from the brainstorm), not cluster-based grouping. The target contract retains that factual cosine, removes personal axes from redundancy, and optionally blends published Jev description/note judgments. Pairwise similarity captures the gradient of overlap between games rather than forcing discrete niche boundaries. The niche champion display's cluster-based niches and this spec's pairwise similarity-based penalties are complementary: cluster niches answer "what mechanic/category groups do I own?", pairwise penalties answer "how much of this game's overall profile is covered by better-scoring games?"
 
 ## Entry Points
 
-- Redundancy settings API: `GET/PATCH /redundancy/settings`
+- Redundancy settings API: aggregate `GET /redundancy/settings`; factual-only `PATCH /redundancy/settings`; semantic-only `PATCH /redundancy/semantic-settings`
 - Game detail view (web): redundancy annotation in score breakdown (Stage 2+)
 - Collection list (web): sort by redundancy-adjusted fitness (Stage 2+)
 - Game detail CLI: redundancy adjustment in `shelf-judge game <id>` output (Stage 2+)
@@ -46,18 +49,35 @@ interface RedundancySettings {
   /** Active engagement stage. "annotation" shows what-if penalties without modifying primary score.
       "integrated" applies the penalty to the primary fitness score. Defaults to "annotation". */
   stage: "annotation" | "integrated";
-  /** Minimum cosine similarity for two games to be considered niche neighbors. Range [0.0, 1.0]. Default 0.6. */
+  /** Minimum factual or valid blended similarity for neighbor status. Range [0.0, 1.0]. Default 0.6. */
   similarityThreshold: number;
   /** Maximum penalty in fitness points. Range [0.5, 5.0]. Default 2.0. */
   maxPenalty: number;
-  /** Weights for each component of the feature vector when computing pairwise similarity. */
-  componentWeights: ComponentWeights;
+  /** Weights within the factual binary/continuous cosine; saved ratios are preserved. */
+  factualComponentWeights: { binary: number; continuous: number };
   /** Minimum number of niche neighbors (games above threshold) before penalties apply. Default 1. */
   minNeighbors: number;
 }
+
+/** Stored only in the revisioned collection, never in redundancy-settings.json. */
+interface SemanticRedundancySettings {
+  enabled: boolean;
+  factualWeight: number; // F; default 7, inert while disabled
+  descriptionWeight: number; // Cw; default 0 until explicit opt-in
+  noteWeight: number; // Dw; default 0 until explicit opt-in
+  cachedNoteUseEnabled: boolean;
+  // Refresh authorization, pair cache, and published-generation pointer are
+  // collection-owned state, not client-writable semantic settings.
+}
+
+/** Read-only aggregate returned by GET; the two nested settings have separate write authorities. */
+interface RedundancySettingsView {
+  factual: RedundancySettings;
+  semantic: SemanticRedundancySettings;
+}
 ```
 
-The `ComponentWeights` type is the existing type from `feature-vector.ts` (`{ binary: number; continuous: number; personalAxes: number }`), already exported from that module. It is re-exported from `types.ts` for shared consumption.
+The factual-component weights apply only to the existing binary/continuous feature encoding and their weighted flattening before one cosine is computed. `personalAxes` is removed from redundancy-only settings and similarity; personal/tournament ratings and shared feature-vector support used elsewhere remain unchanged. The separate `factualWeight` (F) weights the already-computed factual cosine only in the final semantic blend; it is not derived from, or a replacement for, the binary/continuous ratio.
 
 - REQ-REDUN-2: Default values for `RedundancySettings`:
 
@@ -67,29 +87,35 @@ const DEFAULT_REDUNDANCY_SETTINGS: RedundancySettings = {
   stage: "annotation",
   similarityThreshold: 0.6,
   maxPenalty: 2.0,
-  componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
+  factualComponentWeights: { binary: 0.4, continuous: 0.3 },
   minNeighbors: 1,
 };
 ```
 
-The `enabled` flag defaults to `false`. Simplicity wins by default (Vision tension table: "Collection-aware fitness vs simplicity"). The user opts in when ready.
+The factual master `enabled` flag defaults to `false`. Semantic settings have separate defaults in the revisioned collection: disabled, F=7, C=0, D=0, and cached-note use disabled. Semantic mode requires explicit opt-in for new and migrated installations. On first explicit opt-in, initialize weights to the approved starting values F=7, C=5, D=10 unless the owner chooses other values; these are opt-in defaults, not calibrated production defaults. While mode remains off, migrated and fresh-install C/D values remain zero and F is inert. The illustrative `4A, 1B, 5C, 10D` is not a new definition of A/B or a reason to alter the factual binary:continuous 4:3 ratio.
 
-- REQ-REDUN-3: `RedundancySettings` are persisted to `~/.shelf-judge/data/redundancy-settings.json` following the `PredictionSettings` storage pattern in `storage-service.ts:176-189`. The storage service gains `loadRedundancySettings()` and `saveRedundancySettings()` methods. When the file does not exist, defaults are returned. Partial writes are not supported; the full settings object is always written.
+- REQ-REDUN-3: Factual `RedundancySettings` only (master enablement, stage, threshold, penalty, binary/continuous weights, and minimum neighbors) are persisted to `~/.shelf-judge/data/redundancy-settings.json` following the `PredictionSettings` storage pattern. Semantic enablement, F/C/D weights, cached-note-use permission, refresh authorization, pair cache, and published generation are stored exclusively in the revisioned collection. Semantic state is never mirrored in `redundancy-settings.json`.
 
-- REQ-REDUN-4: `GET /redundancy/settings` returns the current `RedundancySettings` object. `PATCH /redundancy/settings` accepts a partial settings object, merges it with current settings, validates the result, and persists. Validation rules:
+- REQ-REDUN-4: `GET /redundancy/settings` returns a `RedundancySettingsView` composed from factual settings in `redundancy-settings.json` and semantic settings in the revisioned collection; its response identifies those distinct authorities and does not expose note text, per-game note state, or consent secrets. Configuration writes are separate: `PATCH /redundancy/settings` accepts only factual fields and persists factual configuration in the settings file; a separate `PATCH /redundancy/semantic-settings` accepts only semantic enablement/F/C/D and cached-note-use permission and persists semantic configuration only in the revisioned collection through its serialized mutation coordinator. Refresh authorization, pair cache, and publication are changed only by their dedicated collection operations, not settings PATCH. Reject fields belonging to the other configuration authority rather than splitting a PATCH across stores. A factual similarity-weight PATCH may also perform the ordered collection epoch/generation invalidation below, but it never writes semantic configuration there. There is no cross-file transaction claim.
+
+  When a factual PATCH changes binary/continuous weights that affect the factual cosine, it must run through the serialized collection mutation coordinator in this order: (1) atomically advance the durable semantic/source epoch in the revisioned collection, withdraw the active semantic generation, and fence every in-flight refresh captured against the prior epoch; then (2) atomically persist the factual settings file. Do not write the factual settings file if step (1) fails. If step (2) fails, return failure and leave the prior factual settings file unchanged; the already-advanced collection epoch and withdrawn generation remain in effect, so semantic scoring safely falls back to factual-only until a fresh generation is published. This is intentionally not a cross-file transaction: the intermediate state may be factual-only, never a stale semantic blend. PATCHes that change only unrelated factual settings (for example stage, threshold, or penalty) retain their existing factual-file-only behavior and do not advance the semantic/source epoch or withdraw a generation. A PATCH containing both similarity weights and unrelated factual settings follows the fenced two-step sequence above.
+
+  Each published generation and refresh captures the durable semantic/source epoch as well as the factual cosine-input identity. Readers and refresh publication validate **both** against the current collection epoch and current factual settings; matching setting values alone are insufficient. A withdrawn generation can become active again only through a new complete publication validated against the new epoch; a PATCH must never restore an old generation pointer. Therefore A→B→A weight changes irreversibly invalidate generations from before either change, including across restart. Validation rules:
   - `similarityThreshold` must be in [0.0, 1.0]
   - `maxPenalty` must be in [0.5, 5.0]
-  - `componentWeights` values must all be >= 0 and sum to > 0
+  - factual binary/continuous weights must be finite, nonnegative, and have positive sum
   - `minNeighbors` must be >= 1
   - `stage` must be "annotation" or "integrated"
 
+  Semantic PATCH validation: F must be finite and >0; C/D must be finite and >=0. A positive-weight component is enabled only when semantic mode is on. Invalid values return 400 with a descriptive error. GET may assemble values from the two stores for display, but must not imply a cross-store transaction or use the aggregate endpoint as a write boundary.
+
   Invalid values return 400 with a descriptive error message. The routes live in a new `packages/daemon/src/routes/redundancy.ts` file, registered in the app alongside other route groups.
 
-- REQ-REDUN-5: When `enabled` is `false`, no redundancy computation occurs anywhere. API endpoints that would return redundancy data return null for redundancy fields. The game service skips the redundancy pass entirely. This is a short-circuit, not a "compute then discard."
+- REQ-REDUN-5: When factual `enabled` is `false`, no pairwise redundancy computation occurs. The game service skips pair scoring, but scored results still expose the safe `redundancySimilarityInfo` with mode/status `disabled` and no generation ID. Other redundancy fields/adjustments are null. This is a short-circuit, not a "compute then discard."
 
 ### Redundancy Engine
 
-- REQ-REDUN-6: The redundancy engine is a pure-function module at `packages/daemon/src/services/redundancy-engine.ts`. It has no service-layer dependencies. It takes scored games, settings, and feature vectors as input; it returns redundancy adjustments as output. It does not read from storage, call other services, or maintain state.
+- REQ-REDUN-6: The redundancy engine is a pure-function module at `packages/daemon/src/services/redundancy-engine.ts`. It has no service-layer dependencies. It takes scored games, factual feature vectors, factual settings, and caller-supplied validated complete pair-similarity inputs plus their publication/mode/status provenance; it returns adjustments and similarity status as output. It does not read storage, caches, providers, note text, or source records; call other services; perform validation-dependent I/O; or maintain state.
 
 - REQ-REDUN-7: The redundancy engine exposes a primary function:
 
@@ -97,20 +123,40 @@ The `enabled` flag defaults to `false`. Simplicity wins by default (Vision tensi
 function computeRedundancyAdjustments(
   gamesWithScores: GameWithScore[],
   settings: RedundancySettings,
-  getFeatureVector: (game: Game) => FeatureVector,
-): Map<string, RedundancyAdjustment>;
+  similarities: ValidatedRedundancySimilarities,
+): RedundancyComputation;
+
+interface ValidatedRedundancySimilarities {
+  /** Complete unordered-pair table for the supplied eligible game set. */
+  pairs: ReadonlyMap<PairKey, { similarity: number }>;
+  /** Caller-verified publication and safe display provenance; no note content/state. */
+  info: RedundancySimilarityInfo;
+}
+
+interface RedundancyComputation {
+  adjustments: Map<string, RedundancyAdjustment>;
+  similarityInfo: RedundancySimilarityInfo;
+}
 ```
 
-The `getFeatureVector` callback is provided by the caller (game service or route handler), allowing the engine to consume feature vectors without importing the feature vector module directly. This keeps the engine's test surface clean: tests provide mock vectors without needing the full feature vector infrastructure.
+The caller computes factual cosine and resolves the complete pair table from current source data and, only when valid, the published semantic generation. Before calling the engine, it validates pair completeness, score ranges, generation identity, consent epoch, and factual-settings identity against the same authoritative snapshots. The engine consumes this already validated table as data; it neither discovers cache entries nor reads generation state itself. Tests supply game scores and complete pair tables without storage, provider, or note-text infrastructure.
 
 - REQ-REDUN-8: For each non-vetoed game with a fitness score > 0, the engine:
-  1. Computes cosine similarity between the game's flattened feature vector and every other non-vetoed game's flattened feature vector, using the `componentWeights` from settings to weight the composite distance components before flattening.
+  1. Reads that pair's already validated similarity from the complete caller-supplied pair table. The caller computes the factual cosine using only existing binary and continuous feature blocks and may supply the approved blend from a valid published generation. Personal axes never participate in target redundancy similarity. The engine performs no cosine, semantic blend, cache lookup, or source lookup of its own. The semantic blend is effective only when factual redundancy and semantic mode are both enabled and at least one of C/D has positive weight.
   2. Identifies "niche neighbors": games whose similarity is >= `similarityThreshold`.
   3. If the game has fewer niche neighbors than `minNeighbors`, the game receives zero penalty.
   4. Among niche neighbors, counts how many have a higher fitness score than this game. This count is `betterNeighbors`.
   5. Computes `coverageRatio = betterNeighbors / nicheNeighborCount`.
   6. Computes `penalty = coverageRatio * maxPenalty`.
   7. The adjusted score is `max(1.0, originalScore - penalty)`. The penalty never pushes a score below 1.0.
+
+- REQ-REDUN-8a (approved target): For each pair, when semantic mode is enabled and at least one semantic signal has positive weight, the final similarity is the weighted mean of available enabled components: `(F*factualCosine + Cw*descriptionScore + Dw*noteScore) / sum(weights for available components)`. Factual cosine is always available. A zero-weight signal is disabled, requires no inference, and is excluded from the denominator; positive-weight unavailable signals are also excluded, while pending/failed/stale work cannot be treated as unavailable to force renormalization. If semantic mode is off or both Cw and Dw are zero, use factual-only similarity and require no semantic generation or request. C requires two usable current BGG descriptions. Before inference, D's candidate set consists of every pair in the frozen game universe for which both current notes are `present`. The owner must authorize that exact disclosed note-bearing pair set before any note is sent; do not silently narrow it to pairs selected after inspecting note relevance. If note authorization is declined or absent, D is not requested (C-only may proceed when Cw>0; D-only remains factual-only/not-ready). The relevance/firsthand-evidence question is asked for each authorized candidate pair; only its validated positive relevance outcome permits a numeric D similarity, while insufficient or irrelevant evidence makes D unavailable. Do not prefilter D pairs as "relevant" before asking Jev. Missing/cleared notes are outside the D candidate set and unavailable. Similarities are normalized to [0,1] under versioned owner-reviewed rubrics; confidence is separate from similarity. The pure engine consumes caller-supplied validated pair scores and never performs inference or receives note text.
+
+- REQ-REDUN-8b (approved target): Semantic mode is off by default. Semantic judgments are computed only by an explicit daemon refresh/status operation, never by reads, the scoring engine, owner-note edits, prediction, or background work. C-only requests contain descriptions and no note fields. Requests containing notes require explicit, disclosed, one-execution authorization for the exact frozen pair set; cached-D use is a separate permission. The D refresh set is not relevance-filtered; if authorization does not cover the complete disclosed set, do not submit note-bearing requests or publish D coverage (C-only may proceed when enabled). See the current owner-note privacy and daemon inference-boundary references for the governing consent and provider contract.
+
+- REQ-REDUN-8c (approved target): A published semantic generation covers the exact unordered pair universe from currently owned, non-vetoed, positive-score games eligible in redundancy. Required coverage is determined solely by enabled positive-weight signals. C-only (Cw>0, Dw=0) requires C judgments for all pairs with two usable descriptions and sends no notes. D-only (Cw=0, Dw>0) requires relevance/similarity judgments for every pair with two current `present` notes in the disclosed authorized pair set; it sends no BGG descriptions and does not prefilter by relevance. If D-only note authorization is unavailable, no D-bearing generation may be published and scoring remains factual-only with `not ready` status. C+D (Cw>0, Dw>0) requires both signal coverages: C for description-eligible pairs and D for the `present`-note pairs in the authorized set. If either semantic weight is zero, that signal is disabled regardless of available text; if both are zero, no generation or request is required. Genuinely absent source or a completed insufficient/irrelevant-evidence judgment is unavailable, not pending inference. Publish the whole generation atomically only after required judgments succeed; pending, failed, stale, and provider-outage work cannot partially renormalize results. If no valid generation exists, use factual-only similarity with visible `not ready` or `stale` status. A relevant source/eligibility change withdraws the generation and returns scoring to factual-only until an explicit complete refresh. Annotation and integrated stages use the same publication state. Disabling cached-D use withdraws D-containing generations; if C remains positively weighted, a complete C-only generation is needed before C is used again.
+
+- REQ-REDUN-8d (approved target): Migrate saved factual binary:continuous settings preserving their ratio. If both are zero, migrate to the existing 4:3 ratio and show a visible notice. Existing enabled annotation/integrated stage remains enabled but becomes factual-only; disclose that removal of personal axes can change neighbors and integrated scores even offline. Do not reinterpret the old personal-axis weight as D. Semantic mode remains off, C/D weights are zero, and F=7 is inert until explicit opt-in. This is an intentional scoring change, not evidence that the migration or semantic feature has shipped.
 
 - REQ-REDUN-9: The game with the highest fitness score among its niche neighbors always receives zero penalty. It has zero `betterNeighbors`, so `coverageRatio` is 0. This is not a special case; it falls out of the formula. This game is the "niche champion" for pairwise redundancy purposes (distinct from the cluster-based niche champion in the niche champion display).
 
@@ -142,10 +188,22 @@ interface RedundancyAdjustment {
   nicheSize: number;
 }
 
+/** Present on every scored result, including when no adjustment exists. */
+interface RedundancySimilarityInfo {
+  mode: "disabled" | "factual-only" | "semantic";
+  status: "ready" | "not-ready" | "stale" | "disabled";
+  /** Opaque published-generation identifier, null when no semantic generation is active. */
+  generationId: string | null;
+  /** Effective signal names; never contains note presence, text, or per-game D availability. */
+  signals: Array<"C" | "D">;
+  /** Identity of factual cosine inputs (binary/continuous weights/encoding), not stage/threshold. */
+  factualSettingsIdentity: string;
+}
+
 interface RedundancyNeighbor {
   gameId: string;
   gameName: string;
-  /** Cosine similarity to the subject game. */
+  /** Factual or published blended similarity, with mode/generation provenance. */
   similarity: number;
   /** The neighbor's fitness score (before its own redundancy adjustment). */
   fitnessScore: number;
@@ -163,12 +221,14 @@ interface RedundancyNeighbor {
 ```typescript
 interface FitnessResult {
   // ... existing fields unchanged ...
+  /** Similarity mode and publication provenance, even when no adjustment exists. */
+  redundancySimilarityInfo: RedundancySimilarityInfo;
   /** Redundancy adjustment data. Null when redundancy is disabled, game is vetoed, or game has no niche neighbors. */
   redundancyAdjustment: RedundancyAdjustment | null;
 }
 ```
 
-This field is always null when redundancy is disabled (`enabled: false`). When redundancy is enabled, it is null for vetoed games and games with no niche neighbors meeting the threshold. For all other games, it is populated.
+`redundancySimilarityInfo` is always present in a scored `FitnessResult`, including when `redundancyAdjustment` is null because redundancy is disabled, the game is vetoed, or it has no qualifying neighbor. It reports effective mode, safe generation/status provenance, and factual-settings identity; it must not reveal whether any particular game's note is missing/present/cleared, pair-level D availability, note content, consent details, fingerprints, or provider payload. `redundancyAdjustment` remains null when redundancy is disabled, the game is vetoed, or it has no qualifying neighbor.
 
 ### Stage 2: Annotation Mode
 
@@ -201,7 +261,7 @@ interface PredictedGameResponse {
 }
 ```
 
-When redundancy is enabled, this shows what penalty the candidate game would receive if added to the collection. The preview is computed by temporarily including the candidate game in the redundancy pass without persisting it. When redundancy is disabled, this field is null.
+When redundancy is enabled, this shows the factual-only candidate penalty against the current collection's pre-redundancy scores. It does not inherit the collection's semantic generation. An explicitly requested candidate semantic comparison may use C transiently when both descriptions exist, must identify candidate and owned-game sources, and must be labeled C-only/not ready/stale as applicable; it never runs as ordinary prediction and does not persist into wishlist snapshots. When redundancy is disabled, this field is null.
 
 - REQ-REDUN-23: The candidate game's redundancy preview is computed against the current collection's pre-redundancy scores. Adding the candidate does not change existing games' penalties in the preview. The preview answers "what penalty would this game receive?" not "how would adding this game change every other game's penalty?" The latter is a more complex computation deferred to a future interaction (see Exit Points).
 
@@ -219,15 +279,15 @@ When redundancy is enabled, this shows what penalty the candidate game would rec
 
 ### Daemon API
 
-- REQ-REDUN-28: `GET /games/:id` response includes `redundancyAdjustment` on the `FitnessResult` when redundancy is enabled. The field is null when disabled or when the game has no niche neighbors.
+- REQ-REDUN-28: `GET /games/:id` includes `redundancySimilarityInfo` on every scored result, even if `redundancyAdjustment` is null. The info is limited to effective mode, ready/not-ready/stale/disabled status, opaque published generation ID when active, enabled signal names, and factual-settings identity; it omits note-state and pair-level D details. `redundancyAdjustment` is included when applicable and null when disabled or when the game has no niche neighbors.
 
-- REQ-REDUN-29: `GET /games` response includes `redundancyAdjustment` on each game's `FitnessResult` when redundancy is enabled. The redundancy pass is computed once for all games, not per-game.
+- REQ-REDUN-29: `GET /games` includes `redundancySimilarityInfo` on each scored result even when its adjustment is null, under the same note-safe projection as REQ-REDUN-28. The redundancy pass and its validated pair table are prepared once for all games, not per-game.
 
-- REQ-REDUN-30: The `GET /redundancy/settings` and `PATCH /redundancy/settings` endpoints are defined in REQ-REDUN-4.
+- REQ-REDUN-30: The aggregate `GET /redundancy/settings`, factual-only `PATCH /redundancy/settings`, and collection-owned `PATCH /redundancy/semantic-settings` endpoints are defined in REQ-REDUN-4. No PATCH writes both stores.
 
 ### Web UI: Game Detail
 
-- REQ-REDUN-31: When redundancy is enabled and the game has a non-null `redundancyAdjustment`, the game detail score breakdown gains a "Redundancy" section. This section displays:
+- REQ-REDUN-31: The game detail result exposes the note-safe `redundancySimilarityInfo` mode/status/generation provenance from the API even if `redundancyAdjustment` is null or there are no neighbors. When an adjustment exists, the score breakdown gains a "Redundancy" section that displays:
   - Original score and adjusted score (e.g., "Fitness: 6.4 (was 7.9, -1.5 redundancy)")
   - Niche rank (e.g., "3rd of 5 similar games")
   - A list of niche neighbors with name, similarity percentage, and fitness score. Each neighbor name links to that game's detail page.
@@ -235,23 +295,23 @@ When redundancy is enabled, this shows what penalty the candidate game would rec
 
 - REQ-REDUN-32: When the game receives zero penalty (niche champion by pairwise similarity), the redundancy section shows "Best among similar games" with the neighbor list but no penalty annotation.
 
-- REQ-REDUN-33: When redundancy is disabled, the redundancy section is omitted entirely (not shown empty).
+- REQ-REDUN-33: When redundancy is disabled, the adjustment section is omitted entirely (not shown empty); the separate result-level `redundancySimilarityInfo` still identifies disabled status.
 
 ### Web UI: Collection List
 
 - REQ-REDUN-34: When redundancy is enabled in annotation or integrated mode, the collection list gains a "Redundancy-Adjusted" sort option. In annotation mode, this sorts by `redundancyAdjustment.adjustedScore` (the what-if score). In integrated mode, the default fitness sort already uses the adjusted score, but the sort option remains available for clarity.
 
-- REQ-REDUN-35: Each game row in the collection list shows a compact redundancy indicator when redundancy is enabled and the game has a non-null adjustment: a small penalty badge (e.g., "-1.5") next to the fitness score. In annotation mode, the badge is visually distinct (e.g., lighter color, parenthesized) to signal it's advisory. In integrated mode, the badge is shown as part of the score breakdown.
+- REQ-REDUN-35: Each game row in the collection list exposes the note-safe similarity mode/status/generation provenance even if that game has no adjustment. When an adjustment exists, the row also shows a compact redundancy indicator: a small penalty badge (e.g., "-1.5") next to the fitness score. In annotation mode, the badge is advisory; in integrated mode it is shown as part of the score breakdown. No row or broad list response reveals per-game note state or D availability.
 
 ### Web UI: Search Preview
 
-- REQ-REDUN-36: The BGG search prediction preview panel shows the `redundancyPreview` from REQ-REDUN-22 when redundancy is enabled. Below the predicted fitness score, the preview shows: "With redundancy: X.X (-Y.Y)" and lists the top 3 most similar existing games by similarity. When no niche neighbors exist above threshold, show: "No similar games in collection."
+- REQ-REDUN-36: The BGG search prediction preview panel shows the factual-only `redundancyPreview` from REQ-REDUN-22 when redundancy is enabled. It labels the mode so the result is not mistaken for collection C/D similarity. A separately requested candidate semantic comparison may use C only, transiently and with source/status identity; ordinary search prediction does not trigger inference. When no niche neighbors exist above threshold, show: "No similar games in collection."
 
 ### CLI
 
-- REQ-REDUN-37: `shelf-judge game <id>` includes redundancy data when the game has a non-null `redundancyAdjustment`. Text mode shows: penalty, adjusted score, niche rank, and neighbor names. In `--json` mode, the full `RedundancyAdjustment` is included in the `FitnessResult` object.
+- REQ-REDUN-37: `shelf-judge game <id>` always includes safe mode/status/generation provenance, including when no `redundancyAdjustment` exists. Text mode identifies disabled, factual-only, semantic-ready, not-ready, or stale state; when applicable it also shows penalty, adjusted score, niche rank, and neighbor names. In `--json` mode, `redundancySimilarityInfo` and the optional full `RedundancyAdjustment` are included in the `FitnessResult` object.
 
-- REQ-REDUN-38: `shelf-judge scores` reflects the current stage. In annotation mode, scores are primary (unadjusted) with an optional `--show-redundancy` flag that appends adjusted scores. In integrated mode, scores are adjusted by default. In `--json` mode, the full `FitnessResult` (including `redundancyAdjustment`) is always included.
+- REQ-REDUN-38: `shelf-judge scores` reflects the current stage and displays safe similarity mode/status/generation provenance even when adjustments are null. In annotation mode, scores are primary (unadjusted) with an optional `--show-redundancy` flag that appends adjusted scores. In integrated mode, scores are adjusted by default. In `--json` mode, the full `FitnessResult` (including `redundancySimilarityInfo` and optional `redundancyAdjustment`) is always included.
 
 - REQ-REDUN-39: `shelf-judge predict bgg <bgg-id>` includes redundancy preview data in output. Text mode shows the penalty and top 3 similar games. In `--json` mode, the full `RedundancyAdjustment` is included.
 
@@ -261,6 +321,9 @@ When redundancy is enabled, this shows what penalty the candidate game would rec
   - `shelf-judge redundancy disable` sets `enabled: false` and returns updated settings.
   - `shelf-judge redundancy stage <annotation|integrated>` sets the active stage.
   - `shelf-judge redundancy set <key> <value>` updates a single setting (e.g., `shelf-judge redundancy set similarityThreshold 0.7`).
+  - `shelf-judge redundancy status` reports semantic mode, published generation, freshness, and per-signal coverage without inference. It may show refresh coverage details to the local owner but never note text or prompt content.
+  - `shelf-judge redundancy refresh` starts an explicit refresh after showing provider/model, frozen pair count and which pairs include notes, estimated budget, retention caveat, and possible integrated-fitness effect. It requires one-execution authorization for note-bearing pairs; cached-D use is separately configured. Refresh supports progress, cancellation, and failure reporting. Settings/status/read commands never initiate inference.
+  - Semantic opt-in and C/D weights are separately settable. The approved proposed opt-in starting values are F=7, C=5, D=10; these are not calibrated and do not enable semantic mode automatically.
 
 ### Web UI: Settings
 
@@ -269,11 +332,15 @@ When redundancy is enabled, this shows what penalty the candidate game would rec
   - Stage selector (annotation / integrated) with a description of what each stage does
   - Similarity threshold slider (0.0 to 1.0, default 0.6)
   - Max penalty slider (0.5 to 5.0, default 2.0)
-  - Component weight controls for binary, continuous, and personalAxes
+  - Factual binary/continuous ratio controls (`personalAxes` is not a redundancy setting)
+  - Separate semantic opt-in and F/C/D weight controls, visible generation/status and coverage
+  - Provider/model disclosure and explicit refresh, authorization/revocation, and explanation that provisional factual output is used until a complete generation is ready
   - Minimum neighbors input (1+)
   - A "Reset to defaults" action
 
-  Changes are persisted via `PATCH /redundancy/settings` on change. The panel is always visible regardless of whether redundancy is enabled, so the user can configure before enabling.
+  Semantic controls keep opt-in distinct from master redundancy/stage controls. Explain F as the factual-cosine weight and C/D as description/note weights; provide the approved proposed opt-in values F=7, C=5, D=10 without presenting them as calibrated. Expose generation status/coverage, explicit disclosed refresh, and cached-D-use/revocation separately. Provider/model, note transmission, pair set, estimated budget, provider retention caveat, and possible integrated-fitness effect must be disclosed before note-bearing refresh. Ordinary settings changes and reads do not start inference.
+
+  Factual controls are persisted via `PATCH /redundancy/settings`; semantic controls are persisted via `PATCH /redundancy/semantic-settings`. The UI keeps the separate transaction/authority boundary visible, and does not present the aggregate GET as a combined write. The panel is always visible regardless of whether redundancy is enabled, so the user can configure before enabling.
 
 ## Scope Exclusions
 
@@ -282,7 +349,7 @@ When redundancy is enabled, this shows what penalty the candidate game would rec
 - **Tournament interaction.** The brainstorm notes that a game redundant by fitness but highly-ranked in tournaments is interesting. This spec does not surface tournament-redundancy divergence.
 - **LLM narration.** Rich natural-language interpretation of redundancy patterns is deferred to the LLM narration layer.
 - **Per-niche penalty caps.** The penalty is global (`maxPenalty`), not per-cluster or per-neighbor. A per-niche cap would require defining niches, which conflicts with the pairwise approach. If users find the global cap too blunt, a future iteration could weight penalty by similarity magnitude (higher similarity = more penalty contribution per neighbor).
-- **Caching.** Redundancy is computed on demand. No caching, no dirty flags. The upgrade path (cache behind profile dirty flag) is documented but not implemented.
+- **Factual-cosine caching.** The factual pairwise cosine remains computed on demand and is not durably cached. This exclusion does not prohibit the approved durable cache of versioned numeric C/D judgments and their minimal source/model/rubric provenance in the revisioned collection. Only a valid atomically published generation is read for semantic scoring; note text, prompts, and free-form explanations are never cached.
 
 ## Exit Points
 
@@ -291,14 +358,14 @@ When redundancy is enabled, this shows what penalty the candidate game would rec
 | Ripple effect preview            | User wants to see how adding a game changes existing games' penalties                     | [STUB: redundancy-ripple-preview]   |
 | Tournament-redundancy divergence | User wants to see when tournament results contradict redundancy penalties                 | [STUB: tournament-niche-divergence] |
 | LLM narration of redundancy      | Deferred LLM layer interprets redundancy patterns                                         | Extends [DEFERRED: REQ-PROFILE-18]  |
-| Redundancy caching               | Performance concern with large collections                                                | [STUB: redundancy-caching]          |
+| Factual-cosine caching           | Performance concern with large collections                                                | [STUB: redundancy-caching]          |
 | Similarity-weighted penalty      | Global maxPenalty feels too blunt, users want penalty proportional to similarity strength | [STUB: similarity-weighted-penalty] |
 
 ## Success Criteria
 
 ### Automated Tests (bun test)
 
-- [ ] `computeRedundancyAdjustments` returns empty map when settings.enabled is false
+- [ ] `computeRedundancyAdjustments` skips pair scoring when factual settings.enabled is false while result construction retains disabled `redundancySimilarityInfo`
 - [ ] A game with no neighbors above threshold gets null adjustment
 - [ ] A game with fewer neighbors than `minNeighbors` gets null adjustment
 - [ ] The highest-scoring game among its neighbors receives zero penalty
@@ -308,18 +375,33 @@ When redundancy is enabled, this shows what penalty the candidate game would rec
 - [ ] Vetoed games are excluded from neighbor lists and do not receive adjustments
 - [ ] Fully-predicted games do not count toward `betterNeighbors` for actual-scored games
 - [ ] Fully-predicted games are penalized normally by actual-scored neighbors
-- [ ] `componentWeights` correctly influence which games are considered similar (binary-heavy weights group mechanic-similar games; continuous-heavy weights group weight/player-count-similar games)
+- [ ] `factualComponentWeights` correctly influence the factual cosine (binary-heavy weights group mechanic-similar games; continuous-heavy weights group weight/player-count-similar games)
+- [ ] Migration removes personalAxes from redundancy settings while preserving factual binary:continuous ratio; 0/0 becomes 4:3 with notice and semantic mode remains off
+- [ ] F/C/D validation rejects non-finite or out-of-range weights; zero-weight signals require no inference
+- [ ] Weighted blend renormalizes only over enabled, available components; missing/insufficient evidence is unavailable rather than zero
+- [ ] C-only request omits note fields; D-only coverage does not send descriptions; C+D coverage includes both eligible signal sets
+- [ ] Incomplete, failed, stale, or unavailable generation uses factual-only output with visible status and never publishes a partial generation
+- [ ] Explicit refresh disclosure, frozen pair coverage, cached-D revocation, source invalidation, and stale in-flight publication fencing are verified
+- [ ] Wishlist persisted previews remain factual-only when semantic collection scoring is active
 - [ ] Changing `similarityThreshold` changes which games are niche neighbors
 - [ ] In annotation mode, `FitnessResult.score` is unchanged; `redundancyAdjustment.adjustedScore` reflects penalty
 - [ ] In integrated mode, `FitnessResult.score` equals `redundancyAdjustment.adjustedScore`
 - [ ] `redundancyAdjustment.originalScore` always equals the pre-penalty fitness score regardless of stage
 - [ ] Niche neighbors are sorted by similarity descending
 - [ ] Redundancy adjustments are deterministic (identical input produces identical output)
-- [ ] `GET /redundancy/settings` returns defaults when no settings file exists
-- [ ] `PATCH /redundancy/settings` validates ranges and returns 400 for invalid values
-- [ ] `PATCH /redundancy/settings` merges partial updates correctly
-- [ ] `GET /games/:id` includes redundancyAdjustment when enabled, null when disabled
-- [ ] `GET /games` includes redundancyAdjustment on all games when enabled
+- [ ] `redundancySimilarityInfo` remains observable when `redundancyAdjustment` is null and exposes no per-game note state
+- [ ] Aggregate `GET /redundancy/settings` composes factual file values and collection-owned semantic values without exposing note text/state
+- [ ] Factual and semantic PATCH endpoints reject fields from the other authority and commit only their own store; failures preserve that store
+- [ ] Binary/continuous weight change advances the durable semantic/source epoch and withdraws/fences a generation before settings-file persistence; failure to advance the collection leaves settings untouched
+- [ ] If factual settings-file persistence fails after epoch advancement, the PATCH fails, prior settings remain unchanged, and the old generation stays withdrawn
+- [ ] An A→B→A binary/continuous weight sequence cannot resurrect the original generation; this remains true after restart and readers validate epoch plus factual identity
+- [ ] In-flight refresh captured before a factual-weight PATCH cannot publish after the epoch advances
+- [ ] PATCHes changing only unrelated factual settings do not advance the semantic/source epoch or withdraw a generation
+- [ ] Factual and semantic PATCH endpoints validate their respective ranges and return 400 for invalid values
+- [ ] Each PATCH merges partial updates only within its own authority
+- [ ] Pure engine receives a complete validated pair table and publication info from its caller; it performs no cache, provider, storage, or text reads
+- [ ] `GET /games/:id` includes safe `redundancySimilarityInfo` when adjustment is null, disabled, or there are no neighbors
+- [ ] `GET /games` includes safe `redundancySimilarityInfo` on all scored results regardless of adjustment availability
 - [ ] `GET /predictions/bgg/:bggId` includes redundancyPreview when enabled
 - [ ] Redundancy preview for a candidate game computes against pre-redundancy collection scores
 - [ ] NichePosition rankings use pre-redundancy scores even in integrated mode
@@ -356,21 +438,21 @@ When redundancy is enabled, this shows what penalty the candidate game would rec
 - Test case: integrated mode returns modified `FitnessResult.score` equal to `adjustedScore`
 - When adding redundancy routes to the daemon, verify that both web proxy route and CLI client helper are updated in the same change (per tournament retro lesson)
 - Verify that `NichePosition` rankings are computed from pre-redundancy scores, not post-penalty scores, to avoid circular dependency
-- Verify that disabling redundancy returns null for all redundancy fields without computing pairwise similarities (performance short-circuit)
+- Verify that disabling redundancy returns null for adjustment fields and `redundancySimilarityInfo.status: "disabled"` without computing pairwise similarities (performance short-circuit)
 
 ## Constraints
 
 - The fitness formula (`sum(effective_rating * weight) / sum(weights)`) does not change. Redundancy is a post-processing step on the computed score, not a modification to the per-axis formula.
-- `FitnessResult` gains exactly one new field: `redundancyAdjustment: RedundancyAdjustment | null`. No other fields are added or modified.
+- `FitnessResult` gains `redundancyAdjustment: RedundancyAdjustment | null` and the note-safe `redundancySimilarityInfo` field. The latter is present even when there is no adjustment and contains no owner-note text or per-game note-state details.
 - The redundancy engine is a pure-function module. No service-layer dependencies, no storage access, no state.
 - `NichePosition` (niche champion display) is unchanged. Cluster-based niche rankings and pairwise redundancy penalties are independent systems.
-- The `CollectionProfile` type and profile computation are not modified. The redundancy engine reads feature vectors from the feature vector module, not from the profile.
-- Performance: pairwise similarity is O(N^2) where N is collection size. For a 200-game collection, this is 40,000 similarity computations per request. Each is a dot product on ~75-dimension vectors, well under 1ms total. No performance concern anticipated at current scale. If collections grow significantly, caching is the upgrade path (see Exit Points).
+- The `CollectionProfile` type and profile computation are not modified. The redundancy engine receives complete validated pair similarities from its caller, not from storage, feature-vector services, or the profile.
+- Performance: factual pairwise similarity is O(N^2) where N is collection size and remains an offline computation. A collection-wide semantic refresh may enumerate up to 19,900 unordered pairs for 200 eligible games; this is a refresh-budget upper bound, not a normal-read network workload. Refresh must disclose pair count/coverage and enforce progress, concurrency, budget, cancellation, and retry controls. Numeric semantic judgments are durably cached; factual cosine is not.
 - Redundancy computation requires all games' fitness scores. `getGame()` for a single game must compute all scores to determine the penalty. This is a known cost of collection-aware scoring.
 
 ## Open Questions
 
-1. **Component weight UX.** The three component weights (binary, continuous, personalAxes) are meaningful to a user who understands feature vectors but opaque to one who doesn't. The settings panel should label them in user terms ("Mechanics & Categories", "Weight & Player Count", "Your Personal Ratings") but the question is whether exposing three sliders is the right UX or whether presets ("mechanic-focused", "balanced", "rating-focused") would be more approachable. The spec defines the data model; the implementer has latitude on presentation.
+1. **Weight UX.** F/C/D and the within-factual binary:continuous ratio need clear explanations. `personalAxes` is not a redundancy weight. Approved opt-in starting values F=7, C=5, D=10 are proposed, not calibration evidence.
 
 2. **Annotation mode sort stability.** In annotation mode, sorting by "redundancy-adjusted fitness" creates a different ordering than the primary fitness sort. If the user is accustomed to the primary sort and switches to redundancy-adjusted, games shuffle. This is correct behavior (the feature's purpose is to reveal a different ranking) but could be surprising. Consider whether the sort toggle needs a confirmation or explanation tooltip.
 
@@ -380,5 +462,6 @@ When redundancy is enabled, this shows what penalty the candidate game would rec
 - [Spec: Niche Champion Display](.lore/reference/specs/fitness/niche-champion-display.md): Stage 1 of the graduated approach. This spec is Stages 2 and 3. The niche champion display's cluster-based niches and this spec's pairwise penalties are complementary, not competing.
 - [Vision](.lore/reference/vision.md): Principle 5 ("The shelf has a carrying capacity") is the driver. Principle 2 (the penalty is fully transparent: original score, penalty amount, neighbors, rank). Principle 1 (the user controls whether and how redundancy affects scores). Tension table: "Collection-aware fitness vs simplicity" defaults to simplicity; the `enabled` toggle respects this.
 - [Spec: Prediction Engine](.lore/reference/specs/fitness/prediction-engine.md): Establishes the `PredictionSettings` pattern (REQ-PRED-25a) that `RedundancySettings` follows. Prediction output is consumed by redundancy (one-way dependency).
-- [Design: MVP Fitness Model](.lore/reference/designs/mvp-fitness-model.md): Defines `FitnessResult` and the scoring formula. This spec extends `FitnessResult` with one nullable field but does not modify the formula.
+- [Approved design: Jev-backed redundancy similarity](.lore/work/design/jev-redundancy-similarity.md): Approved design basis for optional C/D signals, consent, migration, cache, and generation policy. Implementation remains pending unless separately verified.
+- [Design: MVP Fitness Model](.lore/reference/designs/mvp-fitness-model.md): Defines `FitnessResult` and the scoring formula. This spec adds redundancy adjustment and safe similarity-provenance fields but does not modify the formula.
 - [Issue: Deferred Redundancy Scoring](.lore/work/issues/deferred-redundancy-scoring.md): The issue that triggered the brainstorm and this spec.
