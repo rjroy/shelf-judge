@@ -5,7 +5,7 @@ import * as path from "node:path";
 import {
   CollectionSchema,
   createInitialEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
   type Collection,
   type DurableGame,
 } from "@shelf-judge/shared";
@@ -61,7 +61,7 @@ function game(): DurableGame {
 
 function initialCollection(): Collection {
   return CollectionSchema.parse({
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 0,
     id: "collection-1",
     name: "Private collection",
@@ -71,7 +71,7 @@ function initialCollection(): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: NOW,
     updatedAt: NOW,
   });

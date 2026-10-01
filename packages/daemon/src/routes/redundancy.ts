@@ -135,6 +135,7 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
       const result = await storageService.loadRedundancySettingsRead?.();
       const settings = result?.settings ?? (await storageService.loadRedundancySettings());
       const collection = await storageService.loadCollection();
+      const legacyCacheMigration = collection.semanticRedundancy.legacyCacheMigration;
       const semanticStatus = {
         status: collection.semanticRedundancy.settings.enabled ? "not-ready" : "disabled",
         publicationStatus: collection.semanticRedundancy.settings.enabled
@@ -144,7 +145,17 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
       return c.json({
         ...settings,
         ...(result ? { migrationNotice: result.migrationNotice } : {}),
-        semantic: { settings: collection.semanticRedundancy.settings, status: semanticStatus },
+        semantic: {
+          settings: collection.semanticRedundancy.settings,
+          status: semanticStatus,
+          migrationNotice:
+            legacyCacheMigration == null
+              ? null
+              : {
+                  kind: legacyCacheMigration.kind,
+                  discardedPairCount: legacyCacheMigration.discardedPairCount,
+                },
+        },
       });
     } catch {
       return c.json({ error: "Redundancy settings are unavailable" }, 500);

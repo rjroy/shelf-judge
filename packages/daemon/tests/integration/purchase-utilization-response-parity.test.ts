@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Collection, DurableGame, GameWithPurchaseUtilization } from "@shelf-judge/shared";
 import {
   createInitialEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
 import {
   canonicalUtilizationCases,
@@ -62,7 +62,7 @@ describe("canonical purchase utilization response parity", () => {
       updatedAt: UTILIZATION_OBSERVED_AT,
     }));
     const collection: Collection = {
-      schemaVersion: 9,
+      schemaVersion: 10,
       revision: 0,
       id: "parity-collection",
       name: "Parity",
@@ -81,7 +81,7 @@ describe("canonical purchase utilization response parity", () => {
       ],
       games,
       entertainmentBenchmark: canonicalUtilizationCases[0].input.entertainmentBenchmark,
-      semanticRedundancy: createInitialSemanticRedundancyState(),
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
       intentions: [],
       attentionDispositions: [],
       commandReceipts: [],

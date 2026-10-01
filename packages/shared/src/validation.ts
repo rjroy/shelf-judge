@@ -29,6 +29,7 @@ import type {
   ToleranceLevel,
   JsonValue,
   SemanticRedundancyState,
+  SemanticRedundancyStateV10,
   SemanticDisclosureManifest,
 } from "./types";
 import { DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY } from "./collection-profile-entity-policy";
@@ -98,7 +99,7 @@ export {
   CollectionProfileResultSchema,
 };
 
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 9 as const;
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 10 as const;
 export const CURRENT_PROFILE_CONTRACT_VERSION = 11 as const;
 export const CURRENT_PROFILE_ALGORITHM_VERSION = 14 as const;
 const AmountInputSchema = z.string().superRefine((value, context) => {
@@ -1955,6 +1956,21 @@ export function createInitialSemanticRedundancyState(): SemanticRedundancyState 
   };
 }
 
+export function createInitialSemanticRedundancyStateV10(): SemanticRedundancyStateV10 {
+  return {
+    settings: {
+      enabled: false,
+      weights: { factual: 7, description: 0, ownerNote: 0 },
+      cachedOwnerNoteUse: false,
+    },
+    evidenceEpoch: 0,
+    consentEpoch: 0,
+    factualWeightsEpoch: 0,
+    factualWeightsFingerprint: null,
+    firstOptInInitialized: false,
+  };
+}
+
 const CollectionSchemaV9Base = CollectionSchemaV6Base.omit({ schemaVersion: true })
   .extend({
     schemaVersion: z.literal(9),
@@ -1989,6 +2005,14 @@ const SemanticRedundancyStateV10Schema = z
     factualWeightsEpoch: SafeEpochSchema,
     factualWeightsFingerprint: SemanticFingerprintSchema.nullable(),
     firstOptInInitialized: z.boolean(),
+    legacyCacheMigration: z
+      .object({
+        kind: z.literal("jev-cache-v9-to-v10"),
+        discardedPairCount: SafeEpochSchema,
+      })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -2010,7 +2034,7 @@ export const CollectionSchemaV10 = CollectionSchemaV9Base.omit({
 
 export type CollectionV10Output = z.output<typeof CollectionSchemaV10>;
 
-export const CollectionSchema = CollectionSchemaV9;
+export const CollectionSchema = CollectionSchemaV10;
 
 const CollectionProfileCollectionSourceV7Base = CollectionSchemaV6Base.omit({
   schemaVersion: true,
@@ -2063,7 +2087,7 @@ export const CollectionProfileCollectionSourceSchema = CollectionProfileCollecti
   { schemaVersion: true, commandReceipts: true },
 )
   .extend({
-    schemaVersion: z.literal(9),
+    schemaVersion: z.literal(10),
     attentionDispositions: z.array(AttentionDispositionSchema),
     commandReceipts: z.array(AttentionCommandReceiptUnionSchema),
   })

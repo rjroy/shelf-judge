@@ -163,7 +163,7 @@ function fixture() {
     game("game-4", "Heat", []),
   ];
   const collection: CollectionProfileCollectionSource = {
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 9,
     id: "collection-1",
     name: "Collection",

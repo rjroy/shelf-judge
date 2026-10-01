@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach } from "bun:test";
 import { Hono } from "hono";
 import { createRedundancyRoutes } from "../src/routes/redundancy";
 import {
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
   type Collection,
   type RedundancySettings,
 } from "@shelf-judge/shared";
@@ -11,10 +11,6 @@ import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
 import { createSettingsRouteStorageStub } from "./helpers/settings-route-storage";
 import { canonicalSha256 } from "../src/services/profile-source-coordinator";
 import { DurableSourcePostCommitError } from "../src/services/storage-service";
-import {
-  semanticGenerationFixture,
-  semanticSourceIdentityFixture,
-} from "./helpers/semantic-redundancy-fixtures";
 
 function createMockStorageService(): StorageService & {
   settings: RedundancySettings;
@@ -31,7 +27,7 @@ function createMockStorageService(): StorageService & {
     settings: { ...DEFAULT_REDUNDANCY_SETTINGS },
     migrationNotice: null as string | null,
     collection: {
-      schemaVersion: 9 as const,
+      schemaVersion: 10 as const,
       revision: 0,
       id: "route-test-collection",
       name: "Route test",
@@ -41,7 +37,7 @@ function createMockStorageService(): StorageService & {
       attentionDispositions: [],
       commandReceipts: [],
       entertainmentBenchmark: null,
-      semanticRedundancy: createInitialSemanticRedundancyState(),
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
       createdAt: initialTime,
       updatedAt: initialTime,
     } as Collection,
@@ -125,6 +121,48 @@ describe("redundancy settings routes", () => {
       expect(await res.json()).toMatchObject({
         componentWeights: { binary: 4 / 7, continuous: 3 / 7 },
         migrationNotice: "Legacy weights migrated to factual 4:3.",
+      });
+    });
+
+    test("exposes only the safe semantic cache migration receipt separately", async () => {
+      storage.migrationNotice = "Legacy weights migrated to factual 4:3.";
+      storage.collection.semanticRedundancy.legacyCacheMigration = {
+        kind: "jev-cache-v9-to-v10",
+        discardedPairCount: 3,
+      };
+      const res = await app.request("/api/redundancy/settings");
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        migrationNotice: "Legacy weights migrated to factual 4:3.",
+        semantic: {
+          settings: storage.collection.semanticRedundancy.settings,
+          status: { status: "disabled", publicationStatus: "disabled" },
+          migrationNotice: { kind: "jev-cache-v9-to-v10", discardedPairCount: 3 },
+        },
+      });
+    });
+
+    test("distinguishes an absent semantic migration receipt from a zero-count receipt", async () => {
+      let res = await app.request("/api/redundancy/settings");
+      expect(await res.json()).toMatchObject({
+        semantic: {
+          settings: storage.collection.semanticRedundancy.settings,
+          status: { status: "disabled", publicationStatus: "disabled" },
+          migrationNotice: null,
+        },
+      });
+      storage.collection.semanticRedundancy.legacyCacheMigration = {
+        kind: "jev-cache-v9-to-v10",
+        discardedPairCount: 0,
+      };
+      res = await app.request("/api/redundancy/settings");
+      expect(await res.json()).toMatchObject({
+        semantic: {
+          migrationNotice: {
+            kind: "jev-cache-v9-to-v10",
+            discardedPairCount: 0,
+          },
+        },
       });
     });
   });
@@ -302,31 +340,12 @@ describe("redundancy settings routes", () => {
       );
     });
 
-    test("settings failure leaves the durable factual fence and discards v9 derived payloads", async () => {
-      storage.collection.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
-        id: "generation-1",
-        sourceIdentity: semanticSourceIdentityFixture({ collectionId: storage.collection.id }),
-      });
-      storage.collection.semanticRedundancy.authorization = {
-        id: "authorization-1",
-        manifestDigest: "a".repeat(64),
-        evidenceEpoch: 0,
-        consentEpoch: 0,
-        pairCount: 0,
-        notePairCount: 0,
-        expiresAt: "2099-01-01T00:00:00.000Z",
-        state: "active",
-      };
-      storage.collection.semanticRedundancy.disclosure = {
-        id: "authorization-1",
-        manifestDigest: "a".repeat(64),
-        evidenceEpoch: 0,
-        consentEpoch: 0,
-        pairCount: 0,
-        notePairCount: 0,
-        expiresAt: "2099-01-01T00:00:00.000Z",
-      };
+    test("settings failure leaves the durable factual fence", async () => {
       storage.failSettingsSave = true;
+      storage.collection.semanticRedundancy.legacyCacheMigration = {
+        kind: "jev-cache-v9-to-v10",
+        discardedPairCount: 0,
+      };
 
       const response = await app.request(
         "/api/redundancy/settings",
@@ -341,15 +360,13 @@ describe("redundancy settings routes", () => {
         DEFAULT_REDUNDANCY_SETTINGS.componentWeights,
       );
       expect(storage.collection.semanticRedundancy.factualWeightsEpoch).toBe(1);
-      expect(storage.collection.semanticRedundancy.publishedGeneration).toBeNull();
-      expect(storage.collection.semanticRedundancy.authorization).toBeNull();
+      expect(storage.collection.semanticRedundancy.legacyCacheMigration).toEqual({
+        kind: "jev-cache-v9-to-v10",
+        discardedPairCount: 0,
+      });
     });
 
     test("reports a durable factual settings write when profile invalidation fails afterward", async () => {
-      storage.collection.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
-        id: "generation-durable-write",
-        sourceIdentity: semanticSourceIdentityFixture({ collectionId: storage.collection.id }),
-      });
       storage.saveRedundancySettings = (settings) => {
         storage.settings = structuredClone(settings);
         storage.settingsWrites += 1;
@@ -362,32 +379,21 @@ describe("redundancy settings routes", () => {
       expect(response.status).toBe(500);
       expect(await response.json()).toMatchObject({
         factualSettingsPersisted: true,
-        semanticGenerationWithdrawn: true,
         profileInvalidationFailed: true,
       });
       expect(storage.settings.componentWeights.binary).toBe(0.8);
-      expect(storage.collection.semanticRedundancy.publishedGeneration).toBeNull();
     });
 
-    test("stage-only factual settings retain semantic generation and do not write collection", async () => {
-      storage.collection.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
-        id: "generation-1",
-        sourceIdentity: semanticSourceIdentityFixture({ collectionId: storage.collection.id }),
-      });
+    test("stage-only factual settings do not write collection", async () => {
       const response = await app.request(
         "/api/redundancy/settings",
         patchRequest({ stage: "integrated" }),
       );
       expect(response.status).toBe(200);
       expect(storage.collectionWrites).toBe(0);
-      expect(storage.collection.semanticRedundancy.publishedGeneration?.id).toBe("generation-1");
     });
 
     test("factual weights A to B to A advance a durable fence across route restart", async () => {
-      storage.collection.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
-        id: "generation-before-A-B-A",
-        sourceIdentity: semanticSourceIdentityFixture({ collectionId: storage.collection.id }),
-      });
       const first = await app.request(
         "/api/redundancy/settings",
         patchRequest({ componentWeights: { binary: 0.8 } }),
@@ -396,7 +402,6 @@ describe("redundancy settings routes", () => {
       const afterB = storage.collection.semanticRedundancy.factualWeightsEpoch;
       const fingerprintB = storage.collection.semanticRedundancy.factualWeightsFingerprint;
       expect(afterB).toBe(1);
-      expect(storage.collection.semanticRedundancy.publishedGeneration).toBeNull();
 
       const { routes } = createRedundancyRoutes({ storageService: storage });
       const restarted = new Hono();
@@ -413,7 +418,6 @@ describe("redundancy settings routes", () => {
       expect(storage.collection.semanticRedundancy.factualWeightsFingerprint).toBe(
         canonicalSha256({ binary: 4 / 7, continuous: 3 / 7 }),
       );
-      expect(storage.collection.semanticRedundancy.publishedGeneration).toBeNull();
     });
 
     test("rejects non-object body", async () => {

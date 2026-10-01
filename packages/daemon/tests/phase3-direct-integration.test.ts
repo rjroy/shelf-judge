@@ -18,7 +18,7 @@ import {
 } from "../src/services/attention-candidate-service.js";
 import type { DisplayedFitnessService } from "../src/services/displayed-fitness-service.js";
 import {
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
   type Collection,
   type DurableGame,
 } from "@shelf-judge/shared";
@@ -190,7 +190,7 @@ describe("Phase 3 direct integration evidence", () => {
       updatedAt: UTILIZATION_OBSERVED_AT,
     };
     await context.storageService.saveCollection({
-      schemaVersion: 9,
+      schemaVersion: 10,
       revision: 0,
       id: "underused-fixture",
       name: "Underused fixture",
@@ -209,7 +209,7 @@ describe("Phase 3 direct integration evidence", () => {
       ],
       games: [game],
       entertainmentBenchmark: fixture.input.entertainmentBenchmark,
-      semanticRedundancy: createInitialSemanticRedundancyState(),
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
       intentions: [],
       attentionDispositions: [],
       commandReceipts: [],
@@ -549,7 +549,7 @@ describe("Phase 3 direct integration evidence", () => {
       },
     ];
     const collection: Collection = {
-      schemaVersion: 9,
+      schemaVersion: 10,
       revision: 0,
       id: "gb-1-collection",
       name: "GB-1",
@@ -568,7 +568,7 @@ describe("Phase 3 direct integration evidence", () => {
       ],
       games,
       entertainmentBenchmark: fixture.input.entertainmentBenchmark,
-      semanticRedundancy: createInitialSemanticRedundancyState(),
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
       intentions: [],
       attentionDispositions: [],
       commandReceipts: [],

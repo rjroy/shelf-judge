@@ -93,7 +93,7 @@ function futureSourceCollection(
   commandReceipts: unknown[] = [],
 ) {
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     id: "collection",
     name: "Collection",
     axes: [],
@@ -1404,7 +1404,7 @@ describe("collection profile attention contract", () => {
       publicationIdentity: {
         source: {
           collectionId: "collection",
-          collectionSchemaVersion: 9,
+          collectionSchemaVersion: 10,
           collectionRevision: 1,
           tournamentHash: "a".repeat(64),
           predictionSettingsHash: "b".repeat(64),
@@ -1417,7 +1417,7 @@ describe("collection profile attention contract", () => {
           evaluatedAt: "2026-08-27T12:00:00.000Z",
           identity: {
             collectionId: "collection",
-            collectionSchemaVersion: 9,
+            collectionSchemaVersion: 10,
             collectionRevision: 1,
             tournamentHash: "a".repeat(64),
             predictionSettingsHash: "b".repeat(64),

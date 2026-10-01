@@ -586,7 +586,7 @@ export interface CollectionV9 extends Omit<CollectionV8, "schemaVersion"> {
   semanticRedundancy: SemanticRedundancyState;
 }
 
-/** Inactive v10 collection contract; current collection consumers remain on v9 until cutover. */
+/** V10 keeps canonical semantic settings and epochs while discarding derived judgments. */
 export interface SemanticRedundancyStateV10 {
   settings: SemanticRedundancySettings;
   evidenceEpoch: number;
@@ -594,6 +594,13 @@ export interface SemanticRedundancyStateV10 {
   factualWeightsEpoch: number;
   factualWeightsFingerprint: string | null;
   firstOptInInitialized: boolean;
+  /** Fixed-size, privacy-safe receipt for the one-time v9 semantic cache cutover. */
+  legacyCacheMigration?: SemanticLegacyCacheMigrationReceipt | null;
+}
+
+export interface SemanticLegacyCacheMigrationReceipt {
+  kind: "jev-cache-v9-to-v10";
+  discardedPairCount: number;
 }
 
 export interface CollectionV10 extends Omit<CollectionV8, "schemaVersion"> {
@@ -601,7 +608,7 @@ export interface CollectionV10 extends Omit<CollectionV8, "schemaVersion"> {
   semanticRedundancy: SemanticRedundancyStateV10;
 }
 
-export type Collection = CollectionV9;
+export type Collection = CollectionV10;
 
 /** Additive internal contracts for the future disposable attention projection. */
 export type AttentionExactValue = { numerator: string; denominator: string };
@@ -1523,7 +1530,7 @@ export type CollectionProfileResult = CollectionProfile | CollectionProfileUnava
 
 export interface ProfileSourceIdentity {
   collectionId: string;
-  collectionSchemaVersion: 9;
+  collectionSchemaVersion: 10;
   collectionRevision: number;
   tournamentHash: string;
   predictionSettingsHash: string;
@@ -1536,7 +1543,7 @@ export interface ProfileAttentionCandidatePublicationIdentity {
   evaluatedAt: string;
   identity: {
     collectionId: string;
-    collectionSchemaVersion: 9;
+    collectionSchemaVersion: 10;
     collectionRevision: number;
     tournamentHash: string;
     predictionSettingsHash: string;

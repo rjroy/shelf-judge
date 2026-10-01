@@ -1,14 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
-import { createInitialSemanticRedundancyState, type Collection } from "@shelf-judge/shared";
+import { createInitialSemanticRedundancyStateV10, type Collection } from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import { createRedundancyRoutes } from "../src/routes/redundancy";
 import { createSettingsRouteStorageStub } from "./helpers/settings-route-storage";
-import { semanticGenerationFixture } from "./helpers/semantic-redundancy-fixtures";
 
 function harness() {
   const collection: Collection = {
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 0,
     id: "semantic-route-test",
     name: "Test",
@@ -18,7 +17,7 @@ function harness() {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   };
@@ -54,13 +53,9 @@ const json = (body: unknown) => ({
 });
 
 describe("semantic redundancy safety quarantine", () => {
-  test("v9 published generation is not disclosed as active or stale semantic output", async () => {
+  test("V10 factual-only state is not-ready and does not disclose semantic output", async () => {
     const { app, collection } = harness();
     collection.semanticRedundancy.settings.enabled = true;
-    collection.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
-      id: "legacy-generation",
-    });
-
     const settings = await app.request("/api/redundancy/settings");
     const summary = await app.request("/api/redundancy/semantic/summary");
     expect(await settings.json()).toMatchObject({

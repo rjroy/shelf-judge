@@ -14,6 +14,7 @@ import {
   migrateCollection,
   migrateCollectionV9ToV10,
 } from "../../src/services/collection-migration.js";
+import { semanticGenerationFixture } from "../helpers/semantic-redundancy-fixtures.js";
 
 const NOW = "2026-01-01T00:00:00.000Z";
 const MIGRATED_AT = "2026-08-24T12:00:00.000Z";
@@ -126,6 +127,28 @@ function versionTwoCollection(games: Record<string, unknown>[]): Record<string, 
   const migrated = step.migrate(versionOneCollection(games), dependencies).data;
   if (!isRecord(migrated)) throw new Error("Invalid v2 migration fixture");
   return migrated;
+}
+
+function historicalV9(current: CollectionV10): CollectionV9 {
+  return CollectionSchemaV9.parse({
+    ...current,
+    schemaVersion: 9,
+    semanticRedundancy: {
+      evidenceEpoch: current.semanticRedundancy.evidenceEpoch,
+      consentEpoch: current.semanticRedundancy.consentEpoch,
+      factualWeightsEpoch: current.semanticRedundancy.factualWeightsEpoch,
+      factualWeightsFingerprint: current.semanticRedundancy.factualWeightsFingerprint,
+      firstOptInInitialized: current.semanticRedundancy.firstOptInInitialized,
+      settings: { ...current.semanticRedundancy.settings, cachedOwnerNoteUse: false },
+      disclosure: null,
+      disclosureManifest: null,
+      manifestDelivery: null,
+      authorization: null,
+      execution: null,
+      pairJudgments: [],
+      publishedGeneration: null,
+    },
+  });
 }
 
 describe("migrateCollection", () => {
@@ -300,7 +323,7 @@ describe("migrateCollection", () => {
     const result = migrateCollection(raw, dependencies);
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 1 });
-    expect(result.data.schemaVersion).toBe(9);
+    expect(result.data.schemaVersion).toBe(10);
     expect(result.data.axes).toEqual(expectedAxes);
     expect(result.data.games.map(({ bestPlayers }) => bestPlayers)).toEqual([3, 4, null]);
     expect(result.data.games[0]?.bestPlayersInvalidEvidence).toBeNull();
@@ -559,7 +582,7 @@ describe("migrateCollection", () => {
     expect(game.bestPlayersInvalidEvidence).toBeNull();
   });
 
-  test("produces equivalent v4 data from direct and chained historical versions", () => {
+  test("produces equivalent current data from direct and chained historical versions", () => {
     const v0 = historicalCollection();
     const v1Step = COLLECTION_MIGRATION_STEPS[0]?.migrate(v0, dependencies).data;
     const v2Step = COLLECTION_MIGRATION_STEPS[1]?.migrate(v1Step, dependencies).data;
@@ -602,7 +625,7 @@ describe("migrateCollection", () => {
     ]);
   });
 
-  test("chains v0 through v9, inserts Tournament once, and is byte-stable at v9", () => {
+  test("chains v0 through v10, inserts Tournament once, and is byte-stable at v10", () => {
     expect(
       COLLECTION_MIGRATION_STEPS.map(({ fromVersion, toVersion }) => ({ fromVersion, toVersion })),
     ).toEqual([
@@ -615,6 +638,7 @@ describe("migrateCollection", () => {
       { fromVersion: 6, toVersion: 7 },
       { fromVersion: 7, toVersion: 8 },
       { fromVersion: 8, toVersion: 9 },
+      { fromVersion: 9, toVersion: 10 },
     ]);
     const first = migrateCollection(historicalCollection(), dependencies);
     expect(first.data.axes.filter((axis) => axis.source === "tournament")).toHaveLength(1);
@@ -757,8 +781,8 @@ describe("migrateCollection", () => {
     const parsed: unknown = CollectionSchema.parse(migrateCollection(current, dependencies).data);
     expect(parsed).toEqual(current);
     expect(() => migrateCollection({ ...current, unexpected: true }, dependencies)).toThrow();
-    expect(() => migrateCollection({ ...current, schemaVersion: 10 }, dependencies)).toThrow(
-      "Unsupported collection schema version 10; current version is 9",
+    expect(() => migrateCollection({ ...current, schemaVersion: 11 }, dependencies)).toThrow(
+      "Unsupported collection schema version 11; current version is 10",
     );
     expect(() =>
       migrateCollection(
@@ -780,7 +804,7 @@ describe("migrateCollection", () => {
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 3 });
     expect(result.data).toMatchObject({
-      schemaVersion: 9,
+      schemaVersion: 10,
       revision: 0,
       intentions: [],
       attentionDispositions: [],
@@ -808,7 +832,7 @@ describe("migrateCollection", () => {
     const result = migrateCollection({ ...v8Collection, schemaVersion: 8 }, dependencies);
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 8 });
-    expect(result.data.schemaVersion).toBe(9);
+    expect(result.data.schemaVersion).toBe(10);
     expect(result.data.semanticRedundancy).toEqual({
       settings: {
         enabled: false,
@@ -820,18 +844,12 @@ describe("migrateCollection", () => {
       factualWeightsEpoch: 0,
       factualWeightsFingerprint: null,
       firstOptInInitialized: false,
-      disclosure: null,
-      disclosureManifest: null,
-      manifestDelivery: null,
-      authorization: null,
-      execution: null,
-      pairJudgments: [],
-      publishedGeneration: null,
+      legacyCacheMigration: { kind: "jev-cache-v9-to-v10", discardedPairCount: 0 },
     });
   });
 
   test("purely migrates v9 to strict inactive v10 while discarding legacy judgments", () => {
-    const v9 = migrateCollection(historicalCollection(), dependencies).data;
+    const v9 = historicalV9(migrateCollection(historicalCollection(), dependencies).data);
     const source = {
       ...v9,
       games: v9.games.map((game) =>
@@ -854,7 +872,25 @@ describe("migrateCollection", () => {
         factualWeightsEpoch: 3,
         factualWeightsFingerprint: "a".repeat(64),
         firstOptInInitialized: true,
-        pairJudgments: [{ gameA: "game-1", gameB: "game-2", description: null, ownerNote: null }],
+        pairJudgments: [
+          {
+            gameA: "game-1",
+            gameB: "game-2",
+            description: {
+              status: "scored",
+              score: 0.7,
+              confidence: null,
+              modelId: "legacy-model",
+              rubricVersion: 1,
+              sourceFingerprintA: "a".repeat(64),
+              sourceFingerprintB: "b".repeat(64),
+              noteVersionA: null,
+              noteVersionB: null,
+              requestContext: { kind: "description-only", descriptionRepresentationVersion: 1 },
+            },
+            ownerNote: null,
+          },
+        ],
         disclosure: {
           id: "private-id",
           manifestDigest: "b".repeat(64),
@@ -889,12 +925,19 @@ describe("migrateCollection", () => {
     const validatedV9: CollectionV9 = CollectionSchemaV9.parse(source);
 
     const result = migrateCollectionV9ToV10(validatedV9);
+    const chainedResult = migrateCollection(validatedV9, dependencies);
 
     expect(result.discardedLegacyPairCount).toBe(1);
     expect(result.notice).toBe(
       "Legacy semantic judgments were discarded during collection migration.",
     );
     expect(result.data.schemaVersion).toBe(10);
+    expect(chainedResult).toMatchObject({
+      migrated: true,
+      sourceVersion: 9,
+      discardedLegacyPairCount: 1,
+      notice: result.notice,
+    });
     expect(result.data.games[0]?.ownerNote).toEqual({
       state: "present",
       version: 2,
@@ -908,6 +951,7 @@ describe("migrateCollection", () => {
       factualWeightsEpoch: 3,
       factualWeightsFingerprint: "a".repeat(64),
       firstOptInInitialized: true,
+      legacyCacheMigration: { kind: "jev-cache-v9-to-v10", discardedPairCount: 1 },
     });
     expect(JSON.stringify(result.data)).not.toContain("private-auth");
     expect(JSON.stringify(result.data)).not.toContain("pairJudgments");
@@ -917,12 +961,60 @@ describe("migrateCollection", () => {
       discardedLegacyPairCount: 0,
       notice: null,
     });
+    expect(
+      migrateCollectionV9ToV10(result.data).data.semanticRedundancy.legacyCacheMigration,
+    ).toEqual({ kind: "jev-cache-v9-to-v10", discardedPairCount: 1 });
+  });
+
+  test("counts published-generation-only successful numeric pairs in the cutover receipt", () => {
+    const v9 = historicalV9(migrateCollection(historicalCollection(), dependencies).data);
+    const publishedOnly = CollectionSchemaV9.parse({
+      ...v9,
+      semanticRedundancy: {
+        ...v9.semanticRedundancy,
+        publishedGeneration: semanticGenerationFixture({
+          eligibleGameIds: ["game-1", "game-2"],
+          sourceIdentity: {
+            ...semanticGenerationFixture().sourceIdentity,
+            collectionId: v9.id,
+          },
+          pairOutcomes: [
+            {
+              gameA: "game-1",
+              gameB: "game-2",
+              description: {
+                status: "scored",
+                score: 0.61,
+                confidence: null,
+                modelId: "legacy-model",
+                rubricVersion: 1,
+                sourceFingerprintA: "a".repeat(64),
+                sourceFingerprintB: "b".repeat(64),
+                noteVersionA: null,
+                noteVersionB: null,
+                requestContext: {
+                  kind: "description-only",
+                  descriptionRepresentationVersion: 1,
+                },
+              },
+              ownerNote: null,
+            },
+          ],
+        }),
+      },
+    });
+
+    const migrated = migrateCollectionV9ToV10(publishedOnly);
+
+    expect(migrated.discardedLegacyPairCount).toBe(1);
+    expect(migrated.data.semanticRedundancy.legacyCacheMigration).toEqual({
+      kind: "jev-cache-v9-to-v10",
+      discardedPairCount: 1,
+    });
   });
 
   test("strictly parses and roundtrips a v10 collection without legacy semantic payload", () => {
-    const currentV9: CollectionV9 = CollectionSchemaV9.parse(
-      migrateCollection(historicalCollection(), dependencies).data,
-    );
+    const currentV9 = historicalV9(migrateCollection(historicalCollection(), dependencies).data);
     const v10Fixture: CollectionV10 = CollectionSchemaV10.parse({
       ...currentV9,
       schemaVersion: 10,
@@ -941,6 +1033,7 @@ describe("migrateCollection", () => {
     expect(v10Fixture.semanticRedundancy).not.toHaveProperty("pairJudgments");
     expect(v10Fixture.semanticRedundancy).not.toHaveProperty("disclosure");
     expect(v10Fixture.semanticRedundancy).not.toHaveProperty("authorization");
+    expect(v10Fixture.semanticRedundancy.legacyCacheMigration).toBeUndefined();
     expect(JSON.stringify(v10Fixture)).not.toContain("legacyPayload");
     const missingFlag = { ...v10Fixture, semanticRedundancy: { ...v10Fixture.semanticRedundancy } };
     delete (missingFlag.semanticRedundancy as Partial<typeof v10Fixture.semanticRedundancy>)
@@ -951,7 +1044,7 @@ describe("migrateCollection", () => {
   test.each([false, true])(
     "copies v9 first-opt-in history unchanged during inactive migration (%s)",
     (firstOptInInitialized) => {
-      const v9 = migrateCollection(historicalCollection(), dependencies).data;
+      const v9 = historicalV9(migrateCollection(historicalCollection(), dependencies).data);
       const source = CollectionSchemaV9.parse({
         ...v9,
         semanticRedundancy: {
@@ -974,6 +1067,7 @@ describe("migrateCollection", () => {
         factualWeightsEpoch: source.semanticRedundancy.factualWeightsEpoch,
         factualWeightsFingerprint: source.semanticRedundancy.factualWeightsFingerprint,
         firstOptInInitialized,
+        legacyCacheMigration: { kind: "jev-cache-v9-to-v10", discardedPairCount: 0 },
       });
       expect(migrated.semanticRedundancy.settings.enabled).toBe(false);
       expect(migrated.semanticRedundancy.settings.weights).toEqual({

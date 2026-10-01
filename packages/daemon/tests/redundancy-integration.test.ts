@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { semanticGenerationFixture } from "./helpers/semantic-redundancy-fixtures";
 import { Hono } from "hono";
 import { createGameRoutes } from "../src/routes/games";
 import { createPredictionRoutes } from "../src/routes/prediction";
@@ -16,7 +15,7 @@ import type {
 } from "@shelf-judge/shared";
 import {
   createInitialEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
 import type { GameService } from "../src/services/game-service";
 import type { PredictionService } from "../src/services/prediction-service";
@@ -151,7 +150,7 @@ const allGamesWithScores: GameWithScore[] = [
 ];
 
 const defaultCollection: Collection = {
-  schemaVersion: 9,
+  schemaVersion: 10,
   revision: 0,
   id: "collection-1",
   name: "Test",
@@ -183,7 +182,7 @@ const defaultCollection: Collection = {
   ],
   games: [gameA, gameB, gameC],
   entertainmentBenchmark: null,
-  semanticRedundancy: createInitialSemanticRedundancyState(),
+  semanticRedundancy: createInitialSemanticRedundancyStateV10(),
   intentions: [],
   attentionDispositions: [],
   commandReceipts: [],
@@ -378,30 +377,6 @@ describe("redundancy integration: GET /games/:id", () => {
     expect(JSON.stringify(listEntry)).not.toContain("ownerNote");
     expect(detail.game).toHaveProperty("ownerNote");
     expect(JSON.stringify(detail.score.redundancySimilarityInfo)).not.toContain("ownerNote");
-
-    // This valid-shaped generation intentionally carries the fixture source identity and is stale.
-    collection.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
-      id: "published-generation",
-      evidenceEpoch: collection.semanticRedundancy.evidenceEpoch,
-      consentEpoch: collection.semanticRedundancy.consentEpoch,
-      modelId: "pinned-model",
-      publishedAt: now,
-    });
-    const staleApp = buildApp(settings, collection);
-    const staleListResponse = await staleApp.request("/api/games");
-    const staleDetailResponse = await staleApp.request("/api/games/c");
-    const staleList = (await staleListResponse.json()) as GameWithPurchaseUtilization[];
-    const staleDetail = (await staleDetailResponse.json()) as GameWithPurchaseUtilization;
-    const staleEntry = staleList.find(({ game }) => game.id === "c");
-    if (!staleEntry?.score || !staleDetail.score)
-      throw new Error("Expected scored stale list/detail entries");
-    expect(staleEntry.score.redundancySimilarityInfo).toEqual({
-      status: "not-ready",
-      generationId: null,
-    });
-    expect(staleDetail.score.redundancySimilarityInfo).toEqual(
-      staleEntry.score.redundancySimilarityInfo,
-    );
   });
 
   test("annotation mode: score.score unchanged, adjustedScore reflects penalty", async () => {
@@ -430,7 +405,7 @@ describe("redundancy integration: GET /games/:id", () => {
 });
 
 describe("redundancy integration: BGG candidate preview", () => {
-  test("semantic-enabled current C/D generation does not change the factual candidate preview", async () => {
+  test("semantic-enabled factual-only state does not change the factual candidate preview", async () => {
     const withoutSemanticGeneration = structuredClone(defaultCollection);
     const factualApp = buildApp(enabledAnnotation, withoutSemanticGeneration);
     const factualResponse = await factualApp.request("/api/predictions/bgg/12345");
@@ -439,30 +414,6 @@ describe("redundancy integration: BGG candidate preview", () => {
 
     const semanticCollection = structuredClone(defaultCollection);
     semanticCollection.semanticRedundancy.settings.enabled = true;
-    semanticCollection.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
-      id: "current-c-d-generation",
-      signalScope: "description-and-owner-notes",
-      weights: { factual: 0, description: 100, ownerNote: 100 },
-      pairOutcomes: [
-        {
-          gameA: "a",
-          gameB: "candidate",
-          description: null,
-          ownerNote: {
-            status: "scored",
-            score: 0,
-            confidence: 1,
-            modelId: "fixture-model",
-            rubricVersion: 1,
-            sourceFingerprintA: "a".repeat(64),
-            sourceFingerprintB: "b".repeat(64),
-            noteVersionA: 1,
-            noteVersionB: null,
-            requestContext: { kind: "owner-notes-only", ownerNoteRepresentationVersion: 1 },
-          },
-        },
-      ],
-    });
     const semanticApp = buildApp(enabledAnnotation, semanticCollection);
     const semanticResponse = await semanticApp.request("/api/predictions/bgg/12345");
     expect(semanticResponse.status).toBe(200);

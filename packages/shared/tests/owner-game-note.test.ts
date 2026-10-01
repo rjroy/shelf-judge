@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
   AddGameResultSchema,
   CollectionGameV5Schema,
   CollectionProfileCollectionSourceV6Schema,
@@ -327,9 +327,9 @@ describe("owner note receipt and collection contracts", () => {
     expect(
       CollectionSchema.safeParse({
         ...baseCollection,
-        schemaVersion: 9,
+        schemaVersion: 10,
         attentionDispositions: [],
-        semanticRedundancy: createInitialSemanticRedundancyState(),
+        semanticRedundancy: createInitialSemanticRedundancyStateV10(),
         games: [{ ...canonicalPublicGame, ownerNote: missingOwnerNote }],
       }).success,
     ).toBe(true);
@@ -369,7 +369,7 @@ describe("owner note receipt and collection contracts", () => {
     expect(
       CollectionProfileCollectionSourceSchema.safeParse({
         ...v6,
-        schemaVersion: 9,
+        schemaVersion: 10,
         attentionDispositions: [],
         games: [canonicalPublicGame],
       }).success,

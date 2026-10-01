@@ -18,7 +18,7 @@ import {
   type PurchaseUtilizationService,
 } from "../../src/services/purchase-utilization-service.js";
 import { createApp, type AppResult } from "../../src/app.js";
-import { createInitialSemanticRedundancyState } from "@shelf-judge/shared";
+import { createInitialSemanticRedundancyStateV10 } from "@shelf-judge/shared";
 import {
   createCollectionMutationService,
   type CollectionMutationService,
@@ -119,7 +119,7 @@ export function createTestPurchaseUtilizationService(
   const fallbackStorage = {
     loadCollection: () =>
       Promise.resolve({
-        schemaVersion: 9 as const,
+        schemaVersion: 10 as const,
         revision: 0,
         id: "test-collection",
         name: "Test Collection",
@@ -129,7 +129,7 @@ export function createTestPurchaseUtilizationService(
         attentionDispositions: [],
         commandReceipts: [],
         entertainmentBenchmark: null,
-        semanticRedundancy: createInitialSemanticRedundancyState(),
+        semanticRedundancy: createInitialSemanticRedundancyStateV10(),
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       }),

@@ -311,6 +311,7 @@ export {
   semanticDisclosureManifestDigest,
   SemanticSignalRequestContextSchema,
   createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
   AttentionDispositionSchema,
   AttentionCommandReceiptSchema,
   attentionDispositionRequestFingerprint,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createInitialSemanticRedundancyState } from "@shelf-judge/shared";
+import { createInitialSemanticRedundancyStateV10 } from "@shelf-judge/shared";
 import type {
   Axis,
   BoxDimensions,
@@ -96,13 +96,13 @@ function createMockStorage(units: ShelfUnit[], axes?: Axis[]): StorageService {
     saveShelfConfig: () => Promise.resolve(),
     loadCollection: () =>
       Promise.resolve({
-        schemaVersion: 9,
+        schemaVersion: 10,
         revision: 0,
         id: "mock",
         name: "Mock",
         games: [],
         entertainmentBenchmark: null,
-        semanticRedundancy: createInitialSemanticRedundancyState(),
+        semanticRedundancy: createInitialSemanticRedundancyStateV10(),
         intentions: [],
         attentionDispositions: [],
         commandReceipts: [],

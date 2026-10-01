@@ -30,7 +30,7 @@ import {
   TournamentDataSchema,
   ShelfConfigurationSchema,
   AttentionCandidateArtifactSchema,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
 import { atomicWrite, type TemporaryPathForAttempt } from "./file-ops.js";
@@ -148,7 +148,7 @@ function createDefaultCollection(dependencies?: CollectionMigrationDependencies)
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: now,
     updatedAt: now,
   });
@@ -200,8 +200,9 @@ export function decodeStoredCollection(raw: unknown, logger: Logger): StoredColl
       raw.schemaVersion !== 4 &&
       raw.schemaVersion !== 5 &&
       // V7 was current when this recovery boundary was introduced. Keep that
-      // established eligibility while it is migrated sequentially to V9.
+      // established eligibility while it is migrated sequentially to V10.
       raw.schemaVersion !== 7 &&
+      raw.schemaVersion !== 9 &&
       raw.schemaVersion !== CURRENT_COLLECTION_SCHEMA_VERSION)
   ) {
     return { data: raw, normalized: false };
@@ -546,6 +547,11 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         logger.log(
           `collection migration checked sourceVersion=${migration.sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION} axes=${migration.data.axes.length} games=${migration.data.games.length} converted=${migration.convertedAxisCount} disabled=${migration.disabledAxisCount}`,
         );
+        if (migration.discardedLegacyPairCount !== undefined) {
+          logger.log(
+            `collection semantic migration discardedLegacyPairCount=${migration.discardedLegacyPairCount} notice=${migration.notice ?? "none"}`,
+          );
+        }
         const normalizedCurrent =
           decoded.normalized && migration.sourceVersion === CURRENT_COLLECTION_SCHEMA_VERSION;
         const candidate = normalizedCurrent

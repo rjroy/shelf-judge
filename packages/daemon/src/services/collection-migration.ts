@@ -28,6 +28,8 @@ export interface CollectionMigrationResult {
   sourceVersion: number;
   convertedAxisCount: number;
   disabledAxisCount: number;
+  discardedLegacyPairCount?: number;
+  notice?: string | null;
 }
 
 export interface CollectionV9ToV10MigrationResult {
@@ -45,6 +47,8 @@ export interface CollectionMigrationStepResult {
   data: unknown;
   convertedAxisCount: number;
   disabledAxisCount: number;
+  discardedLegacyPairCount?: number;
+  notice?: string | null;
 }
 
 export interface CollectionMigrationStep {
@@ -797,6 +801,20 @@ export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
     toVersion: 9,
     migrate: migrateVersionEightToNine,
   },
+  {
+    fromVersion: 9,
+    toVersion: 10,
+    migrate(raw): CollectionMigrationStepResult {
+      const result = migrateCollectionV9ToV10(raw);
+      return {
+        data: result.data,
+        convertedAxisCount: 0,
+        disabledAxisCount: 0,
+        discardedLegacyPairCount: result.discardedLegacyPairCount,
+        notice: result.notice,
+      };
+    },
+  },
 ];
 
 function readSchemaVersion(raw: unknown): number {
@@ -823,6 +841,9 @@ export function migrateCollection(
   let working: unknown = raw;
   let convertedAxisCount = 0;
   let disabledAxisCount = 0;
+  let discardedLegacyPairCount = 0;
+  let notice: string | null = null;
+  let semanticStateMigrated = false;
   while (version < CURRENT_COLLECTION_SCHEMA_VERSION) {
     const step = COLLECTION_MIGRATION_STEPS.find(({ fromVersion }) => fromVersion === version);
     if (step === undefined || step.toVersion <= version) {
@@ -834,6 +855,9 @@ export function migrateCollection(
     working = result.data;
     convertedAxisCount += result.convertedAxisCount;
     disabledAxisCount += result.disabledAxisCount;
+    semanticStateMigrated ||= result.discardedLegacyPairCount !== undefined;
+    discardedLegacyPairCount += result.discardedLegacyPairCount ?? 0;
+    notice ??= result.notice ?? null;
     version = step.toVersion;
   }
 
@@ -844,6 +868,7 @@ export function migrateCollection(
     sourceVersion,
     convertedAxisCount,
     disabledAxisCount,
+    ...(semanticStateMigrated ? { discardedLegacyPairCount, notice } : {}),
   };
 }
 
@@ -866,11 +891,18 @@ export function migrateCollectionV9ToV10(raw: unknown): CollectionV9ToV10Migrati
     };
   }
   const source = CollectionSchemaV9.parse(raw);
-  const discardedLegacyPairCount = new Set(
-    source.semanticRedundancy.pairJudgments.map(({ gameA, gameB }) =>
-      gameA < gameB ? `${gameA}\u0000${gameB}` : `${gameB}\u0000${gameA}`,
-    ),
-  ).size;
+  const pairKey = (gameA: string, gameB: string) =>
+    JSON.stringify(gameA < gameB ? [gameA, gameB] : [gameB, gameA]);
+  const discardedPairs = new Set<string>();
+  for (const pair of source.semanticRedundancy.pairJudgments) {
+    if (hasSuccessfulNumericSemanticResult(pair.description, pair.ownerNote))
+      discardedPairs.add(pairKey(pair.gameA, pair.gameB));
+  }
+  for (const pair of source.semanticRedundancy.publishedGeneration?.pairOutcomes ?? []) {
+    if (hasSuccessfulNumericSemanticResult(pair.description, pair.ownerNote))
+      discardedPairs.add(pairKey(pair.gameA, pair.gameB));
+  }
+  const discardedLegacyPairCount = discardedPairs.size;
   const { semanticRedundancy: legacyState, ...collection } = source;
   const data = CollectionSchemaV10.parse({
     ...collection,
@@ -882,6 +914,10 @@ export function migrateCollectionV9ToV10(raw: unknown): CollectionV9ToV10Migrati
       factualWeightsEpoch: legacyState.factualWeightsEpoch,
       factualWeightsFingerprint: legacyState.factualWeightsFingerprint,
       firstOptInInitialized: legacyState.firstOptInInitialized,
+      legacyCacheMigration: {
+        kind: "jev-cache-v9-to-v10",
+        discardedPairCount: discardedLegacyPairCount,
+      },
     },
   });
   return {
@@ -892,4 +928,17 @@ export function migrateCollectionV9ToV10(raw: unknown): CollectionV9ToV10Migrati
         ? "Legacy semantic judgments were discarded during collection migration."
         : null,
   };
+}
+
+function hasSuccessfulNumericSemanticResult(
+  description: { status: string; score?: number } | null,
+  ownerNote: { status: string; score?: number } | null,
+): boolean {
+  return [description, ownerNote].some(
+    (result) =>
+      result !== null &&
+      result.status === "scored" &&
+      typeof result.score === "number" &&
+      Number.isFinite(result.score),
+  );
 }

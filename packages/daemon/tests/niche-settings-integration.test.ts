@@ -12,7 +12,7 @@ import type {
 } from "@shelf-judge/shared";
 import {
   createInitialEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
 import type { GameService } from "../src/services/game-service";
@@ -129,14 +129,14 @@ const allGamesWithScores: GameWithScore[] = [
 // --- Mock factories ---
 
 const defaultCollection: Collection = {
-  schemaVersion: 9,
+  schemaVersion: 10,
   revision: 0,
   id: "collection-1",
   name: "Test",
   axes: [],
   games: [gameA, gameB, gameC],
   entertainmentBenchmark: null,
-  semanticRedundancy: createInitialSemanticRedundancyState(),
+  semanticRedundancy: createInitialSemanticRedundancyStateV10(),
   intentions: [],
   attentionDispositions: [],
   commandReceipts: [],

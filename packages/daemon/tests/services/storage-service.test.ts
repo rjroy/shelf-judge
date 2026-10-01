@@ -39,8 +39,17 @@ function makeService(initialFiles?: Record<string, string>) {
 }
 
 function currentCollection(overrides: Partial<Collection> = {}): Collection {
+  const initialSemanticState = createInitialSemanticRedundancyState();
+  const semanticRedundancy = {
+    settings: initialSemanticState.settings,
+    evidenceEpoch: initialSemanticState.evidenceEpoch,
+    consentEpoch: initialSemanticState.consentEpoch,
+    factualWeightsEpoch: initialSemanticState.factualWeightsEpoch,
+    factualWeightsFingerprint: initialSemanticState.factualWeightsFingerprint,
+    firstOptInInitialized: initialSemanticState.firstOptInInitialized,
+  };
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 0,
     id: "col-1",
     name: "Test",
@@ -50,7 +59,7 @@ function currentCollection(overrides: Partial<Collection> = {}): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
@@ -104,7 +113,7 @@ describe("StorageService.loadCollection", () => {
     const collection = await service.loadCollection();
 
     expect(collection.name).toBe("My Collection");
-    expect(collection.schemaVersion).toBe(9);
+    expect(collection.schemaVersion).toBe(10);
     expect(collection.axes).toHaveLength(3);
     expect(collection.games).toHaveLength(0);
 

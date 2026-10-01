@@ -49,6 +49,12 @@ test("redundancy disclosure is inspectable, C-only can be declined, and layout f
                 cachedOwnerNoteUse: false,
               },
               status: { status: "not-ready", publicationStatus: "not-ready" },
+              migrationNotice: {
+                kind: "jev-cache-v9-to-v10",
+                discardedPairCount: Number(
+                  new URL(location.href).searchParams.get("discardedPairCount") ?? 1,
+                ),
+              },
             },
           };
         else if (url.pathname.endsWith("/refresh-status")) {
@@ -173,6 +179,25 @@ test("redundancy disclosure is inspectable, C-only can be declined, and layout f
   });
   await page.goto("/redundancy");
   await expect(page.getByRole("heading", { name: "Redundancy scoring" })).toBeVisible();
+  await expect(
+    page.getByText(
+      "Semantic cache storage was upgraded. The cached result for 1 game pair was discarded because its inputs could not be verified. Your games, notes, and preferences were preserved.",
+    ),
+  ).toBeVisible();
+  const migrationPage = await page.context().newPage();
+  await migrationPage.goto("/redundancy?discardedPairCount=0");
+  await expect(
+    migrationPage.getByText(
+      "Semantic cache storage was upgraded. No cached game-pair results were discarded. Your games, notes, and preferences were preserved.",
+    ),
+  ).toBeVisible();
+  await migrationPage.goto("/redundancy?discardedPairCount=3");
+  await expect(
+    migrationPage.getByText(
+      "Semantic cache storage was upgraded. Cached results for 3 game pairs were discarded because their inputs could not be verified. Your games, notes, and preferences were preserved.",
+    ),
+  ).toBeVisible();
+  await migrationPage.close();
   await expect(page.getByText(/Not ready/)).toBeVisible();
   await expect(page.getByText(/only action that contacts JEV/i)).toBeVisible();
   await expect(page.locator(".topbar").getByRole("button")).toHaveCount(0);
@@ -396,7 +421,10 @@ test("large manifests paginate without a nested vertical scroll trap", async ({ 
           response = { status: "not-ready", publicationStatus: "not-ready" };
         else if (url.pathname.endsWith("/summary")) response = { disclosure: null };
         else if (url.pathname.endsWith("/disclosure")) {
-          const body = JSON.parse(String(init?.body)) as { signalScope: string };
+          const body =
+            typeof init?.body === "string"
+              ? (JSON.parse(init.body) as { signalScope: string })
+              : { signalScope: "description-only" };
           response = {
             id: "large-manifest",
             digest: "large-manifest-digest",

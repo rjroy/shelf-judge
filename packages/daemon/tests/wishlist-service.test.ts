@@ -8,13 +8,12 @@ import type {
 } from "@shelf-judge/shared";
 import {
   createInitialEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import type { PredictionService, PredictedGameResult } from "../src/services/prediction-service";
 import type { GameService } from "../src/services/game-service";
 import { createWishlistService } from "../src/services/wishlist-service";
-import { semanticGenerationFixture } from "./helpers/semantic-redundancy-fixtures";
 
 const NOW = "2026-04-12T12:00:00.000Z";
 
@@ -129,7 +128,7 @@ function createMockStorage(
 ): StorageService {
   let stored = structuredClone(wishlist);
   const coll: Collection = {
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 0,
     id: "coll-1",
     name: "Test",
@@ -139,7 +138,7 @@ function createMockStorage(
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: NOW,
     updatedAt: NOW,
     ...collection,
@@ -388,33 +387,9 @@ describe("wishlist service", () => {
           },
         },
       ],
-      semanticRedundancy: createInitialSemanticRedundancyState(),
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     };
     collection.semanticRedundancy.settings.enabled = true;
-    collection.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
-      id: "current-semantic-generation",
-      signalScope: "description-and-owner-notes",
-      weights: { factual: 0, description: 100, ownerNote: 100 },
-      pairOutcomes: [
-        {
-          gameA: "collection-peer",
-          gameB: "preview-100",
-          description: null,
-          ownerNote: {
-            status: "scored",
-            score: 0,
-            confidence: 1,
-            modelId: "fixture-model",
-            rubricVersion: 1,
-            sourceFingerprintA: "a".repeat(64),
-            sourceFingerprintB: "b".repeat(64),
-            noteVersionA: 1,
-            noteVersionB: null,
-            requestContext: { kind: "owner-notes-only", ownerNoteRepresentationVersion: 1 },
-          },
-        },
-      ],
-    });
     storage = createMockStorage([], collection, true);
     predictionService = createMockPredictionService(predictions, [
       { game: peer, score: peerScore },

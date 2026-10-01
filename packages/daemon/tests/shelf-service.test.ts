@@ -3,7 +3,7 @@ import { describe, expect, test, beforeEach } from "bun:test";
 import type { Collection, DurableGame, ShelfConfiguration } from "@shelf-judge/shared";
 import {
   createInitialEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import {
@@ -30,7 +30,7 @@ function createMockStorage(): StorageService & {
       updatedAt: NOW,
     } as ShelfConfiguration,
     collection: {
-      schemaVersion: 9,
+      schemaVersion: 10,
       revision: 0,
       id: "collection-1",
       name: "Test",
@@ -40,7 +40,7 @@ function createMockStorage(): StorageService & {
       attentionDispositions: [],
       commandReceipts: [],
       entertainmentBenchmark: null,
-      semanticRedundancy: createInitialSemanticRedundancyState(),
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
       createdAt: NOW,
       updatedAt: NOW,
     } as Collection,

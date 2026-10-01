@@ -179,11 +179,7 @@ function invalidatesSemanticDisplayArtifacts(prior: Collection, accepted: Collec
     prior.semanticRedundancy.factualWeightsEpoch !==
       accepted.semanticRedundancy.factualWeightsEpoch ||
     prior.semanticRedundancy.factualWeightsFingerprint !==
-      accepted.semanticRedundancy.factualWeightsFingerprint ||
-    (prior.schemaVersion === 9 &&
-      accepted.schemaVersion === 9 &&
-      canonicalSha256(prior.semanticRedundancy.publishedGeneration) !==
-        canonicalSha256(accepted.semanticRedundancy.publishedGeneration))
+      accepted.semanticRedundancy.factualWeightsFingerprint
   );
 }
 

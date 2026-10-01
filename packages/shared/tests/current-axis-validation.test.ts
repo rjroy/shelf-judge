@@ -6,7 +6,7 @@ import {
   CollectionProfileCollectionSourceSchema,
   CreateAxisSchema,
   CollectionSchema,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
   CURRENT_COLLECTION_SCHEMA_VERSION,
   UpdateAxisSchema,
   LegacyAxisRepairSchema,
@@ -604,7 +604,7 @@ describe("current persisted collection validation", () => {
     commandReceipts: [],
     bggPlaySessions: [],
     entertainmentBenchmark: null,
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -914,7 +914,7 @@ describe("current persisted collection validation", () => {
       CollectionSchema.safeParse({
         ...currentCollection,
         semanticRedundancy: {
-          ...createInitialSemanticRedundancyState(),
+          ...createInitialSemanticRedundancyStateV10(),
           unexpectedProviderPayload: { text: "not allowed" },
         },
       }).success,
@@ -924,7 +924,7 @@ describe("current persisted collection validation", () => {
         CollectionSchema.safeParse({
           ...currentCollection,
           semanticRedundancy: {
-            ...createInitialSemanticRedundancyState(),
+            ...createInitialSemanticRedundancyStateV10(),
             evidenceEpoch: invalidEpoch,
           },
         }).success,
@@ -933,7 +933,7 @@ describe("current persisted collection validation", () => {
         CollectionSchema.safeParse({
           ...currentCollection,
           semanticRedundancy: {
-            ...createInitialSemanticRedundancyState(),
+            ...createInitialSemanticRedundancyStateV10(),
             consentEpoch: invalidEpoch,
           },
         }).success,
@@ -943,7 +943,7 @@ describe("current persisted collection validation", () => {
       CollectionSchema.safeParse({
         ...currentCollection,
         semanticRedundancy: {
-          ...createInitialSemanticRedundancyState(),
+          ...createInitialSemanticRedundancyStateV10(),
           pairJudgments: [
             {
               gameA: "game-z",
@@ -1158,7 +1158,7 @@ describe("current persisted collection validation", () => {
   });
 
   test("rejects future versions and extra persisted fields", () => {
-    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 10 }).success).toBe(
+    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 11 }).success).toBe(
       false,
     );
     expect(CollectionSchema.safeParse({ ...currentCollection, unexpected: true }).success).toBe(

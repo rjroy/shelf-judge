@@ -24,6 +24,7 @@ import {
 } from "../../src/services/game-projection.js";
 import { profileSourceIdentity } from "../../src/services/profile-source-coordinator.js";
 import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
+import { semanticFallbackStatus } from "../../src/services/displayed-fitness-service.js";
 import { createTestApp, jsonRequest } from "../helpers/test-app.js";
 
 const SENTINEL = "OWNER-NOTE-SENTINEL-1d4.4";
@@ -196,25 +197,14 @@ describe("game projections", () => {
   test("omits private semantic consent, judgments, and generation from Profile source", async () => {
     const context = createTestApp();
     const collection = await context.storageService.loadCollection();
+    collection.semanticRedundancy.settings.enabled = true;
     const projected = projectProfileCollectionSource({
       ...collection,
-      semanticRedundancy: {
-        ...collection.semanticRedundancy,
-        authorization: {
-          id: "PRIVATE-AUTHORIZATION-SENTINEL",
-          manifestDigest: "a".repeat(64),
-          evidenceEpoch: 0,
-          consentEpoch: 0,
-          pairCount: 0,
-          notePairCount: 0,
-          expiresAt: "2026-09-29T00:00:00.000Z",
-          state: "active" as const,
-        },
-      },
     });
 
+    expect(collection.semanticRedundancy.firstOptInInitialized).toBe(false);
+    expect(semanticFallbackStatus(collection, true)).toBe("not-ready");
     expect(projected).not.toHaveProperty("semanticRedundancy");
-    expect(JSON.stringify(projected)).not.toContain("PRIVATE-AUTHORIZATION-SENTINEL");
   });
 
   test("prepares a complete-note detail snapshot without exposing notes to computation inputs", async () => {
@@ -223,7 +213,7 @@ describe("game projections", () => {
     const collection = await context.storageService.loadCollection();
     const durable: Collection = {
       ...collection,
-      schemaVersion: 9,
+      schemaVersion: 10,
       games: [
         {
           ...game,
@@ -261,7 +251,7 @@ describe("game projections", () => {
     const collection = await context.storageService.loadCollection();
     const durable: Collection = {
       ...collection,
-      schemaVersion: 9,
+      schemaVersion: 10,
       games: [
         {
           ...game,

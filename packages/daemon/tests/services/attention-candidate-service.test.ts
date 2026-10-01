@@ -4,7 +4,7 @@ import {
   ATTENTION_CANDIDATE_ARTIFACT_SCHEMA_VERSION,
   AttentionCandidateArtifactSchema,
   createInitialEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
   type AttentionCandidateArtifact,
   type Collection,
   type DurableGame,
@@ -101,7 +101,7 @@ function ownedGame(id: string): DurableGame {
 function source(revision = 1, games: DurableGame[] = []): AttentionCandidateSource {
   return {
     collection: {
-      schemaVersion: 9,
+      schemaVersion: 10,
       revision,
       id: "collection",
       name: "Collection",
@@ -111,13 +111,13 @@ function source(revision = 1, games: DurableGame[] = []): AttentionCandidateSour
       attentionDispositions: [],
       commandReceipts: [],
       entertainmentBenchmark: null,
-      semanticRedundancy: createInitialSemanticRedundancyState(),
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
       createdAt: observedAt,
       updatedAt: observedAt,
     } satisfies Collection,
     identity: {
       collectionId: "collection",
-      collectionSchemaVersion: 9,
+      collectionSchemaVersion: 10,
       collectionRevision: revision,
       tournamentHash: hash,
       predictionSettingsHash: hash,

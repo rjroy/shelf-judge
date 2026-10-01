@@ -153,13 +153,6 @@ describe("storage collection migration ordering and recovery", () => {
       factualWeightsEpoch: 0,
       factualWeightsFingerprint: null,
       firstOptInInitialized: false,
-      disclosure: null,
-      disclosureManifest: null,
-      manifestDelivery: null,
-      authorization: null,
-      execution: null,
-      pairJudgments: [],
-      publishedGeneration: null,
     });
   });
 
@@ -187,7 +180,11 @@ describe("storage collection migration ordering and recovery", () => {
       const migrated = await service.loadCollection();
       const persistedAfterMigration = await fs.readFile(collectionPath, "utf8");
       expect(JSON.parse(persistedAfterMigration)).toEqual(migrated);
-      expect(migrated.schemaVersion).toBe(9);
+      expect(migrated.schemaVersion).toBe(10);
+      expect(migrated.semanticRedundancy.legacyCacheMigration).toEqual({
+        kind: "jev-cache-v9-to-v10",
+        discardedPairCount: 0,
+      });
       expect(
         await fs.stat(profilePath).then(
           () => true,
@@ -265,7 +262,7 @@ describe("storage collection migration ordering and recovery", () => {
       });
       const migrated = await service.loadCollection();
 
-      expect(migrated.schemaVersion).toBe(9);
+      expect(migrated.schemaVersion).toBe(10);
       expect(migrated.attentionDispositions).toEqual([]);
       expect(migrated.games[0]?.acquisition).toEqual({
         state: "invalid",
@@ -302,7 +299,7 @@ describe("storage collection migration ordering and recovery", () => {
 
       await fs.writeFile(
         collectionPath,
-        JSON.stringify({ ...irrecoverable, schemaVersion: 10 }),
+        JSON.stringify({ ...irrecoverable, schemaVersion: 11 }),
         "utf8",
       );
       const futureService = createStorageService({
@@ -313,7 +310,7 @@ describe("storage collection migration ordering and recovery", () => {
       });
       // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(futureService.loadCollection()).rejects.toThrow(
-        "Unsupported collection schema version 10",
+        "Unsupported collection schema version 11",
       );
     } finally {
       await fs.rm(dataDir, { recursive: true, force: true });
@@ -384,7 +381,7 @@ describe("storage collection migration ordering and recovery", () => {
           collectionMigrationDependencies: migrationDependencies,
         });
         const migrated = await restarted.loadCollection();
-        expect(migrated.schemaVersion).toBe(9);
+        expect(migrated.schemaVersion).toBe(10);
         expect(migrated.games.map(({ ownerNote }) => ownerNote)).toEqual([
           { state: "missing", version: 0, updatedAt: null },
         ]);
@@ -432,13 +429,13 @@ describe("storage collection migration ordering and recovery", () => {
       dataDir: DATA_DIR,
       configPath: "/test/config.json",
       fileOps: createMockFileOps({
-        [COLLECTION_PATH]: JSON.stringify({ ...historicalCollection, schemaVersion: 10 }),
+        [COLLECTION_PATH]: JSON.stringify({ ...historicalCollection, schemaVersion: 11 }),
       }),
       logger: migrationLog,
     });
     // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
     await expect(migrationService.loadCollection()).rejects.toThrow(
-      "Unsupported collection schema version 10",
+      "Unsupported collection schema version 11",
     );
     expect(
       migrationLog.entries.some((entry) => entry.includes("collection migration failed")),
@@ -452,7 +449,7 @@ describe("storage collection migration ordering and recovery", () => {
       logger: validationLog,
     });
     const invalidCurrent: Collection = {
-      schemaVersion: 9,
+      schemaVersion: 10,
       revision: 0,
       id: "collection-1",
       name: "",
@@ -473,13 +470,6 @@ describe("storage collection migration ordering and recovery", () => {
         factualWeightsEpoch: 0,
         factualWeightsFingerprint: null,
         firstOptInInitialized: false,
-        disclosure: null,
-        disclosureManifest: null,
-        manifestDelivery: null,
-        authorization: null,
-        execution: null,
-        pairJudgments: [],
-        publishedGeneration: null,
       },
       createdAt: NOW,
       updatedAt: NOW,
@@ -592,7 +582,7 @@ describe("storage collection migration ordering and recovery", () => {
 
     const migrated = await service.loadCollection();
 
-    expect(migrated.schemaVersion).toBe(9);
+    expect(migrated.schemaVersion).toBe(10);
     expect(invalidated).toEqual(["v1-derived-artifact"]);
     expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(migrated);
   });
@@ -696,7 +686,7 @@ describe("storage collection migration ordering and recovery", () => {
     expect(fileOps.files.get(COLLECTION_PATH)).toBe(original);
 
     const loaded = await service.loadCollection();
-    expect(loaded.schemaVersion).toBe(9);
+    expect(loaded.schemaVersion).toBe(10);
     expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(loaded);
   });
 });

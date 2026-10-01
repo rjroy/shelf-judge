@@ -110,7 +110,7 @@ describe("owner-note persisted flow", () => {
       const first = createTestApp({ bggClient, configPath, dataDir, fileOps, now });
       const migrated = await first.storageService.loadCollection();
       const migratedBgg = migrated.games.find(({ id }) => id === bggGameId);
-      expect(migrated.schemaVersion).toBe(9);
+      expect(migrated.schemaVersion).toBe(10);
       expect(migratedBgg?.ownerNote).toEqual({ state: "missing", version: 0, updatedAt: null });
       expect(JSON.stringify(migratedBgg?.ownerNote)).not.toContain("description");
       if (migratedBgg?.bggData === null || migratedBgg === undefined)

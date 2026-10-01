@@ -11,7 +11,7 @@ import {
 } from "../../../../test-fixtures/purchase-utilization-responses.js";
 import {
   createInitialEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
   type DurableGame,
 } from "@shelf-judge/shared";
 
@@ -74,7 +74,7 @@ describe("profile attention routes", () => {
         updatedAt: UTILIZATION_OBSERVED_AT,
       };
       await context.storageService.saveCollection({
-        schemaVersion: 9,
+        schemaVersion: 10,
         revision: 0,
         id: "route-underused-fixture",
         name: "Route underused fixture",
@@ -93,7 +93,7 @@ describe("profile attention routes", () => {
         ],
         games: [game],
         entertainmentBenchmark: fixture.input.entertainmentBenchmark,
-        semanticRedundancy: createInitialSemanticRedundancyState(),
+        semanticRedundancy: createInitialSemanticRedundancyStateV10(),
         intentions: [],
         attentionDispositions: [],
         commandReceipts: [],

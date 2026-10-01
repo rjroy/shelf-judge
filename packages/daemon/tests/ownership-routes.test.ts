@@ -12,7 +12,7 @@ import type {
 } from "@shelf-judge/shared";
 import {
   createInitialEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
 import { createGameRoutes } from "../src/routes/games";
 import type { GameService } from "../src/services/game-service";
@@ -125,7 +125,7 @@ const prevOwned = makeGame("prev", "Delta", "previously-owned");
 // Mutable collection for setOwnership tests
 function makeCollection(): Collection {
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 0,
     id: "coll-1",
     name: "Test",
@@ -148,7 +148,7 @@ function makeCollection(): Collection {
       structuredClone(prevOwned),
     ],
     entertainmentBenchmark: null,
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     intentions: [],
     attentionDispositions: [],
     commandReceipts: [],

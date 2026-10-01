@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createInitialSemanticRedundancyState, type Collection } from "@shelf-judge/shared";
+import { createInitialSemanticRedundancyStateV10, type Collection } from "@shelf-judge/shared";
 import { createCollectionMutationService } from "../../src/services/collection-mutation-service.js";
 import { createSemanticRedundancyStateService } from "../../src/services/semantic-redundancy-state-service.js";
 import type {
@@ -11,7 +11,7 @@ const at = "2026-01-01T00:00:00.000Z";
 
 function collection(): Collection {
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 0,
     id: "collection-1",
     name: "Collection",
@@ -21,7 +21,7 @@ function collection(): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: at,
     updatedAt: at,
   };
@@ -46,7 +46,7 @@ function harness(initial = collection()) {
   };
 }
 
-describe("semantic redundancy state service (v9-compatible Phase 2d2)", () => {
+describe("semantic redundancy state service (V10 factual-only state)", () => {
   test("updates semantic preferences with optimistic epoch fencing", async () => {
     const h = harness();
     const service = h.service;
@@ -121,22 +121,8 @@ describe("semantic redundancy state service (v9-compatible Phase 2d2)", () => {
     });
   });
 
-  test("does not invoke a provider or interpret legacy execution payloads", async () => {
-    const initial = collection();
-    initial.semanticRedundancy.disclosure = {
-      id: "old-disclosure",
-      manifestDigest: "a".repeat(64),
-      evidenceEpoch: 0,
-      consentEpoch: 0,
-      pairCount: 0,
-      notePairCount: 0,
-      expiresAt: "2020-01-01T00:00:00.000Z",
-    };
-    initial.semanticRedundancy.authorization = {
-      ...initial.semanticRedundancy.disclosure,
-      state: "active",
-    };
-    const h = harness(initial);
+  test("V10 state stores preferences and epochs without legacy inference payloads", async () => {
+    const h = harness();
     const accepted = await h.service.updateSettings(
       { evidenceEpoch: 0, consentEpoch: 0 },
       {
@@ -146,9 +132,17 @@ describe("semantic redundancy state service (v9-compatible Phase 2d2)", () => {
       },
     );
     expect(accepted.outcome).toBe("accepted");
-    expect(h.read().semanticRedundancy.disclosure).toBeNull();
-    expect(h.read().semanticRedundancy.authorization).toBeNull();
-    expect(h.read().semanticRedundancy.pairJudgments).toEqual([]);
-    expect(h.read().semanticRedundancy.publishedGeneration).toBeNull();
+    expect(h.read().semanticRedundancy).toEqual({
+      settings: {
+        enabled: true,
+        weights: { factual: 7, description: 5, ownerNote: 3 },
+        cachedOwnerNoteUse: false,
+      },
+      evidenceEpoch: 0,
+      consentEpoch: 1,
+      factualWeightsEpoch: 0,
+      factualWeightsFingerprint: null,
+      firstOptInInitialized: true,
+    });
   });
 });

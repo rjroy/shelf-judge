@@ -4,7 +4,7 @@ import {
   CollectionSchema,
   canonicalizeOwnerGameNoteRequest,
   createInitialEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
   type Collection,
   type DurableGame,
   type OwnerGameNote,
@@ -89,7 +89,7 @@ function game(overrides: Partial<DurableGame> = {}): DurableGame {
 
 function collection(sourceGame = game()): Collection {
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 0,
     id: "collection-1",
     name: "Private collection name",
@@ -99,7 +99,7 @@ function collection(sourceGame = game()): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: initialTime,
     updatedAt: initialTime,
   };

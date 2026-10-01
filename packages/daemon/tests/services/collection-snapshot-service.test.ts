@@ -16,7 +16,7 @@ import type {
 import { createSourceVectorService } from "../../src/services/source-vector.js";
 import {
   createInitialEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
 import { createCollectionSnapshotService } from "../../src/services/collection-snapshot-service.js";
 import { createCollectionSnapshotCacheService } from "../../src/services/collection-snapshot-cache-service.js";
@@ -73,7 +73,7 @@ function setup(
 ) {
   const vector = createSourceVectorService();
   vector.hydrate(
-    { id: "collection-id", schemaVersion: 9, revision: 1 },
+    { id: "collection-id", schemaVersion: 10, revision: 1 },
     {
       tournament: 1,
       predictionSettings: 1,
@@ -83,7 +83,7 @@ function setup(
     },
   );
   const collection: Collection = {
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 1,
     id: "collection-id",
     name: "Collection",
@@ -93,7 +93,7 @@ function setup(
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   };
@@ -288,7 +288,7 @@ function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
   games.find((game) => game.id === "prediction-only")!.ratings["unconfigured-null"] =
     null as unknown as number;
   const collection: Collection = {
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 1,
     id: "parity-collection",
     name: "Parity collection",
@@ -301,7 +301,7 @@ function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
       state: "configured",
       amount: { hundredths: 500, source: "manual", confirmedAt: now },
     },
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: now,
     updatedAt: now,
   };
@@ -357,7 +357,7 @@ function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
   };
   const vector = createSourceVectorService();
   vector.hydrate(
-    { id: collection.id, schemaVersion: 9, revision: 1 },
+    { id: collection.id, schemaVersion: 10, revision: 1 },
     {
       tournament: 1,
       predictionSettings: 1,

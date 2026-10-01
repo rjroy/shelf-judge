@@ -23,7 +23,7 @@ import type {
 } from "@shelf-judge/shared";
 import {
   createCompleteEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
 
 type GameAddResponse = AddGameResult;
@@ -195,7 +195,7 @@ describe("Game Routes", () => {
   test("GET game detail uses factual fallback with sanitized semantic snapshots in both modes", async () => {
     const game = (await ctx.gameService.addGame({ name: "Snapshot fallback fixture" })).game;
     const collection = await ctx.storageService.loadCollection();
-    collection.semanticRedundancy = createInitialSemanticRedundancyState();
+    collection.semanticRedundancy = createInitialSemanticRedundancyStateV10();
     collection.semanticRedundancy.settings.enabled = true;
     await ctx.storageService.saveCollection(collection);
     const redundancySettings = await ctx.storageService.loadRedundancySettings();

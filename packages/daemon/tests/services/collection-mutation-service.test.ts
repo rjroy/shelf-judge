@@ -2,16 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   createInitialEntityMetadata,
   createInitialSemanticRedundancyState,
-  type SemanticPairJudgment,
-  type SemanticPublishedSignalJudgment,
-  type CollectionV10,
 } from "@shelf-judge/shared";
 import type { Collection } from "@shelf-judge/shared";
-import {
-  SEMANTIC_FIXTURE_FINGERPRINT,
-  semanticGenerationFixture,
-  semanticSourceIdentityFixture,
-} from "../helpers/semantic-redundancy-fixtures.js";
 import {
   collectionMutationServiceFor,
   createCollectionMutationService,
@@ -21,8 +13,6 @@ import {
   createSemanticRedundancyStateService,
   applySemanticEvidenceTransition,
   collectionRedundancyEvidenceIdentity,
-  semanticDescriptionSourceFingerprint,
-  semanticOwnerNoteSourceFingerprint,
 } from "../../src/services/semantic-redundancy-state-service.js";
 import { canonicalSha256 } from "../../src/services/profile-source-coordinator.js";
 import type { Logger } from "../../src/services/logger.js";
@@ -35,18 +25,10 @@ import { createMockFileOps } from "../helpers/mock-file-ops.js";
 
 const initialTime = "2026-01-01T00:00:00.000Z";
 
-function publishedSignal(
-  judgment: SemanticPairJudgment["description"],
-): SemanticPublishedSignalJudgment | null {
-  if (judgment === null || judgment.status === "scored" || judgment.status === "unavailable") {
-    return judgment;
-  }
-  throw new Error("Published semantic outcomes must be terminal");
-}
-
 function collection(): Collection {
+  const semanticState = createInitialSemanticRedundancyState();
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 0,
     id: "collection-1",
     name: "Private collection name",
@@ -56,50 +38,17 @@ function collection(): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy: {
+      settings: semanticState.settings,
+      evidenceEpoch: 0,
+      consentEpoch: 0,
+      factualWeightsEpoch: 0,
+      factualWeightsFingerprint: null,
+      firstOptInInitialized: false,
+    },
     createdAt: initialTime,
     updatedAt: initialTime,
   };
-}
-
-function withActiveSemanticRefresh(source: Collection): Collection {
-  const digest = SEMANTIC_FIXTURE_FINGERPRINT;
-  const sourceIdentity = semanticSourceIdentityFixture({
-    collectionId: source.id,
-    collectionRevision: source.revision,
-    evidenceEpoch: source.semanticRedundancy.evidenceEpoch,
-    consentEpoch: source.semanticRedundancy.consentEpoch,
-  });
-  source.semanticRedundancy.disclosure = {
-    id: "authorization-1",
-    manifestDigest: digest,
-    evidenceEpoch: source.semanticRedundancy.evidenceEpoch,
-    consentEpoch: source.semanticRedundancy.consentEpoch,
-    pairCount: source.semanticRedundancy.pairJudgments.length,
-    notePairCount: source.semanticRedundancy.pairJudgments.filter(
-      ({ description, ownerNote }) =>
-        (description?.status === "scored" && description.noteVersionA !== null) ||
-        ownerNote?.status === "scored",
-    ).length,
-    expiresAt: "2099-01-02T00:00:00.000Z",
-  };
-  source.semanticRedundancy.authorization = {
-    ...source.semanticRedundancy.disclosure,
-    state: "active",
-  };
-  source.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
-    id: "generation-0",
-    manifestDigest: digest,
-    sourceIdentity,
-    eligibleGameIds: source.games.map(({ id }) => id).sort(),
-    pairOutcomes: source.semanticRedundancy.pairJudgments.map((pair) => ({
-      gameA: pair.gameA,
-      gameB: pair.gameB,
-      description: publishedSignal(pair.description),
-      ownerNote: publishedSignal(pair.ownerNote),
-    })),
-  });
-  return source;
 }
 
 function semanticGame(id: string, name: string, description: string, ownerNoteVersion = 1) {
@@ -172,68 +121,7 @@ function semanticGame(id: string, name: string, description: string, ownerNoteVe
   };
 }
 
-function scoredPair(
-  gameA: ReturnType<typeof semanticGame>,
-  gameB: ReturnType<typeof semanticGame>,
-  mode: "description-only" | "description-and-owner-notes" | "owner-notes-only",
-): SemanticPairJudgment {
-  const descriptionA = semanticDescriptionSourceFingerprint(gameA);
-  const descriptionB = semanticDescriptionSourceFingerprint(gameB);
-  const ownerNoteA = semanticOwnerNoteSourceFingerprint(gameA);
-  const ownerNoteB = semanticOwnerNoteSourceFingerprint(gameB);
-  if (!descriptionA || !descriptionB || !ownerNoteA || !ownerNoteB)
-    throw new Error("Test games must have all semantic sources");
-  const context =
-    mode === "description-only"
-      ? { kind: mode, descriptionRepresentationVersion: 1 as const }
-      : mode === "description-and-owner-notes"
-        ? {
-            kind: mode,
-            descriptionRepresentationVersion: 1 as const,
-            ownerNoteRepresentationVersion: 1 as const,
-            descriptionFingerprintA: descriptionA,
-            descriptionFingerprintB: descriptionB,
-          }
-        : { kind: mode, ownerNoteRepresentationVersion: 1 as const };
-  const description =
-    mode === "owner-notes-only"
-      ? null
-      : {
-          status: "scored" as const,
-          score: 0.75,
-          confidence: null,
-          modelId: "jev-pinned",
-          rubricVersion: 1,
-          sourceFingerprintA: descriptionA,
-          sourceFingerprintB: descriptionB,
-          noteVersionA: mode === "description-only" ? null : gameA.ownerNote.version,
-          noteVersionB: mode === "description-only" ? null : gameB.ownerNote.version,
-          requestContext: context,
-        };
-  const ownerNote =
-    mode === "description-only"
-      ? null
-      : {
-          status: "scored" as const,
-          score: 0.5,
-          confidence: null,
-          modelId: "jev-pinned",
-          rubricVersion: 1,
-          sourceFingerprintA: ownerNoteA,
-          sourceFingerprintB: ownerNoteB,
-          noteVersionA: gameA.ownerNote.version,
-          noteVersionB: gameB.ownerNote.version,
-          requestContext: context,
-        };
-  return {
-    gameA: gameA.id,
-    gameB: gameB.id,
-    description,
-    ownerNote,
-  };
-}
-
-function collectionWithSemanticPairs(): Collection {
+function collectionWithSemanticGames(): Collection {
   const a = semanticGame("game-a", "A", "Description A");
   const b = semanticGame("game-b", "B", "Description B");
   const c = semanticGame("game-c", "C", "Description C");
@@ -245,18 +133,7 @@ function collectionWithSemanticPairs(): Collection {
     cachedOwnerNoteUse: true,
   };
   source.semanticRedundancy.firstOptInInitialized = true;
-  source.semanticRedundancy.pairJudgments = [
-    {
-      ...scoredPair(a, b, "description-only"),
-      ownerNote: scoredPair(a, b, "owner-notes-only").ownerNote,
-    },
-    scoredPair(a, c, "description-and-owner-notes"),
-    {
-      ...scoredPair(b, c, "description-only"),
-      ownerNote: scoredPair(b, c, "owner-notes-only").ownerNote,
-    },
-  ];
-  return withActiveSemanticRefresh(source);
+  return source;
 }
 
 function controlledStorage(options: { failFirstSave?: boolean } = {}) {
@@ -333,12 +210,12 @@ describe("CollectionMutationService", () => {
   });
 
   test("v10 evidence transitions advance only the retained evidence epoch", () => {
-    const v9 = collection();
-    const prior: CollectionV10 = {
-      ...v9,
+    const initial = collection();
+    const prior: Collection = {
+      ...initial,
       schemaVersion: 10,
       semanticRedundancy: {
-        settings: v9.semanticRedundancy.settings,
+        settings: initial.semanticRedundancy.settings,
         evidenceEpoch: 3,
         consentEpoch: 2,
         factualWeightsEpoch: 4,
@@ -346,7 +223,7 @@ describe("CollectionMutationService", () => {
         firstOptInInitialized: true,
       },
     };
-    const candidate: CollectionV10 = structuredClone(prior);
+    const candidate: Collection = structuredClone(prior);
     candidate.entertainmentBenchmark = {
       state: "configured",
       amount: { hundredths: 500, source: "manual", confirmedAt: initialTime },
@@ -360,14 +237,11 @@ describe("CollectionMutationService", () => {
     });
   });
 
-  test("deleting a game clears orphaned v9 judgments before validation without touching wishlist", async () => {
+  test("deleting a game persists without touching wishlist", async () => {
     const initial = collection();
     initial.games = [
       semanticGame("game-a", "A", "description"),
       semanticGame("game-b", "B", "description"),
-    ];
-    initial.semanticRedundancy.pairJudgments = [
-      { gameA: "game-a", gameB: "game-b", description: null, ownerNote: null },
     ];
     let stored = structuredClone(initial);
     const wishlist = [{ id: "wishlist-entry" }];
@@ -387,7 +261,6 @@ describe("CollectionMutationService", () => {
 
     expect(stored.games.map(({ id }) => id)).toEqual(["game-b"]);
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(1);
-    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
     expect(wishlist).toEqual([{ id: "wishlist-entry" }]);
   });
 
@@ -399,7 +272,7 @@ describe("CollectionMutationService", () => {
 
     expect(collectionRevisionStrategy.identity(source)).toEqual({
       collectionId: "collection-1",
-      schemaVersion: 9,
+      schemaVersion: 10,
       revision: 7,
     });
     expect(collectionRevisionStrategy.advance(source, source).revision).toBe(8);
@@ -463,7 +336,7 @@ describe("CollectionMutationService", () => {
       outcome: "no-op",
       changed: false,
       value: "collection-1",
-      collection: { schemaVersion: 9, revision: 0, id: "collection-1", updatedAt: initialTime },
+      collection: { schemaVersion: 10, revision: 0, id: "collection-1", updatedAt: initialTime },
     });
     expect(ctx.saveCount()).toBe(0);
   });
@@ -547,7 +420,7 @@ describe("CollectionMutationService", () => {
   });
 
   test("does not purge on no-op or semantic bookkeeping-only checkpoint writes", async () => {
-    const initial = withActiveSemanticRefresh(collection());
+    const initial = collection();
     let stored = structuredClone(initial);
     const storage: CollectionReader & CollectionPersistence = {
       loadCollection: () => Promise.resolve(structuredClone(stored)),
@@ -576,19 +449,14 @@ describe("CollectionMutationService", () => {
     expect(fileOps.files.has("/test/data/profile.json")).toBe(true);
     await service.mutate(
       { operation: "semantic-redundancy.judgments.checkpoint", trigger: "refresh" },
-      (candidate) => {
-        candidate.semanticRedundancy.pairJudgments = structuredClone(
-          candidate.semanticRedundancy.pairJudgments,
-        );
-        return { changed: true, value: undefined };
-      },
+      () => ({ changed: true, value: undefined }),
     );
     expect(fileOps.files.has("/test/data/profile.json")).toBe(true);
     expect(fileOps.files.has("/test/data/attention-candidates.json")).toBe(true);
   });
 
   test("purges when accepted consent changes invalidate the published semantic display", async () => {
-    let stored = withActiveSemanticRefresh(collection());
+    let stored = collection();
     const storage: CollectionReader & CollectionPersistence = {
       loadCollection: () => Promise.resolve(structuredClone(stored)),
       saveCollection: (next) => {
@@ -625,8 +493,8 @@ describe("CollectionMutationService", () => {
     expect(fileOps.files.has("/test/data/attention-candidates.json")).toBe(false);
   });
 
-  test("purges when a published generation is withdrawn", async () => {
-    let stored = withActiveSemanticRefresh(collection());
+  test("purges when a durable factual-weight fence changes", async () => {
+    let stored = collection();
     const storage: CollectionReader & CollectionPersistence = {
       loadCollection: () => Promise.resolve(structuredClone(stored)),
       saveCollection: (next) => {
@@ -648,14 +516,15 @@ describe("CollectionMutationService", () => {
     });
 
     await service.mutate(
-      { operation: "semantic-redundancy.generation.publish", trigger: "refresh" },
+      { operation: "semantic-redundancy.factual-weights.invalidate", trigger: "refresh" },
       (candidate) => {
-        candidate.semanticRedundancy.publishedGeneration = null;
+        candidate.semanticRedundancy.factualWeightsEpoch += 1;
+        candidate.semanticRedundancy.factualWeightsFingerprint = "d".repeat(64);
         return { changed: true, value: undefined };
       },
     );
 
-    expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
+    expect(stored.semanticRedundancy.factualWeightsEpoch).toBe(1);
     expect(fileOps.files.has("/test/data/profile.json")).toBe(false);
     expect(fileOps.files.has("/test/data/attention-candidates.json")).toBe(false);
   });
@@ -725,7 +594,7 @@ describe("CollectionMutationService", () => {
   });
 
   test("advances evidence epoch and withdraws semantic state only for evidence changes", async () => {
-    const initial = withActiveSemanticRefresh(collection());
+    const initial = collection();
     let stored = structuredClone(initial);
     const storage: CollectionReader & CollectionPersistence = {
       loadCollection: () => Promise.resolve(structuredClone(stored)),
@@ -741,8 +610,6 @@ describe("CollectionMutationService", () => {
       return { changed: true, value: undefined };
     });
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
-    expect(stored.semanticRedundancy.authorization?.state).toBe("active");
-    expect(stored.semanticRedundancy.publishedGeneration?.id).toBe("generation-0");
 
     await mutations.mutate(
       { operation: "purchase.benchmark.set", trigger: "owner" },
@@ -756,13 +623,6 @@ describe("CollectionMutationService", () => {
     );
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(1);
     expect(stored.semanticRedundancy.consentEpoch).toBe(0);
-    expect(stored.semanticRedundancy.disclosure).toBeNull();
-    expect(stored.semanticRedundancy.authorization).toBeNull();
-    expect(stored.semanticRedundancy.disclosureManifest).toBeNull();
-    expect(stored.semanticRedundancy.manifestDelivery).toBeNull();
-    expect(stored.semanticRedundancy.execution).toBeNull();
-    expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
-    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
   });
 
   test("rejects an evidence change when the semantic epoch cannot advance safely", async () => {
@@ -794,8 +654,8 @@ describe("CollectionMutationService", () => {
     expect(stored).toEqual(initial);
   });
 
-  test("semantic settings advance consent epoch and discard deprecated v9 payloads", async () => {
-    const initial = withActiveSemanticRefresh(collection());
+  test("semantic settings advance consent epoch", async () => {
+    const initial = collection();
     let stored = structuredClone(initial);
     const storage: CollectionReader & CollectionPersistence = {
       loadCollection: () => Promise.resolve(structuredClone(stored)),
@@ -831,7 +691,6 @@ describe("CollectionMutationService", () => {
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
     expect(stored.semanticRedundancy.consentEpoch).toBe(1);
     expect(stored.semanticRedundancy.firstOptInInitialized).toBe(true);
-    expect(stored.semanticRedundancy.authorization).toBeNull();
     expect(
       (
         await semantic.updateSettings(
@@ -848,12 +707,10 @@ describe("CollectionMutationService", () => {
 
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
     expect(stored.semanticRedundancy.consentEpoch).toBe(1);
-    expect(stored.semanticRedundancy.authorization).toBeNull();
-    expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
   });
 
   test("factual-weight invalidation advances its own collection epoch without changing semantic epochs", async () => {
-    let stored = withActiveSemanticRefresh(collection());
+    let stored = collection();
     const storage: CollectionReader & CollectionPersistence = {
       loadCollection: () => Promise.resolve(structuredClone(stored)),
       saveCollection: (next) => {
@@ -869,9 +726,6 @@ describe("CollectionMutationService", () => {
     expect(stored.semanticRedundancy.factualWeightsFingerprint).toBe("b".repeat(64));
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
     expect(stored.semanticRedundancy.consentEpoch).toBe(0);
-    expect(stored.semanticRedundancy.authorization).toBeNull();
-    expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
-    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
     const revisionAfterFirst = stored.revision;
 
     await semantic.invalidateForFactualWeights("b".repeat(64));
@@ -881,8 +735,8 @@ describe("CollectionMutationService", () => {
     expect(stored.semanticRedundancy.factualWeightsFingerprint).toBe("a".repeat(64));
   });
 
-  test("note and BGG evidence changes advance the epoch and discard v9 judgments", async () => {
-    let stored = collectionWithSemanticPairs();
+  test("note and BGG evidence changes advance the epoch", async () => {
+    let stored = collectionWithSemanticGames();
     const storage: CollectionReader & CollectionPersistence = {
       loadCollection: () => Promise.resolve(structuredClone(stored)),
       saveCollection: (next) => {
@@ -910,9 +764,6 @@ describe("CollectionMutationService", () => {
       },
     );
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(initialEpoch + 1);
-    expect(stored.semanticRedundancy.authorization).toBeNull();
-    expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
-    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
     const afterNoteSetEpoch = stored.semanticRedundancy.evidenceEpoch;
 
     await mutations.mutate(
@@ -929,7 +780,6 @@ describe("CollectionMutationService", () => {
       },
     );
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(afterNoteSetEpoch + 1);
-    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
 
     await mutations.mutate(
       { operation: "game.bgg.refresh", trigger: "owner", gameIds: ["game-b"] },
@@ -939,7 +789,6 @@ describe("CollectionMutationService", () => {
         return { changed: true, value: undefined };
       },
     );
-    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
 
     await mutations.mutate(
       { operation: "game.ownership.set", trigger: "owner", gameIds: ["game-c"] },
@@ -948,7 +797,6 @@ describe("CollectionMutationService", () => {
         return { changed: true, value: undefined };
       },
     );
-    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
     const afterOwnershipEpoch = stored.semanticRedundancy.evidenceEpoch;
 
     await mutations.mutate(
@@ -959,21 +807,20 @@ describe("CollectionMutationService", () => {
       },
     );
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(afterOwnershipEpoch + 1);
-    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
 
     const restarted = createCollectionMutationService({ storageService: storage });
     const reopened = await restarted.mutate(
       { operation: "test.read", trigger: "test" },
       (candidate) => ({
         changed: false,
-        value: candidate.semanticRedundancy.pairJudgments,
+        value: candidate.semanticRedundancy.evidenceEpoch,
       }),
     );
-    expect(reopened.value).toEqual([]);
+    expect(reopened.value).toBe(stored.semanticRedundancy.evidenceEpoch);
   });
 
-  test("game deletion persists after discarding legacy semantic references", async () => {
-    let stored = collectionWithSemanticPairs();
+  test("game deletion persists and advances the evidence epoch", async () => {
+    let stored = collectionWithSemanticGames();
     const storage: CollectionReader & CollectionPersistence = {
       loadCollection: () => Promise.resolve(structuredClone(stored)),
       saveCollection: (next) => {
@@ -993,12 +840,10 @@ describe("CollectionMutationService", () => {
 
     expect(stored.games.some(({ id }) => id === "game-b")).toBe(false);
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(1);
-    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
-    expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
   });
 
-  test("changing cached owner-note preference advances consent and discards historical scores", async () => {
-    let stored = collectionWithSemanticPairs();
+  test("changing cached owner-note preference advances consent", async () => {
+    let stored = collectionWithSemanticGames();
     const storage: CollectionReader & CollectionPersistence = {
       loadCollection: () => Promise.resolve(structuredClone(stored)),
       saveCollection: (next) => {
@@ -1019,7 +864,6 @@ describe("CollectionMutationService", () => {
     expect(result.outcome).toBe("accepted");
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
     expect(stored.semanticRedundancy.consentEpoch).toBe(1);
-    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
   });
 
   test("isolates rejected and invalid candidates from active state", async () => {
@@ -1037,7 +881,7 @@ describe("CollectionMutationService", () => {
     await expect(
       service.mutate({ operation: "axis.create", trigger: "owner" }, (candidate) => {
         candidate.name = "";
-        candidate.schemaVersion = 99 as 9;
+        (candidate as { schemaVersion: number }).schemaVersion = 99;
         return { changed: true, value: undefined };
       }),
     ).rejects.toThrow();

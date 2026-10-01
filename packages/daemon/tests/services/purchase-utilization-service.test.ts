@@ -9,7 +9,7 @@ import type {
 } from "@shelf-judge/shared";
 import {
   createInitialEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
 import {
   createPurchaseUtilizationService,
@@ -78,7 +78,7 @@ function game(overrides: Partial<DurableGame> = {}): DurableGame {
 
 function collection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 0,
     id: "collection-1",
     name: "Test",
@@ -88,7 +88,7 @@ function collection(overrides: Partial<Collection> = {}): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: initialTime,
     updatedAt: initialTime,
     ...overrides,

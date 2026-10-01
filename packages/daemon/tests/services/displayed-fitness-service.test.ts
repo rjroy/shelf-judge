@@ -12,6 +12,7 @@ import type {
 import {
   createInitialEntityMetadata,
   createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
 import { semanticGenerationFixture } from "../helpers/semantic-redundancy-fixtures.js";
 import {
@@ -423,7 +424,7 @@ describe("DisplayedFitnessService", () => {
       },
     ];
     const collection: Collection = {
-      schemaVersion: 9,
+      schemaVersion: 10,
       revision: 1,
       id: "collection",
       name: "Collection",
@@ -433,7 +434,7 @@ describe("DisplayedFitnessService", () => {
       attentionDispositions: [],
       commandReceipts: [],
       entertainmentBenchmark: null,
-      semanticRedundancy: createInitialSemanticRedundancyState(),
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
     };
@@ -583,7 +584,7 @@ describe("DisplayedFitnessService", () => {
       },
     }));
     const collection: Collection = {
-      schemaVersion: 9,
+      schemaVersion: 10,
       revision: 1,
       id: "private-snapshot-fixture",
       name: "Private snapshot fixture",
@@ -593,7 +594,7 @@ describe("DisplayedFitnessService", () => {
       attentionDispositions: [],
       commandReceipts: [],
       entertainmentBenchmark: null,
-      semanticRedundancy: createInitialSemanticRedundancyState(),
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -619,7 +620,7 @@ describe("DisplayedFitnessService", () => {
     };
     const vector = createSourceVectorService();
     vector.hydrate(
-      { id: collection.id, schemaVersion: 9, revision: collection.revision },
+      { id: collection.id, schemaVersion: 10, revision: collection.revision },
       {
         tournament: 1,
         predictionSettings: 1,

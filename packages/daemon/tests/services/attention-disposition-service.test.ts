@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CollectionSchema,
   createInitialEntityMetadata,
-  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
   type Collection,
   type DurableGame,
 } from "@shelf-judge/shared";
@@ -65,7 +65,7 @@ function game(overrides: Partial<DurableGame> = {}): DurableGame {
 
 function collection(sourceGame = game()): Collection {
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     revision: 0,
     id: "collection",
     name: "Collection",
@@ -75,7 +75,7 @@ function collection(sourceGame = game()): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
-    semanticRedundancy: createInitialSemanticRedundancyState(),
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: now,
     updatedAt: now,
   };

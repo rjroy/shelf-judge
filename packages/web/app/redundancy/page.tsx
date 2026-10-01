@@ -27,6 +27,10 @@ type Manifest = {
 type Semantic = {
   settings: { enabled: boolean; weights: Weights; cachedOwnerNoteUse: boolean };
   status: string | { status?: unknown; publicationStatus?: unknown };
+  migrationNotice?: {
+    kind: "jev-cache-v9-to-v10";
+    discardedPairCount: number;
+  } | null;
 };
 type SettingsResponse = RedundancySettings & { semantic: Semantic; migrationNotice?: string };
 type Refresh = {
@@ -115,6 +119,22 @@ function semanticStatusValue(status: Semantic["status"]): string {
   if (typeof status === "string") return status;
   const value = status.publicationStatus ?? status.status;
   return typeof value === "string" ? value : "unavailable";
+}
+
+function semanticMigrationCopy(notice: Semantic["migrationNotice"]): string | null {
+  if (
+    !notice ||
+    notice.kind !== "jev-cache-v9-to-v10" ||
+    !Number.isSafeInteger(notice.discardedPairCount) ||
+    notice.discardedPairCount < 0
+  )
+    return null;
+  const preserved = "Your games, notes, and preferences were preserved.";
+  if (notice.discardedPairCount === 0)
+    return `Semantic cache storage was upgraded. No cached game-pair results were discarded. ${preserved}`;
+  if (notice.discardedPairCount === 1)
+    return `Semantic cache storage was upgraded. The cached result for 1 game pair was discarded because its inputs could not be verified. ${preserved}`;
+  return `Semantic cache storage was upgraded. Cached results for ${notice.discardedPairCount} game pairs were discarded because their inputs could not be verified. ${preserved}`;
 }
 
 function scopeDescription(scope: Manifest["signalScope"]): string {
@@ -451,6 +471,7 @@ export default function RedundancyPage() {
   const dirty = saved !== null && JSON.stringify(settings) !== JSON.stringify(saved);
   const semanticDirty =
     savedSemantic !== null && JSON.stringify(semantic.settings) !== JSON.stringify(savedSemantic);
+  const semanticMigrationMessage = semanticMigrationCopy(semantic.migrationNotice);
   const clearPreparedDisclosure = () => {
     disclosureRevision.current += 1;
     setManifest(null);
@@ -516,6 +537,11 @@ export default function RedundancyPage() {
           {migrationNotice && (
             <div className="redundancy-stage-desc" role="status">
               Settings updated: {migrationNotice}
+            </div>
+          )}
+          {semanticMigrationMessage && (
+            <div className="success-banner" role="status">
+              {semanticMigrationMessage}
             </div>
           )}
 
