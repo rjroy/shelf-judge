@@ -944,6 +944,17 @@ describe("migrateCollection", () => {
       updatedAt: NOW,
       text: "private note",
     });
+    expect(
+      result.data.games.map(({ ownerNote, ...game }) => {
+        void ownerNote;
+        return game;
+      }),
+    ).toEqual(
+      source.games.map(({ ownerNote, ...game }) => {
+        void ownerNote;
+        return game;
+      }),
+    );
     expect(result.data.semanticRedundancy).toEqual({
       settings: source.semanticRedundancy.settings,
       evidenceEpoch: 12,
@@ -1013,6 +1024,39 @@ describe("migrateCollection", () => {
     });
   });
 
+  test("does not count failed or pending v9 judgments as discarded cached pairs", () => {
+    const v9 = historicalV9(migrateCollection(historicalCollection(), dependencies).data);
+    const withUnsuccessfulJudgments = CollectionSchemaV9.parse({
+      ...v9,
+      games: [...v9.games, { ...v9.games[0], id: "game-2" }, { ...v9.games[0], id: "game-3" }],
+      semanticRedundancy: {
+        ...v9.semanticRedundancy,
+        pairJudgments: [
+          {
+            gameA: "game-1",
+            gameB: "game-2",
+            description: { status: "failed", reason: "provider" },
+            ownerNote: null,
+          },
+          {
+            gameA: "game-1",
+            gameB: "game-3",
+            description: { status: "pending" },
+            ownerNote: null,
+          },
+        ],
+      },
+    });
+
+    const migrated = migrateCollectionV9ToV10(withUnsuccessfulJudgments);
+
+    expect(migrated.discardedLegacyPairCount).toBe(0);
+    expect(migrated.data.semanticRedundancy.legacyCacheMigration).toEqual({
+      kind: "jev-cache-v9-to-v10",
+      discardedPairCount: 0,
+    });
+  });
+
   test("strictly parses and roundtrips a v10 collection without legacy semantic payload", () => {
     const currentV9 = historicalV9(migrateCollection(historicalCollection(), dependencies).data);
     const v10Fixture: CollectionV10 = CollectionSchemaV10.parse({
@@ -1035,6 +1079,24 @@ describe("migrateCollection", () => {
     expect(v10Fixture.semanticRedundancy).not.toHaveProperty("authorization");
     expect(v10Fixture.semanticRedundancy.legacyCacheMigration).toBeUndefined();
     expect(JSON.stringify(v10Fixture)).not.toContain("legacyPayload");
+    for (const legacyField of [
+      "disclosure",
+      "disclosureManifest",
+      "manifestDelivery",
+      "authorization",
+      "execution",
+      "pairJudgments",
+      "publishedGeneration",
+    ]) {
+      const invalidV10 = {
+        ...v10Fixture,
+        semanticRedundancy: {
+          ...v10Fixture.semanticRedundancy,
+          [legacyField]: null,
+        },
+      };
+      expect(CollectionSchemaV10.safeParse(invalidV10).success).toBe(false);
+    }
     const missingFlag = { ...v10Fixture, semanticRedundancy: { ...v10Fixture.semanticRedundancy } };
     delete (missingFlag.semanticRedundancy as Partial<typeof v10Fixture.semanticRedundancy>)
       .firstOptInInitialized;

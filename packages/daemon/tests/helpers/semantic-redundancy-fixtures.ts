@@ -1,9 +1,9 @@
-import {
-  semanticDisclosureManifestDigest,
-  type SemanticDisclosureManifest,
-  type SemanticRedundancyGeneration,
-  type SemanticSourceIdentity,
-} from "@shelf-judge/shared";
+import { semanticDisclosureManifestDigest } from "../../../shared/src/validation.js";
+import type {
+  SemanticDisclosureManifest,
+  SemanticRedundancyGeneration,
+  SemanticSourceIdentity,
+} from "../../../shared/src/types.js";
 
 export const SEMANTIC_FIXTURE_FINGERPRINT = "a".repeat(64);
 

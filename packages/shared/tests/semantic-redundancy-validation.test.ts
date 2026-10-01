@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import * as publicSharedApi from "../src/index.js";
 import {
   createInitialSemanticRedundancyState,
   SemanticDisclosureManifestSchema,
@@ -8,7 +9,7 @@ import {
   SemanticRedundancySettingsSchema,
   SemanticRedundancyStateSchema,
   semanticDisclosureManifestDigest,
-} from "../src/index.js";
+} from "../src/validation.js";
 
 const fingerprint = "a".repeat(64);
 
@@ -73,6 +74,21 @@ const scoredBase = {
 };
 
 describe("semantic redundancy provenance schema", () => {
+  test("legacy v9 protocol validators are not exported as current shared API", () => {
+    for (const name of [
+      "SemanticRedundancyStateSchema",
+      "SemanticDisclosureManifestSchema",
+      "SemanticExecutionSchema",
+      "SemanticPublishedPairOutcomeSchema",
+      "SemanticRedundancyGenerationSchema",
+      "SemanticSignalRequestContextSchema",
+      "semanticDisclosureManifestDigest",
+    ])
+      expect(publicSharedApi).not.toHaveProperty(name);
+    expect(publicSharedApi).toHaveProperty("CollectionSchemaV9");
+    expect(publicSharedApi).toHaveProperty("CollectionSchemaV10");
+  });
+
   test("validates strict settings independently of legacy semantic payload", () => {
     const settings = {
       enabled: true,

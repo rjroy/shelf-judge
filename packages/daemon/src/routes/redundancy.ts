@@ -211,12 +211,10 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
     }
   });
 
-  // Legacy capture/page/acknowledge/worker endpoints are quarantined until the
-  // v10 SQLite-backed explicit Run flow is implemented. Do not consult state or runtime.
-  const unavailable = (c: Context) =>
-    c.json({ error: "Semantic inference is unavailable during the v10 cache cutover" }, 503);
-  routes.post("/redundancy/semantic/disclosure", unavailable);
-
+  // The manifest protocol has been retired. The aggregate Run status below is
+  // the supported read surface; Run mutations use the direct controller routes.
+  // Keep the existing settings/publication summary until its CLI consumer moves
+  // to the aggregate refresh-status contract.
   routes.get("/redundancy/semantic/summary", async (c) => {
     try {
       const collection = await storageService.loadCollection();
@@ -232,10 +230,6 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
       return c.json({ error: "Semantic summary is unavailable" }, 503);
     }
   });
-
-  routes.post("/redundancy/semantic/disclosure/page", unavailable);
-
-  routes.post("/redundancy/semantic/acknowledge-and-start", unavailable);
 
   routes.get("/redundancy/semantic/refresh-status", async (c) => {
     c.header("Cache-Control", "no-store");
@@ -496,7 +490,7 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
     {
       operationId: "shelf.redundancy.get-semantic-refresh-status",
       name: "get-semantic-refresh-status",
-      description: "Get aggregate, read-only semantic coverage status",
+      description: "Get aggregate semantic coverage and historical Jev Run progress",
       invocation: { method: "GET", path: "/api/redundancy/semantic/refresh-status" },
       response: {
         body: {
@@ -528,7 +522,7 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
     {
       operationId: "shelf.redundancy.get-semantic-run-preview",
       name: "get-semantic-run-preview",
-      description: "Preview aggregate Jev Run scope and disclosure without provider work",
+      description: "Preview aggregate Jev Run scope without provider work",
       invocation: { method: "GET", path: "/api/redundancy/semantic/run-preview" },
       response: {
         body: {

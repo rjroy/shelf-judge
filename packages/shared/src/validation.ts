@@ -1934,6 +1934,7 @@ export const SemanticRedundancyStateSchema = z
     }
   });
 
+/** @deprecated V9 legacy fixture/migration helper; initialize current data with the V10 helper. */
 export function createInitialSemanticRedundancyState(): SemanticRedundancyState {
   return {
     settings: {

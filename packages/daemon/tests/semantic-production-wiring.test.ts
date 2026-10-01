@@ -446,7 +446,7 @@ describe("semantic production app wiring", () => {
     }
   });
 
-  test("the app keeps semantic reads available while legacy inference remains quarantined", async () => {
+  test("the app keeps settings available and removes retired manifest protocol routes", async () => {
     const { app } = createTestApp();
 
     const status = await jsonRequest(app, "GET", "/api/redundancy/settings");
@@ -455,14 +455,15 @@ describe("semantic production app wiring", () => {
     expect(statusBody).not.toContain("TYPESAFE_API_KEY");
     expect(statusBody).not.toContain("Bearer");
 
-    const disclosure = await jsonRequest(app, "POST", "/api/redundancy/semantic/disclosure", {
-      signalScope: "description-only",
-    });
-    const start = await jsonRequest(app, "POST", "/api/redundancy/semantic/acknowledge-and-start", {
-      manifestId: "legacy",
-    });
-    expect(disclosure.status).toBe(503);
-    expect(start.status).toBe(503);
+    const retiredRoutes = [
+      ["POST", "/api/redundancy/semantic/disclosure"],
+      ["POST", "/api/redundancy/semantic/disclosure/page"],
+      ["POST", "/api/redundancy/semantic/acknowledge-and-start"],
+    ] as const;
+    for (const [method, path] of retiredRoutes) {
+      const response = await jsonRequest(app, method, path, method === "POST" ? {} : undefined);
+      expect(response.status).toBe(404);
+    }
 
     const ordinarySettings = await jsonRequest(app, "PATCH", "/api/redundancy/settings", {
       enabled: false,

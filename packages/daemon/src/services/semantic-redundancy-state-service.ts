@@ -157,32 +157,6 @@ function gameEvidence(game: SemanticCollection["games"][number]): Record<string,
   };
 }
 
-// Retained for v9 pair-resolver/validator consumers until the schema alias cutover.
-export function semanticDescriptionSourceFingerprint(
-  game: Collection["games"][number],
-): string | null {
-  const description = game.bggData?.description;
-  if (description === null || description === undefined || description.trim().length === 0)
-    return null;
-  return canonicalSha256({
-    representationVersion: 1,
-    gameName: game.name,
-    bggDescription: description,
-  });
-}
-
-// Retained for v9 pair-resolver/validator consumers until the schema alias cutover.
-export function semanticOwnerNoteSourceFingerprint(
-  game: Collection["games"][number],
-): string | null {
-  if (game.ownerNote.state !== "present" || game.ownerNote.version <= 0) return null;
-  return canonicalSha256({
-    representationVersion: 1,
-    gameName: game.name,
-    ownerNote: game.ownerNote.text,
-  });
-}
-
 /** Stable collection-owned inputs that determine scoring or game eligibility. */
 export function collectionRedundancyEvidenceIdentity(collection: SemanticCollection): string {
   return canonicalSha256({

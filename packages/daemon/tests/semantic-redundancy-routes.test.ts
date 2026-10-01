@@ -62,20 +62,17 @@ const json = (body: unknown) => ({
   body: JSON.stringify(body),
 });
 
-describe("semantic redundancy safety quarantine", () => {
-  test("V10 factual-only state is not-ready and does not disclose semantic output", async () => {
+describe("semantic redundancy routes", () => {
+  test("V10 factual-only state and compatibility summary remain not-ready", async () => {
     const { app, collection } = harness();
     collection.semanticRedundancy.settings.enabled = true;
     const settings = await app.request("/api/redundancy/settings");
-    const summary = await app.request("/api/redundancy/semantic/summary");
     expect(await settings.json()).toMatchObject({
       semantic: { status: { status: "not-ready", publicationStatus: "not-ready" } },
     });
-    expect(await summary.json()).toMatchObject({
-      status: "not-ready",
-      generation: null,
-      disclosure: null,
-    });
+    const summary = await app.request("/api/redundancy/semantic/summary");
+    expect(summary.status).toBe(200);
+    expect(await summary.json()).toMatchObject({ status: "not-ready", generation: null });
     const refreshStatus = await app.request("/api/redundancy/semantic/refresh-status");
     expect(refreshStatus.status).toBe(503);
     expect(refreshStatus.headers.get("Cache-Control")).toBe("no-store");
@@ -101,19 +98,16 @@ describe("semantic redundancy safety quarantine", () => {
     });
   });
 
-  test("legacy inference endpoints are explicitly unavailable", async () => {
+  test("retired manifest protocol routes are removed", async () => {
     const { app } = harness();
     const requests: [string, RequestInit][] = [
       ["/api/redundancy/semantic/disclosure", json({ signalScope: "description-only" })],
       ["/api/redundancy/semantic/disclosure/page", json({ manifestId: "m", offset: 0 })],
       ["/api/redundancy/semantic/acknowledge-and-start", json({ manifestId: "m" })],
-      ["/api/redundancy/semantic/cancel", json({ runId: "m" })],
     ];
     for (const [path, init] of requests) {
       const response = await app.request(path, init);
-      expect(response.status).toBe(503);
-      const responseBody = (await response.json()) as { error: string };
-      expect(responseBody.error).toContain("unavailable");
+      expect(response.status).toBe(404);
     }
   });
 
@@ -160,7 +154,14 @@ describe("semantic redundancy safety quarantine", () => {
     expect(reads).toBe(1);
     expect(
       operations.find((operation) => operation.invocation.path.endsWith("refresh-status")),
-    ).toMatchObject({ invocation: { method: "GET" }, idempotent: true });
+    ).toMatchObject({
+      invocation: { method: "GET" },
+      description: "Get aggregate semantic coverage and historical Jev Run progress",
+      idempotent: true,
+    });
+    expect(operations.some((operation) => operation.invocation.path.endsWith("/summary"))).toBe(
+      true,
+    );
   });
 
   test("refresh-status returns a sanitized no-store 503 when its dependency throws", async () => {

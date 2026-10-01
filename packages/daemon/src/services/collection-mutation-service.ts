@@ -29,8 +29,6 @@ export interface CollectionMutationContext {
     | "attention-disposition"
     | "attention-disposition-maintenance"
     | "semantic-redundancy.settings.update"
-    | "semantic-redundancy.disclosure.create"
-    | "semantic-redundancy.disclosure.deliver"
     | "semantic-redundancy.execution.start"
     | "semantic-redundancy.execution.cancel"
     | "semantic-redundancy.execution.reserve-attempt"
@@ -164,8 +162,6 @@ function isAttentionDispositionOperation(
 
 type SemanticRedundancyMutationOperation =
   | "semantic-redundancy.settings.update"
-  | "semantic-redundancy.disclosure.create"
-  | "semantic-redundancy.disclosure.deliver"
   | "semantic-redundancy.execution.start"
   | "semantic-redundancy.execution.cancel"
   | "semantic-redundancy.execution.reserve-attempt"
