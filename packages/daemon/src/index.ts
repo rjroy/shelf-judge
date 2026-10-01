@@ -40,6 +40,7 @@ import { createCollectionSnapshotCacheService } from "./services/collection-snap
 import { createSemanticRedundancyStateService } from "./services/semantic-redundancy-state-service.js";
 import { openJevPairCacheLifecycle } from "./services/jev-pair-cache-lifecycle.js";
 import { purgeRevokedOwnerNoteCache } from "./services/jev-owner-note-revocation.js";
+import { createJevProductionSemanticRead } from "./services/jev-production-read.js";
 
 const logger = createLogger("daemon");
 
@@ -80,7 +81,7 @@ export async function main() {
   // The first request therefore sees only a validated current collection and clean caches.
   await storageService.loadCollection();
   const jevPairCacheLifecycle = await openJevPairCacheLifecycle(envConfig.dataDir, logger);
-  // This local is the injection point for daemon services that consume JEV cache state.
+  // Mutations/revocation and the read adapter share the lifecycle-owned cache instance.
   const jevPairCache = jevPairCacheLifecycle.cache;
   try {
     const collection = await storageService.loadCollection();
@@ -94,7 +95,6 @@ export async function main() {
       outcome: "cleanup-pending",
     });
   }
-  void jevPairCache;
   try {
     let displayedFitnessService: DisplayedFitnessService | null = null;
     const dispositionOracle = createAttentionCandidateOracle(() => {
@@ -262,10 +262,12 @@ export async function main() {
       bggClient,
       afterSourceSave: maintainCandidateSource,
     });
+    const resolveSemanticRead = createJevProductionSemanticRead(jevPairCache);
     displayedFitnessService = createDisplayedFitnessService({
       gameService,
       predictionService,
       storageService,
+      resolveSemanticRead,
     });
     const purchaseUtilizationService = createPurchaseUtilizationService({
       storageService,
@@ -276,6 +278,7 @@ export async function main() {
       gameService,
       predictionService,
       purchaseUtilizationService,
+      resolveSemanticRead,
     });
     const collectionSnapshotService = createCollectionSnapshotCacheService({
       builder: collectionSnapshotBuilder,

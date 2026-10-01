@@ -38,6 +38,7 @@ import { cosineSimilarity } from "../../src/services/feature-vector.js";
 import { deriveDisplayStats } from "../../src/services/tournament-service.js";
 import { createSourceVectorService } from "../../src/services/source-vector.js";
 import { projectProfileCollectionSource } from "../../src/services/game-projection.js";
+import { canonicalSha256 } from "../../src/services/profile-source-coordinator.js";
 
 function game(id: string): Game {
   return {
@@ -599,6 +600,7 @@ describe("DisplayedFitnessService", () => {
       updatedAt: timestamp,
     };
     collection.semanticRedundancy.settings.enabled = true;
+    collection.semanticRedundancy.settings.weights.description = 1;
     const tournament: TournamentData = {
       settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
       sessions: [],
@@ -618,9 +620,20 @@ describe("DisplayedFitnessService", () => {
       minNeighbors: 1,
       expectedNeighbors: 2,
     };
+    const factualWeights = { binary: 1, continuous: 0 };
+    const factualFingerprint = canonicalSha256(factualWeights);
+    collection.semanticRedundancy.factualWeightsFingerprint = factualFingerprint;
     const vector = createSourceVectorService();
     vector.hydrate(
-      { id: collection.id, schemaVersion: 10, revision: collection.revision },
+      {
+        id: collection.id,
+        schemaVersion: 10,
+        revision: collection.revision,
+        semanticEvidenceEpoch: collection.semanticRedundancy.evidenceEpoch,
+        semanticConsentEpoch: collection.semanticRedundancy.consentEpoch,
+        factualWeightsEpoch: collection.semanticRedundancy.factualWeightsEpoch,
+        factualWeightsFingerprint: factualFingerprint,
+      },
       {
         tournament: 1,
         predictionSettings: 1,
@@ -629,6 +642,7 @@ describe("DisplayedFitnessService", () => {
         shelfConfig: 1,
       },
     );
+    vector.publishRedundancyWeightsFingerprint(factualFingerprint);
     const ordinaryScores = new Map([
       ["target", 8],
       ["peer-one", 6],
@@ -644,6 +658,7 @@ describe("DisplayedFitnessService", () => {
         game: sourceGame,
         score: score({
           score: (predicted ? predictedScores : ordinaryScores).get(sourceGame.id) ?? 0,
+          ratedAxisCount: predicted ? 0 : 1,
           predictionMeta: predicted
             ? {
                 readinessStage: 1,
@@ -685,10 +700,21 @@ describe("DisplayedFitnessService", () => {
           ),
         ),
     } as unknown as PredictionService;
+    const semanticCaptures: GameWithScore[][] = [];
+    const semanticIdentities: unknown[] = [];
     const service = createDisplayedFitnessService({
       gameService,
       predictionService,
       storageService: { sourceVector: () => vector.read() } as StorageService,
+      resolveSemanticRead: (input) => {
+        semanticCaptures.push([...input.predictionCapture]);
+        semanticIdentities.push(input.captureIdentity);
+        return {
+          result: { status: "not-ready", summary: "Fixture miss" },
+          proof: { status: "not-ready", summary: "Fixture miss" },
+          isCurrent: () => true,
+        };
+      },
     });
     const snapshot = {
       kind: "private-capture" as const,
@@ -715,6 +741,12 @@ describe("DisplayedFitnessService", () => {
       targetScores.push(result[0]?.score?.score ?? 0);
     }
     expect(targetScores).toEqual([7, 7]);
+    expect(semanticCaptures).toHaveLength(2);
+    expect(semanticCaptures.every((capture) => capture.length === games.length)).toBe(true);
+    expect(semanticCaptures[0]?.map(({ game: captured }) => captured.id)).toEqual(
+      games.map(({ id }) => id),
+    );
+    expect(semanticIdentities[0]).toEqual(semanticIdentities[1]);
 
     const racedPredictionService = {
       listGamesWithPredictionsFromSnapshot: (

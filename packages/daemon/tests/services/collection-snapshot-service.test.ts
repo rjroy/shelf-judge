@@ -14,6 +14,8 @@ import type {
   TournamentData,
 } from "@shelf-judge/shared";
 import { createSourceVectorService } from "../../src/services/source-vector.js";
+import { buildJevPredictionCaptureIdentity } from "../../src/services/jev-prediction-capture-identity.js";
+import { canonicalSha256 } from "../../src/services/profile-source-coordinator.js";
 import {
   createInitialEntityMetadata,
   createInitialSemanticRedundancyStateV10,
@@ -365,7 +367,15 @@ function parityFixture(
   };
   const vector = createSourceVectorService();
   vector.hydrate(
-    { id: collection.id, schemaVersion: 10, revision: 1 },
+    {
+      id: collection.id,
+      schemaVersion: 10,
+      revision: 1,
+      semanticEvidenceEpoch: collection.semanticRedundancy.evidenceEpoch,
+      semanticConsentEpoch: collection.semanticRedundancy.consentEpoch,
+      factualWeightsEpoch: collection.semanticRedundancy.factualWeightsEpoch,
+      factualWeightsFingerprint: collection.semanticRedundancy.factualWeightsFingerprint,
+    },
     {
       tournament: 1,
       predictionSettings: 1,
@@ -374,6 +384,7 @@ function parityFixture(
       shelfConfig: 1,
     },
   );
+  vector.publishRedundancyWeightsFingerprint(canonicalSha256(redundancySettings.componentWeights));
   const storage = {
     sourceVector: () => vector.read(),
     loadCollection: () => Promise.resolve(structuredClone(collection)),
@@ -493,6 +504,49 @@ describe("CollectionSnapshotService", () => {
     const built = await fixture.snapshotService.buildSnapshot();
     expect(readInput?.predictionCapture).toHaveLength(fixture.collection.games.length);
     expect(readInput?.predictionCapture.some(({ game }) => game.id === "retired")).toBe(true);
+    expect(readInput?.captureIdentity.sourceVectorIdentity).toMatch(/^[a-f0-9]{64}$/);
+    if (!readInput) throw new Error("Expected the complete semantic read input");
+    const identityInput = {
+      collection: readInput.collection,
+      sourceVector: readInput.sourceVector,
+      tournament: readInput.tournament,
+      predictionSettings: readInput.predictionSettings,
+      factualWeights: readInput.factualWeights,
+      predictionCapture: readInput.predictionCapture,
+    };
+    const baselineIdentity = buildJevPredictionCaptureIdentity(identityInput);
+    if (!baselineIdentity.ok) throw new Error(baselineIdentity.reason);
+    expect(baselineIdentity.identity).toEqual(readInput.captureIdentity);
+    expect(
+      buildJevPredictionCaptureIdentity({
+        ...identityInput,
+        sourceVector: {
+          ...identityInput.sourceVector,
+          processEpoch: "another-process",
+          changeToken: identityInput.sourceVector.changeToken + 100,
+        },
+      }),
+    ).toEqual(baselineIdentity);
+    const revisedCollection = { ...identityInput.collection, revision: 2 };
+    expect(
+      buildJevPredictionCaptureIdentity({
+        ...identityInput,
+        collection: revisedCollection,
+        sourceVector: { ...identityInput.sourceVector, collectionRevision: 2 },
+      }),
+    ).toEqual(baselineIdentity);
+    const reorderedCapture = identityInput.predictionCapture.map((entry) => ({
+      score: entry.score,
+      game: Object.fromEntries(
+        Object.entries({
+          ...entry.game,
+          name: `Presentation only: ${entry.game.name}`,
+        }).reverse(),
+      ) as unknown as typeof entry.game,
+    }));
+    expect(
+      buildJevPredictionCaptureIdentity({ ...identityInput, predictionCapture: reorderedCapture }),
+    ).toEqual(baselineIdentity);
     expect(built.semanticRead?.status).toBe("verified");
     expect(
       built.semanticRead?.status === "verified" &&
@@ -503,6 +557,35 @@ describe("CollectionSnapshotService", () => {
       /semantic-generation|semanticRedundancy|ownerNote/,
     );
     expect(built.semanticRead?.status === "verified" && built.semanticRead.isCurrent()).toBe(true);
+  });
+
+  test("incoherent capture identity fails closed to factual not-ready without a semantic read", async () => {
+    let semanticReadCalls = 0;
+    const fixture = parityFixture("integrated", true, () => {
+      semanticReadCalls += 1;
+      throw new Error("incoherent capture must not reach semantic read");
+    });
+    fixture.collection.semanticRedundancy.settings.enabled = true;
+    fixture.collection.semanticRedundancy.settings.weights.description = 1;
+    // The collection has advanced without its authoritative source vector advancing.
+    fixture.collection.revision += 1;
+
+    const built = await fixture.snapshotService.buildSnapshot();
+
+    expect(semanticReadCalls).toBe(0);
+    expect(built.semanticRead).toEqual({ status: "not-used" });
+    expect(built.snapshot.redundancyMode).toBe("integrated");
+    expect(
+      built.snapshot.games.every(
+        (row) =>
+          row.game.ownership === "previously-owned" ||
+          row.ordinary.score === null ||
+          row.ordinary.score.redundancySimilarityInfo?.status === "not-ready",
+      ),
+    ).toBe(true);
+    expect(
+      built.snapshot.games.every((row) => row.redundancySimilarityInfo.generationId === null),
+    ).toBe(true);
   });
 
   test("not-ready semantic fallback retains its read fence", async () => {

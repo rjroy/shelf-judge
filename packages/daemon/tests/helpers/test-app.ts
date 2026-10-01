@@ -17,6 +17,10 @@ import {
   createPurchaseUtilizationService,
   type PurchaseUtilizationService,
 } from "../../src/services/purchase-utilization-service.js";
+import { createCollectionSnapshotService } from "../../src/services/collection-snapshot-service.js";
+import { createCollectionSnapshotCacheService } from "../../src/services/collection-snapshot-cache-service.js";
+import { createJevProductionSemanticRead } from "../../src/services/jev-production-read.js";
+import type { JevPairCache } from "../../src/services/jev-pair-cache-service.js";
 import { createApp, type AppResult } from "../../src/app.js";
 import { createInitialSemanticRedundancyStateV10 } from "@shelf-judge/shared";
 import {
@@ -111,6 +115,8 @@ export interface TestAppOptions<TFileOps extends FileOps = MockFileOps> {
     dispositions: readonly AttentionDisposition[],
   ) => Promise<readonly AttentionDispositionWinner[]>;
   semanticRedundancyStateService?: SemanticRedundancyStateService;
+  /** Opt-in production semantic read wiring for SQLite-backed integration tests. */
+  jevPairCache?: JevPairCache;
 }
 
 export function createTestPurchaseUtilizationService(
@@ -161,6 +167,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
   let attentionDispositionGlobalMaintenance: AttentionDispositionGlobalMaintenance | null = null;
   const collectionMutationService = createCollectionMutationService({
     storageService,
+    ...(options?.jevPairCache ? { jevPairCache: options.jevPairCache } : {}),
     async postCommitObserver(event) {
       if (
         attentionCandidateService === null ||
@@ -213,10 +220,14 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     bggClient,
     afterSourceSave: maintainCandidateSource,
   });
+  const resolveSemanticRead = options?.jevPairCache
+    ? createJevProductionSemanticRead(options.jevPairCache)
+    : undefined;
   const displayedFitnessService = createDisplayedFitnessService({
     gameService,
     predictionService,
     storageService,
+    resolveSemanticRead,
   });
   attentionCandidateService = createAttentionCandidateService({
     coordinator: profileSourceCoordinatorFor(storageService),
@@ -335,6 +346,23 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     options?.groundedAnalysisProvider ??
     createGroundedAnalysisProvider({ configuration: unavailableGroundedConfiguration });
 
+  const collectionSnapshotService = resolveSemanticRead
+    ? createCollectionSnapshotCacheService({
+        builder: createCollectionSnapshotService({
+          storageService,
+          gameService,
+          predictionService,
+          purchaseUtilizationService: createPurchaseUtilizationService({
+            storageService,
+            collectionMutationService,
+          }),
+          resolveSemanticRead,
+        }),
+        storageService,
+        coordinator: profileSourceCoordinatorFor(storageService),
+      })
+    : undefined;
+
   const { app, operations, groundedAnalysisTransportController } = createApp({
     storageService,
     collectionMutationService,
@@ -349,6 +377,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     ownerGameNoteService,
     groundedAnalysisProvider,
     reflectionRuntime,
+    collectionSnapshotService,
     semanticRedundancyStateService: options?.semanticRedundancyStateService,
     bggClient,
     profileSourceCoordinator: profileSourceCoordinatorFor(storageService),

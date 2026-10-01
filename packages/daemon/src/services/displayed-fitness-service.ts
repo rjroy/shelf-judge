@@ -22,6 +22,8 @@ import { createRedundancyFactualContext } from "./redundancy-factual.js";
 import type { SourceVector } from "./source-vector.js";
 import { canonicalSha256 } from "./profile-source-coordinator.js";
 import { projectProfileCollectionSource } from "./game-projection.js";
+import { buildJevPredictionCaptureIdentity } from "./jev-prediction-capture-identity.js";
+import type { JevPairReadProofFence } from "./jev-pair-read-service.js";
 
 export interface DisplayedGameFitness extends GameWithScore {
   hasPredictedContribution: boolean;
@@ -87,6 +89,42 @@ export interface DisplayedFitnessServiceDeps {
     /** Authoritative freshness vector for validating the publication. */
     sourceVector?: SourceVector;
   }) => RedundancyPairTable | undefined;
+  /** One synchronous authoritative read; ready tables require a valid current proof fence. */
+  resolveSemanticRead?: (input: {
+    predictionCapture: readonly GameWithScore[];
+    collection: Collection;
+    tournament: TournamentData;
+    predictionSettings: PredictionSettings;
+    redundancySettings: RedundancySettings;
+    factualWeights: RedundancySettings["componentWeights"];
+    captureIdentity: import("./jev-pair-coverage.js").JevPredictionCaptureIdentity;
+    sourceVector: SourceVector;
+  }) => JevPairReadProofFence;
+}
+
+function semanticConfigured(collection: Collection, settings: RedundancySettings): boolean {
+  const semantic = collection.semanticRedundancy;
+  return (
+    settings.enabled &&
+    semantic?.settings.enabled === true &&
+    (semantic.settings.weights.description > 0 || semantic.settings.weights.ownerNote > 0)
+  );
+}
+
+function verifiedSemanticTable(
+  fence: JevPairReadProofFence | undefined,
+): RedundancyPairTable | undefined {
+  if (
+    !fence ||
+    typeof fence.isCurrent !== "function" ||
+    !fence.proof ||
+    fence.proof.status !== fence.result.status ||
+    !fence.isCurrent()
+  )
+    return undefined;
+  return fence.result.status === "ready" && fence.proof.status === "ready"
+    ? fence.result.table
+    : undefined;
 }
 
 export function semanticFallbackStatus(
@@ -299,7 +337,13 @@ function targetEntries(
 export function createDisplayedFitnessService(
   deps: DisplayedFitnessServiceDeps,
 ): DisplayedFitnessService {
-  const { gameService, predictionService, storageService, resolveRedundancyPairTable } = deps;
+  const {
+    gameService,
+    predictionService,
+    storageService,
+    resolveRedundancyPairTable,
+    resolveSemanticRead,
+  } = deps;
 
   return {
     async listGames(options): Promise<DisplayedGameFitness[]> {
@@ -360,6 +404,15 @@ export function createDisplayedFitnessService(
               sessions: [],
               gameStats: {},
             };
+        let semanticCapture: GameWithScore[] | undefined;
+        const configured = semanticConfigured(collection, redundancySettings);
+        if (configured && predictionService) {
+          try {
+            semanticCapture = await getPredictedGames();
+          } catch {
+            semanticCapture = undefined;
+          }
+        }
         const pairUniverse = universe ?? ownedGames;
         const eligiblePairUniverse = pairUniverse.filter(
           ({ score }) => score !== null && !score.vetoed && score.score > 0,
@@ -372,19 +425,55 @@ export function createDisplayedFitnessService(
           initialSourceVector.processEpoch === vectorAfter.processEpoch &&
           initialSourceVector.changeToken === vectorAfter.changeToken &&
           vectorAfter.available;
-        const pairTable = redundancySettings.enabled
-          ? coherentCapture
-            ? resolveRedundancyPairTable?.({
-                universe: eligiblePairUniverse,
-                settings: redundancySettings,
-                collection,
-                tournament,
-                predictionSettings,
-                predictionSettingsHash: canonicalSha256(predictionSettings),
-                sourceVector: vectorAfter,
-              })
-            : undefined
-          : undefined;
+        let pairTable: RedundancyPairTable | undefined;
+        let semanticStatus: Exclude<RedundancySimilarityStatus, "ready"> | undefined;
+        if (configured) {
+          semanticStatus = "not-ready";
+          if (coherentCapture && semanticCapture && resolveSemanticRead && vectorAfter) {
+            const identity = buildJevPredictionCaptureIdentity({
+              collection,
+              sourceVector: vectorAfter,
+              tournament,
+              predictionSettings,
+              factualWeights: redundancySettings.componentWeights,
+              predictionCapture: semanticCapture,
+            });
+            if (identity.ok) {
+              try {
+                const fence = resolveSemanticRead({
+                  predictionCapture: semanticCapture,
+                  collection,
+                  tournament,
+                  predictionSettings,
+                  redundancySettings,
+                  factualWeights: redundancySettings.componentWeights,
+                  captureIdentity: identity.identity,
+                  sourceVector: vectorAfter,
+                });
+                const verified = verifiedSemanticTable(fence);
+                pairTable = verified;
+                semanticStatus = verified
+                  ? undefined
+                  : fence?.proof?.status !== undefined && fence.proof.status !== "ready"
+                    ? fence.proof.status
+                    : "not-ready";
+              } catch {
+                semanticStatus = "not-ready";
+              }
+            }
+          }
+        } else if (redundancySettings.enabled && coherentCapture) {
+          const legacyTable = resolveRedundancyPairTable?.({
+            universe: eligiblePairUniverse,
+            settings: redundancySettings,
+            collection,
+            tournament,
+            predictionSettings,
+            predictionSettingsHash: canonicalSha256(predictionSettings),
+            sourceVector: vectorAfter,
+          });
+          pairTable = legacyTable?.status === "ready" ? undefined : legacyTable;
+        }
         applyRedundancy(
           ownedGames,
           redundancySettings,
@@ -393,6 +482,7 @@ export function createDisplayedFitnessService(
           pairUniverse,
           pairTable,
           options.redundancySimilarityStatus ??
+            semanticStatus ??
             semanticFallbackStatus(collection, redundancySettings.enabled),
         );
       }
@@ -509,6 +599,24 @@ export function createDisplayedFitnessService(
                 })()
           : undefined;
       const semanticUniverse = await privateSemanticUniverse;
+      const semanticConfiguredForSnapshot =
+        privateCollection !== undefined &&
+        semanticConfigured(privateCollection, snapshot.redundancySettings);
+      let semanticCapture: GameWithScore[] | undefined;
+      if (
+        semanticConfiguredForSnapshot &&
+        predictionService?.listGamesWithPredictionsFromSnapshot
+      ) {
+        try {
+          semanticCapture = await predictionService.listGamesWithPredictionsFromSnapshot(
+            collection,
+            tournament,
+            structuredClone(snapshot.predictionSettings),
+          );
+        } catch {
+          semanticCapture = undefined;
+        }
+      }
       const currentSourceVector =
         snapshot.kind === "private-capture" ? storageService?.sourceVector?.() : undefined;
       const sourceVectorIsCurrent =
@@ -525,16 +633,49 @@ export function createDisplayedFitnessService(
         snapshot.sourceVector.collectionRevision === currentSourceVector.collectionRevision &&
         snapshot.sourceVector.processEpoch === currentSourceVector.processEpoch &&
         snapshot.sourceVector.changeToken === currentSourceVector.changeToken;
-      applyRedundancy(
-        ownedGames,
-        structuredClone(snapshot.redundancySettings),
-        collection,
-        tournament,
-        semanticUniverse ?? redundancyUniverse,
+      let semanticPairTable: RedundancyPairTable | undefined;
+      let semanticStatus: Exclude<RedundancySimilarityStatus, "ready"> | undefined;
+      if (semanticConfiguredForSnapshot) {
+        semanticStatus = "not-ready";
+        if (semanticCapture && privateCollection && sourceVectorIsCurrent && resolveSemanticRead) {
+          const identity = buildJevPredictionCaptureIdentity({
+            collection: privateCollection,
+            sourceVector: snapshot.sourceVector,
+            tournament,
+            predictionSettings: snapshot.predictionSettings,
+            factualWeights: snapshot.redundancySettings.componentWeights,
+            predictionCapture: semanticCapture,
+          });
+          if (identity.ok) {
+            try {
+              const fence = resolveSemanticRead({
+                predictionCapture: semanticCapture,
+                collection: privateCollection,
+                tournament,
+                predictionSettings: structuredClone(snapshot.predictionSettings),
+                redundancySettings: structuredClone(snapshot.redundancySettings),
+                factualWeights: snapshot.redundancySettings.componentWeights,
+                captureIdentity: identity.identity,
+                sourceVector: snapshot.sourceVector,
+              });
+              semanticPairTable = verifiedSemanticTable(fence);
+              semanticStatus = semanticPairTable
+                ? undefined
+                : fence?.proof?.status !== undefined && fence.proof.status !== "ready"
+                  ? fence.proof.status
+                  : "not-ready";
+            } catch {
+              semanticStatus = "not-ready";
+            }
+          }
+        }
+      }
+      const legacyPairTable =
+        !semanticConfiguredForSnapshot &&
         snapshot.kind === "private-capture" &&
-          privateCollection !== undefined &&
-          sourceVectorIsCurrent &&
-          snapshot.redundancySettings.enabled
+        privateCollection !== undefined &&
+        sourceVectorIsCurrent &&
+        snapshot.redundancySettings.enabled
           ? resolveRedundancyPairTable?.({
               universe: (semanticUniverse ?? redundancyUniverse ?? ownedGames).filter(
                 ({ score }) => score !== null && !score.vetoed && score.score > 0,
@@ -546,8 +687,16 @@ export function createDisplayedFitnessService(
               predictionSettingsHash: canonicalSha256(snapshot.predictionSettings),
               sourceVector: snapshot.sourceVector,
             })
-          : undefined,
+          : undefined;
+      applyRedundancy(
+        ownedGames,
+        structuredClone(snapshot.redundancySettings),
+        collection,
+        tournament,
+        semanticUniverse ?? redundancyUniverse,
+        semanticPairTable ?? (legacyPairTable?.status === "ready" ? undefined : legacyPairTable),
         options.redundancySimilarityStatus ??
+          semanticStatus ??
           (privateCollection === undefined
             ? snapshot.redundancySettings.enabled
               ? "factual"

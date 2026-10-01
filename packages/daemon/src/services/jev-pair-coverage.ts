@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import type {
   Collection,
   DurableGame,
@@ -8,10 +6,11 @@ import type {
 } from "@shelf-judge/shared";
 import { JEV_JUDGMENT_CONTRACT } from "./jev/jev-judgment-contract.js";
 import { createRedundancyFactualContext } from "./redundancy-factual.js";
+import { canonicalSha256 } from "./profile-source-coordinator.js";
 import type { JevPairJudgment, JevPairKey } from "./jev-pair-cache-service.js";
 import { validateJevCachedRow, type JevRowValidationGame } from "./jev-pair-read-proof.js";
 
-export const JEV_ACTIVATION_DIGEST_VERSION = "jev-activation-coverage-v2" as const;
+export const JEV_ACTIVATION_DIGEST_VERSION = "jev-activation-coverage-v4" as const;
 
 /** Durable identities for the exact capture; volatile process-local tokens do not belong here. */
 export interface JevPredictionCaptureIdentity {
@@ -69,17 +68,86 @@ function compareIds(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function digest(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
-}
-
-function validFactualWeights(weights: RedundancyComponentWeights): boolean {
+export function validJevFactualWeights(weights: RedundancyComponentWeights): boolean {
   return (
     Number.isFinite(weights.binary) &&
     weights.binary >= 0 &&
     Number.isFinite(weights.continuous) &&
     weights.continuous >= 0
   );
+}
+
+/** Validates a full capture and returns the minimal owned score projection used by identity. */
+export function projectJevOwnedPredictionCapture(
+  collection: Collection,
+  predictionCapture: readonly GameWithScore[],
+):
+  | {
+      ok: true;
+      ownedGameIds: string[];
+      predictionScores: {
+        gameId: string;
+        score: number | null;
+        vetoed: boolean | null;
+        actualAxisCount: number | null;
+      }[];
+    }
+  | { ok: false; reason: string } {
+  if (!collection?.id || !Array.isArray(collection.games) || !Array.isArray(predictionCapture))
+    return { ok: false, reason: "invalid collection or prediction capture" };
+  const captures = predictionCapture as readonly GameWithScore[];
+  const collectionById = new Map<string, DurableGame>();
+  for (const game of collection.games) {
+    if (!isText(game.id) || collectionById.has(game.id))
+      return { ok: false, reason: "invalid or duplicate collection game ID" };
+    collectionById.set(game.id, game);
+  }
+  const ownedGames = collection.games
+    .filter((game) => game.ownership === "owned")
+    .sort((a, b) => compareIds(a.id, b.id));
+  const captureById = new Map<string, GameWithScore>();
+  for (const result of captures) {
+    if (!result || !result.game || !isText(result.game.id))
+      return { ok: false, reason: "prediction capture contains an empty entry" };
+    const source = collectionById.get(result.game.id);
+    if (!source || captureById.has(source.id) || result.game.ownership !== source.ownership)
+      return {
+        ok: false,
+        reason: "prediction capture contains unknown, duplicate, or ownership-mismatched game",
+      };
+    if (result.score !== null) {
+      const { ratedAxisCount, predictionMeta } = result.score;
+      const actualAxisCount =
+        predictionMeta === null ? ratedAxisCount : predictionMeta.actualAxisCount;
+      if (
+        !Number.isFinite(result.score.score) ||
+        typeof result.score.vetoed !== "boolean" ||
+        !Number.isSafeInteger(ratedAxisCount) ||
+        ratedAxisCount < 0 ||
+        !Number.isSafeInteger(actualAxisCount) ||
+        actualAxisCount < 0 ||
+        (predictionMeta !== null && predictionMeta.actualAxisCount !== ratedAxisCount)
+      )
+        return { ok: false, reason: "prediction capture contains non-finite or invalid score" };
+    }
+    captureById.set(source.id, result);
+  }
+  if (ownedGames.some((game) => !captureById.has(game.id)))
+    return { ok: false, reason: "prediction capture is incomplete for owned collection games" };
+  return {
+    ok: true,
+    ownedGameIds: ownedGames.map((game) => game.id),
+    predictionScores: ownedGames.map(({ id }) => {
+      const score = captureById.get(id)!.score;
+      return {
+        gameId: id,
+        score: score?.score ?? null,
+        vetoed: score?.vetoed ?? null,
+        actualAxisCount:
+          score === null ? null : (score.predictionMeta?.actualAxisCount ?? score.ratedAxisCount),
+      };
+    }),
+  };
 }
 
 function proofGame(game: DurableGame): JevRowValidationGame {
@@ -108,7 +176,7 @@ export function computeJevPairCoverage(options: JevCoverageOptions): JevPairCove
     !isText(captureIdentity.sourceVectorIdentity) ||
     !isText(captureIdentity.tournamentIdentity) ||
     !isText(captureIdentity.predictionCaptureIdentity) ||
-    !validFactualWeights(factualWeights)
+    !validJevFactualWeights(factualWeights)
   ) {
     throw new TypeError("Invalid Jev coverage input or prediction capture identity");
   }
@@ -132,12 +200,8 @@ export function computeJevPairCoverage(options: JevCoverageOptions): JevPairCove
     throw new TypeError("Invalid Jev collection semantic authority or policy");
   }
 
-  const collectionById = new Map<string, DurableGame>();
-  for (const game of collection.games) {
-    if (!isText(game.id) || collectionById.has(game.id))
-      throw new TypeError("Invalid or duplicate collection game ID");
-    collectionById.set(game.id, game);
-  }
+  const projected = projectJevOwnedPredictionCapture(collection, predictionCapture);
+  if (!projected.ok) throw new TypeError(projected.reason);
   const ownedGames = collection.games
     .filter((game) => game.ownership === "owned")
     .sort((a, b) => compareIds(a.id, b.id));
@@ -145,22 +209,7 @@ export function computeJevPairCoverage(options: JevCoverageOptions): JevPairCove
 
   // The production scorer returns collection rows in its full (targetGameIds omitted) call.
   // Require exact owned-ID coverage; non-owned extras are allowed only if they match collection.
-  const captureById = new Map<string, GameWithScore>();
-  for (let index = 0; index < predictionCapture.length; index++) {
-    const result = predictionCapture[index];
-    if (!result) throw new TypeError("Prediction capture contains an empty entry");
-    const id = result.game.id;
-    const source = collectionById.get(id);
-    if (!source || captureById.has(id) || result.game.ownership !== source.ownership) {
-      throw new TypeError(
-        "Prediction capture contains unknown, duplicate, or ownership-mismatched game",
-      );
-    }
-    captureById.set(id, result);
-  }
-  if (ownedIds.some((id) => !captureById.has(id))) {
-    throw new TypeError("Prediction capture is incomplete for current owned collection games");
-  }
+  const captureById = new Map(predictionCapture.map((result) => [result.game.id, result]));
 
   const scoredOwned = ownedGames.map((game) => ({ game, score: captureById.get(game.id)!.score }));
   const eligible = scoredOwned.filter(
@@ -237,11 +286,7 @@ export function computeJevPairCoverage(options: JevCoverageOptions): JevPairCove
     settings,
     factualWeights,
     ownedGameIds: ownedIds,
-    predictionScores: scoredOwned.map(({ game, score }) => ({
-      gameId: game.id,
-      score: score ? score.score : null,
-      vetoed: score?.vetoed ?? null,
-    })),
+    predictionScores: projected.predictionScores,
     eligibleGameIds: eligibleIds,
     captureIdentity,
     contract: JEV_JUDGMENT_CONTRACT,
@@ -266,13 +311,18 @@ export function computeJevActivationIdentity(input: {
   settings: Collection["semanticRedundancy"]["settings"];
   factualWeights: RedundancyComponentWeights;
   ownedGameIds: readonly string[];
-  predictionScores: readonly { gameId: string; score: number | null; vetoed: boolean | null }[];
+  predictionScores: readonly {
+    gameId: string;
+    score: number | null;
+    vetoed: boolean | null;
+    actualAxisCount?: number | null;
+  }[];
   eligibleGameIds: readonly string[];
   captureIdentity: JevPredictionCaptureIdentity;
   contract: typeof JEV_JUDGMENT_CONTRACT;
   pairs: readonly JevPairCoverageEntry[];
 }): string {
-  return digest({
+  return canonicalSha256({
     version: JEV_ACTIVATION_DIGEST_VERSION,
     collectionId: input.collectionId,
     authority: {

@@ -141,3 +141,24 @@ overall Phase 2 implementation and feature remain in progress.
 - Typecheck and browser checks passed.
 - Full-project lint and format checks passed.
 - Independent reviewer accepted P2D10C-1 and P2D10C-2.
+
+## Phase 2d10d — production Jev scored reads
+
+Checkpointed on `design/jev-similarity`, after Phase 2d10c. The overall Phase
+2 implementation and feature remain in progress.
+
+- Production snapshot, list, and detail scored reads now share the SQLite read
+  proof. Durable capture identity binds `actualAxisCount` exactly, including
+  actual-only captures with null metadata.
+- Added real prediction-plus-SQLite route coverage for restart, missing-row,
+  and revoked-consent behavior.
+- Owner-triggered Run and provider execution remain absent. No live provider
+  operation was run; this checkpoint does not claim the Jev cache feature is
+  complete.
+
+### Validation evidence for this checkpoint
+
+- Full Bun test suite: 3,558 passed, 1 skipped, 0 failed.
+- `bun run typecheck`, `bun run typecheck:browser`, `bun run lint`,
+  `bun run format:check`, and `git diff --check` passed.
+- Independent `bun-typescript-reviewer` accepted the implementation.

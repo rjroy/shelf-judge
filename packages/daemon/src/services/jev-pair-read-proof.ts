@@ -1,7 +1,6 @@
-import { createHash } from "node:crypto";
-
 import { JEV_JUDGMENT_CONTRACT } from "./jev/jev-judgment-contract.js";
 import { buildJevPairDependencies, type JevPairSource } from "./jev-pair-identity.js";
+import { canonicalSha256 } from "./profile-source-coordinator.js";
 import type {
   JevDependencyKind,
   JevPairDependency,
@@ -121,7 +120,7 @@ function rowIdentity(row: JevPairJudgment): string {
     consentEpoch: row.consentEpoch ?? null,
     dependencies,
   };
-  return createHash("sha256").update(JSON.stringify(identity), "utf8").digest("hex");
+  return canonicalSha256(identity);
 }
 
 /** Proves that a cached numeric judgment still matches the exact current request source and contract. */

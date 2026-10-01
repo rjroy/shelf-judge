@@ -34,6 +34,7 @@ import type { RedundancyPairTable } from "./redundancy-engine.js";
 import { canonicalSha256 } from "./profile-source-coordinator.js";
 import type { JevPairReadProofFence } from "./jev-pair-read-service.js";
 import type { JevPredictionCaptureIdentity } from "./jev-pair-coverage.js";
+import { buildJevPredictionCaptureIdentity } from "./jev-prediction-capture-identity.js";
 
 export interface CollectionSnapshotSemanticReadInput {
   /** Complete prediction capture, including null, vetoed, and nonpositive scores. */
@@ -387,6 +388,7 @@ export function createCollectionSnapshotService(
       let ordinaryDisplay = ordinary;
       let predictedDisplay = predicted;
       let semanticRead: CollectionSnapshotBuildResult["semanticRead"] = { status: "not-used" };
+      let snapshotSimilarityStatus = input.redundancySimilarityStatus;
       let redundancyMode: "off" | "annotation" | "integrated" = input.redundancySettings?.enabled
         ? input.redundancySettings.stage
         : "off";
@@ -399,31 +401,45 @@ export function createCollectionSnapshotService(
           let pairTable: RedundancyPairTable | undefined;
           let similarityStatus = input.redundancySimilarityStatus ?? "factual";
           if (deps.resolveSemanticRead && semanticConfigured) {
-            const fence = deps.resolveSemanticRead({
-              predictionCapture: predicted,
+            const captureIdentity = buildJevPredictionCaptureIdentity({
               collection: input.collection,
+              sourceVector: input.sourceVector,
               tournament: input.tournament,
               predictionSettings: input.predictionSettings,
-              redundancySettings: input.redundancySettings,
               factualWeights: input.redundancySettings.componentWeights,
-              captureIdentity: {
-                sourceVectorIdentity: canonicalSha256(input.sourceVector),
-                tournamentIdentity: canonicalSha256(input.tournament),
-                predictionCaptureIdentity: canonicalSha256(predicted),
-              },
-              sourceVector: input.sourceVector,
+              predictionCapture: predicted,
             });
-            if (
-              !fence ||
-              typeof fence.isCurrent !== "function" ||
-              !fence.proof ||
-              fence.proof.status !== fence.result.status
-            ) {
-              throw new Error("Semantic redundancy read proof is unavailable");
+            if (!captureIdentity.ok) {
+              // An incoherent capture cannot authorize any semantic result. Keep the
+              // ordinary factual projection and report semantic readiness honestly.
+              similarityStatus = "not-ready";
+              snapshotSimilarityStatus = "not-ready";
+            } else {
+              const fence = deps.resolveSemanticRead({
+                predictionCapture: predicted,
+                collection: input.collection,
+                tournament: input.tournament,
+                predictionSettings: input.predictionSettings,
+                redundancySettings: input.redundancySettings,
+                factualWeights: input.redundancySettings.componentWeights,
+                captureIdentity: captureIdentity.identity,
+                sourceVector: input.sourceVector,
+              });
+              if (
+                !fence ||
+                typeof fence.isCurrent !== "function" ||
+                !fence.proof ||
+                fence.proof.status !== fence.result.status
+              ) {
+                throw new Error("Semantic redundancy read proof is unavailable");
+              }
+              semanticRead = { status: "verified", ...fence };
+              if (fence.result.status === "ready") pairTable = fence.result.table;
+              else {
+                similarityStatus = fence.result.status;
+                snapshotSimilarityStatus = fence.result.status;
+              }
             }
-            semanticRead = { status: "verified", ...fence };
-            if (fence.result.status === "ready") pairTable = fence.result.table;
-            else similarityStatus = fence.result.status;
           } else {
             pairTable = deps.resolveRedundancyPairTable?.({
               universe: predictedCandidates.filter(
@@ -569,7 +585,7 @@ export function createCollectionSnapshotService(
           redundancySimilarityInfo: predictedEntry?.score?.redundancySimilarityInfo ??
             ordinaryEntry.score?.redundancySimilarityInfo ?? {
               status:
-                input.redundancySimilarityStatus ??
+                snapshotSimilarityStatus ??
                 (input.redundancySettings?.enabled ? "factual" : "disabled"),
               generationId: null,
             },
