@@ -30,6 +30,8 @@ export interface JevRunScope {
   readonly ownerNoteSignalBlocked: boolean;
   readonly cachedOwnerNoteUse: boolean;
   sourceForGame(gameId: string): JevRunGameSource | undefined;
+  /** Looks up a canonical eligible pair without enumerating the pair set. */
+  pairForIds(gameAId: string, gameBId: string): JevRunPair | undefined;
   /** Recreates unordered pairs on demand; the plan intentionally retains no pair manifest. */
   pairs(): IterableIterator<JevRunPair>;
 }
@@ -116,7 +118,8 @@ export function planJevRunScope(
     if (source.descriptionPresent) descriptions++;
     if (source.ownerNotePresent) notes++;
   }
-  const frozenEligibleGameIds = Object.freeze([...eligibleGameIds]);
+  const frozenEligibleGameIds = Object.freeze([...eligibleGameIds].sort());
+  const eligibleGameIdSet = new Set(frozenEligibleGameIds);
   const count = frozenEligibleGameIds.length;
   const totalEligiblePairs = (count * (count - 1)) / 2;
   const descriptionRequired = settings.enabled && settings.weights.description > 0;
@@ -129,6 +132,41 @@ export function planJevRunScope(
   // Counts above describe source availability. Signal activation additionally obeys semantic policy.
   const ownerNoteSignalBlocked = ownerNoteRequired && !cachedOwnerNoteUse;
 
+  function pairForSources(
+    gameAId: string,
+    gameBId: string,
+    sourceA: JevRunGameSource,
+    sourceB: JevRunGameSource,
+  ): JevRunPair {
+    return Object.freeze({
+      gameAId,
+      gameBId,
+      descriptionSignalRequired:
+        descriptionRequired && sourceA.descriptionPresent && sourceB.descriptionPresent,
+      ownerNoteSignalRequired:
+        ownerNoteRequired &&
+        cachedOwnerNoteUse &&
+        sourceA.ownerNotePresent &&
+        sourceB.ownerNotePresent,
+      ownerNoteSignalBlocked,
+    });
+  }
+
+  function pairForIds(gameAId: string, gameBId: string): JevRunPair | undefined {
+    if (
+      typeof gameAId !== "string" ||
+      typeof gameBId !== "string" ||
+      gameAId >= gameBId ||
+      !eligibleGameIdSet.has(gameAId) ||
+      !eligibleGameIdSet.has(gameBId)
+    ) {
+      return undefined;
+    }
+    const sourceA = sourceByGameId.get(gameAId);
+    const sourceB = sourceByGameId.get(gameBId);
+    return sourceA && sourceB ? pairForSources(gameAId, gameBId, sourceA, sourceB) : undefined;
+  }
+
   function* pairs(): IterableIterator<JevRunPair> {
     for (let i = 0; i < frozenEligibleGameIds.length; i++) {
       const gameAId = frozenEligibleGameIds[i];
@@ -140,18 +178,7 @@ export function planJevRunScope(
         if (gameBId === undefined) continue;
         const sourceB = sourceByGameId.get(gameBId);
         if (!sourceB) continue;
-        yield Object.freeze({
-          gameAId,
-          gameBId,
-          descriptionSignalRequired:
-            descriptionRequired && sourceA.descriptionPresent && sourceB.descriptionPresent,
-          ownerNoteSignalRequired:
-            ownerNoteRequired &&
-            cachedOwnerNoteUse &&
-            sourceA.ownerNotePresent &&
-            sourceB.ownerNotePresent,
-          ownerNoteSignalBlocked,
-        });
+        yield pairForSources(gameAId, gameBId, sourceA, sourceB);
       }
     }
   }
@@ -164,6 +191,7 @@ export function planJevRunScope(
     ownerNoteSignalBlocked,
     cachedOwnerNoteUse,
     sourceForGame: (gameId) => sourceByGameId.get(gameId),
+    pairForIds,
     pairs,
   };
   return { ok: true, scope: Object.freeze(scope) };

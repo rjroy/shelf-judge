@@ -83,6 +83,44 @@ describe("Jev run scope planner", () => {
     expect(sourceText).not.toContain('"note"');
   });
 
+  test("looks up canonical pairs directly with the same captured signals as iteration", () => {
+    const games = [
+      game("c", { description: "c" }),
+      game("a", { description: "a", note: "note-a" }),
+      game("b", { note: "note-b" }),
+      game("ineligible"),
+    ];
+    const scores = capture(games);
+    const ineligibleScore = scores.find((entry) => entry.game.id === "ineligible");
+    if (ineligibleScore?.score) ineligibleScore.score.score = 0;
+    const planned = planJevRunScope(collection(games), scores);
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) return;
+
+    const pair = planned.scope.pairForIds("a", "b");
+    expect(pair).toEqual(
+      [...planned.scope.pairs()].find(({ gameAId, gameBId }) => gameAId === "a" && gameBId === "b"),
+    );
+    expect(pair?.descriptionSignalRequired).toBe(false);
+    expect(pair?.ownerNoteSignalRequired).toBe(true);
+    expect(planned.scope.pairForIds("b", "a")).toBeUndefined();
+    expect(planned.scope.pairForIds("a", "ineligible")).toBeUndefined();
+    expect(planned.scope.pairForIds("", "a")).toBeUndefined();
+    expect(planned.scope.pairForIds("a", "a")).toBeUndefined();
+  });
+
+  test("direct pair lookup does not enumerate the planned pairs", () => {
+    const games = Array.from({ length: 200 }, (_, i) => game(`g${String(i).padStart(3, "0")}`));
+    const planned = planJevRunScope(collection(games), capture(games));
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) return;
+
+    const pair = planned.scope.pairForIds("g197", "g199");
+    expect(pair?.gameAId).toBe("g197");
+    expect(pair?.gameBId).toBe("g199");
+    expect(pair).toBeDefined();
+  });
+
   test("source edits only stale pairs containing the changed game", () => {
     const games = [
       game("a", { description: "a", note: "note-a" }),

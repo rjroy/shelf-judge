@@ -163,6 +163,42 @@ Checkpointed on `design/jev-similarity`, after Phase 2d10c. The overall Phase
   `bun run format:check`, and `git diff --check` passed.
 - Independent `bun-typescript-reviewer` accepted the implementation.
 
+## Phase 2d11d — fenced sequential Jev Run worker
+
+Checkpointed on `design/jev-similarity`, after Phase 2d11a–c. The overall
+Phase 2 implementation and feature remain in progress.
+
+- Added an inactive, explicit-start-only `JevRunService` with one sequential
+  process-local run, bounded work, cancellation, and durable progress that is
+  never execution authority after restart. Interrupted progress reconciliation
+  does not create a gateway or resume requests.
+- The original run scope is the immutable source/consent authorization
+  snapshot. Current full captures refresh eligibility only when the source
+  vector moves; one pair is prepared at a time. Each request attempt is
+  admitted and synchronously started inside the shared profile-source
+  coordinator, while provider response waits stay outside it. Pair-local
+  fences discard changed/ineligible responses and allow unaffected pairs to
+  continue.
+- Validated pair rows and progress checkpoint atomically in SQLite. Final
+  coverage is computed outside the coordinator and activated only after a
+  short serialized check confirms current source/policy authority, cancellation
+  state, and unchanged usable cache mutation revision. Incomplete, interrupted,
+  or stale runs do not publish a new activation; valid partial rows remain
+  available for a later explicit Run.
+- Added deterministic fake-gateway barrier coverage for edits, retries,
+  unrelated mutations, cancellation, restart progress, storage failures,
+  and partial reuse; temporary SQLite tests cover checkpoints, purge/revision
+  races, and activation completeness.
+- No production route or runtime wiring was added. No live provider was called
+  and no owner data was accessed.
+
+### Validation evidence for this checkpoint
+
+- Full Bun suite: 3,607 passed, 1 skipped, 0 failed.
+- Focused Jev Run worker suite: 21 tests passed.
+- Typecheck, browser typecheck, lint, format check, and `git diff --check` passed.
+- Independent source oracle and reviewer accepted the worker.
+
 ## Phase 2d11c — per-pair Run request and row mapping
 
 Checkpointed on `design/jev-similarity`. The overall Phase 2 implementation

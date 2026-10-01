@@ -103,20 +103,51 @@ export function prepareJevRunPair(options: JevPairRunOptions): JevPairPreparatio
   }
   const misses = signalRows.filter((signal) => !valid.get(signal));
   if (misses.length === 0) return { status: "skip", reason: "both-cached" };
-  const dependencyKind: JevDependencyKind =
-    misses.length === 2 ? "SHARED_CD" : misses[0] === "C" ? "C_ONLY" : "D_ONLY";
-  const sendsNotes = misses.includes("D");
-  if (
-    sendsNotes &&
-    (!options.noteTransmissionAuthorized ||
-      collection.semanticRedundancy.settings.cachedOwnerNoteUse !== true)
-  ) {
-    return { status: "blocked", reason: "note-use-not-permitted" };
+  const plannedA = scope.sourceForGame(pair.gameAId);
+  const plannedB = scope.sourceForGame(pair.gameBId);
+  if (!plannedA || !plannedB) return { status: "skip", reason: "stale-source" };
+  const canSendC =
+    misses.includes("C") &&
+    plannedA.descriptionPresent &&
+    plannedB.descriptionPresent &&
+    !jevRunPairSourcesChanged(scope, collection, pair.gameAId, pair.gameBId, "C_ONLY");
+  const noteUsePermitted =
+    options.noteTransmissionAuthorized &&
+    collection.semanticRedundancy.settings.cachedOwnerNoteUse === true;
+  const canSendD =
+    misses.includes("D") &&
+    plannedA.ownerNotePresent &&
+    plannedB.ownerNotePresent &&
+    noteUsePermitted &&
+    !jevRunPairSourcesChanged(scope, collection, pair.gameAId, pair.gameBId, "D_ONLY");
+  if (!canSendC && !canSendD) {
+    if (misses.includes("D") && !noteUsePermitted) {
+      return { status: "blocked", reason: "note-use-not-permitted" };
+    }
+    if (
+      misses.includes("C") &&
+      (plannedA.descriptionPresent || plannedB.descriptionPresent) &&
+      jevRunPairSourcesChanged(scope, collection, pair.gameAId, pair.gameBId, "C_ONLY")
+    ) {
+      return { status: "skip", reason: "stale-source" };
+    }
+    if (
+      misses.includes("D") &&
+      (plannedA.ownerNotePresent || plannedB.ownerNotePresent) &&
+      jevRunPairSourcesChanged(scope, collection, pair.gameAId, pair.gameBId, "D_ONLY")
+    ) {
+      return { status: "skip", reason: "stale-source" };
+    }
+    return { status: "unavailable", reason: "missing-source" };
   }
+  const selectedSignals: JevSignal[] = canSendC && canSendD ? ["C", "D"] : canSendC ? ["C"] : ["D"];
+  const dependencyKind: JevDependencyKind =
+    selectedSignals.length === 2 ? "SHARED_CD" : selectedSignals[0] === "C" ? "C_ONLY" : "D_ONLY";
+  const sendsNotes = selectedSignals.includes("D");
   if (jevRunPairSourcesChanged(scope, collection, pair.gameAId, pair.gameBId, dependencyKind)) {
     return { status: "skip", reason: "stale-source" };
   }
-  const sendsDescription = misses.includes("C");
+  const sendsDescription = selectedSignals.includes("C");
   if (
     (sendsDescription && (!hasDescription(gameA) || !hasDescription(gameB))) ||
     (sendsNotes && (!hasNote(gameA) || !hasNote(gameB)))
@@ -135,7 +166,7 @@ export function prepareJevRunPair(options: JevPairRunOptions): JevPairPreparatio
   const sources = [sourceFor(gameA), sourceFor(gameB)] as const;
   const dependencies = buildJevPairDependencies(dependencyKind, sources[0], sources[1]);
   const request: JevPairRequest =
-    misses.includes("C") && misses.includes("D")
+    selectedSignals.includes("C") && selectedSignals.includes("D")
       ? {
           mode: "description-and-owner-notes",
           gameA: {
@@ -149,7 +180,7 @@ export function prepareJevRunPair(options: JevPairRunOptions): JevPairPreparatio
             ownerNote: hasNote(gameB) ? gameB.ownerNote.text : "",
           },
         }
-      : misses.includes("C")
+      : selectedSignals.includes("C")
         ? {
             mode: "description-only",
             gameA: { name: gameA.name, bggDescription: gameA.bggData?.description ?? "" },
@@ -164,7 +195,7 @@ export function prepareJevRunPair(options: JevPairRunOptions): JevPairPreparatio
     status: "ready",
     request,
     dependencyKind,
-    signals: misses,
+    signals: selectedSignals,
     gameAId: pair.gameAId,
     gameBId: pair.gameBId,
     collectionId: collection.id,

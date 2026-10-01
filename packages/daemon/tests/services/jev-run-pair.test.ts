@@ -133,6 +133,7 @@ function setup(games = [game("a"), game("b")]) {
     ownerNoteSignalBlocked: false,
     cachedOwnerNoteUse: true,
     sourceForGame: (id) => sources.get(id),
+    pairForIds: (a, b) => (a === "a" && b === "b" ? pair() : undefined),
     pairs: function* () {},
   };
   return { collection, scope, games };
@@ -395,6 +396,141 @@ describe("prepareJevRunPair", () => {
       persistentCache.close();
       await rm(temporaryDirectory, { recursive: true, force: true });
     }
+  });
+
+  test("falls back to the unchanged signal when the other source changed or note transmission is unauthorized", () => {
+    const original = setup();
+    const editedNotes = {
+      ...original.collection,
+      games: [
+        game("a", "description-a", "edited-private-note-a"),
+        game("b", "description-b", "edited-private-note-b"),
+      ],
+    };
+    const cOnly = prepareJevRunPair({
+      plannedPair: pair(),
+      scope: original.scope,
+      collection: editedNotes,
+      cache: { lookup: () => null },
+      noteTransmissionAuthorized: true,
+    });
+    expect(cOnly).toMatchObject({ status: "ready" });
+    if (cOnly.status === "ready") {
+      expect(cOnly.dependencyKind).toBe("C_ONLY");
+      expect(cOnly.signals).toEqual(["C"]);
+      expect(cOnly.consentEpoch).toBeUndefined();
+      expect(cOnly.request.mode).toBe("description-only");
+      expect(JSON.stringify(cOnly.request)).not.toContain("edited-private-note");
+      const cRow = mapJevPairResult(
+        cOnly,
+        {
+          description: {
+            score: 0.5,
+            confidence: null,
+            modelId: JEV_JUDGMENT_CONTRACT.modelId,
+            rubricVersion: 2,
+            questionVersion: 2,
+          },
+          ownerNote: null,
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        "2026-01-01T00:00:00Z",
+      )?.[0];
+      expect(cRow?.dependencyKind).toBe("C_ONLY");
+      expect(cRow?.consentEpoch).toBeUndefined();
+      expect(
+        prepareJevRunPair({
+          plannedPair: pair(false, true),
+          scope: original.scope,
+          collection: editedNotes,
+          cache: { lookup: () => null },
+          noteTransmissionAuthorized: true,
+        }),
+      ).toEqual({ status: "skip", reason: "stale-source" });
+    }
+
+    const editedDescriptions = {
+      ...original.collection,
+      games: [game("a", "edited-description-a"), game("b", "edited-description-b")],
+    };
+    const dOnly = prepareJevRunPair({
+      plannedPair: pair(),
+      scope: original.scope,
+      collection: editedDescriptions,
+      cache: { lookup: () => null },
+      noteTransmissionAuthorized: true,
+    });
+    expect(dOnly.status).toBe("ready");
+    if (dOnly.status === "ready") {
+      expect(dOnly.dependencyKind).toBe("D_ONLY");
+      expect(dOnly.signals).toEqual(["D"]);
+      expect(dOnly.request.mode).toBe("owner-notes-only");
+      expect(JSON.stringify(dOnly.request)).not.toContain("edited-description");
+    }
+
+    const unauthorizedNote = prepareJevRunPair({
+      plannedPair: pair(),
+      scope: original.scope,
+      collection: original.collection,
+      cache: { lookup: () => null },
+      noteTransmissionAuthorized: false,
+    });
+    expect(unauthorizedNote.status).toBe("ready");
+    if (unauthorizedNote.status === "ready") {
+      expect(unauthorizedNote.dependencyKind).toBe("C_ONLY");
+      expect(unauthorizedNote.signals).toEqual(["C"]);
+      expect(unauthorizedNote.consentEpoch).toBeUndefined();
+      expect(unauthorizedNote.request.mode).toBe("description-only");
+    }
+  });
+
+  test("keeps combined provenance when a response arrives after a note edit", () => {
+    const original = setup();
+    const admission = prepareJevRunPair({
+      plannedPair: pair(),
+      scope: original.scope,
+      collection: original.collection,
+      cache: { lookup: () => null },
+      noteTransmissionAuthorized: true,
+    });
+    expect(admission.status).toBe("ready");
+    if (admission.status !== "ready") return;
+    expect(admission.dependencyKind).toBe("SHARED_CD");
+    const score = {
+      score: 0.5,
+      confidence: null,
+      modelId: JEV_JUDGMENT_CONTRACT.modelId,
+      rubricVersion: 2 as const,
+      questionVersion: 2 as const,
+    };
+    const [cRow] =
+      mapJevPairResult(
+        admission,
+        {
+          description: score,
+          ownerNote: score,
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        "2026-01-01T00:00:00Z",
+      ) ?? [];
+    expect(cRow?.dependencyKind).toBe("SHARED_CD");
+    if (!cRow) return;
+    const edited = {
+      ...original.collection,
+      games: [
+        game("a", "description-a", "edited-private-note-a"),
+        game("b", "description-b", "edited-private-note-b"),
+      ],
+    };
+    expect(
+      validateJevCachedRow(
+        cRow,
+        edited,
+        requiredGame(edited.games, "a"),
+        requiredGame(edited.games, "b"),
+        "C",
+      ).valid,
+    ).toBe(false);
   });
 
   test("maps combined result to shared dependencies without storing source text; rejects partial or malformed results", () => {

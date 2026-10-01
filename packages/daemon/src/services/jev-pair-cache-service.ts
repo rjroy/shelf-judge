@@ -67,6 +67,7 @@ export interface JevRunFinish {
 
 export interface JevPairCache {
   readonly available: boolean;
+  mutationRevision(): number | null;
   lookup(key: JevPairKey): JevPairJudgment | null;
   upsert(judgment: JevPairJudgment): void;
   purgePair(gameAId: string, gameBId: string, signal?: JevSignal): number;
@@ -301,6 +302,7 @@ function prepareStatements(db: Database) {
 function noOpCache(): JevPairCache {
   return {
     available: false,
+    mutationRevision: () => null,
     lookup: () => null,
     upsert: () => {
       throw new Error("Jev pair cache unavailable");
@@ -392,7 +394,11 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
   if (!db || !statements) return noOpCache();
 
   let closed = false;
+  let revision: number | null = 0;
   const usable = (): boolean => !closed;
+  const recordMutation = (): void => {
+    revision = revision === null || revision >= Number.MAX_SAFE_INTEGER ? null : revision + 1;
+  };
   const assertUsable = (): void => {
     if (!usable()) throw new Error("Jev pair cache closed");
   };
@@ -431,6 +437,9 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
   };
   return {
     available: true,
+    mutationRevision() {
+      return usable() ? revision : null;
+    },
     lookup(key) {
       if (!usable()) return null;
       try {
@@ -467,17 +476,20 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       assertUsable();
       validate(judgment);
       writeJudgment(judgment);
+      recordMutation();
     },
     purgePair(left, right, signal) {
       assertUsable();
       const [a, b] = canonicalPair(left, right);
-      return db.transaction(() => {
+      const deleted = db.transaction(() => {
         statements.deleteActivation.run();
         return Number(
           (signal ? statements.deletePairSignal.run(a, b, signal) : statements.deletePair.run(a, b))
             .changes,
         );
       })();
+      recordMutation();
+      return deleted;
     },
     purgeGame(gameId, signal, dependencyKind) {
       const allKinds: JevDependencyKind[] = ["C_ONLY", "D_ONLY", "SHARED_CD"];
@@ -489,7 +501,7 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       requireText(gameId, "game ID");
       if (selected.length === 0) return 0;
       const placeholders = selected.map(() => "?").join(",");
-      return db.transaction(() => {
+      const deleted = db.transaction(() => {
         statements.deleteActivation.run();
         return Number(
           db
@@ -499,6 +511,8 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
             .run(gameId, gameId, ...selected, ...(signal ? [signal] : [])).changes,
         );
       })();
+      recordMutation();
+      return deleted;
     },
     invalidateGame(gameId, dependencyKinds) {
       assertUsable();
@@ -506,7 +520,7 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       const kinds = [...new Set(dependencyKinds)];
       if (kinds.length === 0) return 0;
       const placeholders = kinds.map(() => "?").join(",");
-      return db.transaction(() => {
+      const deleted = db.transaction(() => {
         statements.deleteActivation.run();
         return Number(
           db
@@ -516,16 +530,20 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
             .run(gameId, gameId, ...kinds).changes,
         );
       })();
+      recordMutation();
+      return deleted;
     },
     purgeDDependent() {
       assertUsable();
-      return db.transaction(() => {
+      const deleted = db.transaction(() => {
         statements.deleteActivation.run();
         return Number(
           db.query("DELETE FROM judgments WHERE dependency_kind IN ('D_ONLY','SHARED_CD')").run()
             .changes,
         );
       })();
+      recordMutation();
+      return deleted;
     },
     saveRunProgress(progress) {
       assertUsable();
@@ -558,6 +576,7 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
         judgments.forEach(writeJudgment);
         writeProgress(progress);
       })();
+      recordMutation();
     },
     finishRun(finish) {
       assertUsable();
@@ -572,6 +591,7 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
           statements.setActivation.run(activation.identity, activation.activatedAt);
         writeProgress(progress);
       })();
+      if (activation !== null) recordMutation();
     },
     getRunProgress() {
       if (!usable()) return null;
@@ -583,12 +603,15 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
     },
     setActivation(activation) {
       assertUsable();
-      if (activation === null) statements.deleteActivation.run();
-      else {
+      if (activation === null) {
+        statements.deleteActivation.run();
+        recordMutation();
+      } else {
         requireExactKeys(activation, ["identity", "activatedAt"], "activation");
         requireText(activation.identity, "activation identity");
         requireText(activation.activatedAt, "activation timestamp");
         statements.setActivation.run(activation.identity, activation.activatedAt);
+        recordMutation();
       }
     },
     getActivation() {
@@ -606,7 +629,10 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
     },
     reset() {
       if (usable()) {
-        db.exec("DELETE FROM judgments; DELETE FROM run_progress; DELETE FROM activation;");
+        db.transaction(() => {
+          db.exec("DELETE FROM judgments; DELETE FROM run_progress; DELETE FROM activation;");
+        })();
+        recordMutation();
       }
     },
     close() {
