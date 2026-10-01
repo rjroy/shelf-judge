@@ -603,15 +603,7 @@ export default function RedundancyPage() {
             <h2 id="semantic-heading">Similarity preferences</h2>
             <p>
               These preferences affect semantic comparisons. They are separate from what you approve
-              sending in a single refresh.
-            </p>
-            <p className="redundancy-stage-desc">
-              Status:{" "}
-              <strong>
-                {statusCopy[semanticStatusValue(semantic.status)] ??
-                  semanticStatusValue(semantic.status)}
-              </strong>
-              . A game can have a status even when it has no qualifying neighbor.
+              sending for one refresh.
             </p>
             <label className="redundancy-setting-row">
               <span className="redundancy-setting-label">Use semantic comparisons in scoring</span>

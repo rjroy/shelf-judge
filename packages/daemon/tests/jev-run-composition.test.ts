@@ -369,21 +369,25 @@ describe("Jev run production composition", () => {
   });
 
   test("composes an internal controller from the lifecycle worker/cache without preview transport", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "jev-run-controller-composition-"));
-    const cache = await createJevPairCache(directory);
-    const sources = runtimeSources();
-    sources.storage.loadRedundancySettings = () =>
-      Promise.resolve({
-        enabled: true,
-        stage: "integrated",
-        similarityThreshold: 0.7,
-        maxPenalty: 0.2,
-        componentWeights: { binary: 0, continuous: 0 },
-        minNeighbors: 1,
-        expectedNeighbors: 5,
-      });
+    const originalApiKey = process.env.TYPESAFE_API_KEY;
+    let directory: string | null = null;
+    let cache: JevPairCache | null = null;
     let transportCalls = 0;
     try {
+      delete process.env.TYPESAFE_API_KEY;
+      directory = await mkdtemp(join(tmpdir(), "jev-run-controller-composition-"));
+      cache = await createJevPairCache(directory);
+      const sources = runtimeSources();
+      sources.storage.loadRedundancySettings = () =>
+        Promise.resolve({
+          enabled: true,
+          stage: "integrated",
+          similarityThreshold: 0.7,
+          maxPenalty: 0.2,
+          componentWeights: { binary: 0, continuous: 0 },
+          minNeighbors: 1,
+          expectedNeighbors: 5,
+        });
       const worker = createJevRunWorker({
         storageService: sources.storage,
         predictionService: sources.predictionService,
@@ -416,9 +420,19 @@ describe("Jev run production composition", () => {
       expect(preview.body.providerConfigured).toBe(false);
       expect(preview.body.pairCount).toBe(1);
       expect(transportCalls).toBe(0);
+
+      process.env.TYPESAFE_API_KEY = "composition-test-key";
+      const configuredPreview = await controller!.preview();
+      expect(configuredPreview.status).toBe(200);
+      if (configuredPreview.status !== 200)
+        throw new Error("Expected provider-free configured Run preview");
+      expect(configuredPreview.body.providerConfigured).toBe(true);
+      expect(transportCalls).toBe(0);
     } finally {
-      cache.close();
-      await rm(directory, { recursive: true, force: true });
+      if (originalApiKey === undefined) delete process.env.TYPESAFE_API_KEY;
+      else process.env.TYPESAFE_API_KEY = originalApiKey;
+      cache?.close();
+      if (directory !== null) await rm(directory, { recursive: true, force: true });
     }
   });
 

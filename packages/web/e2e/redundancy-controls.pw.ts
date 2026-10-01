@@ -35,7 +35,7 @@ async function installDaemon(page: Page) {
                 weights: { factual: 7, description: 5, ownerNote: 10 },
                 cachedOwnerNoteUse: false,
               },
-              status: "ready",
+              status: "not-ready",
               migrationNotice: { kind: "jev-cache-v9-to-v10", discardedPairCount: 1 },
             },
           };
@@ -144,6 +144,14 @@ async function installDaemon(page: Page) {
     );
   });
 }
+
+test("aggregate Ready status does not conflict with stale settings status", async ({ page }) => {
+  await installDaemon(page);
+  await page.goto("/redundancy");
+  await expect(page.getByRole("heading", { name: "Similarity preferences" })).toBeVisible();
+  await expect(page.locator(".redundancy-refresh-status")).toContainText("Ready");
+  await expect(page.getByText(/Not ready — factual-only results are shown/)).toHaveCount(0);
+});
 
 test("note consent is opt-in and declining still runs without note text", async ({
   page,
