@@ -199,6 +199,27 @@ Phase 2 implementation and feature remain in progress.
 - Typecheck, browser typecheck, lint, format check, and `git diff --check` passed.
 - Independent source oracle and reviewer accepted the worker.
 
+## Phase 2d11e — Jev Run source adapter
+
+Checkpointed on `design/jev-similarity`, after Phase 2d11d. The overall Phase 2
+implementation and feature remain in progress.
+
+- Added the inactive production `JevRunSourceAdapter`: authoritative source
+  reads and final verification are short coordinator operations, while a
+  complete untargeted prediction capture is computed outside the coordinator.
+- Kept full live source-vector identity, global policy identity, and durable
+  prediction-capture identity separate. `readCurrent` reflects current durable
+  note permission and policy; bounded retries fail closed on source drift.
+- No gateway, provider, route, or runtime wiring was added. No live provider
+  or owner data was accessed.
+
+### Validation evidence for this checkpoint
+
+- Full Bun suite: 3,612 passed, 1 skipped, 0 failed.
+- `bun run typecheck`, `bun run typecheck:browser`, `bun run lint`,
+  `bun run format:check`, and `git diff --check` passed.
+- Independent `bun-typescript-reviewer` accepted the adapter.
+
 ## Phase 2d11c — per-pair Run request and row mapping
 
 Checkpointed on `design/jev-similarity`. The overall Phase 2 implementation
