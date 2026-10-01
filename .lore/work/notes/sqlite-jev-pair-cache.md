@@ -118,3 +118,26 @@ and feature remain in progress.
 - Typecheck and browser checks: passed.
 - Full-project lint and format checks: passed.
 - Independent reviewer accepted P2D10B-1 and P2D10B-2.
+
+## Phase 2d10c — request-local attention and response proof fences
+
+Checkpointed on `design/jev-similarity`, after Phase 2d10b (`2a27604`). The
+overall Phase 2 implementation and feature remain in progress.
+
+- Semantic-enabled attention is request-local and is not reused from persisted
+  cache state. Profile responses neither reuse nor save cache results and take
+  one attention capture per request.
+- Snapshot responses do not take a cache hit or emit ETag/304 behavior for
+  semantic-enabled requests. `resolveWithProof` and snapshot building enforce
+  a same-result fence; response proof is revalidated per caller under the
+  coordinator. A legacy ready table without proof is rejected.
+- Production scored-read wiring, provider integration, and owner-triggered Run
+  are still absent. No provider operation was run; this checkpoint does not
+  claim the Jev cache feature is complete.
+
+### Validation evidence for this checkpoint
+
+- Full Bun test suite: 3,551 passed, 1 skipped.
+- Typecheck and browser checks passed.
+- Full-project lint and format checks passed.
+- Independent reviewer accepted P2D10C-1 and P2D10C-2.

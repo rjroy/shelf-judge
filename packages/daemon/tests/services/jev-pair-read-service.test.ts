@@ -158,6 +158,52 @@ function row(c: Collection, a: DurableGame, b: DurableGame, signal: "C" | "D"): 
 }
 
 describe("Jev pair read adapter", () => {
+  test("proof fence rechecks a captured read against SQLite without exposing source text", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "jev-read-proof-"));
+    dirs.push(dir);
+    const cache = await createJevPairCache(dir);
+    const f = fixture();
+    const rows: JevPairJudgment[] = [];
+    for (let i = 0; i < f.games.length; i++)
+      for (let j = i + 1; j < f.games.length; j++) {
+        rows.push(
+          row(f.collection, f.games[i], f.games[j], "C"),
+          row(f.collection, f.games[i], f.games[j], "D"),
+        );
+      }
+    rows.forEach((item) => cache.upsert(item));
+    const reader = createJevPairReadService(cache);
+
+    const notReady = reader.resolveWithProof(f);
+    expect(notReady.result.status).toBe("not-ready");
+    expect(notReady.isCurrent()).toBe(true);
+
+    const identity = computeJevPairCoverage({ ...f, cache }).identity;
+    cache.setActivation({ identity, activatedAt: "2026-01-01T00:00:00Z" });
+    expect(notReady.isCurrent()).toBe(false);
+
+    const ready = reader.resolveWithProof(f);
+    expect(ready.result.status).toBe("ready");
+    expect(ready.proof).toEqual({ status: "ready", identity });
+    expect(ready.isCurrent()).toBe(true);
+    expect(JSON.stringify(ready.proof)).not.toContain("PRIVATE NOTE");
+    expect(JSON.stringify(ready.proof)).not.toContain("Description");
+    f.games[0].name = "mutated after capture";
+    expect(ready.isCurrent()).toBe(true);
+
+    cache.setActivation({ identity: "different-activation", activatedAt: "2026-01-02T00:00:00Z" });
+    expect(ready.isCurrent()).toBe(false);
+    cache.setActivation({ identity, activatedAt: "2026-01-01T00:00:00Z" });
+    cache.upsert({ ...rows[0], value: 0.8 });
+    expect(ready.isCurrent()).toBe(false);
+
+    const missingDatabase = createJevPairReadService({ ...cache, available: false });
+    const unavailable = missingDatabase.resolveWithProof(f);
+    expect(unavailable.result.status).toBe("not-ready");
+    expect(unavailable.isCurrent()).toBe(true);
+    cache.close();
+  });
+
   test("returns a complete ready numeric table from real SQLite and fails closed for misses/staleness/errors", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-read-"));
     dirs.push(dir);
@@ -183,7 +229,7 @@ describe("Jev pair read adapter", () => {
     expect(ready.table.pairs[0]).toMatchObject({ description: 0.7, ownerNote: 0.4 });
     expect(JSON.stringify(ready)).not.toContain("PRIVATE NOTE");
     expect(JSON.stringify(ready)).not.toContain("Description a");
-    expect(Object.keys(reader)).toEqual(["resolve"]);
+    expect(Object.keys(reader)).toEqual(["resolve", "resolveWithProof"]);
 
     const revoked = {
       ...f,

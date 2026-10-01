@@ -134,6 +134,65 @@ describe("ProfileService", () => {
     });
   });
 
+  test("recomputes without reusing or saving Profile when collection semantic mode is enabled", async () => {
+    const ctx = createTestApp();
+    await ctx.gameService.addGame({ name: "SQLite activation cache game" });
+    const redundancySettings = await ctx.storageService.loadRedundancySettings();
+    await ctx.storageService.saveRedundancySettings({ ...redundancySettings, enabled: true });
+
+    let computations = 0;
+    let freshnessChecks = 0;
+    const service = createProfileService({
+      storageService: ctx.storageService,
+      attentionCandidates: {
+        ...ctx.attentionCandidateService,
+        async ensureFresh() {
+          freshnessChecks += 1;
+          return ctx.attentionCandidateService.ensureFresh();
+        },
+      },
+      displayedFitnessService: {
+        ...ctx.displayedFitnessService,
+        async listGamesFromSnapshot(snapshot, options) {
+          computations += 1;
+          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+      },
+    });
+    const factual = await service.getProfile();
+    expect(factual.status).toBe("available");
+    const cachedFactual = await ctx.storageService.loadProfile();
+    if (!cachedFactual) throw new Error("Expected factual Profile cache");
+    const unchangedRevision = (await ctx.storageService.loadCollection()).revision;
+    expect(computations).toBe(1);
+    expect(freshnessChecks).toBe(2);
+
+    // SQLite semantic activation does not change the collection publication
+    // revision or the projected Profile source identity.
+    const collection = await ctx.storageService.loadCollection();
+    collection.semanticRedundancy.settings.enabled = true;
+    await ctx.storageService.saveCollection(collection);
+    expect((await ctx.storageService.loadCollection()).revision).toBe(unchangedRevision);
+
+    const activated = await service.getProfile();
+    expect(activated.status).toBe("available");
+    expect(computations).toBe(2);
+    expect(freshnessChecks).toBe(3);
+    expect(await ctx.storageService.loadProfile()).toEqual(cachedFactual);
+    if (activated.status !== "available") throw new Error("Expected activated Profile");
+    expect(activated.computedAt).not.toBe(
+      factual.status === "available" ? factual.computedAt : null,
+    );
+
+    // Disabling authoritative collection semantic mode restores exact cache reuse.
+    collection.semanticRedundancy.settings.enabled = false;
+    await ctx.storageService.saveCollection(collection);
+    const disabled = await service.getProfile();
+    expect(disabled).toEqual(factual);
+    expect(computations).toBe(2);
+    expect(freshnessChecks).toBe(4);
+  });
+
   test("projects canonical game image URLs into public attention cards and rebuilds old caches", async () => {
     const ctx = createTestApp();
     await ctx.gameService.addGame({

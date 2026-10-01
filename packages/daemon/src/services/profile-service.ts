@@ -329,6 +329,7 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         let entityPolicy: CollectionProfile["entityPolicy"];
         let fitnessCollection: Collection;
         let fitnessSourceVector: SourceVector | undefined;
+        let semanticModeEnabled = false;
         let redundancySimilarityStatus: "disabled" | "factual" | "not-ready" | "stale" = "disabled";
         try {
           const [collection, config, tournament, predictionSettings, redundancySettings] =
@@ -343,6 +344,7 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
             collection,
             redundancySettings.enabled,
           );
+          semanticModeEnabled = collection.semanticRedundancy?.settings.enabled === true;
           // Keep the private captured collection for snapshot-backed fitness and
           // semantic resolution. The Profile source itself remains projected.
           fitnessCollection = structuredClone(collection);
@@ -378,11 +380,13 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         }
 
         const sourceIdentity = profileSourceIdentity(sources);
-        let stored: ProfileData | null;
-        try {
-          stored = await storageService.loadProfile();
-        } catch (error) {
-          return unavailable(failureKind(error), error);
+        let stored: ProfileData | null = null;
+        if (!semanticModeEnabled) {
+          try {
+            stored = await storageService.loadProfile();
+          } catch (error) {
+            return unavailable(failureKind(error), error);
+          }
         }
         if (
           stored &&
@@ -453,6 +457,51 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
           }).profile as CollectionProfile;
         } catch (error) {
           return unavailable(error instanceof ZodError ? "validation" : "recomputation", error);
+        }
+
+        // Collection source identity intentionally does not include activation state
+        // maintained by the semantic SQLite cache. Until that state is part of the
+        // publication identity, never reuse or publish a Profile in semantic mode.
+        if (semanticModeEnabled) {
+          try {
+            // Keep the canonical source/configuration proof, but do not ask candidate
+            // maintenance for a second request-local artifact: semantic mode may
+            // produce a new evaluatedAt on every ensureFresh call.
+            const [
+              finalCollection,
+              finalConfig,
+              finalTournament,
+              finalPredictionSettings,
+              finalRedundancySettings,
+            ] = await Promise.all([
+              storageService.loadCollection(),
+              storageService.loadConfig(),
+              storageService.loadTournament(),
+              storageService.loadPredictionSettings(),
+              storageService.loadRedundancySettings(),
+            ]);
+            const finalSources = {
+              collection: projectProfileCollectionSource(finalCollection),
+              tournament: finalTournament,
+              predictionSettings: finalPredictionSettings,
+              redundancySettings: finalRedundancySettings,
+            } satisfies ProfileSources;
+            const finalIdentity = profileSourceIdentity(finalSources);
+            if (!sameProfileSourceIdentity(sourceIdentity, finalIdentity))
+              throw new Error("Profile source snapshot changed during computation");
+            if (finalConfig.profileAttentionCardLimit !== cardLimit)
+              throw new Error("Profile configuration changed during computation");
+            if (canonicalJson(finalConfig.profileEntityPolicy) !== canonicalJson(entityPolicy))
+              throw new Error("Profile entity policy changed during computation");
+            if (!sameCandidateSource(artifact.identity, finalIdentity))
+              throw new Error("Attention candidate source changed during computation");
+            return profile;
+          } catch (error) {
+            return unavailable(
+              error instanceof ZodError ? "validation" : failureKind(error),
+              error,
+            );
+          }
         }
 
         try {

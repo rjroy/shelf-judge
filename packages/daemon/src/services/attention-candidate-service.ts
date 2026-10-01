@@ -162,6 +162,24 @@ export interface AttentionCandidateProductionSource extends AttentionCandidateSo
   readonly redundancySettings: RedundancySettings;
 }
 
+export type AttentionCandidateCachePolicy = "persistent" | "request-local";
+
+function productionCachePolicy(source: AttentionCandidateSource): AttentionCandidateCachePolicy {
+  if (
+    !("redundancySettings" in source) ||
+    typeof source.redundancySettings !== "object" ||
+    source.redundancySettings === null ||
+    !("enabled" in source.redundancySettings)
+  )
+    return "persistent";
+  const semantic = source.collection.semanticRedundancy.settings;
+  return source.redundancySettings.enabled &&
+    semantic.enabled &&
+    (semantic.weights.description > 0 || semantic.weights.ownerNote > 0)
+    ? "request-local"
+    : "persistent";
+}
+
 /**
  * Derives persisted reverse-index entries from the same catalog consumed by the
  * oracle. Current rules have only self-local dependencies; dormant-session
@@ -234,7 +252,7 @@ export function createAttentionCandidateProductionSourceLoader(storage: {
         ...identity,
         // The snapshot's semantic input changed from public projection to a private
         // source-vector capture; invalidate artifacts calculated under the old path.
-        calculationVersion: ATTENTION_CANDIDATE_CALCULATION_VERSION + 1,
+        calculationVersion: ATTENTION_CANDIDATE_CALCULATION_VERSION + 2,
         ruleCatalogVersion: ATTENTION_RULE_CATALOG_VERSION,
         dependencyVersion: ATTENTION_RULE_DEPENDENCY_VERSION,
         projectionVersion: PURCHASE_UTILIZATION_PROJECTION_VERSION,
@@ -283,6 +301,7 @@ export function createAttentionCandidateService(
     sourceGeneration: deps.productionStorage?.attentionCandidateSourceGeneration?.bind(
       deps.productionStorage,
     ),
+    cachePolicyForSource: productionCachePolicy,
   });
 }
 
@@ -389,6 +408,10 @@ export interface AttentionCandidateServiceDependencies<
   };
   /** Read-only, process-local source token used only by an already validated cache. */
   readonly sourceGeneration?: () => number;
+  /** Sources with semantic scoring inputs can require request-local recomputation. */
+  readonly cachePolicyForSource?: (
+    source: AttentionCandidateSource,
+  ) => AttentionCandidateCachePolicy;
   /** Test observer for the error intentionally converted to retryable unavailability. */
   readonly onMaintenanceError?: (error: unknown) => void;
   /** Durable disposition reconciliation must finish before candidates can publish. */
@@ -484,13 +507,13 @@ export class AttentionCandidateService<
     if (this.dependencies.recoveryRequired?.()) return { state: "unavailable", retryable: true };
     const cached = this.cached;
     const generation = this.dependencies.sourceGeneration?.();
-    const now = this.dependencies.clock.now();
+    const nowDate = this.dependencies.clock.now();
     if (
       cached !== null &&
       generation !== undefined &&
       cached.generation === generation &&
       (cached.artifact.earliestBoundary === null ||
-        Date.parse(cached.artifact.earliestBoundary) > now.getTime())
+        Date.parse(cached.artifact.earliestBoundary) > nowDate.getTime())
     )
       return { state: "available", artifact: cached.artifact };
     return this.dependencies.coordinator.runExclusive(async () => {
@@ -498,6 +521,20 @@ export class AttentionCandidateService<
         if (this.dependencies.recoveryRequired?.())
           return { state: "unavailable", retryable: true };
         const source = await this.dependencies.loadSource();
+        if (this.cachePolicy(source) === "request-local") {
+          return {
+            state: "available",
+            artifact: await this.maintainLocked(
+              source,
+              null,
+              instant(nowDate),
+              null,
+              true,
+              1,
+              false,
+            ),
+          };
+        }
         const loaded = await this.dependencies.storage.loadAttentionCandidates();
         const artifact = loaded === null ? null : AttentionCandidateArtifactSchema.parse(loaded);
         const now = instant(this.dependencies.clock.now());
@@ -526,6 +563,19 @@ export class AttentionCandidateService<
     return this.dependencies.coordinator.runExclusive(async () => {
       try {
         const source = await this.dependencies.loadSource();
+        if (this.cachePolicy(source) === "request-local")
+          return {
+            state: "available",
+            artifact: await this.maintainLocked(
+              source,
+              null,
+              instant(this.dependencies.clock.now()),
+              null,
+              true,
+              1,
+              false,
+            ),
+          };
         const existing = await this.dependencies.storage.loadAttentionCandidates();
         const now = instant(this.dependencies.clock.now());
         const targets = impact.kind === "games" ? sortedUnique(impact.gameIds) : null;
@@ -562,6 +612,19 @@ export class AttentionCandidateService<
     return this.dependencies.coordinator.runExclusive(async () => {
       try {
         const source = await this.dependencies.loadSource();
+        if (this.cachePolicy(source) === "request-local")
+          return {
+            state: "available",
+            artifact: await this.maintainLocked(
+              source,
+              null,
+              instant(this.dependencies.clock.now()),
+              null,
+              true,
+              1,
+              false,
+            ),
+          };
         const existing = await this.dependencies.storage.loadAttentionCandidates();
         const now = instant(this.dependencies.clock.now());
         const reusable =
@@ -613,6 +676,7 @@ export class AttentionCandidateService<
     requestedTargets: readonly string[] | null,
     forceFull: boolean,
     retries = 1,
+    persist = true,
   ): Promise<AttentionCandidateArtifact> {
     const validExisting =
       existing !== null &&
@@ -644,11 +708,19 @@ export class AttentionCandidateService<
     if (!sameIdentity(source.identity, reread.identity)) {
       if (retries === 0)
         throw new Error("Attention candidate source identity changed during maintenance");
-      return this.maintainLocked(reread, null, now, null, true, retries - 1);
+      return this.maintainLocked(reread, null, now, null, true, retries - 1, persist);
     }
-    await this.dependencies.storage.saveAttentionCandidates(staged);
-    this.publishCache(staged);
+    if (persist) {
+      await this.dependencies.storage.saveAttentionCandidates(staged);
+      this.publishCache(staged);
+    } else {
+      this.cached = null;
+    }
     return staged;
+  }
+
+  private cachePolicy(source: Source): AttentionCandidateCachePolicy {
+    return this.dependencies.cachePolicyForSource?.(source) ?? "persistent";
   }
 
   private publishCache(artifact: AttentionCandidateArtifact): void {

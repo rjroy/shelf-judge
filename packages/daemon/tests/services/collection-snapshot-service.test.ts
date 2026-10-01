@@ -19,6 +19,9 @@ import {
   createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
 import { createCollectionSnapshotService } from "../../src/services/collection-snapshot-service.js";
+import type { CollectionSnapshotSemanticReadInput } from "../../src/services/collection-snapshot-service.js";
+import type { JevPairReadProofFence } from "../../src/services/jev-pair-read-service.js";
+import type { RedundancyPairTable } from "../../src/services/redundancy-engine.js";
 import { createCollectionSnapshotCacheService } from "../../src/services/collection-snapshot-cache-service.js";
 import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
 import { enrichGameWithPurchaseUtilization } from "../../src/services/purchase-utilization-projection.js";
@@ -198,7 +201,12 @@ function setup(
   };
 }
 
-function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
+function parityFixture(
+  stage: RedundancySettings["stage"],
+  enabled = true,
+  resolveSemanticRead?: (input: CollectionSnapshotSemanticReadInput) => JevPairReadProofFence,
+  resolveRedundancyPairTable?: () => RedundancyPairTable | undefined,
+) {
   const now = "2026-02-01T00:00:00.000Z";
   const personalAxis = (id: string, name: string, veto = false): Axis => ({
     id,
@@ -417,6 +425,8 @@ function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
     gameService,
     predictionService,
     purchaseUtilizationService,
+    ...(resolveSemanticRead ? { resolveSemanticRead } : {}),
+    ...(resolveRedundancyPairTable ? { resolveRedundancyPairTable } : {}),
   });
   const snapshotCache = createCollectionSnapshotCacheService({
     builder: snapshotService,
@@ -452,6 +462,118 @@ function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
 }
 
 describe("CollectionSnapshotService", () => {
+  test("semantic snapshot scoring uses one fenced read over the complete prediction capture", async () => {
+    let readInput: CollectionSnapshotSemanticReadInput | undefined;
+    const fixture = parityFixture("integrated", true, (input) => {
+      readInput = input;
+      const identity = {
+        generationId: "semantic-generation",
+        consentEpoch: "1",
+        settingsEpoch: "1:1",
+      };
+      const result = {
+        status: "ready" as const,
+        summary: "Semantic redundancy is ready.",
+        table: {
+          status: "ready" as const,
+          identity,
+          expectedIdentity: identity,
+          weights: { factual: 0.4, description: 0.4, ownerNote: 0.2 },
+          pairs: [],
+        },
+      };
+      return {
+        result,
+        proof: { status: "ready", identity: "semantic-generation" },
+        isCurrent: () => true,
+      };
+    });
+    fixture.collection.semanticRedundancy.settings.enabled = true;
+    fixture.collection.semanticRedundancy.settings.weights.description = 1;
+    const built = await fixture.snapshotService.buildSnapshot();
+    expect(readInput?.predictionCapture).toHaveLength(fixture.collection.games.length);
+    expect(readInput?.predictionCapture.some(({ game }) => game.id === "retired")).toBe(true);
+    expect(built.semanticRead?.status).toBe("verified");
+    expect(
+      built.semanticRead?.status === "verified" &&
+        built.semanticRead.result.status === "ready" &&
+        built.semanticRead.result.table.identity.generationId,
+    ).toBe("semantic-generation");
+    expect(JSON.stringify(built.snapshot)).not.toMatch(
+      /semantic-generation|semanticRedundancy|ownerNote/,
+    );
+    expect(built.semanticRead?.status === "verified" && built.semanticRead.isCurrent()).toBe(true);
+  });
+
+  test("not-ready semantic fallback retains its read fence", async () => {
+    const fixture = parityFixture("integrated", true, () => ({
+      result: { status: "not-ready", summary: "Semantic redundancy is not ready." },
+      proof: { status: "not-ready", summary: "Semantic redundancy is not ready." },
+      isCurrent: () => true,
+    }));
+    fixture.collection.semanticRedundancy.settings.enabled = true;
+    fixture.collection.semanticRedundancy.settings.weights.description = 1;
+    const built = await fixture.snapshotService.buildSnapshot();
+    expect(built.semanticRead?.status).toBe("verified");
+    expect(built.semanticRead?.status === "verified" && built.semanticRead.result.status).toBe(
+      "not-ready",
+    );
+    expect(built.semanticRead?.status === "verified" && built.semanticRead.isCurrent()).toBe(true);
+  });
+
+  test("legacy ready pair tables cannot bypass semantic read proof when semantic settings are disabled", async () => {
+    let legacyResolverCalls = 0;
+    let semanticProviderCalls = 0;
+    const fixture = parityFixture(
+      "integrated",
+      true,
+      () => {
+        semanticProviderCalls += 1;
+        throw new Error(
+          "Semantic provider should not be called when semantic settings are disabled",
+        );
+      },
+      () => {
+        legacyResolverCalls += 1;
+        const identity = {
+          generationId: "unfenced-generation",
+          consentEpoch: "1",
+          settingsEpoch: "1:1",
+        };
+        return {
+          status: "ready",
+          identity,
+          expectedIdentity: identity,
+          weights: { factual: 1, description: 0, ownerNote: 0 },
+          pairs: [],
+        };
+      },
+    );
+
+    const built = await fixture.snapshotService.buildSnapshot();
+
+    expect(fixture.collection.semanticRedundancy.settings.enabled).toBe(false);
+    expect(legacyResolverCalls).toBe(1);
+    expect(semanticProviderCalls).toBe(0);
+    expect(built.semanticRead).toEqual({ status: "not-used" });
+    expect(built.snapshot.redundancyMode).toBe("off");
+    expect(built.snapshot.unavailableFeatures).toContainEqual({
+      feature: "redundancy",
+      reason: "Semantic redundancy read proof is unavailable",
+    });
+    for (const row of built.snapshot.games) {
+      expect(row.redundancySimilarityInfo.status).not.toBe("ready");
+      expect(row.redundancySimilarityInfo.generationId).toBeNull();
+      expect(row.ordinary.score?.redundancySimilarityInfo?.status).not.toBe("ready");
+      expect(row.ordinary.score?.redundancySimilarityInfo?.generationId ?? null).toBeNull();
+      if (row.predicted.availability === "available") {
+        expect(row.predicted.score?.redundancySimilarityInfo?.status).not.toBe("ready");
+        expect(row.predicted.score?.redundancySimilarityInfo?.generationId ?? null).toBeNull();
+      }
+    }
+    expect(JSON.stringify(built.snapshot)).not.toContain("unfenced-generation");
+  });
+
   test("semantic publication remains not-ready while factual scoring is shared by list and snapshot", async () => {
     const fixture = parityFixture("integrated", true);
     fixture.redundancySettings.similarityThreshold = 1.01;

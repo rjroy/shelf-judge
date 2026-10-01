@@ -245,6 +245,78 @@ function setup(initial: AttentionCandidateArtifact | null = null) {
 }
 
 describe("AttentionCandidateService core", () => {
+  test("semantic candidate artifacts are recomputed request-locally across all entry points", async () => {
+    const factual = source();
+    const semantic = {
+      ...factual,
+      collection: {
+        ...factual.collection,
+        semanticRedundancy: {
+          ...factual.collection.semanticRedundancy,
+          settings: {
+            ...factual.collection.semanticRedundancy.settings,
+            enabled: true,
+            weights: { factual: 1, description: 1, ownerNote: 0 },
+          },
+        },
+      },
+    } satisfies AttentionCandidateSource;
+    let current = factual;
+    let stored: AttentionCandidateArtifact | null = null;
+    let oracleCalls = 0;
+    let saves = 0;
+    let generation = 0;
+    const service = new AttentionCandidateService({
+      coordinator: { runExclusive: (operation) => operation() },
+      clock: { now: () => new Date("2026-01-02T00:00:00.000Z") },
+      sourceGeneration: () => generation,
+      cachePolicyForSource: (value) =>
+        value.collection.semanticRedundancy.settings.enabled &&
+        (value.collection.semanticRedundancy.settings.weights.description > 0 ||
+          value.collection.semanticRedundancy.settings.weights.ownerNote > 0)
+          ? "request-local"
+          : "persistent",
+      loadSource: () => Promise.resolve(current),
+      storage: {
+        loadAttentionCandidates: () => Promise.resolve(stored),
+        saveAttentionCandidates: (value) => {
+          saves += 1;
+          stored = value;
+          return Promise.resolve();
+        },
+        discardAttentionCandidates: () => Promise.resolve(),
+      },
+      oracle: {
+        evaluate: () => {
+          oracleCalls += 1;
+          return Promise.resolve({ evaluations: [], presentations: new Map() });
+        },
+      },
+    });
+
+    // Factual mode retains its persistent warm/cache path.
+    expect((await service.ensureFresh()).state).toBe("available");
+    expect({ oracleCalls, saves }).toEqual({ oracleCalls: 1, saves: 1 });
+    current = semantic;
+    generation += 1;
+    expect((await service.ensureFresh()).state).toBe("available");
+    expect((await service.ensureFresh()).state).toBe("available");
+    expect({ oracleCalls, saves }).toEqual({ oracleCalls: 3, saves: 1 });
+
+    // Semantic settings ignore any stored artifact, including a stale disk artifact.
+    stored = artifact(factual);
+    expect((await service.maintain({ kind: "global", reason: "redundancy" })).state).toBe(
+      "available",
+    );
+    expect(
+      (await service.maintainAfterCollectionCommit({ kind: "global", reason: "recovery" })).state,
+    ).toBe("available");
+    expect({ oracleCalls, saves, storedIdentity: stored.identity }).toMatchObject({
+      oracleCalls: 5,
+      saves: 1,
+      storedIdentity: factual.identity,
+    });
+  });
   test("valid non-due cache hit neither evaluates nor saves", async () => {
     const value = source();
     const fixture = setup(artifact(value));

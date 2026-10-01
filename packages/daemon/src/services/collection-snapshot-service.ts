@@ -32,6 +32,29 @@ import type { SourceVector } from "./source-vector.js";
 import { createCollectionSnapshotTimePolicy } from "./collection-snapshot-time-policy.js";
 import type { RedundancyPairTable } from "./redundancy-engine.js";
 import { canonicalSha256 } from "./profile-source-coordinator.js";
+import type { JevPairReadProofFence } from "./jev-pair-read-service.js";
+import type { JevPredictionCaptureIdentity } from "./jev-pair-coverage.js";
+
+export interface CollectionSnapshotSemanticReadInput {
+  /** Complete prediction capture, including null, vetoed, and nonpositive scores. */
+  predictionCapture: readonly GameWithScore[];
+  collection: Collection;
+  tournament: TournamentData;
+  predictionSettings: PredictionSettings;
+  redundancySettings: RedundancySettings;
+  factualWeights: RedundancySettings["componentWeights"];
+  captureIdentity: JevPredictionCaptureIdentity;
+  sourceVector: SourceVector;
+}
+
+export interface CollectionSnapshotBuildResult {
+  snapshot: CollectionSnapshot;
+  sourceVector: SourceVector;
+  evaluatedAtMs: number;
+  expiresAtMs: number | null;
+  /** Internal writer evidence only; never part of the public snapshot JSON. */
+  semanticRead?: { status: "not-used" } | ({ status: "verified" } & JevPairReadProofFence);
+}
 
 interface CapturedInputs {
   sourceVector: SourceVector;
@@ -56,12 +79,7 @@ export class CollectionSnapshotUnavailableError extends Error {
 
 export interface CollectionSnapshotService {
   getSnapshot(): Promise<CollectionSnapshot>;
-  buildSnapshot(): Promise<{
-    snapshot: CollectionSnapshot;
-    sourceVector: SourceVector;
-    evaluatedAtMs: number;
-    expiresAtMs: number | null;
-  }>;
+  buildSnapshot(): Promise<CollectionSnapshotBuildResult>;
 }
 
 export interface CollectionSnapshotServiceDeps {
@@ -83,6 +101,8 @@ export interface CollectionSnapshotServiceDeps {
     /** Captured authoritative vector used to validate publication freshness. */
     sourceVector?: SourceVector;
   }) => RedundancyPairTable | undefined;
+  /** Production semantic adapter. A single fenced read supplies both status and pair table. */
+  resolveSemanticRead?: (input: CollectionSnapshotSemanticReadInput) => JevPairReadProofFence;
 }
 
 function errorReason(error: unknown): string {
@@ -366,19 +386,46 @@ export function createCollectionSnapshotService(
 
       let ordinaryDisplay = ordinary;
       let predictedDisplay = predicted;
+      let semanticRead: CollectionSnapshotBuildResult["semanticRead"] = { status: "not-used" };
       let redundancyMode: "off" | "annotation" | "integrated" = input.redundancySettings?.enabled
         ? input.redundancySettings.stage
         : "off";
       if (input.redundancySettings?.enabled && predicted && input.predictionSettings) {
         try {
-          const adjusted = withRedundancyAdjustmentsForVariants(
-            ordinary.filter((entry) => entry.game.ownership !== "previously-owned"),
-            predicted.filter((entry) => entry.game.ownership !== "previously-owned"),
-            input.redundancySettings,
-            input.collection,
-            input.tournament,
-            predictedCandidates,
-            deps.resolveRedundancyPairTable?.({
+          const semanticConfigured =
+            input.collection.semanticRedundancy?.settings.enabled === true &&
+            (input.collection.semanticRedundancy.settings.weights.description > 0 ||
+              input.collection.semanticRedundancy.settings.weights.ownerNote > 0);
+          let pairTable: RedundancyPairTable | undefined;
+          let similarityStatus = input.redundancySimilarityStatus ?? "factual";
+          if (deps.resolveSemanticRead && semanticConfigured) {
+            const fence = deps.resolveSemanticRead({
+              predictionCapture: predicted,
+              collection: input.collection,
+              tournament: input.tournament,
+              predictionSettings: input.predictionSettings,
+              redundancySettings: input.redundancySettings,
+              factualWeights: input.redundancySettings.componentWeights,
+              captureIdentity: {
+                sourceVectorIdentity: canonicalSha256(input.sourceVector),
+                tournamentIdentity: canonicalSha256(input.tournament),
+                predictionCaptureIdentity: canonicalSha256(predicted),
+              },
+              sourceVector: input.sourceVector,
+            });
+            if (
+              !fence ||
+              typeof fence.isCurrent !== "function" ||
+              !fence.proof ||
+              fence.proof.status !== fence.result.status
+            ) {
+              throw new Error("Semantic redundancy read proof is unavailable");
+            }
+            semanticRead = { status: "verified", ...fence };
+            if (fence.result.status === "ready") pairTable = fence.result.table;
+            else similarityStatus = fence.result.status;
+          } else {
+            pairTable = deps.resolveRedundancyPairTable?.({
               universe: predictedCandidates.filter(
                 ({ score }) => score !== null && !score.vetoed && score.score > 0,
               ),
@@ -388,8 +435,21 @@ export function createCollectionSnapshotService(
               predictionSettings: input.predictionSettings,
               predictionSettingsHash: canonicalSha256(input.predictionSettings),
               sourceVector: input.sourceVector,
-            }),
-            input.redundancySimilarityStatus ?? "factual",
+            });
+            // The old test seam cannot authorize a dynamic semantic result: it carries no read fence.
+            if (pairTable?.status === "ready") {
+              throw new Error("Semantic redundancy read proof is unavailable");
+            }
+          }
+          const adjusted = withRedundancyAdjustmentsForVariants(
+            ordinary.filter((entry) => entry.game.ownership !== "previously-owned"),
+            predicted.filter((entry) => entry.game.ownership !== "previously-owned"),
+            input.redundancySettings,
+            input.collection,
+            input.tournament,
+            predictedCandidates,
+            pairTable,
+            similarityStatus,
           );
           for (const entry of [...adjusted.ordinary, ...adjusted.predicted]) {
             if (entry.score !== null) FitnessResultResponseSchema.parse(entry.score);
@@ -569,7 +629,13 @@ export function createCollectionSnapshotService(
         ),
       });
       await stillCurrent(input.token, input.sourceVector);
-      return { snapshot, sourceVector: input.sourceVector, evaluatedAtMs, expiresAtMs };
+      return {
+        snapshot,
+        sourceVector: input.sourceVector,
+        evaluatedAtMs,
+        expiresAtMs,
+        semanticRead,
+      };
     },
     async getSnapshot() {
       return (await this.buildSnapshot()).snapshot;

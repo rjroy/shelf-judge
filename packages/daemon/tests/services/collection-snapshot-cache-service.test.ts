@@ -4,6 +4,7 @@ import { createSourceVectorService } from "../../src/services/source-vector.js";
 import { CollectionSnapshotUnavailableError } from "../../src/services/collection-snapshot-service.js";
 import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
 import { createCollectionSnapshotCacheService } from "../../src/services/collection-snapshot-cache-service.js";
+import type { CollectionSnapshotBuildResult } from "../../src/services/collection-snapshot-service.js";
 import { createCollectionSnapshotRoutes } from "../../src/routes/collection-snapshot.js";
 
 const BASE_TIME = Date.UTC(2026, 0, 1);
@@ -48,6 +49,9 @@ function fixture(
     build?: () => Promise<CollectionSnapshot>;
     expiresAtMs?: number | null;
     serialize?: (snapshot: CollectionSnapshot) => string;
+    semanticRead?:
+      | CollectionSnapshotBuildResult["semanticRead"]
+      | (() => CollectionSnapshotBuildResult["semanticRead"]);
   } = {},
 ) {
   const vectorService = createSourceVectorService();
@@ -61,7 +65,12 @@ function fixture(
       shelfConfig: 1,
     },
   );
-  const storage = { sourceVector: () => vectorService.read() };
+  let semanticEnabled = false;
+  const storage = {
+    sourceVector: () => vectorService.read(),
+    loadCollection: () =>
+      Promise.resolve({ semanticRedundancy: { settings: { enabled: semanticEnabled } } }),
+  };
   let now = BASE_TIME;
   let builds = 0;
   let serializations = 0;
@@ -81,6 +90,14 @@ function fixture(
         snapshot,
         sourceVector,
         evaluatedAtMs,
+        ...(options.semanticRead === undefined
+          ? {}
+          : {
+              semanticRead:
+                typeof options.semanticRead === "function"
+                  ? options.semanticRead()
+                  : options.semanticRead,
+            }),
         expiresAtMs:
           options.expiresAtMs != null && evaluatedAtMs < options.expiresAtMs
             ? options.expiresAtMs
@@ -115,6 +132,9 @@ function fixture(
     },
     setStatus(value: "complete" | "degraded") {
       nextStatus = value;
+    },
+    setSemanticEnabled(value: boolean) {
+      semanticEnabled = value;
     },
   };
 }
@@ -195,6 +215,139 @@ describe("CollectionSnapshotCacheService", () => {
     });
     expect(afterEdit.status).toBe(200);
     expect(afterEdit.headers.get("etag")).not.toBe(oldEtag);
+  });
+
+  test("semantic redundancy activation bypasses cache and validators without changing the source vector", async () => {
+    const f = fixture({
+      build: () => {
+        const snapshot = makeSnapshot();
+        snapshot.redundancyMode = "integrated";
+        return Promise.resolve(snapshot);
+      },
+    });
+    const factual = await f.route.request("/collection/snapshot");
+    const factualEtag = factual.headers.get("etag")!;
+    const unchanged = await f.route.request("/collection/snapshot", {
+      headers: { "If-None-Match": factualEtag },
+    });
+    expect(unchanged.status).toBe(304);
+
+    const token = f.vector.read().changeToken;
+    f.setSemanticEnabled(true);
+    const enabled = await f.route.request("/collection/snapshot", {
+      headers: { "If-None-Match": factualEtag },
+    });
+    expect(enabled.status).toBe(200);
+    expect(enabled.headers.get("cache-control")).toBe("no-store");
+    expect(enabled.headers.get("etag")).toBeNull();
+    expect((JSON.parse(await enabled.text()) as { redundancyMode: string }).redundancyMode).toBe(
+      "integrated",
+    );
+    expect(f.vector.read().changeToken).toBe(token);
+
+    const enabledAgain = await f.cache.resolve(factualEtag);
+    expect(enabledAgain.status).toBe(200);
+    expect(enabledAgain.cacheable).toBe(false);
+    expect(enabledAgain.etag).toBeNull();
+    expect(f.counts().builds).toBe(3);
+
+    f.setSemanticEnabled(false);
+    const factualAgain = await f.cache.resolve();
+    expect(factualAgain.cacheable).toBe(true);
+    expect((await f.cache.resolve(factualAgain.etag)).status).toBe(304);
+    expect(f.counts().builds).toBe(4);
+  });
+
+  test("an activation during an in-flight build discards the old-mode result", async () => {
+    let unblock!: () => void;
+    let firstBuild = true;
+    const f = fixture({
+      build: async () => {
+        if (firstBuild) {
+          firstBuild = false;
+          await new Promise<void>((resolve) => {
+            unblock = resolve;
+          });
+        }
+        const snapshot = makeSnapshot();
+        snapshot.redundancyMode = "integrated";
+        return snapshot;
+      },
+    });
+    const pending = f.cache.resolve();
+    await f.waitForBuild();
+    f.setSemanticEnabled(true);
+    unblock();
+    const result = await pending;
+    expect(result.status).toBe(200);
+    expect(result.cacheable).toBe(false);
+    expect(result.etag).toBeNull();
+    expect(f.counts().builds).toBe(2);
+  });
+
+  test("semantic read proof is checked independently for original and joined callers", async () => {
+    let release!: () => void;
+    let initial = true;
+    let firstProofCurrent = true;
+    let proofChecks = 0;
+    let buildNumber = 0;
+    const f = fixture({
+      semanticRead: () => {
+        const thisBuild = ++buildNumber;
+        return {
+          status: "verified",
+          result: { status: "not-ready", summary: "not ready" },
+          proof: { status: "not-ready", summary: "not ready" },
+          isCurrent: () => {
+            proofChecks += 1;
+            return thisBuild > 1 || firstProofCurrent;
+          },
+        };
+      },
+      build: async () => {
+        if (initial) {
+          initial = false;
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+        return makeSnapshot();
+      },
+    });
+    f.setSemanticEnabled(true);
+    const original = f.cache.resolve();
+    await f.waitForBuild();
+    const joined = f.cache.resolve();
+    // The original build's read is stale even though the source vector is unchanged.
+    firstProofCurrent = false;
+    release();
+    const [a, b] = await Promise.all([original, joined]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(a.etag).toBeNull();
+    expect(b.etag).toBeNull();
+    expect(a.cacheable).toBe(false);
+    expect(b.cacheable).toBe(false);
+    expect(proofChecks).toBeGreaterThanOrEqual(2);
+    expect(f.counts().builds).toBeGreaterThanOrEqual(2);
+  });
+
+  test("semantic proof changes are bounded to unavailable instead of returning stale data", async () => {
+    let checks = 0;
+    const f = fixture({
+      semanticRead: () => ({
+        status: "verified",
+        result: { status: "not-ready", summary: "not ready" },
+        proof: { status: "not-ready", summary: "not ready" },
+        isCurrent: () => {
+          checks += 1;
+          return false;
+        },
+      }),
+    });
+    f.setSemanticEnabled(true);
+    await expectRejected(f.cache.resolve(), "changed repeatedly");
+    expect(checks).toBe(2);
   });
 
   test("each revisioned source, collection identity, and a new process epoch produce a new validator", async () => {

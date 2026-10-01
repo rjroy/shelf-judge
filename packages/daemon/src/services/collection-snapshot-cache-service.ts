@@ -1,15 +1,16 @@
 import type { CollectionSnapshot } from "@shelf-judge/shared";
 import { canonicalSha256 } from "./profile-source-coordinator.js";
 import { createLogger, type Logger } from "./logger.js";
-import { CollectionSnapshotUnavailableError } from "./collection-snapshot-service.js";
+import {
+  CollectionSnapshotUnavailableError,
+  type CollectionSnapshotBuildResult,
+} from "./collection-snapshot-service.js";
 import type { SourceVector } from "./source-vector.js";
 
-export interface BuiltCollectionSnapshot {
-  snapshot: CollectionSnapshot;
-  sourceVector: SourceVector;
-  evaluatedAtMs: number;
-  expiresAtMs: number | null;
-}
+export type BuiltCollectionSnapshot = Pick<
+  CollectionSnapshotBuildResult,
+  "snapshot" | "sourceVector" | "evaluatedAtMs" | "expiresAtMs" | "semanticRead"
+>;
 
 export interface CollectionSnapshotBuilder {
   buildSnapshot(): Promise<BuiltCollectionSnapshot>;
@@ -17,6 +18,7 @@ export interface CollectionSnapshotBuilder {
 
 export interface CollectionSnapshotCacheStorage {
   sourceVector?(): SourceVector | undefined;
+  loadCollection?(): Promise<{ semanticRedundancy?: { settings?: { enabled?: boolean } } }>;
 }
 
 export interface CollectionSnapshotCacheCoordinator {
@@ -55,6 +57,7 @@ interface CacheEntry {
 }
 
 interface BuildFlight {
+  semanticEnabled: boolean;
   promise: Promise<CompletedBuild>;
   resolve(value: CompletedBuild): void;
   reject(error: unknown): void;
@@ -65,6 +68,8 @@ interface CompletedBuild {
   sourceVector: SourceVector;
   evaluatedAtMs: number;
   expiresAtMs: number | null;
+  semanticEnabled: boolean;
+  semanticRead: BuiltCollectionSnapshot["semanticRead"];
 }
 
 type Reservation =
@@ -83,14 +88,19 @@ export function createCollectionSnapshotCacheService(
   let entry: CacheEntry | null = null;
   let flight: BuildFlight | null = null;
 
-  function createFlight(): BuildFlight {
+  function createFlight(semanticEnabled: boolean): BuildFlight {
     let resolve!: (value: CompletedBuild) => void;
     let reject!: (error: unknown) => void;
     const promise = new Promise<CompletedBuild>((res, rej) => {
       resolve = res;
       reject = rej;
     });
-    return { promise, resolve, reject };
+    return { semanticEnabled, promise, resolve, reject };
+  }
+
+  async function semanticEnabled(): Promise<boolean> {
+    const collection = await deps.storageService.loadCollection?.();
+    return collection?.semanticRedundancy?.settings?.enabled === true;
   }
 
   function isUsable(candidate: CacheEntry | null, current: SourceVector | undefined, now: number) {
@@ -130,28 +140,33 @@ export function createCollectionSnapshotCacheService(
   async function reserve(ifNoneMatch?: string | null): Promise<Reservation> {
     return deps.coordinator.runExclusive(async () => {
       await Promise.resolve();
+      const semanticIsEnabled = await semanticEnabled();
       const current = deps.storageService.sourceVector?.();
       const now = clock.now();
-      if (isUsable(entry, current, now)) {
+      if (!semanticIsEnabled && isUsable(entry, current, now)) {
         return { kind: "hit", decision: decisionForEntry(entry!, ifNoneMatch) };
       }
-      if (entry) {
+      if (entry && (semanticIsEnabled || !isUsable(entry, current, now))) {
         logger.log("collection snapshot cache invalidation", {
           outcome: "invalidated",
           cachedChangeToken: entry.sourceVector.changeToken,
           currentChangeToken: current?.changeToken ?? null,
-          reason: !current?.available ? "sources-unavailable" : "source-or-time-mismatch",
+          reason: semanticIsEnabled
+            ? "semantic-redundancy-enabled"
+            : !current?.available
+              ? "sources-unavailable"
+              : "source-or-time-mismatch",
         });
         entry = null;
       }
-      if (flight) {
+      if (flight && flight.semanticEnabled === semanticIsEnabled) {
         logger.log("collection snapshot cache miss", {
           outcome: "joined-in-flight",
           currentChangeToken: current?.changeToken ?? null,
         });
         return { kind: "join", flight };
       }
-      const created = createFlight();
+      const created = createFlight(semanticIsEnabled);
       flight = created;
       logger.log("collection snapshot cache miss", {
         outcome: "build-reserved",
@@ -169,7 +184,13 @@ export function createCollectionSnapshotCacheService(
       const serializedBody = serialize(built.snapshot);
       const result = await deps.coordinator.runExclusive(async (): Promise<CompletedBuild> => {
         await Promise.resolve();
+        const semanticIsEnabled = await semanticEnabled();
         const current = deps.storageService.sourceVector?.();
+        if (semanticIsEnabled !== buildFlight.semanticEnabled) {
+          throw new CollectionSnapshotUnavailableError(
+            "Collection snapshot semantic settings changed before publication",
+          );
+        }
         if (!sameSourceVector(built.sourceVector, current)) {
           logger.warn("collection snapshot cache build discarded", {
             outcome: "source-changed",
@@ -191,6 +212,8 @@ export function createCollectionSnapshotCacheService(
             outcome: "time-changed",
             evaluatedAtMs: built.evaluatedAtMs,
             expiresAtMs: built.expiresAtMs,
+            semanticEnabled: semanticIsEnabled,
+            semanticRead: built.semanticRead,
             now,
           });
           throw new CollectionSnapshotUnavailableError(
@@ -216,6 +239,31 @@ export function createCollectionSnapshotCacheService(
             sourceVector: built.sourceVector,
             evaluatedAtMs: built.evaluatedAtMs,
             expiresAtMs: built.expiresAtMs,
+            semanticEnabled: semanticIsEnabled,
+            semanticRead: built.semanticRead,
+          };
+        }
+        if (semanticIsEnabled) {
+          if (flight === buildFlight) flight = null;
+          logger.log("collection snapshot cache build completed", {
+            outcome: "semantic-redundancy-no-store",
+            gameCount: built.snapshot.games.length,
+            bytes: Buffer.byteLength(serializedBody),
+          });
+          return {
+            decision: {
+              status: 200,
+              body: serializedBody,
+              etag: null,
+              cacheable: false,
+              snapshotStatus: "complete",
+              gameCount: built.snapshot.games.length,
+            },
+            sourceVector: built.sourceVector,
+            evaluatedAtMs: built.evaluatedAtMs,
+            expiresAtMs: built.expiresAtMs,
+            semanticEnabled: true,
+            semanticRead: built.semanticRead,
           };
         }
         const etag = createSnapshotEtag(built);
@@ -247,6 +295,8 @@ export function createCollectionSnapshotCacheService(
           sourceVector: built.sourceVector,
           evaluatedAtMs: built.evaluatedAtMs,
           expiresAtMs: built.expiresAtMs,
+          semanticEnabled: semanticIsEnabled,
+          semanticRead: built.semanticRead,
         };
       });
       // Publication/removal is atomic with source validation; resolve outside the
@@ -283,9 +333,13 @@ export function createCollectionSnapshotCacheService(
         }
         const decision = await deps.coordinator.runExclusive(async () => {
           await Promise.resolve();
+          const semanticIsEnabled = await semanticEnabled();
+          // Read the vector only after the authoritative semantic setting has
+          // settled; loading it can cross an activation/commit boundary.
           const current = deps.storageService.sourceVector?.();
           const now = clock.now();
           if (
+            semanticIsEnabled !== completed.semanticEnabled ||
             !sameSourceVector(completed.sourceVector, current) ||
             !freshAt(completed.evaluatedAtMs, completed.expiresAtMs, now)
           ) {
@@ -298,9 +352,31 @@ export function createCollectionSnapshotCacheService(
             });
             return null;
           }
+          if (
+            completed.semanticEnabled &&
+            completed.semanticRead?.status !== "verified" &&
+            hasReadySemanticData(completed.decision.body)
+          ) {
+            throw new CollectionSnapshotUnavailableError(
+              "Semantic snapshot result has no current read proof",
+            );
+          }
+          if (
+            completed.semanticEnabled &&
+            completed.semanticRead?.status === "verified" &&
+            !completed.semanticRead.isCurrent()
+          ) {
+            logger.warn("collection snapshot semantic result superseded", {
+              outcome: "retry",
+              proofStatus: completed.semanticRead.proof.status,
+              currentChangeToken: current?.changeToken ?? null,
+            });
+            return null;
+          }
           if (completed.decision.snapshotStatus === "degraded") {
             return completed.decision;
           }
+          if (completed.semanticEnabled) return completed.decision;
           if (!current?.available || !entry || !sameSourceVector(entry.sourceVector, current)) {
             return null;
           }
@@ -313,6 +389,20 @@ export function createCollectionSnapshotCacheService(
       );
     },
   };
+}
+
+function hasReadySemanticData(body: string | null): boolean {
+  if (body === null) return false;
+  try {
+    const snapshot = JSON.parse(body) as {
+      games?: Array<{ redundancySimilarityInfo?: { status?: unknown } }>;
+    };
+    return (
+      snapshot.games?.some((game) => game.redundancySimilarityInfo?.status === "ready") ?? false
+    );
+  } catch {
+    return false;
+  }
 }
 
 function freshAt(evaluatedAtMs: number, expiresAtMs: number | null, now: number): boolean {
