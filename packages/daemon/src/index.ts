@@ -41,8 +41,81 @@ import { createSemanticRedundancyStateService } from "./services/semantic-redund
 import { openJevPairCacheLifecycle } from "./services/jev-pair-cache-lifecycle.js";
 import { purgeRevokedOwnerNoteCache } from "./services/jev-owner-note-revocation.js";
 import { createJevProductionSemanticRead } from "./services/jev-production-read.js";
+import { createJevGateway } from "./services/jev/jev-gateway.js";
+import type { JevGatewayOptions } from "./services/jev/jev-gateway.js";
+import { JevRunService } from "./services/jev-run-service.js";
+import { createJevRunSourceAdapter } from "./services/jev-run-source-adapter.js";
+import type { JevPairCache } from "./services/jev-pair-cache-service.js";
+import type { StorageService } from "./services/storage-service.js";
+import type { PredictionService } from "./services/prediction-service.js";
 
 const logger = createLogger("daemon");
+
+/** Creates an explicit-run worker only around the lifecycle-owned usable cache. */
+export function createJevRunWorker(options: {
+  storageService: StorageService;
+  predictionService: PredictionService;
+  cache: JevPairCache | null;
+  /** Test transport seam only; production uses global fetch and the gateway's configured environment key. */
+  fetch?: JevGatewayOptions["fetch"];
+  gatewayLogger?: Pick<typeof logger, "log" | "warn" | "error">;
+}): JevRunService | null {
+  const { storageService, predictionService, cache } = options;
+  if (!cache?.available) return null;
+  if (!predictionService.listGamesWithPredictionsFromSnapshot)
+    throw new Error("Complete snapshot prediction is unavailable");
+  const snapshotPrediction =
+    predictionService.listGamesWithPredictionsFromSnapshot.bind(predictionService);
+  const sourceAdapter = createJevRunSourceAdapter({
+    storageService,
+    predictionService: {
+      listGamesWithPredictionsFromSnapshot: (collection, tournament, settings, targetGameIds) =>
+        snapshotPrediction(collection, tournament, settings, targetGameIds),
+    },
+  });
+  return new JevRunService({
+    storageService,
+    cache,
+    ...sourceAdapter,
+    // This factory runs once per explicit startRun, so the gateway's request and
+    // reported-token budgets are fresh for each separately authorized execution.
+    createGateway: (admitAndDispatch) =>
+      createJevGateway({
+        admitAndDispatch,
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+        logger: options.gatewayLogger ?? createLogger("jev-gateway"),
+      }),
+  });
+}
+
+/** Startup reconciliation is cache-only and deliberately never starts or constructs a gateway. */
+export async function recoverJevRunOnStartup(
+  service: Pick<JevRunService, "reconcileInterruptedProgress"> | null,
+  startupLogger: Pick<typeof logger, "log" | "error"> = logger,
+): Promise<void> {
+  startupLogger.log("Jev run recovery started", { trigger: "startup" });
+  if (!service) {
+    startupLogger.log("Jev run recovery skipped", {
+      trigger: "startup",
+      outcome: "no-usable-cache-worker",
+    });
+    return;
+  }
+  try {
+    const progress = await service.reconcileInterruptedProgress();
+    startupLogger.log("Jev run recovery completed", {
+      trigger: "startup",
+      state: progress?.state ?? "none",
+      outcome: "reconciled",
+    });
+  } catch (error) {
+    startupLogger.error("Jev run recovery failed", {
+      trigger: "startup",
+      outcome: "failed",
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
+}
 
 export async function recoverAttentionCandidatesOnStartup(
   attentionCandidates: AttentionCandidateMaintenanceRecovery,
@@ -314,6 +387,25 @@ export async function main() {
         error: toErrorMessage(error),
       });
     }
+    let jevRunWorker: JevRunService | null = null;
+    try {
+      jevRunWorker = createJevRunWorker({
+        storageService,
+        predictionService,
+        cache: jevPairCache,
+      });
+    } catch (error) {
+      // Jev is derived and optional; a missing source adapter must not block
+      // factual daemon reads. No gateway is created until an explicit Run.
+      logger.error("Jev run worker composition failed", {
+        trigger: "startup",
+        outcome: "unavailable",
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+    await recoverJevRunOnStartup(jevRunWorker, logger);
+    // Kept intentionally inactive until an approved explicit Run route is wired.
+    void jevRunWorker;
     await recoverAttentionCandidatesOnStartup(attentionCandidateRecovery, logger);
 
     const profileService = createProfileService({

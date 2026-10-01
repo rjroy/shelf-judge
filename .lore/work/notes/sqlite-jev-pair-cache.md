@@ -163,6 +163,26 @@ Checkpointed on `design/jev-similarity`, after Phase 2d10c. The overall Phase
   `bun run format:check`, and `git diff --check` passed.
 - Independent `bun-typescript-reviewer` accepted the implementation.
 
+## Phase 2d11f — daemon Jev Run composition
+
+Checkpointed on `design/jev-similarity`, after Phase 2d11e. The overall Phase 2
+implementation and feature remain in progress.
+
+- The daemon composes an inactive Jev Run worker only when the lifecycle-owned
+  SQLite cache is available. The reviewed source adapter and an admission-wired
+  gateway factory are connected; a fresh gateway is constructed per explicit
+  run.
+- After source-vector hydration, startup reconciliation changes persisted
+  `running` progress to `interrupted` without constructing a gateway or
+  inferring/retrying work. No route or automatic inference was added.
+- No live provider calls were made and no owner data was accessed.
+
+### Validation evidence for this checkpoint
+
+- Full Bun suite: 3,615 passed, 1 skipped, 0 failed.
+- Typecheck, browser typecheck, lint, format check, and `git diff --check` passed.
+- Independent reviewer accepted the implementation.
+
 ## Phase 2d11d — fenced sequential Jev Run worker
 
 Checkpointed on `design/jev-similarity`, after Phase 2d11a–c. The overall
