@@ -183,11 +183,8 @@ export function createGameDetailSnapshot(
     collectionRevision: collection.revision,
     game: projectGameDetail(game),
     collection: projectProfileCollectionSource(collection),
-    redundancySimilarityStatus: collection.semanticRedundancy.settings.enabled
-      ? collection.semanticRedundancy.publishedGeneration
-        ? "stale"
-        : "not-ready"
-      : null,
+    // Legacy v9 published generations are quarantined during the v10 cutover.
+    redundancySimilarityStatus: collection.semanticRedundancy.settings.enabled ? "not-ready" : null,
     ...(sources === undefined
       ? {}
       : {

@@ -3,6 +3,7 @@ import {
   CollectionProfileResultSchema,
   CURRENT_PROFILE_ALGORITHM_VERSION,
   ProfileDataSchema,
+  type FitnessResult,
 } from "@shelf-judge/shared";
 import type { DisplayedFitnessService } from "../src/services/displayed-fitness-service.js";
 import { createProfileService } from "../src/services/profile-service.js";
@@ -39,6 +40,100 @@ describe("profile source identity", () => {
 });
 
 describe("ProfileService", () => {
+  test("recomputes a source-matching cached profile containing quarantined semantic activation", async () => {
+    const ctx = createTestApp();
+    await ctx.gameService.addGame({ name: "Semantic cache game" });
+    const collection = await ctx.storageService.loadCollection();
+    const sourceGame = collection.games[0];
+    if (!sourceGame) throw new Error("Expected source game");
+    sourceGame.bggId = 101;
+    const metadata = {
+      state: "complete" as const,
+      entities: [] as { id: number; name: string }[],
+      observedAt: "2026-09-01T00:00:00.000Z",
+      refreshFailure: null,
+      correctionDestination: null,
+    };
+    sourceGame.entityMetadata.mechanic = {
+      ...metadata,
+      entities: [{ id: 101, name: "Dice" }],
+    };
+    sourceGame.entityMetadata.designer = structuredClone(metadata);
+    sourceGame.entityMetadata.artist = structuredClone(metadata);
+    collection.semanticRedundancy.settings.enabled = true;
+    await ctx.storageService.saveCollection(collection);
+
+    const makeDisplayedFitness = (
+      score: number,
+      semanticInfo: NonNullable<FitnessResult["redundancySimilarityInfo"]>,
+    ): DisplayedFitnessService => ({
+      listGames: () => Promise.resolve([]),
+      listGamesFromSnapshot: (snapshot) =>
+        Promise.resolve(
+          snapshot.collection.games.map((game) => ({
+            game,
+            score: {
+              score,
+              ratedAxisCount: 1,
+              totalAxisCount: 1,
+              breakdown: [{ contribution: 1 }] as FitnessResult["breakdown"],
+              vetoed: false,
+              vetoedBy: null,
+              hypotheticalScore: null,
+              predictionMeta: null,
+              redundancyAdjustment: null,
+              redundancySimilarityInfo: semanticInfo,
+            } satisfies FitnessResult,
+            bggDataStale: false,
+            nichePosition: null,
+            hasPredictedContribution: false,
+            hasScoringContribution: true,
+          })),
+        ),
+    });
+
+    const oldSemanticProfile = await createProfileService({
+      storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
+      displayedFitnessService: makeDisplayedFitness(9, {
+        status: "ready",
+        generationId: "legacy-generation",
+      }),
+    }).getProfile();
+    expect(oldSemanticProfile.status).toBe("available");
+    if (oldSemanticProfile.status !== "available")
+      throw new Error("Expected generated legacy semantic profile");
+    expect(oldSemanticProfile.identity.classes.mechanic.entities[0]?.games[0]).toMatchObject({
+      currentFitness: 9,
+      redundancySimilarityInfo: { status: "ready", generationId: "legacy-generation" },
+    });
+
+    let recomputations = 0;
+    const quarantinedProfile = await createProfileService({
+      storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
+      displayedFitnessService: {
+        ...makeDisplayedFitness(4, { status: "not-ready", generationId: null }),
+        async listGamesFromSnapshot(snapshot, options) {
+          recomputations += 1;
+          return makeDisplayedFitness(4, {
+            status: "not-ready",
+            generationId: null,
+          }).listGamesFromSnapshot(snapshot, options);
+        },
+      },
+    }).getProfile();
+
+    expect(recomputations).toBe(1);
+    expect(quarantinedProfile.status).toBe("available");
+    if (quarantinedProfile.status !== "available")
+      throw new Error("Expected recomputed factual-only Profile");
+    expect(quarantinedProfile.identity.classes.mechanic.entities[0]?.games[0]).toMatchObject({
+      currentFitness: 4,
+      redundancySimilarityInfo: { status: "not-ready", generationId: null },
+    });
+  });
+
   test("projects canonical game image URLs into public attention cards and rebuilds old caches", async () => {
     const ctx = createTestApp();
     await ctx.gameService.addGame({

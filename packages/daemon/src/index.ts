@@ -33,22 +33,11 @@ import {
   type AttentionCandidateMaintenanceRecovery,
 } from "./services/attention-disposition-maintenance.js";
 import { createAttentionDispositionService } from "./services/attention-disposition-service.js";
-import type {
-  DisplayedFitnessService,
-  DisplayedFitnessServiceDeps,
-} from "./services/displayed-fitness-service.js";
+import type { DisplayedFitnessService } from "./services/displayed-fitness-service.js";
 import { createPurchaseUtilizationService } from "./services/purchase-utilization-service.js";
 import { createCollectionSnapshotService } from "./services/collection-snapshot-service.js";
 import { createCollectionSnapshotCacheService } from "./services/collection-snapshot-cache-service.js";
 import { createSemanticRedundancyStateService } from "./services/semantic-redundancy-state-service.js";
-import { createSemanticRefreshCaptureService } from "./services/semantic-refresh-capture-service.js";
-import { createSemanticRefreshService } from "./services/semantic-refresh-service.js";
-import { createSemanticRefreshRuntime } from "./services/semantic-refresh-runtime.js";
-import { resolveSemanticRedundancyPairTable } from "./services/semantic-redundancy-pair-resolver.js";
-import { semanticGenerationSourceIdentity } from "./services/source-vector.js";
-import { canonicalSha256 } from "./services/profile-source-coordinator.js";
-import { createJevGateway, JEV_MODEL_ID, JEV_RUBRIC_VERSION } from "./services/jev/jev-gateway.js";
-import type { SemanticRefreshRuntime } from "./services/semantic-refresh-runtime.js";
 
 const logger = createLogger("daemon");
 
@@ -253,51 +242,10 @@ export async function main() {
     bggClient,
     afterSourceSave: maintainCandidateSource,
   });
-  const resolvePublishedRedundancy: NonNullable<
-    DisplayedFitnessServiceDeps["resolveRedundancyPairTable"]
-  > = (input) => {
-    const vector = input.sourceVector;
-    const sourceIdentity = vector ? semanticGenerationSourceIdentity(vector) : null;
-    if (!sourceIdentity) return undefined;
-    return resolveSemanticRedundancyPairTable({
-      collection: input.collection,
-      universe: input.universe,
-      generation: input.collection.semanticRedundancy.publishedGeneration,
-      factualSettings: input.settings,
-      sourceIdentity,
-      support: {
-        modelId: JEV_MODEL_ID,
-        rubricVersion: JEV_RUBRIC_VERSION,
-        scoringVersion: 1,
-        sourceIdentity: {
-          collectionId: sourceIdentity.collectionId,
-          collectionSchemaVersion: 9,
-          collectionRevision: 0,
-          evidenceEpoch: sourceIdentity.evidenceEpoch,
-          consentEpoch: sourceIdentity.consentEpoch,
-          factualWeightsEpoch: sourceIdentity.factualWeightsEpoch,
-          factualWeightsFingerprint: sourceIdentity.currentFactualWeightsFingerprint,
-          tournamentHash: canonicalSha256({
-            revision: sourceIdentity.tournamentRevision,
-            data: input.tournament,
-          }),
-          predictionSettingsHash: canonicalSha256({
-            revision: sourceIdentity.predictionSettingsRevision,
-            settings: input.predictionSettings,
-          }),
-          redundancySettingsHash: canonicalSha256({
-            currentFactualWeightsFingerprint: sourceIdentity.currentFactualWeightsFingerprint,
-            settings: input.settings,
-          }),
-        },
-      },
-    });
-  };
   displayedFitnessService = createDisplayedFitnessService({
     gameService,
     predictionService,
     storageService,
-    resolveRedundancyPairTable: resolvePublishedRedundancy,
   });
   const purchaseUtilizationService = createPurchaseUtilizationService({
     storageService,
@@ -308,7 +256,6 @@ export async function main() {
     gameService,
     predictionService,
     purchaseUtilizationService,
-    resolveRedundancyPairTable: resolvePublishedRedundancy,
   });
   const collectionSnapshotService = createCollectionSnapshotCacheService({
     builder: collectionSnapshotBuilder,
@@ -352,67 +299,9 @@ export async function main() {
     attentionCandidates,
   });
 
-  // The capture authority is assigned immediately after state construction; mutations
-  // refer to it lazily so every semantic state transition uses the same validator.
-  // The capture authority is assigned after state construction to break the dependency cycle.
-  // eslint-disable-next-line prefer-const
-  let semanticCaptureService: ReturnType<typeof createSemanticRefreshCaptureService>;
   const semanticStateService = createSemanticRedundancyStateService({
     collectionMutationService,
-    validateSourceIdentity: (collection, identity) =>
-      semanticCaptureService.validateSourceIdentity(collection, identity),
   });
-  // The runtime is assigned after worker construction; the worker callbacks use it lazily.
-  // eslint-disable-next-line prefer-const
-  let semanticRuntime: SemanticRefreshRuntime;
-  semanticCaptureService = createSemanticRefreshCaptureService({
-    storageService,
-    gameService,
-    predictionService,
-    stateService: semanticStateService,
-    options: {
-      providerId: "typesafe",
-      modelId: JEV_MODEL_ID,
-      rubricVersion: JEV_RUBRIC_VERSION,
-      scoringVersion: 1,
-      maxSourceTextChars: 12_000,
-    },
-  });
-  const semanticWorker = createSemanticRefreshService({
-    stateService: semanticStateService,
-    async loadExecution(executionId) {
-      const state = (await storageService.loadCollection()).semanticRedundancy;
-      const manifest = state.disclosureManifest;
-      const execution = state.execution;
-      if (!manifest || !execution || execution.commandId !== executionId) return null;
-      return {
-        manifest,
-        execution,
-        authorizationId: state.authorization?.id ?? "",
-        deliveryComplete: state.manifestDelivery?.complete === true,
-        authorizationActive: state.authorization?.state === "active",
-      };
-    },
-    isExecutionStartCurrentProcess: (executionId) =>
-      semanticRuntime.isStartReceiptCurrentProcess(executionId),
-    pairAuthority: semanticCaptureService,
-    generationAuthority: semanticCaptureService,
-    gatewayFactory: ({ admitAndDispatch, maxRequests, maxReportedTokens }) =>
-      createJevGateway({
-        apiKey: process.env.TYPESAFE_API_KEY,
-        maxRequests,
-        maxReportedTokens,
-        admitAndDispatch,
-      }),
-    logger,
-  });
-  semanticRuntime = createSemanticRefreshRuntime({
-    stateService: semanticStateService,
-    captureService: semanticCaptureService,
-    worker: semanticWorker,
-    storageService,
-  });
-  await semanticRuntime.recoverOrphanedRun();
 
   // Forward-declared so the shutdown route can reference the server.
   // Using a wrapper object so the reference can be updated after Bun.serve()
@@ -431,7 +320,6 @@ export async function main() {
     intentionService,
     attentionDispositionService,
     collectionSnapshotService,
-    semanticRefreshRuntime: semanticRuntime,
     semanticRedundancyStateService: semanticStateService,
     ownerGameNoteService,
     groundedAnalysisProvider,

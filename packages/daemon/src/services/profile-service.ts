@@ -297,6 +297,22 @@ function publicationIdentityMatches(
   );
 }
 
+function containsQuarantinedSemanticActivation(profile: CollectionProfile): boolean {
+  const classes = Object.values(profile.identity.classes);
+  const evidence = classes.flatMap(({ comparator, entities }) => [
+    ...comparator.games,
+    ...entities.flatMap(({ games }) => games),
+  ]);
+  return evidence.some(({ redundancySimilarityInfo }) => {
+    if (!redundancySimilarityInfo) return false;
+    return (
+      redundancySimilarityInfo.status === "ready" ||
+      redundancySimilarityInfo.status === "stale" ||
+      redundancySimilarityInfo.generationId !== null
+    );
+  });
+}
+
 export function createProfileService(deps: ProfileServiceDeps): ProfileService {
   const { storageService, displayedFitnessService } = deps;
   const now = deps.now ?? (() => new Date().toISOString());
@@ -368,7 +384,11 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         } catch (error) {
           return unavailable(failureKind(error), error);
         }
-        if (stored && publicationIdentityMatches(stored, sourceIdentity, cardLimit, artifact)) {
+        if (
+          stored &&
+          publicationIdentityMatches(stored, sourceIdentity, cardLimit, artifact) &&
+          !containsQuarantinedSemanticActivation(stored.profile)
+        ) {
           const cachedSnapshot = createCollectionProfileSnapshotSchema(entityPolicy).safeParse({
             source: sources.collection,
             profile: stored.profile,

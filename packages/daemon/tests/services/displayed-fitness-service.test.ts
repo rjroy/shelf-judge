@@ -358,7 +358,7 @@ describe("DisplayedFitnessService", () => {
     expect(sourceScore.score).toBe(8);
   });
 
-  test("publishes ready injected similarity info and factual/not-ready/stale fallback without adjustments", () => {
+  test("legacy v9 publication fallback is always not-ready without adjustments", () => {
     const semanticState = createInitialSemanticRedundancyState();
     semanticState.settings.enabled = true;
     expect(semanticFallbackStatus({ semanticRedundancy: semanticState }, true)).toBe("not-ready");
@@ -366,7 +366,7 @@ describe("DisplayedFitnessService", () => {
       id: "published-but-unvalidated",
       manifestDigest: "d".repeat(64),
     });
-    expect(semanticFallbackStatus({ semanticRedundancy: semanticState }, true)).toBe("stale");
+    expect(semanticFallbackStatus({ semanticRedundancy: semanticState }, true)).toBe("not-ready");
     const entries = [
       { game: game("one"), score: score({ score: 9 }) },
       { game: game("two"), score: score({ score: 7 }) },

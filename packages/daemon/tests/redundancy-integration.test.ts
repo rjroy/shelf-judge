@@ -396,7 +396,7 @@ describe("redundancy integration: GET /games/:id", () => {
     if (!staleEntry?.score || !staleDetail.score)
       throw new Error("Expected scored stale list/detail entries");
     expect(staleEntry.score.redundancySimilarityInfo).toEqual({
-      status: "stale",
+      status: "not-ready",
       generationId: null,
     });
     expect(staleDetail.score.redundancySimilarityInfo).toEqual(

@@ -93,14 +93,14 @@ export function semanticFallbackStatus(
   collection: {
     semanticRedundancy?: {
       settings: { enabled: boolean };
-      publishedGeneration: { id: string } | null;
     };
   },
   factualEnabled: boolean,
 ): Exclude<RedundancySimilarityStatus, "ready"> {
   const semantic = collection.semanticRedundancy;
   if (!semantic?.settings.enabled) return factualEnabled ? "factual" : "disabled";
-  return semantic.publishedGeneration ? "stale" : "not-ready";
+  // Embedded v9 generations are quarantined until the v10 pair cache exists.
+  return "not-ready";
 }
 
 function hasPredictedContribution(entry: GameWithScore): boolean {
