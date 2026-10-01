@@ -1,0 +1,289 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import type { Collection, DurableGame, GameWithScore } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createInitialSemanticRedundancyStateV10 } from "@shelf-judge/shared";
+import { JEV_JUDGMENT_CONTRACT } from "../../src/services/jev/jev-judgment-contract.js";
+import {
+  computeJevPairCoverage,
+  type JevPredictionCaptureIdentity,
+} from "../../src/services/jev-pair-coverage.js";
+import { buildJevPairDependencies } from "../../src/services/jev-pair-identity.js";
+import {
+  createJevPairCache,
+  type JevPairJudgment,
+} from "../../src/services/jev-pair-cache-service.js";
+import { createJevPairReadService } from "../../src/services/jev-pair-read-service.js";
+
+const dirs: string[] = [];
+afterEach(async () =>
+  Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))),
+);
+
+function game(id: string): DurableGame {
+  return {
+    id,
+    bggId: null,
+    name: `Game ${id}`,
+    yearPublished: 2020,
+    minPlayers: 2,
+    maxPlayers: 4,
+    bestPlayers: null,
+    playingTime: 60,
+    imageUrl: null,
+    bggData: {
+      communityRating: 5,
+      bayesAverage: 5,
+      weight: null,
+      numWeightVotes: 0,
+      description: `Description ${id}`,
+      mechanics: [],
+      categories: [],
+      families: [],
+      subdomains: [],
+      bestPlayerCount: null,
+      fetchedAt: "2026-01-01T00:00:00Z",
+    },
+    numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
+    entityMetadata: createInitialEntityMetadata(null),
+    latestPlayCountCheck: null,
+    ownership: "owned",
+    boxDimensions: null,
+    manualShelfId: null,
+    ratings: {},
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    ownerNote: {
+      state: "present",
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00Z",
+      text: `PRIVATE NOTE ${id}`,
+    },
+  };
+}
+function fixture() {
+  const games = [game("a"), game("b"), game("c")];
+  const initial = createInitialSemanticRedundancyStateV10();
+  const collection = {
+    id: "collection-1",
+    name: "Fixture",
+    schemaVersion: 10,
+    revision: 1,
+    axes: [],
+    games,
+    intentions: [],
+    commandReceipts: [],
+    entertainmentBenchmark: null,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    attentionDispositions: [],
+    semanticRedundancy: {
+      ...initial,
+      settings: {
+        enabled: true,
+        weights: { factual: 0.5, description: 1, ownerNote: 1 },
+        cachedOwnerNoteUse: true,
+      },
+      evidenceEpoch: 3,
+      consentEpoch: 4,
+      factualWeightsEpoch: 2,
+      factualWeightsFingerprint: "factual-v2",
+    },
+  } as unknown as Collection;
+  const capture = games.map((g) => ({
+    game: { ...g, ownerNote: undefined },
+    score: {
+      score: 3,
+      ratedAxisCount: 1,
+      totalAxisCount: 1,
+      breakdown: [],
+      vetoed: false,
+      vetoedBy: null,
+      hypotheticalScore: null,
+      predictionMeta: null,
+      redundancyAdjustment: null,
+    },
+  })) as unknown as GameWithScore[];
+  const captureIdentity: JevPredictionCaptureIdentity = {
+    sourceVectorIdentity: "source-vector",
+    tournamentIdentity: "tournament",
+    predictionCaptureIdentity: "prediction-capture",
+  };
+  const factualWeights = { binary: 1, continuous: 1 };
+  return { collection, games, predictionCapture: capture, captureIdentity, factualWeights };
+}
+function row(c: Collection, a: DurableGame, b: DurableGame, signal: "C" | "D"): JevPairJudgment {
+  const kind = signal === "C" ? "SHARED_CD" : "D_ONLY";
+  const source = (g: DurableGame) => ({
+    gameId: g.id,
+    name: g.name,
+    ...(signal === "C" ? { description: g.bggData?.description ?? "" } : {}),
+    note: {
+      text: g.ownerNote.state === "present" ? g.ownerNote.text : "",
+      version: String(g.ownerNote.version),
+    },
+  });
+  return {
+    collectionId: c.id,
+    consentEpoch: String(c.semanticRedundancy.consentEpoch),
+    gameAId: a.id,
+    gameBId: b.id,
+    signal,
+    dependencyKind: kind,
+    value: signal === "C" ? 0.7 : 0.4,
+    modelId: JEV_JUDGMENT_CONTRACT.modelId,
+    rubricVersion: JEV_JUDGMENT_CONTRACT.rubricVersion,
+    questionVersion: JEV_JUDGMENT_CONTRACT.questionVersion,
+    requestSchemaVersion: JEV_JUDGMENT_CONTRACT.requestSchemaVersion,
+    scoreMappingVersion: JEV_JUDGMENT_CONTRACT.scoreMappingVersion,
+    semanticPolicyId: JEV_JUDGMENT_CONTRACT.semanticPolicyId,
+    completedAt: "2026-01-01T00:00:00Z",
+    dependencies: buildJevPairDependencies(kind, source(a), source(b)),
+  };
+}
+
+describe("Jev pair read adapter", () => {
+  test("returns a complete ready numeric table from real SQLite and fails closed for misses/staleness/errors", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "jev-read-"));
+    dirs.push(dir);
+    const cache = await createJevPairCache(dir);
+    const f = fixture();
+    const rows: JevPairJudgment[] = [];
+    for (let i = 0; i < f.games.length; i++)
+      for (let j = i + 1; j < f.games.length; j++) {
+        rows.push(
+          row(f.collection, f.games[i], f.games[j], "C"),
+          row(f.collection, f.games[i], f.games[j], "D"),
+        );
+      }
+    rows.forEach((item) => cache.upsert(item));
+    const digest = computeJevPairCoverage({ ...f, cache }).identity;
+    cache.setActivation({ identity: digest, activatedAt: "2026-01-01T00:00:00Z" });
+    const reader = createJevPairReadService(cache);
+    const ready = reader.resolve(f);
+    expect(ready.status).toBe("ready");
+    if (ready.status !== "ready") throw new Error("expected ready table");
+    expect(ready.table.pairs).toHaveLength(3);
+    expect(typeof ready.table.pairs[0]?.factual).toBe("number");
+    expect(ready.table.pairs[0]).toMatchObject({ description: 0.7, ownerNote: 0.4 });
+    expect(JSON.stringify(ready)).not.toContain("PRIVATE NOTE");
+    expect(JSON.stringify(ready)).not.toContain("Description a");
+    expect(Object.keys(reader)).toEqual(["resolve"]);
+
+    const revoked = {
+      ...f,
+      collection: {
+        ...f.collection,
+        semanticRedundancy: {
+          ...f.collection.semanticRedundancy,
+          settings: { ...f.collection.semanticRedundancy.settings, cachedOwnerNoteUse: false },
+        },
+      },
+    };
+    expect(reader.resolve(revoked).status).toBe("not-ready");
+    expect("table" in reader.resolve(revoked)).toBe(false);
+    expect(reader.resolve(f).status).toBe("ready");
+
+    cache.purgePair("a", "b", "C");
+    expect(reader.resolve(f).status).toBe("not-ready");
+    rows.forEach((item) => cache.upsert(item));
+    cache.setActivation({
+      identity: computeJevPairCoverage({ ...f, cache }).identity,
+      activatedAt: "2026-01-01T00:00:00Z",
+    });
+    cache.upsert({ ...rows[0], value: 0.8 });
+    expect(reader.resolve(f).status).toBe("stale");
+    expect(createJevPairReadService({ ...cache, available: false }).resolve(f).status).toBe(
+      "not-ready",
+    );
+    expect(
+      createJevPairReadService({
+        available: true,
+        lookup: () => {
+          throw new Error("PRIVATE NOTE failure");
+        },
+        getActivation: () => ({ identity: digest, activatedAt: "now" }),
+      }).resolve(f).status,
+    ).toBe("not-ready");
+    expect(
+      createJevPairReadService({
+        available: true,
+        lookup: () => null,
+        getActivation: () => {
+          throw new Error("activation read failed");
+        },
+      }).resolve(f).status,
+    ).toBe("not-ready");
+    expect(
+      createJevPairReadService({
+        available: true,
+        lookup: () => null,
+        getActivation: () => null,
+      }).resolve({ ...f, predictionCapture: [] }).status,
+    ).toBe("not-ready");
+    expect(JSON.stringify(reader.resolve(f))).not.toContain("PRIVATE NOTE");
+    cache.close();
+  });
+
+  test("respects settings and note permission without returning partial tables", () => {
+    const f = fixture();
+    const cache = { available: true, lookup: () => null, getActivation: () => null };
+    const reader = createJevPairReadService(cache);
+    expect(reader.resolve({ ...f, factualEnabled: false }).status).toBe("disabled");
+    expect(
+      reader.resolve({
+        ...f,
+        collection: {
+          ...f.collection,
+          semanticRedundancy: {
+            ...f.collection.semanticRedundancy,
+            settings: { ...f.collection.semanticRedundancy.settings, enabled: false },
+          },
+        },
+      }).status,
+    ).toBe("factual");
+    expect(reader.resolve(f).status).toBe("not-ready");
+    expect("table" in reader.resolve(f)).toBe(false);
+  });
+
+  test("uses factual-only when both semantic weights are zero despite a matching activation", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "jev-read-zero-"));
+    dirs.push(dir);
+    const cache = await createJevPairCache(dir);
+    const f = fixture();
+    const zero = {
+      ...f,
+      collection: {
+        ...f.collection,
+        semanticRedundancy: {
+          ...f.collection.semanticRedundancy,
+          settings: {
+            ...f.collection.semanticRedundancy.settings,
+            weights: { factual: 1, description: 0, ownerNote: 0 },
+          },
+        },
+      },
+    };
+    const identity = computeJevPairCoverage({ ...zero, cache }).identity;
+    cache.setActivation({ identity, activatedAt: "2026-01-01T00:00:00Z" });
+    const result = createJevPairReadService(cache).resolve(zero);
+    expect(result.status).toBe("factual");
+    expect("table" in result).toBe(false);
+    cache.close();
+  });
+});

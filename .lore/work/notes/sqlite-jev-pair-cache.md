@@ -98,3 +98,23 @@ and feature remain in progress.
   coverage tests: 5 passed after repairs.
 - Full-project lint and `format:check` passed.
 - Independent reviewer accepted four proof fixes.
+
+## Phase 2d10b — read-only Jev pair service
+
+Checkpointed on `design/jev-similarity`. The overall Phase 2 implementation
+and feature remain in progress.
+
+- Added a read-only SQLite adapter that reports ready only when complete
+  read-proof succeeds and the advisory activation matches. It distinguishes
+  disabled, factual, not-ready, and stale states, and fails closed on missing
+  or errored cache data and absent note permission.
+- This slice adds no provider or mutation behavior and is not wired into
+  production services. Remaining work includes the artifact gate, production
+  wiring, and owner-triggered Run behavior. No live provider calls were made.
+
+### Validation evidence for this checkpoint
+
+- Full Bun test suite: 3,541 passed, 1 skipped.
+- Typecheck and browser checks: passed.
+- Full-project lint and format checks: passed.
+- Independent reviewer accepted P2D10B-1 and P2D10B-2.
