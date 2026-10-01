@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RedundancySettings } from "@shelf-judge/shared";
 
 type Weights = { factual: number; description: number; ownerNote: number };
@@ -50,6 +50,8 @@ type Refresh = {
 type SemanticSummary = {
   disclosure?: { id: string; digest: string; pairCount: number; expiresAt: string } | null;
 };
+
+const MANIFEST_REVIEW_PAGE_SIZE = 50;
 
 function activeCommandFromDaemon(refresh: Refresh, summary: SemanticSummary): string | undefined {
   const execution = refresh.execution;
@@ -137,9 +139,11 @@ export default function RedundancyPage() {
   const [settings, setSettings] = useState<RedundancySettings | null>(null);
   const [saved, setSaved] = useState<RedundancySettings | null>(null);
   const [semantic, setSemantic] = useState<Semantic | null>(null);
+  const [savedSemantic, setSavedSemantic] = useState<Semantic["settings"] | null>(null);
   const [migrationNotice, setMigrationNotice] = useState<string>();
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [pairs, setPairs] = useState<Pair[]>([]);
+  const [manifestPage, setManifestPage] = useState(0);
   const [deliveryComplete, setDeliveryComplete] = useState(false);
   const [refresh, setRefresh] = useState<Refresh | null>(null);
   const [noteTransmission, setNoteTransmission] = useState(false);
@@ -148,10 +152,14 @@ export default function RedundancyPage() {
   const [signalScope, setSignalScope] = useState<Manifest["signalScope"]>("description-only");
   const [commandId, setCommandId] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [factualSaving, setFactualSaving] = useState(false);
+  const [semanticSaving, setSemanticSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [message, setMessage] = useState<string>();
   const [statusError, setStatusError] = useState<string>();
+  const authorizeRef = useRef<HTMLDivElement>(null);
+  const disclosureRevision = useRef(0);
 
   const reload = useCallback(async () => {
     const [data, status] = await Promise.all([
@@ -161,6 +169,7 @@ export default function RedundancyPage() {
     setSettings(data);
     setSaved(data);
     setSemantic(data.semantic);
+    setSavedSemantic(data.semantic.settings);
     setMigrationNotice(data.migrationNotice);
     if (status) {
       setRefresh(status.refresh);
@@ -197,10 +206,14 @@ export default function RedundancyPage() {
       window.clearInterval(timer);
     };
   }, [commandId, refresh?.execution?.status]);
+  useEffect(() => {
+    if (deliveryComplete) authorizeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [deliveryComplete]);
 
   const saveFactual = async () => {
     if (!settings) return;
     setBusy(true);
+    setFactualSaving(true);
     setError(undefined);
     setMessage(undefined);
     try {
@@ -223,12 +236,14 @@ export default function RedundancyPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save settings");
     } finally {
+      setFactualSaving(false);
       setBusy(false);
     }
   };
   const saveSemantic = async (patch: Partial<Semantic["settings"]>) => {
     if (!semantic) return;
     setBusy(true);
+    setSemanticSaving(true);
     setError(undefined);
     setMessage(undefined);
     try {
@@ -249,6 +264,7 @@ export default function RedundancyPage() {
             ? { status: "not-ready", publicationStatus: "not-ready" }
             : semantic.status,
       });
+      setSavedSemantic(result.settings);
       setMessage(
         result.settings.enabled
           ? "Similarity preferences saved. No provider request was made."
@@ -257,10 +273,13 @@ export default function RedundancyPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save preferences");
     } finally {
+      setSemanticSaving(false);
       setBusy(false);
     }
   };
   const disclose = async () => {
+    clearPreparedDisclosure();
+    const revision = disclosureRevision.current;
     setBusy(true);
     setError(undefined);
     setMessage(undefined);
@@ -282,6 +301,7 @@ export default function RedundancyPage() {
           "/api/daemon/redundancy/semantic/disclosure/page",
           json({ manifestId: created.id, manifestDigest: created.digest, offset }),
         );
+        if (revision !== disclosureRevision.current) return;
         collected.push(...page.pairs);
         setPairs([...collected]);
         if (
@@ -429,31 +449,60 @@ export default function RedundancyPage() {
       </>
     );
   const dirty = saved !== null && JSON.stringify(settings) !== JSON.stringify(saved);
-  const updateWeight = (key: keyof Weights, value: number) =>
+  const semanticDirty =
+    savedSemantic !== null && JSON.stringify(semantic.settings) !== JSON.stringify(savedSemantic);
+  const clearPreparedDisclosure = () => {
+    disclosureRevision.current += 1;
+    setManifest(null);
+    setPairs([]);
+    setManifestPage(0);
+    setDeliveryComplete(false);
+    setNoteTransmission(false);
+    setCachedNotes(false);
+    setAck(false);
+  };
+  const updateWeight = (key: keyof Weights, value: number) => {
+    clearPreparedDisclosure();
     setSemantic({
       ...semantic,
       settings: { ...semantic.settings, weights: { ...semantic.settings.weights, [key]: value } },
     });
+  };
+  const manifestPageCount = Math.ceil(pairs.length / MANIFEST_REVIEW_PAGE_SIZE);
+  const visiblePairs = pairs.slice(
+    manifestPage * MANIFEST_REVIEW_PAGE_SIZE,
+    (manifestPage + 1) * MANIFEST_REVIEW_PAGE_SIZE,
+  );
+  const manifestRangeStart = pairs.length ? manifestPage * MANIFEST_REVIEW_PAGE_SIZE + 1 : 0;
+  const manifestRangeEnd = Math.min((manifestPage + 1) * MANIFEST_REVIEW_PAGE_SIZE, pairs.length);
 
   return (
     <>
       <div className="topbar">
         <div className="topbar-title">Redundancy</div>
-        <button
-          className="btn btn-primary"
-          disabled={!dirty || busy}
-          onClick={() => void saveFactual()}
-        >
-          {busy ? "Saving…" : "Save factual settings"}
-        </button>
       </div>
       <div className="main-scroll">
         <main className="axes-content redundancy-settings-body">
           <h1>Redundancy scoring</h1>
-          <p className="loading-text">
-            Compare owned games using factual evidence, with optional description and owner-note
-            signals. Nothing is sent until you review the exact pair list and authorize one refresh.
+          <p className="redundancy-intro">
+            Set how similar owned games affect fitness, then choose whether to compare their written
+            descriptions or your notes. Saving either set of preferences only updates local
+            settings. It never contacts JEV.
           </p>
+          <ol className="redundancy-steps" aria-label="Refresh steps">
+            <li>
+              <strong>Set preferences</strong>
+              <span>Saved locally; no provider call.</span>
+            </li>
+            <li>
+              <strong>Review pairs</strong>
+              <span>Build and inspect the exact list offline.</span>
+            </li>
+            <li>
+              <strong>Authorize refresh</strong>
+              <span>This is the only action that contacts JEV.</span>
+            </li>
+          </ol>
           {error && (
             <div className="error-banner" role="alert">
               {error}
@@ -470,14 +519,22 @@ export default function RedundancyPage() {
             </div>
           )}
 
-          <section aria-labelledby="factual-heading">
+          <section aria-labelledby="factual-heading" className="redundancy-step">
             <h2 id="factual-heading">Factual scoring</h2>
+            <p>
+              These controls compare game facts such as mechanics, categories, weight, and player
+              count.
+            </p>
             <label className="redundancy-setting-row">
               <span className="redundancy-setting-label">Enable redundancy scoring</span>
               <input
                 type="checkbox"
+                disabled={busy}
                 checked={settings.enabled}
-                onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })}
+                onChange={(e) => {
+                  clearPreparedDisclosure();
+                  setSettings({ ...settings, enabled: e.target.checked });
+                }}
               />
             </label>
             <div className="redundancy-setting-row">
@@ -486,14 +543,22 @@ export default function RedundancyPage() {
                 <button
                   className={`seg-btn${settings.stage === "annotation" ? " active" : ""}`}
                   aria-pressed={settings.stage === "annotation"}
-                  onClick={() => setSettings({ ...settings, stage: "annotation" })}
+                  disabled={busy}
+                  onClick={() => {
+                    clearPreparedDisclosure();
+                    setSettings({ ...settings, stage: "annotation" });
+                  }}
                 >
                   Annotation
                 </button>
                 <button
                   className={`seg-btn${settings.stage === "integrated" ? " active" : ""}`}
                   aria-pressed={settings.stage === "integrated"}
-                  onClick={() => setSettings({ ...settings, stage: "integrated" })}
+                  disabled={busy}
+                  onClick={() => {
+                    clearPreparedDisclosure();
+                    setSettings({ ...settings, stage: "integrated" });
+                  }}
                 >
                   Integrated
                 </button>
@@ -508,26 +573,32 @@ export default function RedundancyPage() {
               Similarity threshold: {settings.similarityThreshold.toFixed(2)}
               <input
                 aria-label="Similarity threshold"
+                disabled={busy}
                 type="range"
                 min="0"
                 max="1"
                 step="0.05"
                 value={settings.similarityThreshold}
-                onChange={(e) =>
-                  setSettings({ ...settings, similarityThreshold: Number(e.target.value) })
-                }
+                onChange={(e) => {
+                  clearPreparedDisclosure();
+                  setSettings({ ...settings, similarityThreshold: Number(e.target.value) });
+                }}
               />
             </label>
             <label className="redundancy-setting-row">
               Maximum penalty: {settings.maxPenalty.toFixed(1)}
               <input
                 aria-label="Maximum penalty"
+                disabled={busy}
                 type="range"
                 min="0.5"
                 max="5"
                 step="0.5"
                 value={settings.maxPenalty}
-                onChange={(e) => setSettings({ ...settings, maxPenalty: Number(e.target.value) })}
+                onChange={(e) => {
+                  clearPreparedDisclosure();
+                  setSettings({ ...settings, maxPenalty: Number(e.target.value) });
+                }}
               />
             </label>
             <h3>Factual similarity weights</h3>
@@ -539,20 +610,22 @@ export default function RedundancyPage() {
               Binary — mechanics &amp; categories: {settings.componentWeights.binary.toFixed(2)}
               <input
                 aria-label="Binary factual weight"
+                disabled={busy}
                 type="range"
                 min="0"
                 max="1"
                 step="0.01"
                 value={settings.componentWeights.binary}
-                onChange={(e) =>
+                onChange={(e) => {
+                  clearPreparedDisclosure();
                   setSettings({
                     ...settings,
                     componentWeights: {
                       ...settings.componentWeights,
                       binary: Number(e.target.value),
                     },
-                  })
-                }
+                  });
+                }}
               />
             </label>
             <label className="redundancy-weight-row">
@@ -560,26 +633,48 @@ export default function RedundancyPage() {
               {settings.componentWeights.continuous.toFixed(2)}
               <input
                 aria-label="Continuous factual weight"
+                disabled={busy}
                 type="range"
                 min="0"
                 max="1"
                 step="0.01"
                 value={settings.componentWeights.continuous}
-                onChange={(e) =>
+                onChange={(e) => {
+                  clearPreparedDisclosure();
                   setSettings({
                     ...settings,
                     componentWeights: {
                       ...settings.componentWeights,
                       continuous: Number(e.target.value),
                     },
-                  })
-                }
+                  });
+                }}
               />
             </label>
+            <div className="redundancy-save-row">
+              {dirty || factualSaving ? (
+                <button
+                  className="btn btn-secondary"
+                  disabled={busy}
+                  onClick={() => void saveFactual()}
+                >
+                  {factualSaving ? "Saving factual settings…" : "Save factual scoring settings"}
+                </button>
+              ) : (
+                <span className="redundancy-save-status" role="status">
+                  Factual settings saved · Stored on this Shelf Judge instance
+                </span>
+              )}
+              {dirty && <span role="status">Unsaved factual changes</span>}
+            </div>
           </section>
 
-          <section aria-labelledby="semantic-heading">
-            <h2 id="semantic-heading">Optional similarity notes</h2>
+          <section aria-labelledby="semantic-heading" className="redundancy-step">
+            <h2 id="semantic-heading">Similarity preferences</h2>
+            <p>
+              These preferences affect semantic comparisons. They are separate from what you approve
+              sending in a single refresh.
+            </p>
             <p className="redundancy-stage-desc">
               Status:{" "}
               <strong>
@@ -589,11 +684,13 @@ export default function RedundancyPage() {
               . A game can have a status even when it has no qualifying neighbor.
             </p>
             <label className="redundancy-setting-row">
-              <span className="redundancy-setting-label">Use semantic similarity in scoring</span>
+              <span className="redundancy-setting-label">Use semantic comparisons in scoring</span>
               <input
                 type="checkbox"
+                disabled={busy}
                 checked={semantic.settings.enabled}
                 onChange={(e) => {
+                  clearPreparedDisclosure();
                   const value = e.target.checked;
                   setSemantic({ ...semantic, settings: { ...semantic.settings, enabled: value } });
                 }}
@@ -605,15 +702,16 @@ export default function RedundancyPage() {
             </p>
             {(
               [
-                ["factual", "F — factual data"],
-                ["description", "C — cached BGG descriptions"],
-                ["ownerNote", "D — owner notes"],
+                ["factual", "Game facts (mechanics, categories, weight, players)"],
+                ["description", "BoardGameGeek descriptions"],
+                ["ownerNote", "Your game notes"],
               ] as const
             ).map(([key, label]) => (
               <label className="redundancy-weight-row" key={key}>
                 {label}: {semantic.settings.weights[key]}
                 <input
                   aria-label={`${label} weight`}
+                  disabled={busy}
                   type="range"
                   min="0"
                   max="10"
@@ -624,55 +722,79 @@ export default function RedundancyPage() {
               </label>
             ))}
             <p className="loading-text">
-              F uses binary mechanics/categories and continuous weight/player-count facts. C uses
-              cached publisher/community descriptions, not personal experience. D uses owner notes
-              only when separately authorized.
+              Game facts are compared locally. BoardGameGeek descriptions come from cached source
+              text. Your notes are personal text and are sent only if you separately allow it for a
+              refresh below.
             </p>
             <label className="redundancy-setting-row">
-              <span>Allow reuse of cached judgments that used owner notes</span>
+              <span>Allow previously cached comparisons informed by my notes</span>
               <input
                 type="checkbox"
+                disabled={busy}
                 checked={semantic.settings.cachedOwnerNoteUse}
-                onChange={(e) =>
+                onChange={(e) => (
+                  clearPreparedDisclosure(),
                   setSemantic({
                     ...semantic,
                     settings: { ...semantic.settings, cachedOwnerNoteUse: e.target.checked },
                   })
-                }
+                )}
               />
             </label>
-            <button
-              className="btn btn-secondary"
-              disabled={busy}
-              onClick={() => void saveSemantic(semantic.settings)}
-            >
-              Save similarity preferences
-            </button>
-            <h3>Review before one refresh</h3>
-            <p>
-              Preparing a disclosure only freezes and displays the pair set; it does not send game
-              data to the provider. Owner-note reuse and sending notes for this one execution are
-              separate permissions.
+            <p className="redundancy-help">
+              This controls reuse of an existing result; it does not send your note text.
             </p>
+            <div className="redundancy-save-row">
+              {semanticDirty || semanticSaving ? (
+                <button
+                  className="btn btn-secondary"
+                  disabled={busy}
+                  onClick={() => void saveSemantic(semantic.settings)}
+                >
+                  {semanticSaving ? "Saving preferences…" : "Save similarity preferences"}
+                </button>
+              ) : (
+                <span className="redundancy-save-status" role="status">
+                  Similarity preferences saved · Stored on this Shelf Judge instance
+                </span>
+              )}
+              {semanticDirty && <span role="status">Unsaved similarity changes</span>}
+            </div>
+            <h3>Review and authorize one refresh</h3>
+            <p>
+              Preparing the pair list is offline: no game data is sent. Only “Authorize one refresh”
+              below starts a JEV request. Reusing an old note-informed result is separate from
+              sending note text for this refresh.
+            </p>
+            {(semanticDirty || dirty) && (
+              <p className="redundancy-inline-guidance" role="status">
+                {semanticDirty && "Save similarity preferences"}
+                {semanticDirty && dirty && " and "}
+                {dirty && "Save factual scoring settings"} before preparing a pair list. No refresh
+                can use unsaved preferences.
+              </p>
+            )}
             <label className="redundancy-setting-row">
               Evidence sent for this execution
               <select
                 value={signalScope}
-                onChange={(e) => setSignalScope(e.target.value as Manifest["signalScope"])}
+                disabled={busy}
+                onChange={(e) => {
+                  clearPreparedDisclosure();
+                  setSignalScope(e.target.value as Manifest["signalScope"]);
+                }}
               >
-                <option value="description-only">C-only — cached descriptions, no notes</option>
-                <option value="owner-notes-only">D-only — owner notes, no descriptions</option>
-                <option value="description-and-owner-notes">
-                  C + D — descriptions and owner notes
-                </option>
+                <option value="description-only">BGG descriptions only — no note text</option>
+                <option value="owner-notes-only">My notes only — no BGG descriptions</option>
+                <option value="description-and-owner-notes">BGG descriptions and my notes</option>
               </select>
             </label>
             <button
               className="btn btn-secondary"
-              disabled={busy || !semantic.settings.enabled}
+              disabled={busy || !semantic.settings.enabled || semanticDirty || dirty}
               onClick={() => void disclose()}
             >
-              {busy ? "Preparing…" : "Prepare exact pair list"}
+              {busy ? "Preparing list…" : "Prepare pair list (offline)"}
             </button>
             {manifest && (
               <div className="redundancy-disclosure" aria-labelledby="disclosure-title">
@@ -696,7 +818,39 @@ export default function RedundancyPage() {
                 <p>
                   Full manifest delivered: {pairs.length} of {manifest.pairCount} pairs. Review the
                   complete list below. Note flags show presence only; no note text is displayed.
+                  Large lists are split into pages; all pairs are available to inspect before you
+                  authorize.
                 </p>
+                <div
+                  className="redundancy-manifest-pagination"
+                  role="group"
+                  aria-label="Manifest page controls"
+                >
+                  <p role="status" aria-live="polite">
+                    Showing pairs {manifestRangeStart}–{manifestRangeEnd} of {pairs.length}
+                    {manifestPageCount > 1
+                      ? ` · Page ${manifestPage + 1} of ${manifestPageCount}`
+                      : ""}
+                  </p>
+                  <div className="redundancy-page-buttons">
+                    <button
+                      className="btn btn-secondary"
+                      disabled={manifestPage === 0}
+                      onClick={() => setManifestPage((page) => Math.max(0, page - 1))}
+                    >
+                      Previous pair page
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      disabled={manifestPage + 1 >= manifestPageCount}
+                      onClick={() =>
+                        setManifestPage((page) => Math.min(manifestPageCount - 1, page + 1))
+                      }
+                    >
+                      Next pair page
+                    </button>
+                  </div>
+                </div>
                 <div
                   className="redundancy-manifest"
                   role="region"
@@ -714,8 +868,10 @@ export default function RedundancyPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {pairs.map((pair, index) => (
-                        <tr key={`${pair.gameA}:${pair.gameB}:${index}`}>
+                      {visiblePairs.map((pair, index) => (
+                        <tr
+                          key={`${pair.gameA}:${pair.gameB}:${manifestPage * MANIFEST_REVIEW_PAGE_SIZE + index}`}
+                        >
                           <td>{pair.gameA}</td>
                           <td>{pair.gameB}</td>
                           <td>
@@ -731,8 +887,37 @@ export default function RedundancyPage() {
                     </tbody>
                   </table>
                 </div>
+                {manifestPageCount > 1 && (
+                  <div
+                    className="redundancy-manifest-pagination redundancy-manifest-pagination-bottom"
+                    role="group"
+                    aria-label="Manifest page controls after table"
+                  >
+                    <span>
+                      Page {manifestPage + 1} of {manifestPageCount}
+                    </span>
+                    <div className="redundancy-page-buttons">
+                      <button
+                        className="btn btn-secondary"
+                        disabled={manifestPage === 0}
+                        onClick={() => setManifestPage((page) => Math.max(0, page - 1))}
+                      >
+                        Previous pair page
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        disabled={manifestPage + 1 >= manifestPageCount}
+                        onClick={() =>
+                          setManifestPage((page) => Math.min(manifestPageCount - 1, page + 1))
+                        }
+                      >
+                        Next pair page
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {deliveryComplete && (
-                  <>
+                  <div className="redundancy-authorize" ref={authorizeRef}>
                     {manifest.signalScope !== "description-only" ? (
                       <label className="redundancy-setting-row">
                         <span>
@@ -747,8 +932,7 @@ export default function RedundancyPage() {
                       </label>
                     ) : (
                       <p className="loading-text">
-                        C-only is selected: this refresh sends cached descriptions only and never
-                        sends owner notes.
+                        BGG descriptions only: no owner-note text will be sent to JEV.
                       </p>
                     )}
                     <label className="redundancy-setting-row">
@@ -781,13 +965,13 @@ export default function RedundancyPage() {
                       }
                       onClick={() => void start()}
                     >
-                      Authorize one refresh
+                      Authorize one JEV refresh
                     </button>
                     <p className="loading-text">
-                      There is no silent note send. C-only scope requires no note-transmission
-                      permission.
+                      No refresh runs unless you select this authorization. Settings saves and
+                      pair-list preparation never contact JEV.
                     </p>
-                  </>
+                  </div>
                 )}
               </div>
             )}

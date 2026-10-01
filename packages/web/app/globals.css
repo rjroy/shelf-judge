@@ -7843,6 +7843,81 @@ body {
   gap: 12px;
 }
 
+.redundancy-intro {
+  max-width: 68ch;
+  margin: 0;
+  color: var(--text-secondary);
+}
+.redundancy-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  list-style-position: inside;
+}
+.redundancy-steps li {
+  min-width: 0;
+  color: var(--action);
+  font-weight: 600;
+}
+.redundancy-steps span {
+  display: block;
+  padding-left: 1.25rem;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+.redundancy-settings-body .redundancy-step {
+  scroll-margin-top: 16px;
+}
+.redundancy-step > p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.redundancy-save-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.redundancy-save-row > span {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.redundancy-save-status {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.redundancy-help {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.redundancy-inline-guidance {
+  margin: 0;
+  padding: 10px 12px;
+  border-inline-start: 3px solid var(--warning-border);
+  background: var(--warning-subtle);
+  color: var(--warning-text);
+  font-size: var(--text-sm);
+}
+.redundancy-authorize {
+  position: sticky;
+  bottom: 8px;
+  z-index: 2;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+}
+.redundancy-authorize .btn-primary {
+  min-height: 44px;
+  justify-content: center;
+}
+
 .redundancy-setting-row {
   display: flex;
   align-items: center;
@@ -7940,13 +8015,14 @@ body {
   background: var(--bg-subtle);
 }
 .redundancy-manifest {
-  max-height: 380px;
-  overflow: auto;
+  max-width: 100%;
+  overflow-x: auto;
   border: 1px solid var(--border);
   background: var(--bg-surface);
 }
 .redundancy-manifest table {
   width: 100%;
+  min-width: 640px;
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
@@ -7958,9 +8034,34 @@ body {
   vertical-align: top;
 }
 .redundancy-manifest th {
-  position: sticky;
-  top: 0;
   background: var(--bg-subtle);
+}
+.redundancy-manifest td {
+  overflow-wrap: anywhere;
+}
+.redundancy-manifest-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.redundancy-manifest-pagination p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.redundancy-page-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.redundancy-manifest-pagination .btn {
+  min-height: 44px;
+}
+.redundancy-manifest-pagination-bottom {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 .redundancy-manifest :focus-visible,
 .redundancy-settings-body :focus-visible {
@@ -8006,8 +8107,27 @@ body {
     max-width: none;
     width: 100%;
   }
-  .redundancy-manifest {
-    max-height: 320px;
+  .redundancy-manifest-pagination {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .redundancy-page-buttons {
+    width: 100%;
+  }
+  .redundancy-page-buttons .btn {
+    flex: 1 1 auto;
+    margin: 0;
+  }
+  .redundancy-steps {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .redundancy-authorize {
+    bottom: 4px;
+    padding: 10px;
+  }
+  .redundancy-save-row > .btn {
+    min-height: 44px;
   }
 }
 
