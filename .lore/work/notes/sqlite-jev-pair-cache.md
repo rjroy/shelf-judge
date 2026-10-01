@@ -162,3 +162,21 @@ Checkpointed on `design/jev-similarity`, after Phase 2d10c. The overall Phase
 - `bun run typecheck`, `bun run typecheck:browser`, `bun run lint`,
   `bun run format:check`, and `git diff --check` passed.
 - Independent `bun-typescript-reviewer` accepted the implementation.
+
+## Phase 2d10e — aggregate-only pair status projection
+
+Checkpointed on `design/jev-similarity`, after Phase 2d10d. The overall Phase
+2 implementation and feature remain in progress.
+
+- Added a compact aggregate-only Jev pair status projection from validated
+  coverage/read proof and SQLite run progress, with truthful readiness and
+  progress states. The DTO excludes source text and per-pair details.
+- This is status groundwork only: no status API, provider calls, or inference
+  behavior were added. Owner-triggered Run remains absent; this checkpoint
+  does not claim the Jev cache feature is complete.
+
+### Validation evidence for this checkpoint
+
+- Full Bun test suite: 3,564 passed, 1 skipped.
+- Typecheck, browser checks, lint, format check, and `git diff --check` passed.
+- Independent reviewer accepted JPS-1 and JPS-2.
