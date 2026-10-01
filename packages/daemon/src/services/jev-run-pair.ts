@@ -248,9 +248,12 @@ export function mapJevPairResult(
   const contract = admission.contract;
   const expectsC = admission.signals.includes("C");
   const expectsD = admission.signals.includes("D");
+  const resultKeys = ["description", "ownerNote", "usage"];
+  if (isRecord(result) && "stopReason" in result) resultKeys.push("stopReason");
   if (
     !isRecord(result) ||
-    !hasExactKeys(result, ["description", "ownerNote", "usage"]) ||
+    !hasExactKeys(result, resultKeys) ||
+    ("stopReason" in result && result.stopReason !== "application-token-threshold") ||
     !isRecord(result.usage) ||
     !hasExactKeys(result.usage, ["inputTokens", "outputTokens"]) ||
     typeof result.usage.inputTokens !== "number" ||

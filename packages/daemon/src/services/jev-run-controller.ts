@@ -16,6 +16,11 @@ import {
   profileSourceCoordinatorFor,
   runOutsideProfileSourceCoordinator,
 } from "./profile-source-coordinator.js";
+import {
+  DEFAULT_JEV_RUN_BUDGET,
+  isValidJevRunBudget,
+  type JevRunBudget,
+} from "./jev-run-budget.js";
 
 const DEFAULT_PRECONDITION_TTL_MS = 2 * 60_000;
 const DEFAULT_RECEIPT_TTL_MS = 10 * 60_000;
@@ -54,12 +59,13 @@ interface ControllerErrorBody {
     | "precondition-failed"
     | "run-conflict"
     | "scope-over-limit"
-    | "run-not-found";
+    | "run-not-found"
+    | "invalid-budget";
 }
 
 export type JevRunControllerPreviewResponse =
   | { status: 200; body: JevRunControllerPreview }
-  | { status: 412 | 503; body: ControllerErrorBody };
+  | { status: 400 | 412 | 503; body: ControllerErrorBody };
 
 export type JevRunControllerStartResponse =
   | { status: 200; body: { state: "started"; runId: string } }
@@ -76,6 +82,7 @@ interface AuthorizationRecord {
   policyIdentity: string;
   scopeIdentity: string;
   limitsIdentity: string;
+  providerBudget: Readonly<JevRunBudget>;
   expiresAtMs: number;
   consumed: boolean;
 }
@@ -114,7 +121,10 @@ export class JevRunController {
     this.coordinator = profileSourceCoordinatorFor(options.storageService);
   }
 
-  async preview(): Promise<JevRunControllerPreviewResponse> {
+  async preview(
+    budget: JevRunBudget = DEFAULT_JEV_RUN_BUDGET,
+  ): Promise<JevRunControllerPreviewResponse> {
+    if (!isValidJevRunBudget(budget)) return { status: 400, body: { error: "invalid-budget" } };
     if (!this.cacheAvailable()) return { status: 503, body: { error: "run-unavailable" } };
     let capture: JevRunCapture;
     try {
@@ -127,7 +137,8 @@ export class JevRunController {
     const planned = planJevRunScope(capture.collection, capture.predictionCapture);
     if (!planned.ok) return { status: 503, body: { error: "status-unavailable" } };
     const scope = planned.scope;
-    const limits = this.limitsIdentity();
+    const providerBudget = Object.freeze({ ...budget });
+    const limits = this.limitsIdentity(providerBudget);
     const scopeIdentity = this.scopeIdentity(capture, scope);
     const authority = await this.readCurrentAuthority();
     if (!authority) return { status: 503, body: { error: "status-unavailable" } };
@@ -153,6 +164,7 @@ export class JevRunController {
       policyIdentity: capture.policyIdentity,
       scopeIdentity,
       limitsIdentity: limits.identity,
+      providerBudget,
       expiresAtMs,
       consumed: false,
     });
@@ -183,10 +195,10 @@ export class JevRunController {
         retentionCaveat: JEV_RETENTION_CAVEAT,
         limits: {
           maxEligiblePairs: limits.run.maxEligiblePairs,
-          maxProviderAttempts: JEV_GATEWAY_LIMITS.maxRequestsPerInstance,
+          maxProviderAttempts: providerBudget.maxProviderAttempts,
           maxRetriesPerEvaluation: JEV_GATEWAY_LIMITS.maxRetriesPerEvaluation,
-          maxRunDurationMs: limits.run.maxRunDurationMs,
-          reportedTokenStopThreshold: JEV_GATEWAY_LIMITS.maxReportedTokensPerInstance,
+          maxRunDurationMs: providerBudget.maxRunDurationMs,
+          reportedTokenStopThreshold: providerBudget.reportedTokenStopThreshold,
           reportedTokenThresholdIsBilledCeiling: false,
         },
         withinPairLimit: scope.totalEligiblePairs <= limits.run.maxEligiblePairs,
@@ -299,7 +311,7 @@ export class JevRunController {
       this.scopeIdentity(capture, planned.scope) !== authorization.scopeIdentity ||
       capture.sourceVectorIdentity !== authorization.sourceVectorIdentity ||
       capture.policyIdentity !== authorization.policyIdentity ||
-      this.limitsIdentity().identity !== authorization.limitsIdentity
+      this.limitsIdentity(authorization.providerBudget).identity !== authorization.limitsIdentity
     )
       return { status: 412, body: { error: "precondition-failed" } };
     if (planned.scope.totalEligiblePairs > this.options.runService.effectiveLimits.maxEligiblePairs)
@@ -323,6 +335,7 @@ export class JevRunController {
         capture,
         scope: planned.scope,
         noteTransmissionAuthorized: input.noteTransmissionAuthorized,
+        providerBudget: authorization.providerBudget,
       }),
     );
     if (!preparedRun) return { status: 412, body: { error: "precondition-failed" } };
@@ -341,7 +354,8 @@ export class JevRunController {
         if (
           authority.source.sourceVectorIdentity !== authorization.sourceVectorIdentity ||
           authority.source.policyIdentity !== authorization.policyIdentity ||
-          this.limitsIdentity().identity !== authorization.limitsIdentity ||
+          this.limitsIdentity(authorization.providerBudget).identity !==
+            authorization.limitsIdentity ||
           (input.noteTransmissionAuthorized &&
             planned.scope.ownerNoteBearingPairCount > 0 &&
             !authority.source.canTransmitNotes)
@@ -422,9 +436,12 @@ export class JevRunController {
     return this.options.gatewayConfigured?.() ?? isJevGatewayConfigured();
   }
 
-  private limitsIdentity() {
+  private limitsIdentity(providerBudget: Readonly<JevRunBudget>) {
     const run = this.options.runService.effectiveLimits;
-    return { run, identity: canonicalSha256({ run, gateway: JEV_GATEWAY_LIMITS }) };
+    return {
+      run,
+      identity: canonicalSha256({ run, gateway: JEV_GATEWAY_LIMITS, providerBudget }),
+    };
   }
 
   private scopeIdentity(capture: JevRunCapture, scope: JevRunScope): string {

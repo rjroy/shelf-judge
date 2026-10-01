@@ -227,7 +227,12 @@ describe("semantic redundancy routes", () => {
 
     const malformed = await app.request(
       "/api/redundancy/semantic/run",
-      json({ requestId: "id", precondition: "token", noteTransmissionAuthorized: false, extra: 1 }),
+      json({
+        requestId: "id",
+        precondition: "token",
+        noteTransmissionAuthorized: false,
+        maxProviderAttempts: 101,
+      }),
     );
     expect(malformed.status).toBe(400);
     expect(malformed.headers.get("Cache-Control")).toBe("no-store");
@@ -268,6 +273,36 @@ describe("semantic redundancy routes", () => {
         operations.find((operation) => operation.invocation.path.endsWith(`/semantic/${suffix}`)),
       ).toBeDefined();
     }
+  });
+
+  test("Run preview validates and forwards only explicit supported budget query values", async () => {
+    const previews: unknown[] = [];
+    const controller = {
+      preview: async (budget: unknown) => {
+        await Promise.resolve();
+        previews.push(budget);
+        return { status: 200, body: { limits: budget } };
+      },
+    } as unknown as NonNullable<RedundancyRoutesDeps["jevRunController"]>;
+    const { app } = harness(undefined, controller);
+
+    const invalid = await app.request(
+      "/api/redundancy/semantic/run-preview?maxProviderAttempts=75001",
+    );
+    expect(invalid.status).toBe(400);
+    expect(previews).toHaveLength(0);
+
+    const valid = await app.request(
+      "/api/redundancy/semantic/run-preview?maxProviderAttempts=501&reportedTokenStopThreshold=40000&maxRunDurationMs=60000",
+    );
+    expect(valid.status).toBe(200);
+    expect(previews).toEqual([
+      {
+        maxProviderAttempts: 501,
+        reportedTokenStopThreshold: 40_000,
+        maxRunDurationMs: 60_000,
+      },
+    ]);
   });
 
   test("new Run routes fail closed when no controller is composed", async () => {

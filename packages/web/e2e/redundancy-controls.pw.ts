@@ -4,6 +4,7 @@ async function installDaemon(page: Page) {
   await page.addInitScript(() => {
     const target = window as typeof window & {
       __redundancyCalls: Array<{ url: string; method: string; body?: unknown }>;
+      __releasePreview?: () => void;
     };
     target.__redundancyCalls = [];
     const original = window.fetch.bind(window);
@@ -15,7 +16,11 @@ async function installDaemon(page: Page) {
           typeof init?.body === "string"
             ? (JSON.parse(init.body) as Record<string, unknown>)
             : undefined;
-        target.__redundancyCalls.push({ url: url.pathname, method: init?.method ?? "GET", body });
+        target.__redundancyCalls.push({
+          url: `${url.pathname}${url.search}`,
+          method: init?.method ?? "GET",
+          body,
+        });
         let response: unknown = {};
         const status = 200;
         if (url.pathname.endsWith("/semantic-settings") && init?.method === "PATCH")
@@ -48,7 +53,8 @@ async function installDaemon(page: Page) {
               status: 503,
               headers: { "content-type": "application/json" },
             });
-          else
+          else {
+            const stopReason = new URL(location.href).searchParams.get("stop");
             response =
               window.localStorage.getItem("run-state") === "complete"
                 ? {
@@ -64,6 +70,7 @@ async function installDaemon(page: Page) {
                       cacheHits: 0,
                       cacheMisses: 2,
                       failedPairs: 0,
+                      ...(stopReason ? { stopReason } : {}),
                     },
                   }
                 : {
@@ -74,7 +81,24 @@ async function installDaemon(page: Page) {
                     coverage: null,
                     progress: null,
                   };
-        } else if (url.pathname.endsWith("/run-preview"))
+            if (stopReason) {
+              const statusSnapshot = response as Record<string, unknown>;
+              statusSnapshot.progress = {
+                state: "interrupted",
+                pairCount: 2,
+                completedPairs: 1,
+                cacheHits: 0,
+                cacheMisses: 1,
+                failedPairs: 0,
+                stopReason,
+              };
+            }
+          }
+        } else if (url.pathname.endsWith("/run-preview")) {
+          if (new URL(location.href).searchParams.get("delay-preview") === "1")
+            await new Promise<void>((resolve) => {
+              target.__releasePreview = resolve;
+            });
           response = {
             requestId: "req-1",
             precondition: "pre-1",
@@ -94,14 +118,18 @@ async function installDaemon(page: Page) {
             retentionCaveat: "Retention duration is unspecified.",
             limits: {
               maxEligiblePairs: 100,
-              maxProviderAttempts: 100,
-              reportedTokenStopThreshold: 50000,
+              maxProviderAttempts: Number(url.searchParams.get("maxProviderAttempts") ?? 100),
+              reportedTokenStopThreshold: Number(
+                url.searchParams.get("reportedTokenStopThreshold") ?? 200000,
+              ),
+              maxRunDurationMs: Number(url.searchParams.get("maxRunDurationMs") ?? 30 * 60_000),
               reportedTokenThresholdIsBilledCeiling: false,
             },
             withinPairLimit: true,
             expiresAt: new Date(Date.now() + 3600000).toISOString(),
           };
-        else if (url.pathname.endsWith("/active-run")) {
+          target.__releasePreview = undefined;
+        } else if (url.pathname.endsWith("/active-run")) {
           if (
             new URL(location.href).searchParams.get("status-fail") === "1" &&
             window.localStorage.getItem("run-state") === "running"
@@ -151,6 +179,80 @@ test("aggregate Ready status does not conflict with stale settings status", asyn
   await expect(page.getByRole("heading", { name: "Similarity preferences" })).toBeVisible();
   await expect(page.locator(".redundancy-refresh-status")).toContainText("Ready");
   await expect(page.getByText(/Not ready — factual-only results are shown/)).toHaveCount(0);
+});
+
+test("selected run limits bind the preview and changing them clears it", async ({
+  page,
+}, testInfo) => {
+  await installDaemon(page);
+  await page.goto("/redundancy");
+  const touchTargetHeight = await page
+    .getByLabel("Maximum HTTP attempts")
+    .evaluate((input) => getComputedStyle(input).minHeight);
+  expect(touchTargetHeight).toBe("44px");
+  await page.getByLabel("Maximum HTTP attempts").fill("1200");
+  await page.getByLabel("Reported-token stop threshold").fill("245000");
+  await page.getByLabel("Maximum run duration in minutes").fill("90");
+  await page.getByRole("button", { name: "Preview one run" }).click();
+  const preview = page.getByRole("region", { name: "Before you run" });
+  await expect(preview).toContainText("1,200 HTTP attempts");
+  await expect(preview).toContainText("90 minutes");
+  await expect(preview).toContainText("245,000 reported tokens");
+  const previewCall = await page.evaluate(() =>
+    (
+      window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+    ).__redundancyCalls.find((entry) => entry.url.includes("/semantic/run-preview?")),
+  );
+  expect(previewCall?.url).toContain("maxProviderAttempts=1200");
+  expect(previewCall?.url).toContain("reportedTokenStopThreshold=245000");
+  expect(previewCall?.url).toContain("maxRunDurationMs=5400000");
+  await page.screenshot({
+    path: testInfo.outputPath(`redundancy-limits-${testInfo.project.name}.png`),
+  });
+  await page.getByLabel("Maximum HTTP attempts").fill("1300");
+  await expect(page.getByRole("region", { name: "Before you run" })).toHaveCount(0);
+});
+
+test("an in-flight preview cannot restore limits after an edit", async ({ page }) => {
+  await installDaemon(page);
+  await page.goto("/redundancy?delay-preview=1");
+  await page.getByRole("button", { name: "Preview one run" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Boolean((window as typeof window & { __releasePreview?: () => void }).__releasePreview),
+      ),
+    )
+    .toBe(true);
+  await page.getByLabel("Maximum HTTP attempts").fill("101");
+  await page.evaluate(() =>
+    (window as typeof window & { __releasePreview?: () => void }).__releasePreview?.(),
+  );
+  await expect(page.getByRole("button", { name: "Preview one run" })).toHaveText("Preview one run");
+  await expect(page.getByRole("region", { name: "Before you run" })).toHaveCount(0);
+});
+
+test("invalid run limits are explained and stop reasons stay distinct", async ({ page }) => {
+  await installDaemon(page);
+  await page.goto("/redundancy");
+  await page.getByLabel("Maximum HTTP attempts").fill("75001");
+  await expect(page.locator(".redundancy-run-limits [role=alert]")).toContainText(
+    "cannot exceed 75,000",
+  );
+  await expect(page.getByRole("button", { name: "Preview one run" })).toBeDisabled();
+
+  const reasonCopy: Record<string, string> = {
+    "application-attempt-limit": "application HTTP attempt limit selected for this run",
+    "application-token-threshold": "application's reported-token threshold for this run",
+    "application-deadline":
+      "application stopped the run when its selected maximum duration elapsed",
+    "provider-limit": "previous application attempt limit",
+    "provider-rate-limited": "provider rate-limited requests",
+  };
+  for (const [reason, copy] of Object.entries(reasonCopy)) {
+    await page.goto(`/redundancy?stop=${reason}`);
+    await expect(page.locator(".redundancy-refresh-status")).toContainText(copy);
+  }
 });
 
 test("note consent is opt-in and declining still runs without note text", async ({

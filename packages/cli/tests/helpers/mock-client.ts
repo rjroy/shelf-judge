@@ -24,7 +24,13 @@ export function createMockClient(config: MockClientConfig = {}): DaemonClient {
 
   function findRoute(method: string, path: string): MockRoute | undefined {
     // Try exact match first, then method+path
-    return routes[`${method} ${path}`] ?? routes[path];
+    const querylessPath = path.split("?", 1)[0] ?? path;
+    return (
+      routes[`${method} ${path}`] ??
+      routes[path] ??
+      routes[`${method} ${querylessPath}`] ??
+      routes[querylessPath]
+    );
   }
 
   function request<T>(method: string, path: string, body?: unknown): Promise<DaemonResponse<T>> {

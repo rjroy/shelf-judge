@@ -38,7 +38,8 @@ const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
   "shelf.redundancy.get-semantic-run-preview": [
     {
       name: "run",
-      usage: "shelf-judge redundancy run [--authorize-notes] [--json]",
+      usage:
+        "shelf-judge redundancy run [--max-attempts N] [--reported-token-stop N] [--max-duration-minutes N] [--authorize-notes] [--json]",
       description:
         "Preview aggregate scope, then explicitly start one bounded Run; note transmission is opt-in",
     },

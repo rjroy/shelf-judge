@@ -73,6 +73,7 @@ export interface JevPairResult {
   description: JevScoreResult | null;
   ownerNote: JevScoreResult | null;
   usage: JevUsage;
+  stopReason?: "application-token-threshold";
 }
 
 export type JevGatewayErrorCode =
@@ -84,6 +85,8 @@ export type JevGatewayErrorCode =
   | "rate-limited"
   | "capacity"
   | "budget-exhausted"
+  | "attempt-limit-exhausted"
+  | "reported-token-threshold"
   | "admission-rejected"
   | "aborted";
 
@@ -317,7 +320,10 @@ export function createJevGateway(options: JevGatewayOptions = {}): JevGateway {
         throw new JevGatewayError("not-configured", "TypeSafe API key is not configured");
       throwIfAborted(signal);
       if (reportedTokens >= maxReportedTokens)
-        throw new JevGatewayError("budget-exhausted", "Jev reported-token budget exhausted");
+        throw new JevGatewayError(
+          "reported-token-threshold",
+          "Jev reported-token stop threshold reached",
+        );
       if (inFlight >= JEV_GATEWAY_LIMITS.maxConcurrentRequests)
         throw new JevGatewayError("capacity", "Jev gateway concurrency limit reached");
 
@@ -349,7 +355,10 @@ export function createJevGateway(options: JevGatewayOptions = {}): JevGateway {
           nextAttemptId: () => String(++attemptIds),
           consumeRequestAttempt: () => {
             if (requests >= maxRequests)
-              throw new JevGatewayError("budget-exhausted", "Jev request budget exhausted");
+              throw new JevGatewayError(
+                "attempt-limit-exhausted",
+                "Jev application attempt limit reached",
+              );
             requests += 1;
             return requests;
           },
@@ -393,9 +402,13 @@ export function createJevGateway(options: JevGatewayOptions = {}): JevGateway {
           );
         }
         const usage = usageResult(parsed.data.usage);
-        reportedTokens += usage.inputTokens + usage.outputTokens;
-        if (!Number.isSafeInteger(reportedTokens) || reportedTokens > maxReportedTokens)
-          throw new JevGatewayError("budget-exhausted", "Jev reported-token budget exceeded");
+        const remainingTokens = maxReportedTokens - reportedTokens;
+        const tokenThresholdReached =
+          usage.inputTokens >= remainingTokens ||
+          usage.outputTokens >= remainingTokens - usage.inputTokens;
+        reportedTokens = tokenThresholdReached
+          ? maxReportedTokens
+          : reportedTokens + usage.inputTokens + usage.outputTokens;
         logger.log("jev request outcome", {
           operationId,
           outcome: "validated",
@@ -407,6 +420,7 @@ export function createJevGateway(options: JevGatewayOptions = {}): JevGateway {
           description,
           ownerNote,
           usage,
+          ...(tokenThresholdReached ? { stopReason: "application-token-threshold" as const } : {}),
         };
       } catch (error) {
         const safeError =

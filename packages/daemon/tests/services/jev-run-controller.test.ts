@@ -154,6 +154,7 @@ function harness(
   let captures = 0;
   let providerConfigured = options.gatewayConfigured ?? true;
   const gatewayRequests: unknown[] = [];
+  const approvedBudgets: unknown[] = [];
   const started = deferred<void>();
   const release = deferred<void>();
   let fakeNowMs = Date.now();
@@ -178,8 +179,9 @@ function harness(
     ...(options.maxPairs === undefined ? {} : { maxPairs: options.maxPairs }),
     loadCapture: () => sourceAdapter.loadCapture(),
     readCurrent: () => sourceAdapter.readCurrent(),
-    createGateway: (admit) => {
+    createGateway: (admit, providerBudget) => {
       gatewayConstructions++;
+      approvedBudgets.push(providerBudget);
       return {
         evaluatePair: async (request) => {
           gatewayRequests.push(request);
@@ -214,6 +216,7 @@ function harness(
     rows,
     progress,
     gatewayRequests,
+    approvedBudgets,
     sourceAdapter,
     storage,
     runService,
@@ -245,6 +248,41 @@ function harness(
 }
 
 describe("JevRunController", () => {
+  test("preview exposes and binds validated per-run budget through opaque authorization", async () => {
+    const h = harness();
+    const selected = {
+      maxProviderAttempts: 501,
+      reportedTokenStopThreshold: 40_000,
+      maxRunDurationMs: 60_000,
+    };
+    const preview = await h.controller.preview(selected);
+    expect(preview.status).toBe(200);
+    if (preview.status !== 200) throw new Error("Expected budget preview");
+    expect(preview.body.limits).toMatchObject(selected);
+    const started = await h.controller.start({
+      requestId: preview.body.requestId,
+      precondition: preview.body.precondition,
+      noteTransmissionAuthorized: false,
+    });
+    expect(started.status).toBe(200);
+    await startedRunCompletion(h);
+    expect(h.approvedBudgets).toEqual([selected]);
+  });
+
+  test("rejects invalid per-run budgets without creating authorization", async () => {
+    const h = harness();
+    const invalid = [
+      { maxProviderAttempts: 0, reportedTokenStopThreshold: 1, maxRunDurationMs: 60_000 },
+      { maxProviderAttempts: 75_001, reportedTokenStopThreshold: 1, maxRunDurationMs: 60_000 },
+      { maxProviderAttempts: 1.5, reportedTokenStopThreshold: 1, maxRunDurationMs: 60_000 },
+      { maxProviderAttempts: 1, reportedTokenStopThreshold: 0, maxRunDurationMs: 60_000 },
+      { maxProviderAttempts: 1, reportedTokenStopThreshold: 1, maxRunDurationMs: 59_999 },
+      { maxProviderAttempts: 1, reportedTokenStopThreshold: 1, maxRunDurationMs: 43_200_001 },
+    ];
+    for (const budget of invalid) expect((await h.controller.preview(budget)).status).toBe(400);
+    expect(h.gatewayConstructions).toBe(0);
+  });
+
   test("preview is aggregate-only, provider-free, and reports enforced limits", async () => {
     const h = harness({ initial: makeCapture(["a", "b", "c"], true) });
     const preview = await h.controller.preview();
@@ -653,15 +691,19 @@ describe("JevRunController", () => {
       status: 200,
       body: { state: "cancellation-requested" },
     });
-    expect(h.controller.activeRun()).toEqual({ runId: started.body.runId });
-
-    type Handle = { runId: string; completion: Promise<unknown>; cancel(): void };
-    const internals = h.controller as unknown as { activeHandle: Handle | null };
+    const internals = h.controller as unknown as {
+      activeHandle: { runId: string; completion: Promise<unknown> } | null;
+    };
     const acceptedHandle = internals.activeHandle;
     if (!acceptedHandle) throw new Error("Expected controller active handle");
-    h.release();
     await acceptedHandle.completion;
     expect(h.controller.activeRun()).toBeNull();
+
+    h.release();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(h.controller.activeRun()).toBeNull();
+    expect(h.progress.at(-1)).toMatchObject({ runId: started.body.runId, state: "interrupted" });
+    expect(h.rows.size).toBe(0);
 
     const restarted = new JevRunController({
       storageService: h.storage,

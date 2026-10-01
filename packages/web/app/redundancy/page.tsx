@@ -32,6 +32,7 @@ type Preview = {
     maxProviderAttempts: number;
     reportedTokenStopThreshold: number;
     reportedTokenThresholdIsBilledCeiling: false;
+    maxRunDurationMs: number;
   };
   withinPairLimit: boolean;
   expiresAt: string;
@@ -52,7 +53,13 @@ type Refresh = {
     cacheHits: number;
     cacheMisses: number;
     failedPairs: number;
-    stopReason?: "provider-limit" | "provider-unconfigured";
+    stopReason?:
+      | "application-attempt-limit"
+      | "application-token-threshold"
+      | "application-deadline"
+      | "provider-limit"
+      | "provider-rate-limited"
+      | "provider-unconfigured";
   };
 };
 type ActiveRun = { runId: string } | null;
@@ -72,6 +79,58 @@ const statusCopy: Record<string, string> = {
   "not-ready": "Not ready — factual-only results are shown",
   unavailable: "Unavailable",
 };
+
+const stopReasonCopy: Record<string, string> = {
+  "application-attempt-limit":
+    "Stopped at the application HTTP attempt limit selected for this run. Results may be partial.",
+  "application-token-threshold":
+    "Stopped at the application's reported-token threshold for this run. This is not a billing limit; results may be partial.",
+  "application-deadline":
+    "The application stopped the run when its selected maximum duration elapsed. Results may be partial.",
+  "provider-limit":
+    "Stopped at the previous application attempt limit. This does not mean TypeSafe rate-limited the run.",
+  "provider-rate-limited": "The provider rate-limited requests. Results may be partial.",
+  "provider-unconfigured": "No provider key was available for remaining comparisons.",
+};
+
+function positiveSafeInteger(value: string): number | null {
+  if (!/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+type RunLimits = {
+  maxProviderAttempts: number;
+  reportedTokenStopThreshold: number;
+  maxRunDurationMs: number;
+};
+
+function validateRunLimits(
+  attemptsText: string,
+  tokenThresholdText: string,
+  durationMinutesText: string,
+): { limits: RunLimits | null; error: string | null } {
+  const attempts = positiveSafeInteger(attemptsText);
+  const tokenThreshold = positiveSafeInteger(tokenThresholdText);
+  const durationMinutes = positiveSafeInteger(durationMinutesText);
+  if (attempts === null)
+    return { limits: null, error: "Enter a positive whole number of HTTP attempts." };
+  if (attempts > 75_000) return { limits: null, error: "HTTP attempts cannot exceed 75,000." };
+  if (tokenThreshold === null)
+    return { limits: null, error: "Enter a positive, safe whole-number reported-token threshold." };
+  if (durationMinutes === null)
+    return { limits: null, error: "Enter a whole-number run duration from 1 to 720 minutes." };
+  if (durationMinutes > 720)
+    return { limits: null, error: "Run duration cannot exceed 12 hours (720 minutes)." };
+  return {
+    limits: {
+      maxProviderAttempts: attempts,
+      reportedTokenStopThreshold: tokenThreshold,
+      maxRunDurationMs: durationMinutes * 60_000,
+    },
+    error: null,
+  };
+}
 
 function semanticStatusValue(status: Semantic["status"]): string {
   if (typeof status === "string") return status;
@@ -130,6 +189,10 @@ export default function RedundancyPage() {
   const [refresh, setRefresh] = useState<Refresh | null>(null);
   const [activeRun, setActiveRun] = useState<ActiveRun>(null);
   const [noteTransmissionAuthorized, setNoteTransmissionAuthorized] = useState(false);
+  const [maxProviderAttempts, setMaxProviderAttempts] = useState("100");
+  const [reportedTokenStopThreshold, setReportedTokenStopThreshold] = useState("200000");
+  const [maxRunDurationMinutes, setMaxRunDurationMinutes] = useState("30");
+  const previewRevision = useRef(0);
   const [busy, setBusy] = useState(false);
   const [factualSaving, setFactualSaving] = useState(false);
   const [semanticSaving, setSemanticSaving] = useState(false);
@@ -138,6 +201,11 @@ export default function RedundancyPage() {
   const [message, setMessage] = useState<string>();
   const [statusError, setStatusError] = useState<string>();
   const runRef = useRef<HTMLDivElement>(null);
+  const { limits: selectedRunLimits, error: runLimitsError } = validateRunLimits(
+    maxProviderAttempts,
+    reportedTokenStopThreshold,
+    maxRunDurationMinutes,
+  );
 
   const reload = useCallback(async () => {
     const [data, status] = await Promise.all([
@@ -256,16 +324,28 @@ export default function RedundancyPage() {
     }
   };
   const loadPreview = async () => {
+    const limits = selectedRunLimits;
+    if (!limits) return;
+    const revision = previewRevision.current;
     setBusy(true);
     setError(undefined);
     setMessage(undefined);
     setPreview(null);
     try {
-      const result = await request<Preview>("/api/daemon/redundancy/semantic/run-preview");
+      const params = new URLSearchParams({
+        maxProviderAttempts: String(limits.maxProviderAttempts),
+        reportedTokenStopThreshold: String(limits.reportedTokenStopThreshold),
+        maxRunDurationMs: String(limits.maxRunDurationMs),
+      });
+      const result = await request<Preview>(
+        `/api/daemon/redundancy/semantic/run-preview?${params.toString()}`,
+      );
+      if (revision !== previewRevision.current) return;
       setPreview(result);
       setNoteTransmissionAuthorized(false);
       runRef.current?.scrollIntoView({ block: "nearest" });
     } catch (e) {
+      if (revision !== previewRevision.current) return;
       setError(e instanceof Error ? e.message : "Could not prepare run details");
     } finally {
       setBusy(false);
@@ -391,6 +471,7 @@ export default function RedundancyPage() {
     savedSemantic !== null && JSON.stringify(semantic.settings) !== JSON.stringify(savedSemantic);
   const semanticMigrationMessage = semanticMigrationCopy(semantic.migrationNotice);
   const clearPreparedDisclosure = () => {
+    previewRevision.current += 1;
     setPreview(null);
     setNoteTransmissionAuthorized(false);
   };
@@ -688,6 +769,69 @@ export default function RedundancyPage() {
                 Preferences must be saved before preparing this offline preview. Saving or reading
                 status never contacts the provider.
               </p>
+              <fieldset className="redundancy-run-limits" aria-describedby="run-limits-help">
+                <legend>Limits for this run</legend>
+                <p id="run-limits-help">
+                  Retries count toward the HTTP attempt limit. These limits apply only to this run.
+                </p>
+                <div className="redundancy-run-limit-grid">
+                  <label>
+                    Maximum HTTP attempts
+                    <input
+                      aria-label="Maximum HTTP attempts"
+                      aria-invalid={Boolean(runLimitsError)}
+                      aria-describedby={runLimitsError ? "run-limits-error" : undefined}
+                      type="number"
+                      min="1"
+                      max="75000"
+                      step="1"
+                      value={maxProviderAttempts}
+                      onChange={(event) => {
+                        clearPreparedDisclosure();
+                        setMaxProviderAttempts(event.target.value);
+                      }}
+                    />
+                  </label>
+                  <label>
+                    Reported-token stop threshold
+                    <input
+                      aria-label="Reported-token stop threshold"
+                      aria-invalid={Boolean(runLimitsError)}
+                      aria-describedby={runLimitsError ? "run-limits-error" : undefined}
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={reportedTokenStopThreshold}
+                      onChange={(event) => {
+                        clearPreparedDisclosure();
+                        setReportedTokenStopThreshold(event.target.value);
+                      }}
+                    />
+                  </label>
+                  <label>
+                    Maximum run duration (minutes)
+                    <input
+                      aria-label="Maximum run duration in minutes"
+                      aria-invalid={Boolean(runLimitsError)}
+                      aria-describedby={runLimitsError ? "run-limits-error" : undefined}
+                      type="number"
+                      min="1"
+                      max="720"
+                      step="1"
+                      value={maxRunDurationMinutes}
+                      onChange={(event) => {
+                        clearPreparedDisclosure();
+                        setMaxRunDurationMinutes(event.target.value);
+                      }}
+                    />
+                  </label>
+                </div>
+                {runLimitsError && (
+                  <p id="run-limits-error" className="redundancy-inline-guidance" role="alert">
+                    {runLimitsError}
+                  </p>
+                )}
+              </fieldset>
               {(semanticDirty || dirty) && (
                 <p className="redundancy-inline-guidance" role="status">
                   Save {semanticDirty ? "similarity preferences" : ""}
@@ -698,7 +842,9 @@ export default function RedundancyPage() {
               )}
               <button
                 className="btn btn-secondary"
-                disabled={busy || semanticDirty || dirty || !semantic.settings.enabled}
+                disabled={
+                  busy || semanticDirty || dirty || !semantic.settings.enabled || !selectedRunLimits
+                }
                 onClick={() => void loadPreview()}
               >
                 {busy ? "Loading preview…" : "Preview one run"}
@@ -736,10 +882,12 @@ export default function RedundancyPage() {
                     . Provider retention is unknown: {preview.retentionCaveat}
                   </p>
                   <p>
-                    Up to {preview.limits.maxProviderAttempts} HTTP attempts. A run can stop early
-                    and leave partial results. The reported-token stop threshold (
-                    {preview.limits.reportedTokenStopThreshold.toLocaleString()} tokens) is not a
-                    hard billing limit.
+                    Up to {preview.limits.maxProviderAttempts.toLocaleString()} HTTP attempts,
+                    including retries, or {Math.round(preview.limits.maxRunDurationMs / 60_000)}{" "}
+                    minutes. The app stops at{" "}
+                    {preview.limits.reportedTokenStopThreshold.toLocaleString()} reported tokens;
+                    this threshold is not a billing limit. Any limit can stop the run with partial
+                    results.
                   </p>
                   <p>
                     {preview.scoringEffect === "integrated-fitness"
@@ -824,14 +972,8 @@ export default function RedundancyPage() {
                     Cancel live run
                   </button>
                 )}
-                {refresh?.progress?.stopReason === "provider-limit" && (
-                  <p role="status">
-                    A provider request or reported-token limit stopped this run. Results may be
-                    partial.
-                  </p>
-                )}
-                {refresh?.progress?.stopReason === "provider-unconfigured" && (
-                  <p role="status">No provider key was available for remaining comparisons.</p>
+                {refresh?.progress?.stopReason && (
+                  <p role="status">{stopReasonCopy[refresh.progress.stopReason]}</p>
                 )}
                 {statusError && <p role="alert">Status could not be loaded: {statusError}</p>}
               </div>

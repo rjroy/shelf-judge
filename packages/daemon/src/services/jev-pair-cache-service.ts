@@ -50,7 +50,12 @@ export interface JevRunProgress {
   updatedAt: string;
 }
 
-export type JevRunStopReason = "provider-limit" | "provider-unconfigured";
+export type JevRunStopReason =
+  | "provider-limit"
+  | "provider-unconfigured"
+  | "application-attempt-limit"
+  | "application-token-threshold"
+  | "application-deadline";
 
 export interface JevAdvisoryActivation {
   identity: string;
@@ -134,8 +139,13 @@ function validateProgress(progress: JevRunProgress): void {
     throw new Error("Invalid run state");
   if (Object.hasOwn(progress, "stopReason")) {
     if (
-      (progress.stopReason !== "provider-limit" &&
-        progress.stopReason !== "provider-unconfigured") ||
+      ![
+        "provider-limit",
+        "provider-unconfigured",
+        "application-attempt-limit",
+        "application-token-threshold",
+        "application-deadline",
+      ].some((reason) => reason === progress.stopReason) ||
       progress.state !== "failed"
     )
       throw new Error("Invalid run stop reason");

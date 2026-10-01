@@ -210,7 +210,12 @@ interface SemanticRunStatus {
     cacheHits: number;
     cacheMisses: number;
     failedPairs: number;
-    stopReason?: "provider-limit" | "provider-unconfigured";
+    stopReason?:
+      | "provider-limit"
+      | "provider-unconfigured"
+      | "application-attempt-limit"
+      | "application-token-threshold"
+      | "application-deadline";
   };
 }
 
@@ -282,8 +287,8 @@ function formatRunPreview(preview: SemanticRunPreview): string {
     `Scoring effect: ${preview.scoringEffect}`,
     `Note transmission permission available: ${preview.noteTransmissionPermitted ? "yes" : "no"}`,
     `Provider configured: ${preview.providerConfigured ? "yes" : "no"}`,
-    `Limits: ${preview.limits.maxEligiblePairs.toLocaleString()} eligible pairs; ${preview.limits.maxProviderAttempts} provider attempts; ${Math.round(preview.limits.maxRunDurationMs / 1000)} seconds`,
-    `Reported-token stop threshold: ${tokenThreshold} (not a hard billed ceiling)`,
+    `Application stop limits: ${preview.limits.maxProviderAttempts.toLocaleString()} provider attempts; ${Math.round(preview.limits.maxRunDurationMs / 60_000)} minutes; ${preview.limits.maxEligiblePairs.toLocaleString()} eligible pairs`,
+    `Provider-reported usage stop threshold: ${tokenThreshold} tokens (reported usage is not a billing cap)`,
     `Retention: ${preview.retentionCaveat}`,
     `Preview expires: ${preview.expiresAt}`,
     preview.withinPairLimit
@@ -307,11 +312,23 @@ function formatRunStatus(status: SemanticRunStatus): string {
     );
     if (progress.stopReason === "provider-limit") {
       lines.push(
-        "Run stopped at a provider attempt or reported-token limit; prior checkpoints are retained.",
+        "Run stopped at a legacy local budget limit (provider-limit); this code does not establish that TypeSafe rate-limited the request. Prior checkpoints are retained.",
       );
     } else if (progress.stopReason === "provider-unconfigured") {
       lines.push(
         "Run stopped because the provider is not configured; prior checkpoints are retained.",
+      );
+    } else if (progress.stopReason === "application-attempt-limit") {
+      lines.push(
+        "Run stopped at the application provider-attempt limit; this is a local budget stop, not evidence of provider rate limiting. Prior checkpoints are retained.",
+      );
+    } else if (progress.stopReason === "application-token-threshold") {
+      lines.push(
+        "Run stopped at the application-enforced provider-reported usage threshold; reported tokens are not a billing cap. Prior checkpoints are retained.",
+      );
+    } else if (progress.stopReason === "application-deadline") {
+      lines.push(
+        "Run stopped at the application Run-duration deadline. Prior checkpoints are retained.",
       );
     }
   }
@@ -323,12 +340,48 @@ export async function redundancySemanticRun(
   args: string[],
   opts: OutputOptions,
 ): Promise<string> {
-  const options = new Set(args);
-  if (options.size !== args.length || args.some((arg) => arg !== "--authorize-notes")) {
-    throw new Error("Usage: shelf-judge redundancy run [--authorize-notes] [--json]");
+  const defaults = { maxAttempts: 100, reportedTokenStop: 200_000, maxDurationMinutes: 30 };
+  const bounds = {
+    maxAttempts: 75_000,
+    reportedTokenStop: Number.MAX_SAFE_INTEGER,
+    maxDurationMinutes: 720,
+  };
+  const values = { ...defaults };
+  const seen = new Set<string>();
+  let authorizeNotes = false;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--authorize-notes") {
+      if (authorizeNotes) throw new Error("--authorize-notes may only be specified once");
+      authorizeNotes = true;
+      continue;
+    }
+    const flagToKey = {
+      "--max-attempts": "maxAttempts",
+      "--reported-token-stop": "reportedTokenStop",
+      "--max-duration-minutes": "maxDurationMinutes",
+    } as const;
+    const key = flagToKey[arg as keyof typeof flagToKey];
+    if (!key || seen.has(arg)) {
+      throw new Error(
+        "Usage: shelf-judge redundancy run [--max-attempts N] [--reported-token-stop N] [--max-duration-minutes N] [--authorize-notes] [--json]",
+      );
+    }
+    seen.add(arg);
+    const rawValue = args[++index];
+    const value = rawValue !== undefined && /^\d+$/.test(rawValue) ? Number(rawValue) : Number.NaN;
+    if (!Number.isSafeInteger(value) || value <= 0 || value > bounds[key]) {
+      throw new Error(`${arg} must be a positive safe integer no greater than ${bounds[key]}`);
+    }
+    values[key] = value;
   }
+  const query = new URLSearchParams({
+    maxProviderAttempts: String(values.maxAttempts),
+    reportedTokenStopThreshold: String(values.reportedTokenStop),
+    maxRunDurationMs: String(values.maxDurationMinutes * 60_000),
+  });
   const { ok: previewOk, data: preview } = await client.get<SemanticRunPreview>(
-    `${SEMANTIC}/run-preview`,
+    `${SEMANTIC}/run-preview?${query.toString()}`,
   );
   if (!previewOk) fail(preview, "Unable to preview semantic Run");
   if (
@@ -351,10 +404,13 @@ export async function redundancySemanticRun(
       return printOutput({ preview, state: "not-started", reason: "provider-unconfigured" }, opts);
     return `${summary}\nNo Run was started because the provider is not configured.`;
   }
-  const noteTransmissionAuthorized = options.has("--authorize-notes");
+  const noteTransmissionAuthorized = authorizeNotes;
   if (noteTransmissionAuthorized && !preview.noteTransmissionPermitted) {
     throw new Error("Note transmission is not currently permitted; no Run was started");
   }
+  const disclosure = formatRunPreview(preview);
+  if (opts.json) console.error(disclosure);
+  else console.log(disclosure);
   const { ok, data } = await client.post(`${SEMANTIC}/run`, {
     requestId: preview.requestId,
     precondition: preview.precondition,
@@ -376,7 +432,7 @@ export async function redundancySemanticRun(
     fail(data, "Run was refused; preview may be stale or expired");
   }
   if (opts.json) return printOutput({ preview, result: data }, opts);
-  return `${formatRunPreview(preview)}\nRun accepted: ${JSON.stringify(data)}`;
+  return `Run accepted: ${JSON.stringify(data)}`;
 }
 
 export async function redundancySemanticCancel(

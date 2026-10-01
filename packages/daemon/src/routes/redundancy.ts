@@ -13,6 +13,7 @@ import { collectionMutationServiceFor } from "../services/collection-mutation-se
 import { createSemanticRedundancyStateService } from "../services/semantic-redundancy-state-service.js";
 import type { createJevStatusService } from "../services/jev-status-service.js";
 import type { JevRunController } from "../services/jev-run-controller.js";
+import { parseJevRunBudgetQuery } from "../services/jev-run-budget.js";
 
 type JevRunRouteController = Pick<JevRunController, "preview" | "start" | "cancel" | "activeRun">;
 
@@ -243,6 +244,7 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
 
   const setRunNoStore = (c: Context) => c.header("Cache-Control", "no-store");
   const controllerError = (c: Context, status: number) => {
+    if (status === 400) return c.json({ error: "Invalid Run budget" }, 400);
     if (status === 409) return c.json({ error: "Run conflict" }, 409);
     if (status === 412) return c.json({ error: "Run precondition failed" }, 412);
     return c.json({ error: "Run is unavailable" }, 503);
@@ -269,8 +271,10 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
     setRunNoStore(c);
     const controller = deps.jevRunController;
     if (!controller) return c.json({ error: "Run is unavailable" }, 503);
+    const parsedBudget = parseJevRunBudgetQuery(new URL(c.req.url).searchParams);
+    if (!parsedBudget.ok) return c.json({ error: "Invalid Run budget" }, 400);
     try {
-      const result = await controller.preview();
+      const result = await controller.preview(parsedBudget.budget);
       if (result.status === 200) return c.json(result.body, 200);
       return controllerError(c, result.status);
     } catch {

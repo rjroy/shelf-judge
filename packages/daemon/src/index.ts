@@ -81,12 +81,15 @@ export function createJevRunWorker(options: {
     ...sourceAdapter,
     // This factory runs once per explicit startRun, so the gateway's request and
     // reported-token budgets are fresh for each separately authorized execution.
-    createGateway: (admitAndDispatch) =>
+    createGateway: (admitAndDispatch, providerBudget) =>
       createJevGateway({
         admitAndDispatch,
+        maxRequests: providerBudget.maxProviderAttempts,
+        maxReportedTokens: providerBudget.reportedTokenStopThreshold,
         ...(options.fetch ? { fetch: options.fetch } : {}),
         logger: options.gatewayLogger ?? createLogger("jev-gateway"),
       }),
+    logger: createLogger("jev-run"),
   });
 }
 

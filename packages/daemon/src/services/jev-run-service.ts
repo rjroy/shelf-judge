@@ -19,6 +19,12 @@ import {
   type JevDispatchReceipt,
   type JevGateway,
 } from "./jev/jev-gateway.js";
+import {
+  DEFAULT_JEV_RUN_BUDGET,
+  isValidJevRunBudget,
+  type JevRunBudget,
+} from "./jev-run-budget.js";
+import { createLogger, type Logger } from "./logger.js";
 
 export interface JevRunCapture {
   collection: Collection;
@@ -45,6 +51,9 @@ export interface JevRunServiceOptions {
   readCurrent(): Promise<JevRunCurrentState>;
   createGateway(
     admitAndDispatch: (attempt: JevAttemptAdmission) => Promise<JevDispatchReceipt>,
+    providerBudget: Readonly<
+      Pick<JevRunBudget, "maxProviderAttempts" | "reportedTokenStopThreshold">
+    >,
   ): JevGateway;
   /** Optional instrumentation seam; production defaults to the canonical planner. */
   planScope?: typeof planJevRunScope;
@@ -52,6 +61,7 @@ export interface JevRunServiceOptions {
   maxPairs?: number;
   maxRunMs?: number;
   finalCaptureRetries?: number;
+  logger?: Pick<Logger, "log" | "error">;
 }
 
 export interface JevRunHandle {
@@ -64,6 +74,7 @@ export interface JevPreparedRunInput {
   capture: JevRunCapture;
   scope: JevRunScope;
   noteTransmissionAuthorized: boolean;
+  providerBudget?: Readonly<JevRunBudget>;
 }
 
 declare const validatedPreparedRunBrand: unique symbol;
@@ -73,6 +84,7 @@ interface PreparedRunData {
   capture: JevRunCapture;
   scope: JevRunScope;
   noteTransmissionAuthorized: boolean;
+  providerBudget: Readonly<JevRunBudget>;
 }
 
 export interface JevRunEffectiveLimits {
@@ -81,10 +93,23 @@ export interface JevRunEffectiveLimits {
 }
 
 const DEFAULT_MAX_PAIRS = 25_000;
-const DEFAULT_MAX_RUN_MS = 30 * 60_000;
+const DEFAULT_MAX_RUN_MS = DEFAULT_JEV_RUN_BUDGET.maxRunDurationMs;
 const DEFAULT_FINAL_CAPTURE_RETRIES = 2;
 const activeRuns = new WeakMap<object, JevRunHandle>();
 type ReadyAdmission = Extract<ReturnType<typeof prepareJevRunPair>, { status: "ready" }>;
+
+interface RunControl {
+  runId: string;
+  controller: AbortController;
+  startedAt: number;
+  progress: JevRunProgress;
+  resolveCompletion(progress: JevRunProgress): void;
+  terminalCause?: "cancelled" | "deadline";
+  completionSettled: boolean;
+  successCommitted: boolean;
+  deadlineTimer: ReturnType<typeof setTimeout>;
+  terminalPersistenceFailed?: boolean;
+}
 
 /** Explicit-start only. Persisted progress is observability, never authority to perform inference. */
 export class JevRunService {
@@ -94,7 +119,11 @@ export class JevRunService {
   private readonly maxRunMs: number;
   private readonly finalCaptureRetries: number;
   private readonly planScope: typeof planJevRunScope;
+  private readonly logger: Pick<Logger, "log" | "error">;
   private readonly preparedRuns = new WeakMap<object, PreparedRunData>();
+  private readonly runDurations = new WeakMap<AbortController, number>();
+  private readonly deadlineControllers = new WeakSet<AbortController>();
+  private readonly runControls = new WeakMap<AbortController, RunControl>();
 
   constructor(private readonly options: JevRunServiceOptions) {
     this.coordinator = profileSourceCoordinatorFor(options.storageService);
@@ -103,6 +132,7 @@ export class JevRunService {
     this.maxRunMs = options.maxRunMs ?? DEFAULT_MAX_RUN_MS;
     this.finalCaptureRetries = options.finalCaptureRetries ?? DEFAULT_FINAL_CAPTURE_RETRIES;
     this.planScope = options.planScope ?? planJevRunScope;
+    this.logger = options.logger ?? createLogger("jev-run");
   }
 
   get effectiveLimits(): JevRunEffectiveLimits {
@@ -122,6 +152,11 @@ export class JevRunService {
       try {
         if (typeof input.noteTransmissionAuthorized !== "boolean") return null;
         const capture = structuredClone(input.capture);
+        const providerBudget = input.providerBudget ?? {
+          ...DEFAULT_JEV_RUN_BUDGET,
+          maxRunDurationMs: this.maxRunMs,
+        };
+        if (!isValidJevRunBudget(providerBudget)) return null;
         const planned = this.planScope(capture.collection, capture.predictionCapture);
         if (
           !planned.ok ||
@@ -134,6 +169,7 @@ export class JevRunService {
           capture,
           scope: planned.scope,
           noteTransmissionAuthorized: input.noteTransmissionAuthorized,
+          providerBudget: Object.freeze({ ...providerBudget }),
         });
         return reservation as ValidatedPreparedJevRun;
       } catch {
@@ -156,18 +192,121 @@ export class JevRunService {
     if (activeRuns.has(this.options.storageService)) throw new Error("A Jev run is already active");
     const runId = crypto.randomUUID();
     const controller = new AbortController();
-    const completion = runOutsideProfileSourceCoordinator(() =>
-      this.execute(runId, noteAuthorized, controller, prepared),
-    );
-    const handle: JevRunHandle = { runId, completion, cancel: () => controller.abort() };
+    const startedAt = this.now().getTime();
+    const duration = prepared?.providerBudget.maxRunDurationMs ?? this.maxRunMs;
+    const budget = prepared?.providerBudget ?? {
+      ...DEFAULT_JEV_RUN_BUDGET,
+      maxRunDurationMs: this.maxRunMs,
+    };
+    let resolveCompletion!: (progress: JevRunProgress) => void;
+    const completion = new Promise<JevRunProgress>((resolve) => {
+      resolveCompletion = resolve;
+    });
+    const control = {
+      runId,
+      controller,
+      startedAt,
+      progress: {
+        runId,
+        state: "running" as const,
+        pairCount: 0,
+        completedPairs: 0,
+        cacheHits: 0,
+        cacheMisses: 0,
+        failedPairs: 0,
+        updatedAt: this.now().toISOString(),
+      },
+      resolveCompletion,
+      completionSettled: false,
+      successCommitted: false,
+      deadlineTimer: setTimeout(() => this.terminateRun(control, "deadline"), duration),
+    } satisfies RunControl;
+    control.deadlineTimer.unref?.();
+    this.runDurations.set(controller, duration);
+    this.runControls.set(controller, control);
+    const handle: JevRunHandle = {
+      runId,
+      completion,
+      cancel: () => this.terminateRun(control, "cancelled"),
+    };
     activeRuns.set(this.options.storageService, handle);
-    void completion
-      .finally(() => {
-        if (activeRuns.get(this.options.storageService) === handle)
-          activeRuns.delete(this.options.storageService);
-      })
-      .catch(() => {});
+    try {
+      this.logger.log("Jev run started", {
+        runId,
+        trigger: "owner-explicit",
+        authorizedSignalScope: noteAuthorized ? "yes" : "no",
+        maxProviderAttempts: budget.maxProviderAttempts,
+        reportedTokenStopThreshold: budget.reportedTokenStopThreshold,
+        maxRunDurationMs: budget.maxRunDurationMs,
+        eligiblePairs: prepared?.scope.totalEligiblePairs ?? null,
+      });
+    } catch {
+      // Lifecycle diagnostics are best-effort and must not strand a reserved Run.
+    }
+    void runOutsideProfileSourceCoordinator(() =>
+      this.execute(control, noteAuthorized, prepared),
+    ).then(
+      (progress) => this.settleRun(control, progress),
+      () => this.settleRun(control, control.progress),
+    );
     return handle;
+  }
+
+  private terminateRun(control: RunControl, cause: "cancelled" | "deadline"): void {
+    if (control.terminalCause || control.completionSettled || control.successCommitted) return;
+    control.terminalCause = cause;
+    if (cause === "deadline") this.deadlineControllers.add(control.controller);
+    control.controller.abort();
+    const terminal: JevRunProgress = {
+      ...control.progress,
+      state: cause === "deadline" ? "failed" : "interrupted",
+      updatedAt: this.now().toISOString(),
+      ...(cause === "deadline" ? { stopReason: "application-deadline" as const } : {}),
+    };
+    if (cause !== "deadline") delete terminal.stopReason;
+    control.progress = terminal;
+    clearTimeout(control.deadlineTimer);
+    let terminalPersistenceFailed = false;
+    try {
+      this.options.cache.finishRun({ activation: null, progress: terminal });
+    } catch {
+      terminalPersistenceFailed = true;
+      // Completion is fail-closed even when terminal status persistence is unavailable.
+    }
+    control.terminalPersistenceFailed = terminalPersistenceFailed;
+    this.settleRun(control, terminal);
+  }
+
+  private settleRun(control: RunControl, progress: JevRunProgress): void {
+    if (control.completionSettled) return;
+    control.completionSettled = true;
+    clearTimeout(control.deadlineTimer);
+    control.progress = progress;
+    control.resolveCompletion(progress);
+    const handle = activeRuns.get(this.options.storageService);
+    if (handle?.runId === control.runId) activeRuns.delete(this.options.storageService);
+    const terminalFields = {
+      runId: control.runId,
+      state: progress.state,
+      stopReason:
+        progress.stopReason ?? (control.terminalCause === "cancelled" ? "owner-cancelled" : null),
+      completedPairs: progress.completedPairs,
+      failedPairs: progress.failedPairs,
+      cacheHits: progress.cacheHits,
+      durationMs: Math.max(0, this.now().getTime() - control.startedAt),
+    };
+    try {
+      if (control.terminalPersistenceFailed) {
+        this.logger.error("Jev run terminal", {
+          ...terminalFields,
+          persistenceFailureReason: "terminal-status-persistence-failed",
+        });
+      } else {
+        this.logger.log("Jev run terminal", terminalFields);
+      }
+    } catch {
+      // Logging must not affect completion or active-run cleanup.
+    }
   }
 
   /** Marks a durable interrupted marker only. This method never creates a gateway or sends. */
@@ -186,22 +325,16 @@ export class JevRunService {
   }
 
   private async execute(
-    runId: string,
+    control: RunControl,
     noteAuthorized: boolean,
-    controller: AbortController,
     prepared?: PreparedRunData,
   ): Promise<JevRunProgress> {
-    const startedAt = this.now().getTime();
-    let progress: JevRunProgress = {
-      runId,
-      state: "running",
-      pairCount: 0,
-      completedPairs: 0,
-      cacheHits: 0,
-      cacheMisses: 0,
-      failedPairs: 0,
-      updatedAt: this.now().toISOString(),
+    const { runId, controller, startedAt } = control;
+    const providerBudget = prepared?.providerBudget ?? {
+      ...DEFAULT_JEV_RUN_BUDGET,
+      maxRunDurationMs: this.maxRunMs,
     };
+    let progress = control.progress;
     let capture: JevRunCapture;
     let originalScope: JevRunScope;
     let terminalStopReason: JevRunStopReason | undefined;
@@ -211,20 +344,27 @@ export class JevRunService {
         originalScope = prepared.scope;
       } else {
         capture = await this.options.loadCapture();
+        if (!this.runCanContinue(control)) return control.progress;
         const planned = this.planScope(capture.collection, capture.predictionCapture);
         if (!planned.ok) throw new Error("Invalid Jev capture");
         originalScope = planned.scope;
       }
+      if (!this.runCanContinue(control)) return control.progress;
       if (originalScope.totalEligiblePairs > this.maxPairs)
         throw new Error("Jev run exceeds configured pair limit");
       progress = this.nextProgress(progress, { pairCount: originalScope.totalEligiblePairs });
+      control.progress = progress;
       await this.coordinator.runExclusive(async () => {
+        if (!this.runCanContinue(control) || this.stopped(controller, startedAt))
+          throw new Error("Jev run stopped");
         const current = await this.options.readCurrent();
-        if (this.stopped(controller, startedAt)) throw new Error("Jev run stopped");
+        if (!this.runCanContinue(control) || this.stopped(controller, startedAt))
+          throw new Error("Jev run stopped");
         if (!sameAuthority(capture, current))
           throw new Error("Jev sources changed before run start");
         this.options.cache.saveRunProgress(progress);
       });
+      if (!this.runCanContinue(control)) return control.progress;
 
       let activeAdmission: { pair: JevRunPair; ready: ReadyAdmission } | null = null;
       let latestCapture = capture;
@@ -239,6 +379,7 @@ export class JevRunService {
             runId,
             noteAuthorized,
             controller,
+            control,
             startedAt,
             originalCapture: capture,
             originalScope,
@@ -252,14 +393,15 @@ export class JevRunService {
             ready: bound.ready,
             attempt,
           });
-        });
+        }, providerBudget);
         return gateway;
       };
 
       for (const originalPair of originalScope.pairs()) {
-        if (this.stopped(controller, startedAt)) break;
+        if (!this.runCanContinue(control) || this.stopped(controller, startedAt)) break;
         const previousCapture = latestCapture;
-        const currentCapture = await this.refreshForCurrentVector(previousCapture);
+        const currentCapture = await this.refreshForCurrentVector(previousCapture, control);
+        if (!this.runCanContinue(control)) return control.progress;
         const captureChanged =
           currentCapture.sourceVectorIdentity !== previousCapture.sourceVectorIdentity;
         if (currentCapture.policyIdentity !== capture.policyIdentity)
@@ -273,6 +415,7 @@ export class JevRunService {
         latestScope = currentScopeResult.scope;
         if (!pairForIds(currentScopeResult.scope, originalPair)) {
           progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
+          control.progress = progress;
           continue;
         }
         const currentPair = pairForIds(currentScopeResult.scope, originalPair)!;
@@ -290,31 +433,38 @@ export class JevRunService {
             cacheHits: prepared.reason === "both-cached" ? 1 : 0,
             failedPairs: prepared.reason === "both-cached" || noRequiredSignal ? 0 : 1,
           });
+          control.progress = progress;
           continue;
         }
         if (prepared.status !== "ready") {
           progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
+          control.progress = progress;
           continue;
         }
         const ready = prepared;
         progress = this.persistOutcome(progress, { cacheMisses: 1 });
+        control.progress = progress;
         activeAdmission = { pair: currentPair, ready };
         let result: Awaited<ReturnType<JevGateway["evaluatePair"]>>;
         try {
           result = await getGateway().evaluatePair(ready.request, controller.signal);
         } catch (error) {
           activeAdmission = null;
+          if (!this.runCanContinue(control)) return control.progress;
           if (!controller.signal.aborted) {
             progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
+            control.progress = progress;
             terminalStopReason = terminalStopReasonFor(error);
             if (terminalStopReason) break;
           }
           continue;
         }
+        if (!this.runCanContinue(control)) return control.progress;
         const mapped = mapJevPairResult(ready, result, this.now().toISOString());
         if (!mapped || mapped.length < 1 || mapped.length > 2) {
           activeAdmission = null;
           progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
+          control.progress = progress;
           continue;
         }
         let checkpointed = false;
@@ -337,53 +487,86 @@ export class JevRunService {
             getProgress: () => progress,
             setProgress: (next) => {
               progress = next;
+              control.progress = next;
             },
             onStorageFailure: () => {
               checkpointStorageFailure = true;
             },
+            control,
           });
         } catch {
           if (checkpointStorageFailure) throw new Error("Jev cache checkpoint failed");
         } finally {
           activeAdmission = null;
         }
+        if (!this.runCanContinue(control)) return control.progress;
         if (!checkpointed && !controller.signal.aborted)
           progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
+        control.progress = progress;
+        if (checkpointed && result.stopReason) {
+          terminalStopReason = result.stopReason;
+          break;
+        }
       }
 
-      const state: JevRunProgress["state"] = this.stopped(controller, startedAt)
-        ? "interrupted"
-        : progress.failedPairs
-          ? "failed"
-          : "completed";
+      if (!this.runCanContinue(control)) return control.progress;
+
+      const state: JevRunProgress["state"] = this.deadlineReached(controller, startedAt)
+        ? "failed"
+        : this.stopped(controller, startedAt)
+          ? "interrupted"
+          : terminalStopReason || progress.failedPairs
+            ? "failed"
+            : "completed";
       const terminal = this.nextProgress(progress, {}, state);
       if (state === "failed" && terminalStopReason) terminal.stopReason = terminalStopReason;
+      if (this.deadlineReached(controller, startedAt)) terminal.stopReason = "application-deadline";
       if (state !== "completed") {
-        return this.finishTerminal(terminal, controller, startedAt, state);
+        control.progress = terminal;
+        return this.finishTerminal(terminal, controller, startedAt, state, control);
       }
-      return await this.finishWithCurrentCoverage(terminal, capture, controller, startedAt);
+      return await this.finishWithCurrentCoverage(
+        terminal,
+        capture,
+        controller,
+        startedAt,
+        control,
+      );
     } catch {
+      if (control.terminalCause) return control.progress;
+      const deadlineReached = this.deadlineReached(controller, startedAt);
       const terminal = this.nextProgress(
         progress,
         {},
-        controller.signal.aborted || this.expired(startedAt) ? "interrupted" : "failed",
+        deadlineReached ? "failed" : controller.signal.aborted ? "interrupted" : "failed",
       );
+      if (deadlineReached) terminal.stopReason = "application-deadline";
+      control.progress = terminal;
+      let terminalPersistenceFailed = false;
       try {
-        this.options.cache.finishRun({ activation: null, progress: terminal });
+        if (!control.terminalCause)
+          this.options.cache.finishRun({ activation: null, progress: terminal });
       } catch {
+        terminalPersistenceFailed = true;
         /* preserve fail-closed state */
       }
+      control.terminalPersistenceFailed = terminalPersistenceFailed;
       return terminal;
     }
   }
 
-  private async refreshForCurrentVector(capture: JevRunCapture): Promise<JevRunCapture> {
+  private async refreshForCurrentVector(
+    capture: JevRunCapture,
+    control?: RunControl,
+  ): Promise<JevRunCapture> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const current = await this.options.readCurrent();
+      if (control && !this.runCanContinue(control)) throw new Error("Jev run stopped");
       if (current.policyIdentity !== capture.policyIdentity)
         throw new Error("Jev policy changed during run");
       if (current.sourceVectorIdentity === capture.sourceVectorIdentity) return capture;
       const refreshed = await this.options.loadCapture();
+      if (control && !this.runCanContinue(control)) throw new Error("Jev run stopped");
       if (refreshed.policyIdentity !== capture.policyIdentity)
         throw new Error("Jev policy changed during source refresh");
       if (refreshed.sourceVectorIdentity === current.sourceVectorIdentity) return refreshed;
@@ -442,6 +625,7 @@ export class JevRunService {
     runId: string;
     noteAuthorized: boolean;
     controller: AbortController;
+    control?: RunControl;
     startedAt: number;
     originalCapture: JevRunCapture;
     originalScope: JevRunScope;
@@ -453,9 +637,13 @@ export class JevRunService {
     attempt: JevAttemptAdmission;
   }): Promise<JevDispatchReceipt> {
     for (let refresh = 0; refresh < 3; refresh++) {
-      if (this.stopped(input.controller, input.startedAt)) throw new Error("Jev run stopped");
+      if (
+        (input.control && !this.runCanContinue(input.control)) ||
+        this.stopped(input.controller, input.startedAt)
+      )
+        throw new Error("Jev run stopped");
       // A coherent eligibility refresh is required independently for every initial/retry attempt.
-      const refreshed = await this.refreshForCurrentVector(input.getLatest());
+      const refreshed = await this.refreshForCurrentVector(input.getLatest(), input.control);
       const freshScopeResult =
         refreshed === input.getLatest()
           ? { ok: true as const, scope: input.getLatestScope() }
@@ -469,8 +657,17 @@ export class JevRunService {
         throw new Error("Jev pair is no longer eligible or authorized");
       input.setLatest(refreshed, freshScopeResult.scope);
       const result = await this.coordinator.runExclusive(async () => {
+        if (
+          (input.control && !this.runCanContinue(input.control)) ||
+          this.stopped(input.controller, input.startedAt)
+        )
+          throw new Error("Jev run stopped");
         const current = await this.options.readCurrent();
-        if (this.stopped(input.controller, input.startedAt)) throw new Error("Jev run stopped");
+        if (
+          (input.control && !this.runCanContinue(input.control)) ||
+          this.stopped(input.controller, input.startedAt)
+        )
+          throw new Error("Jev run stopped");
         if (current.policyIdentity !== input.originalCapture.policyIdentity)
           throw new Error("Jev policy changed before dispatch");
         // A newer unrelated edit raced the fresh capture. Release the lock and recapture instead
@@ -496,18 +693,21 @@ export class JevRunService {
     original: JevRunCapture,
     controller: AbortController,
     startedAt: number,
+    control: RunControl,
   ): Promise<JevRunProgress> {
     for (let attempt = 0; attempt <= this.finalCaptureRetries; attempt++) {
+      if (!this.runCanContinue(control)) return control.progress;
       if (this.stopped(controller, startedAt))
-        return this.finishTerminal(terminal, controller, startedAt);
+        return this.finishTerminal(terminal, controller, startedAt, undefined, control);
       const capture = await this.options.loadCapture();
+      if (!this.runCanContinue(control)) return control.progress;
       if (this.stopped(controller, startedAt))
-        return this.finishTerminal(terminal, controller, startedAt);
+        return this.finishTerminal(terminal, controller, startedAt, undefined, control);
       if (capture.policyIdentity !== original.policyIdentity)
-        return this.finishTerminal(terminal, controller, startedAt, "failed");
+        return this.finishTerminal(terminal, controller, startedAt, "failed", control);
       const cacheRevisionBefore = this.options.cache.mutationRevision();
       if (cacheRevisionBefore === null)
-        return this.finishTerminal(terminal, controller, startedAt, "failed");
+        return this.finishTerminal(terminal, controller, startedAt, "failed", control);
       const digest = computeJevPairCoverage({
         collection: capture.collection,
         predictionCapture: capture.predictionCapture,
@@ -518,8 +718,15 @@ export class JevRunService {
       const cacheRevisionAfter = this.options.cache.mutationRevision();
       if (cacheRevisionAfter === null || cacheRevisionAfter !== cacheRevisionBefore) continue;
       const result = await this.coordinator.runExclusive(async () => {
+        if (!this.runCanContinue(control) || this.stopped(controller, startedAt))
+          return {
+            retry: false,
+            complete: false,
+            persisted: false,
+            terminalState: "interrupted" as const,
+          };
         const current = await this.options.readCurrent();
-        if (this.stopped(controller, startedAt))
+        if (!this.runCanContinue(control) || this.stopped(controller, startedAt))
           return {
             retry: false,
             complete: false,
@@ -554,7 +761,9 @@ export class JevRunService {
         const finalProgress = digest.complete
           ? terminal
           : { ...terminal, state: "failed" as const };
+        control.progress = finalProgress;
         this.options.cache.finishRun({ activation, progress: finalProgress });
+        if (digest.complete) control.successCommitted = true;
         return {
           retry: false,
           complete: digest.complete,
@@ -562,33 +771,43 @@ export class JevRunService {
           terminalState: digest.complete ? ("completed" as const) : ("failed" as const),
         };
       });
+      if (control.terminalCause) return control.progress;
       if (result.retry) continue;
       if (result.terminalState === "interrupted")
-        return this.finishTerminal(terminal, controller, startedAt, "interrupted");
-      if (!result.persisted) return this.finishTerminal(terminal, controller, startedAt, "failed");
+        return this.finishTerminal(terminal, controller, startedAt, "interrupted", control);
+      if (!result.persisted)
+        return this.finishTerminal(terminal, controller, startedAt, "failed", control);
       return result.complete ? terminal : { ...terminal, state: "failed" };
     }
-    return this.finishTerminal(terminal, controller, startedAt, "failed");
+    return this.finishTerminal(terminal, controller, startedAt, "failed", control);
   }
 
-  private async finishTerminal(
+  private finishTerminal(
     progress: JevRunProgress,
     controller: AbortController,
     startedAt: number,
-    requestedState?: "failed" | "interrupted",
+    requestedState: "failed" | "interrupted" | undefined,
+    control: RunControl,
   ): Promise<JevRunProgress> {
-    let terminal = progress;
-    await this.coordinator.runExclusive(async () => {
-      // The read creates a barrier for cancellation/source mutations; cancellation wins after it.
-      await this.options.readCurrent();
-      const state = this.stopped(controller, startedAt)
-        ? "interrupted"
-        : (requestedState ?? "failed");
-      terminal = { ...progress, state, updatedAt: this.now().toISOString() };
-      if (state !== "failed") delete terminal.stopReason;
+    if (control.completionSettled || control.terminalCause)
+      return Promise.resolve(control.progress);
+    if (this.deadlineReached(controller, startedAt)) return Promise.resolve(control.progress);
+    const state = this.stopped(controller, startedAt)
+      ? "interrupted"
+      : (requestedState ?? "failed");
+    const terminal: JevRunProgress = { ...progress, state, updatedAt: this.now().toISOString() };
+    if (state !== "failed") delete terminal.stopReason;
+    control.progress = terminal;
+    let terminalPersistenceFailed = false;
+    try {
       this.options.cache.finishRun({ activation: null, progress: terminal });
-    });
-    return terminal;
+    } catch {
+      terminalPersistenceFailed = true;
+      // Completion is fail-closed even when terminal status persistence is unavailable.
+    }
+    control.terminalPersistenceFailed = terminalPersistenceFailed;
+    this.settleRun(control, terminal);
+    return Promise.resolve(terminal);
   }
 
   private async checkpointMappedPair(input: {
@@ -605,9 +824,15 @@ export class JevRunService {
     getProgress: () => JevRunProgress;
     setProgress: (progress: JevRunProgress) => void;
     onStorageFailure: () => void;
+    control: RunControl;
   }): Promise<boolean> {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const checkpointCapture = await this.refreshForCurrentVector(input.getLatest());
+      if (!this.runCanContinue(input.control)) return false;
+      const checkpointCapture = await this.refreshForCurrentVector(
+        input.getLatest(),
+        input.control,
+      );
+      if (!this.runCanContinue(input.control)) return false;
       const checkpointPlan =
         checkpointCapture === input.getLatest()
           ? { ok: true as const, scope: input.getLatestScope() }
@@ -620,8 +845,11 @@ export class JevRunService {
       )
         return false;
       const result = await this.coordinator.runExclusive(async () => {
+        if (!this.runCanContinue(input.control) || this.stopped(input.controller, input.startedAt))
+          return { retry: false, saved: false };
         const current = await this.options.readCurrent();
-        if (this.stopped(input.controller, input.startedAt)) return { retry: false, saved: false };
+        if (!this.runCanContinue(input.control) || this.stopped(input.controller, input.startedAt))
+          return { retry: false, saved: false };
         if (current.policyIdentity !== input.originalCapture.policyIdentity)
           return { retry: false, saved: false };
         if (current.sourceVectorIdentity !== checkpointCapture.sourceVectorIdentity)
@@ -689,10 +917,24 @@ export class JevRunService {
   }
 
   private stopped(controller: AbortController, startedAt: number): boolean {
-    return controller.signal.aborted || this.expired(startedAt);
+    return controller.signal.aborted || this.expired(startedAt, controller);
   }
-  private expired(startedAt: number): boolean {
-    return this.now().getTime() - startedAt >= this.maxRunMs;
+
+  private runCanContinue(control: RunControl): boolean {
+    return !control.terminalCause && !control.completionSettled && !control.successCommitted;
+  }
+
+  private deadlineReached(controller: AbortController, startedAt: number): boolean {
+    return this.deadlineControllers.has(controller) || this.expired(startedAt, controller);
+  }
+  private expired(startedAt: number, controller: AbortController): boolean {
+    const duration = this.runDurations.get(controller) ?? this.maxRunMs;
+    if (this.now().getTime() - startedAt < duration) return false;
+    this.deadlineControllers.add(controller);
+    const control = this.runControls.get(controller);
+    if (control) this.terminateRun(control, "deadline");
+    else controller.abort();
+    return true;
   }
 }
 
@@ -702,6 +944,8 @@ function pairForIds(scope: JevRunScope, pair: JevRunPair): JevRunPair | undefine
 
 function terminalStopReasonFor(error: unknown): JevRunStopReason | undefined {
   if (!(error instanceof JevGatewayError)) return undefined;
+  if (error.code === "attempt-limit-exhausted") return "application-attempt-limit";
+  if (error.code === "reported-token-threshold") return "application-token-threshold";
   if (error.code === "budget-exhausted") return "provider-limit";
   if (error.code === "not-configured") return "provider-unconfigured";
   return undefined;

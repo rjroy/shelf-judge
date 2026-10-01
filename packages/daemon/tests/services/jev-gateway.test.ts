@@ -657,7 +657,7 @@ describe("Jev typed gateway", () => {
       } catch (error) {
         failure = error;
       }
-      expect((failure as JevGatewayError).code).toBe("budget-exhausted");
+      expect((failure as JevGatewayError).code).toBe("attempt-limit-exhausted");
       expect(attempts).toBe(1);
     }
   });
@@ -738,7 +738,7 @@ describe("Jev typed gateway", () => {
     } catch (error) {
       budgetError = error;
     }
-    expect((budgetError as JevGatewayError).code).toBe("budget-exhausted");
+    expect((budgetError as JevGatewayError).code).toBe("attempt-limit-exhausted");
     expect(calls).toBe(1);
 
     let oversized: unknown;
@@ -764,17 +764,25 @@ describe("Jev typed gateway", () => {
           response(answers({ description: 1 }), { input_tokens: 3, output_tokens: 3 }),
         ),
     });
-    let tokenError: unknown;
+    const tokenCrossing = await tokenLimited.evaluatePair({
+      mode: "description-only",
+      gameA: { name: "A", bggDescription: "Description A" },
+      gameB: { name: "B", bggDescription: "Description B" },
+    });
+    expect(tokenCrossing.description).not.toBeNull();
+    expect(tokenCrossing.usage).toEqual({ inputTokens: 3, outputTokens: 3 });
+    expect(tokenCrossing.stopReason).toBe("application-token-threshold");
+    let nextPairError: unknown;
     try {
       await tokenLimited.evaluatePair({
         mode: "description-only",
-        gameA: { name: "A", bggDescription: "Description A" },
-        gameB: { name: "B", bggDescription: "Description B" },
+        gameA: { name: "C", bggDescription: "Description C" },
+        gameB: { name: "D", bggDescription: "Description D" },
       });
     } catch (error) {
-      tokenError = error;
+      nextPairError = error;
     }
-    expect((tokenError as JevGatewayError).code).toBe("budget-exhausted");
+    expect((nextPairError as JevGatewayError).code).toBe("reported-token-threshold");
   });
 
   test("caps concurrent TypeSafe requests", async () => {
@@ -884,7 +892,7 @@ describe("Jev typed gateway", () => {
     expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
     const rejected = outcomes.find((outcome) => outcome.status === "rejected");
     expect(rejected?.status === "rejected" && (rejected.reason as JevGatewayError).code).toBe(
-      "budget-exhausted",
+      "attempt-limit-exhausted",
     );
   });
 });

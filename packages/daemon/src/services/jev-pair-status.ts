@@ -79,8 +79,13 @@ function projectedProgress(progress: JevRunProgress | null): JevStatusProgress {
     return null;
   if (
     progress.stopReason !== undefined &&
-    ((progress.stopReason !== "provider-limit" &&
-      progress.stopReason !== "provider-unconfigured") ||
+    (![
+      "provider-limit",
+      "provider-unconfigured",
+      "application-attempt-limit",
+      "application-token-threshold",
+      "application-deadline",
+    ].some((reason) => reason === progress.stopReason) ||
       progress.state !== "failed")
   )
     return null;
