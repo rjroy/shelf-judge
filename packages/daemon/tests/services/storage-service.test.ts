@@ -20,6 +20,7 @@ import { createStorageService } from "../../src/services/storage-service.js";
 import { computeCollectionProfile } from "../../src/services/collection-profile-engine.js";
 import { profileSourceIdentity } from "../../src/services/profile-source-coordinator.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
+import type { Logger } from "../../src/services/logger.js";
 
 const DATA_DIR = "/test/data";
 const CONFIG_PATH = "/test/config.json";
@@ -36,6 +37,22 @@ function makeService(initialFiles?: Record<string, string>) {
     fileOps,
   });
   return { service, fileOps };
+}
+
+function captureLogger(): { entries: string[]; logger: Logger } {
+  const entries: string[] = [];
+  const record = (level: string, values: unknown[]) =>
+    entries.push(
+      `${level} ${values.map((value) => (typeof value === "string" ? value : JSON.stringify(value))).join(" ")}`,
+    );
+  return {
+    entries,
+    logger: {
+      log: (...values) => record("log", values),
+      warn: (...values) => record("warn", values),
+      error: (...values) => record("error", values),
+    },
+  };
 }
 
 function currentCollection(overrides: Partial<Collection> = {}): Collection {
@@ -107,6 +124,186 @@ function currentGame(overrides: Partial<DurableGame> = {}): DurableGame {
 }
 
 describe("StorageService.loadCollection", () => {
+  test("keeps repeated ordinary current collection loads quiet", async () => {
+    const { entries, logger } = captureLogger();
+    const service = createStorageService({
+      dataDir: DATA_DIR,
+      configPath: CONFIG_PATH,
+      fileOps: createMockFileOps({ [COLLECTION_PATH]: JSON.stringify(currentCollection()) }),
+      logger,
+    });
+
+    await service.loadCollection();
+    await service.loadCollection();
+
+    expect(entries).toEqual([]);
+  });
+
+  test("logs concise outcomes for persisted collection migration and normalization", async () => {
+    const migrationLogger = captureLogger();
+    const migrationService = createStorageService({
+      dataDir: DATA_DIR,
+      configPath: CONFIG_PATH,
+      fileOps: createMockFileOps({
+        [COLLECTION_PATH]: JSON.stringify(legacyCollectionWithoutTournamentAxis()),
+      }),
+      logger: migrationLogger.logger,
+    });
+    await migrationService.loadCollection();
+
+    expect(
+      migrationLogger.entries.some((entry) =>
+        entry.includes(`collection migration persisted path=${COLLECTION_PATH}`),
+      ),
+    ).toBe(true);
+    expect(
+      migrationLogger.entries.some((entry) =>
+        entry.includes(`collection persistence completed path=${COLLECTION_PATH}`),
+      ),
+    ).toBe(true);
+    expect(
+      migrationLogger.entries.some((entry) => entry.includes("collection migration checked")),
+    ).toBe(false);
+    expect(migrationLogger.entries.join(" ")).not.toContain("migration completed");
+
+    const normalizationLogger = captureLogger();
+    const normalized = {
+      ...currentCollection(),
+      games: [
+        {
+          ...currentGame(),
+          acquisition: { state: "purchase", amount: { hundredths: "private-input" } },
+        },
+      ],
+    };
+    const normalizationService = createStorageService({
+      dataDir: DATA_DIR,
+      configPath: CONFIG_PATH,
+      fileOps: createMockFileOps({ [COLLECTION_PATH]: JSON.stringify(normalized) }),
+      logger: normalizationLogger.logger,
+    });
+    await normalizationService.loadCollection();
+
+    expect(
+      normalizationLogger.entries.some(
+        (entry) =>
+          entry.includes(`collection migration persisted path=${COLLECTION_PATH}`) &&
+          entry.includes("normalized=true") &&
+          entry.includes("normalizationFields=acquisition") &&
+          entry.includes("acquisitionGames=1"),
+      ),
+    ).toBe(true);
+    expect(normalizationLogger.entries.join(" ")).not.toContain("normalization completed");
+    expect(
+      normalizationLogger.entries.some((entry) =>
+        entry.includes(`collection persistence completed path=${COLLECTION_PATH}`),
+      ),
+    ).toBe(true);
+    expect(normalizationLogger.entries.join(" ")).not.toContain("private-input");
+  });
+
+  test("logs safe stage and path context for collection load failures", async () => {
+    const cases: Array<{
+      stage: string;
+      files: Record<string, string>;
+    }> = [
+      {
+        stage: "read",
+        files: { [COLLECTION_PATH]: JSON.stringify(currentCollection()) },
+      },
+      {
+        stage: "parse",
+        files: { [COLLECTION_PATH]: "{ private-note-value" },
+      },
+      {
+        stage: "migration",
+        files: { [COLLECTION_PATH]: JSON.stringify({ ...currentCollection(), schemaVersion: 11 }) },
+      },
+      {
+        stage: "validation",
+        files: {
+          [COLLECTION_PATH]: JSON.stringify({
+            ...currentCollection({ revision: Number.MAX_SAFE_INTEGER }),
+            games: [
+              {
+                ...currentGame(),
+                acquisition: { state: "purchase", amount: { hundredths: "private-input" } },
+              },
+            ],
+          }),
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const { entries, logger } = captureLogger();
+      const fileOps = createMockFileOps(testCase.files);
+      if (testCase.stage === "read") {
+        fileOps.readFile = () =>
+          Promise.reject(Object.assign(new Error("private-read-value"), { code: "EACCES" }));
+      }
+      const service = createStorageService({
+        dataDir: DATA_DIR,
+        configPath: CONFIG_PATH,
+        fileOps,
+        logger,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(service.loadCollection()).rejects.toThrow();
+
+      const logs = entries.join(" ");
+      expect(logs).toContain(`collection ${testCase.stage} failed path=${COLLECTION_PATH}`);
+      expect(logs).not.toContain("private-");
+      expect(logs).toContain("errorType");
+      expect(logs).not.toContain("collection migration persisted");
+      if (testCase.stage === "read") expect(logs).toContain("EACCES");
+    }
+  });
+
+  test("redacts malformed schema versions from migration failure logs", async () => {
+    const canary = "private-schema-version-canary";
+    const { entries, logger } = captureLogger();
+    const service = createStorageService({
+      dataDir: DATA_DIR,
+      configPath: CONFIG_PATH,
+      fileOps: createMockFileOps({
+        [COLLECTION_PATH]: JSON.stringify({ ...currentCollection(), schemaVersion: canary }),
+      }),
+      logger,
+    });
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(service.loadCollection()).rejects.toThrow();
+
+    const logs = entries.join(" ");
+    expect(logs).toContain(`collection migration failed path=${COLLECTION_PATH}`);
+    expect(logs).toContain("sourceVersion=invalid");
+    expect(logs).not.toContain(canary);
+  });
+
+  test("does not report migration persistence success when collection write fails", async () => {
+    const { entries, logger } = captureLogger();
+    const fileOps = createMockFileOps({
+      [COLLECTION_PATH]: JSON.stringify(legacyCollectionWithoutTournamentAxis()),
+    });
+    fileOps.rename = () => Promise.reject(new Error("private-persist-value"));
+    const service = createStorageService({
+      dataDir: DATA_DIR,
+      configPath: CONFIG_PATH,
+      fileOps,
+      logger,
+    });
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(service.loadCollection()).rejects.toThrow();
+
+    const logs = entries.join(" ");
+    expect(logs).toContain(`collection persistence failed path=${COLLECTION_PATH}`);
+    expect(logs).not.toContain("private-persist-value");
+    expect(logs).not.toContain("collection migration persisted");
+  });
+
   test("returns a current collection with two derived defaults plus Tournament", async () => {
     const { service } = makeService();
 
@@ -314,8 +511,14 @@ describe("StorageService.loadCollection", () => {
           value: { state: "configured", amount: { hundredths: "12345" } },
         },
       });
-      expect(entries.some((entry) => entry.includes("field=acquisition"))).toBe(true);
-      expect(entries.some((entry) => entry.includes("field=entertainmentBenchmark"))).toBe(true);
+      expect(
+        entries.some(
+          (entry) =>
+            entry.includes("collection migration persisted") &&
+            entry.includes("normalizationFields=entertainmentBenchmark,acquisition") &&
+            entry.includes("acquisitionGames=1"),
+        ),
+      ).toBe(true);
       expect(entries.join(" ")).not.toContain('hundredths":"12345');
     }
   });

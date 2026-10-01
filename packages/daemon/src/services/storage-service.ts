@@ -170,6 +170,8 @@ function sourceIdentityForCollection(collection: Collection): CollectionSourceId
 export interface StoredCollectionDecodeResult {
   data: unknown;
   normalized: boolean;
+  normalizedFields: string[];
+  normalizedAcquisitionCount: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -187,13 +189,41 @@ function isJsonValue(value: unknown): value is JsonValue {
   return isRecord(value) && Object.values(value).every(isJsonValue);
 }
 
+function safeErrorContext(error: unknown): Record<string, string | number | string[]> {
+  const context: Record<string, string | number | string[]> = {
+    errorType: error instanceof Error ? error.name : "UnknownError",
+  };
+  if (error instanceof z.ZodError) {
+    context.issueCount = error.issues.length;
+    context.issuePaths = error.issues
+      .slice(0, 3)
+      .map((issue) =>
+        issue.path
+          .map((part) =>
+            typeof part === "number"
+              ? "[index]"
+              : typeof part === "string" && /^[A-Za-z][A-Za-z0-9_]*$/.test(part)
+                ? part
+                : "*",
+          )
+          .join("."),
+      );
+  }
+  const code =
+    typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+      ? error.code
+      : undefined;
+  if (code !== undefined && /^[A-Z0-9_]+$/.test(code)) context.errorCode = code;
+  return context;
+}
+
 function storedInvalidEvidence(value: unknown, present: boolean): InvalidEvidence {
   if (!present) return { presence: "missing" };
   if (!isJsonValue(value)) throw new Error("Malformed stored value is not JSON-safe");
   return { presence: "present", value };
 }
 
-export function decodeStoredCollection(raw: unknown, logger: Logger): StoredCollectionDecodeResult {
+export function decodeStoredCollection(raw: unknown): StoredCollectionDecodeResult {
   if (
     !isRecord(raw) ||
     (raw.schemaVersion !== 3 &&
@@ -205,26 +235,22 @@ export function decodeStoredCollection(raw: unknown, logger: Logger): StoredColl
       raw.schemaVersion !== 9 &&
       raw.schemaVersion !== CURRENT_COLLECTION_SCHEMA_VERSION)
   ) {
-    return { data: raw, normalized: false };
+    return { data: raw, normalized: false, normalizedFields: [], normalizedAcquisitionCount: 0 };
   }
 
   let normalized = false;
-  const collectionId = typeof raw.id === "string" ? raw.id : "unknown";
+  const normalizedFields = new Set<string>();
+  let normalizedAcquisitionCount = 0;
   const next: Record<string, unknown> = { ...raw };
   const benchmarkPresent = Object.hasOwn(raw, "entertainmentBenchmark");
   const benchmark = raw.entertainmentBenchmark;
   if (!EntertainmentBenchmarkSchema.safeParse(benchmark).success) {
-    logger.log(
-      `collection storage normalization attempt collectionId=${collectionId} field=entertainmentBenchmark`,
-    );
     next.entertainmentBenchmark = {
       state: "invalid",
       evidence: storedInvalidEvidence(benchmark, benchmarkPresent),
     };
     normalized = true;
-    logger.log(
-      `collection storage normalization completed collectionId=${collectionId} field=entertainmentBenchmark`,
-    );
+    normalizedFields.add("entertainmentBenchmark");
   }
 
   if (isUnknownArray(raw.games)) {
@@ -233,11 +259,8 @@ export function decodeStoredCollection(raw: unknown, logger: Logger): StoredColl
       const acquisitionPresent = Object.hasOwn(entry, "acquisition");
       const acquisition = entry.acquisition;
       if (AcquisitionSchema.safeParse(acquisition).success) return entry;
-      const gameId = typeof entry.id === "string" ? entry.id : "unknown";
-      logger.log(
-        `collection storage normalization attempt collectionId=${collectionId} gameId=${gameId} field=acquisition`,
-      );
       normalized = true;
+      normalizedAcquisitionCount += 1;
       const decoded = {
         ...entry,
         acquisition: {
@@ -245,14 +268,18 @@ export function decodeStoredCollection(raw: unknown, logger: Logger): StoredColl
           evidence: storedInvalidEvidence(acquisition, acquisitionPresent),
         },
       };
-      logger.log(
-        `collection storage normalization completed collectionId=${collectionId} gameId=${gameId} field=acquisition`,
-      );
       return decoded;
     });
   }
 
-  return { data: next, normalized };
+  if (normalizedAcquisitionCount > 0) normalizedFields.add("acquisition");
+
+  return {
+    data: next,
+    normalized,
+    normalizedFields: [...normalizedFields],
+    normalizedAcquisitionCount,
+  };
 }
 
 function defaultConfig(): AppConfig {
@@ -450,13 +477,10 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   }
 
   function validateCollection(collection: unknown): Collection {
-    logger.log(`collection validation attempt path=${collectionPath}`);
     try {
-      const validated = CollectionSchema.parse(collection);
-      logger.log(`collection validation completed path=${collectionPath}`);
-      return validated;
+      return CollectionSchema.parse(collection);
     } catch (error) {
-      logger.error(`collection validation failed path=${collectionPath}`, error);
+      logger.error(`collection validation failed path=${collectionPath}`, safeErrorContext(error));
       throw error;
     }
   }
@@ -469,7 +493,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       await writeAtomically(collectionPath, JSON.stringify(validated, null, 2));
       logger.log(`collection persistence completed path=${collectionPath}`);
     } catch (error) {
-      logger.error(`collection persistence failed path=${collectionPath}`, error);
+      logger.error(`collection persistence failed path=${collectionPath}`, safeErrorContext(error));
       throw error;
     }
   }
@@ -507,50 +531,37 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
           return collection;
         }
 
-        logger.log(`collection read attempt path=${collectionPath}`);
         let rawText: string;
         try {
           rawText = await fileOps.readFile(collectionPath);
-          logger.log(`collection read completed path=${collectionPath} bytes=${rawText.length}`);
         } catch (error) {
-          logger.error(`collection read failed path=${collectionPath}`, error);
+          logger.error(`collection read failed path=${collectionPath}`, safeErrorContext(error));
           throw error;
         }
 
-        logger.log(`collection parse attempt path=${collectionPath}`);
         let raw: unknown;
         try {
           raw = JSON.parse(rawText);
-          logger.log(`collection parse completed path=${collectionPath}`);
         } catch (error) {
-          logger.error(`collection parse failed path=${collectionPath}`, error);
+          logger.error(`collection parse failed path=${collectionPath}`, safeErrorContext(error));
           throw error;
         }
+        const rawSourceVersion =
+          typeof raw === "object" && raw !== null && "schemaVersion" in raw ? raw.schemaVersion : 0;
         const sourceVersion =
-          typeof raw === "object" && raw !== null && "schemaVersion" in raw
-            ? String(raw.schemaVersion)
-            : "0";
-        logger.log(
-          `collection migration start sourceVersion=${sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION}`,
-        );
+          typeof rawSourceVersion === "number" && Number.isSafeInteger(rawSourceVersion)
+            ? String(rawSourceVersion)
+            : "invalid";
         let migration: CollectionMigrationResult;
-        const decoded = decodeStoredCollection(raw, logger);
+        const decoded = decodeStoredCollection(raw);
         try {
           migration = migrateCollection(decoded.data, deps.collectionMigrationDependencies);
         } catch (error) {
           logger.error(
-            `collection migration failed sourceVersion=${sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION}`,
-            error,
+            `collection migration failed path=${collectionPath} sourceVersion=${sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION}`,
+            safeErrorContext(error),
           );
           throw error;
-        }
-        logger.log(
-          `collection migration checked sourceVersion=${migration.sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION} axes=${migration.data.axes.length} games=${migration.data.games.length} converted=${migration.convertedAxisCount} disabled=${migration.disabledAxisCount}`,
-        );
-        if (migration.discardedLegacyPairCount !== undefined) {
-          logger.log(
-            `collection semantic migration discardedLegacyPairCount=${migration.discardedLegacyPairCount} notice=${migration.notice ?? "none"}`,
-          );
         }
         const normalizedCurrent =
           decoded.normalized && migration.sourceVersion === CURRENT_COLLECTION_SCHEMA_VERSION;
@@ -592,7 +603,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
             } catch (error) {
               logger.error(
                 `artifact invalidation failed identity=${artifact.identity} path=${artifactPath}`,
-                error,
+                safeErrorContext(error),
               );
               throw error;
             }
@@ -600,6 +611,9 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         }
 
         await persistCollection(validated);
+        logger.log(
+          `collection migration persisted path=${collectionPath} sourceVersion=${migration.sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION} migrated=${migration.migrated} normalized=${normalizedCurrent} normalizationFields=${decoded.normalizedFields.join(",") || "none"} acquisitionGames=${decoded.normalizedAcquisitionCount} discardedLegacyPairCount=${migration.discardedLegacyPairCount ?? 0}`,
+        );
         advanceAttentionCandidateSourceGeneration();
         sourceVector.publishCollection(sourceIdentityForCollection(validated));
         return validated;
