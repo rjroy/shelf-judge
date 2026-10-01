@@ -46,8 +46,11 @@ export interface JevRunProgress {
   cacheHits: number;
   cacheMisses: number;
   failedPairs: number;
+  stopReason?: JevRunStopReason;
   updatedAt: string;
 }
+
+export type JevRunStopReason = "provider-limit" | "provider-unconfigured";
 
 export interface JevAdvisoryActivation {
   identity: string;
@@ -86,7 +89,7 @@ export interface JevPairCache {
 }
 
 const DATABASE_FILENAME = "jev-pair-cache.sqlite";
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 function canonicalPair(left: string, right: string): [string, string] {
   if (!left || !right || left === right) throw new Error("Pair requires two distinct stable IDs");
@@ -122,12 +125,21 @@ function validateProgress(progress: JevRunProgress): void {
       "cacheHits",
       "cacheMisses",
       "failedPairs",
+      "stopReason",
       "updatedAt",
     ],
     "run progress",
   );
   if (!["running", "completed", "interrupted", "failed"].includes(progress.state))
     throw new Error("Invalid run state");
+  if (Object.hasOwn(progress, "stopReason")) {
+    if (
+      (progress.stopReason !== "provider-limit" &&
+        progress.stopReason !== "provider-unconfigured") ||
+      progress.state !== "failed"
+    )
+      throw new Error("Invalid run stop reason");
+  }
   for (const n of [
     progress.pairCount,
     progress.completedPairs,
@@ -277,6 +289,8 @@ type JudgmentRow = {
   dependencies_json: string;
 };
 
+type RunProgressRow = Omit<JevRunProgress, "stopReason"> & { stopReason: string | null };
+
 function prepareStatements(db: Database) {
   return {
     get: db.query<JudgmentRow, [string, string, JevSignal]>(
@@ -287,9 +301,11 @@ function prepareStatements(db: Database) {
     ),
     deletePairSignal: db.query("DELETE FROM judgments WHERE game_a=? AND game_b=? AND signal=?"),
     deletePair: db.query("DELETE FROM judgments WHERE game_a=? AND game_b=?"),
-    saveRunProgress: db.query("INSERT OR REPLACE INTO run_progress VALUES (1,?,?,?,?,?,?,?,?)"),
-    getRunProgress: db.query<JevRunProgress, []>(
-      "SELECT run_id as runId,state,pair_count as pairCount,completed_pairs as completedPairs,cache_hits as cacheHits,cache_misses as cacheMisses,failed_pairs as failedPairs,updated_at as updatedAt FROM run_progress WHERE singleton=1",
+    saveRunProgress: db.query(
+      "INSERT OR REPLACE INTO run_progress (singleton,run_id,state,pair_count,completed_pairs,cache_hits,cache_misses,failed_pairs,stop_reason,updated_at) VALUES (1,?,?,?,?,?,?,?,?,?)",
+    ),
+    getRunProgress: db.query<RunProgressRow, []>(
+      "SELECT run_id as runId,state,pair_count as pairCount,completed_pairs as completedPairs,cache_hits as cacheHits,cache_misses as cacheMisses,failed_pairs as failedPairs,stop_reason as stopReason,updated_at as updatedAt FROM run_progress WHERE singleton=1",
     ),
     setActivation: db.query("INSERT OR REPLACE INTO activation VALUES (1,?,?)"),
     getActivation: db.query<JevAdvisoryActivation, []>(
@@ -367,20 +383,29 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1), run_id TEXT NOT NULL,
           state TEXT NOT NULL CHECK(state IN ('running','completed','interrupted','failed')),
           pair_count INTEGER NOT NULL, completed_pairs INTEGER NOT NULL, cache_hits INTEGER NOT NULL,
-          cache_misses INTEGER NOT NULL, failed_pairs INTEGER NOT NULL, updated_at TEXT NOT NULL
+          cache_misses INTEGER NOT NULL, failed_pairs INTEGER NOT NULL, stop_reason TEXT,
+          updated_at TEXT NOT NULL
         );
         CREATE TABLE activation (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), identity TEXT NOT NULL, activated_at TEXT NOT NULL);
-        PRAGMA user_version = 2;
+        PRAGMA user_version = 3;
         COMMIT;`);
-    } else if (version < 2) {
-      // Earlier cache rows lack collection/consent fences and cannot be proven reusable.
-      db.exec(`BEGIN IMMEDIATE;
-        ALTER TABLE judgments ADD COLUMN collection_id TEXT NOT NULL DEFAULT '';
-        ALTER TABLE judgments ADD COLUMN consent_epoch TEXT;
-        DELETE FROM judgments;
-        DELETE FROM activation;
-        PRAGMA user_version = 2;
-        COMMIT;`);
+    } else {
+      if (version < 2) {
+        // Earlier cache rows lack collection/consent fences and cannot be proven reusable.
+        db.exec(`BEGIN IMMEDIATE;
+          ALTER TABLE judgments ADD COLUMN collection_id TEXT NOT NULL DEFAULT '';
+          ALTER TABLE judgments ADD COLUMN consent_epoch TEXT;
+          DELETE FROM judgments;
+          DELETE FROM activation;
+          PRAGMA user_version = 2;
+          COMMIT;`);
+      }
+      if (version < 3) {
+        db.exec(`BEGIN IMMEDIATE;
+          ALTER TABLE run_progress ADD COLUMN stop_reason TEXT;
+          PRAGMA user_version = 3;
+          COMMIT;`);
+      }
     }
     statements = prepareStatements(db);
   } catch {
@@ -435,6 +460,7 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       progress.cacheHits,
       progress.cacheMisses,
       progress.failedPairs,
+      progress.stopReason ?? null,
       progress.updatedAt,
     );
   };
@@ -605,7 +631,21 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
     getRunProgress() {
       if (!usable()) return null;
       try {
-        return statements.getRunProgress.get() ?? null;
+        const row = statements.getRunProgress.get();
+        if (!row) return null;
+        const progress: JevRunProgress = {
+          runId: row.runId,
+          state: row.state,
+          pairCount: row.pairCount,
+          completedPairs: row.completedPairs,
+          cacheHits: row.cacheHits,
+          cacheMisses: row.cacheMisses,
+          failedPairs: row.failedPairs,
+          ...(row.stopReason === null ? {} : { stopReason: row.stopReason as JevRunStopReason }),
+          updatedAt: row.updatedAt,
+        };
+        validateProgress(progress);
+        return progress;
       } catch {
         return null;
       }

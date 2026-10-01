@@ -205,6 +205,28 @@ implementation and feature remain in progress.
 - Typecheck, browser typecheck, lint, format check, and `git diff --check` passed.
 - Independent reviewer accepted the implementation.
 
+## Phase 2d11k — sanitized Jev Run stop reasons
+
+Checkpointed on `design/jev-similarity`, after Phase 2d11j. The overall Phase 2
+implementation and feature remain in progress.
+
+- Added optional sanitized terminal progress reasons `provider-limit` and
+  `provider-unconfigured`. Budget exhaustion stops further pair processing and
+  retains valid checkpoints; aggregate historical progress exposes only the
+  sanitized enum. Ordinary pair failures and cancellation do not inherit a
+  provider stop reason.
+- SQLite schema v3 persists the reason and migrates v2 progress without losing
+  rows. Legacy progress with no reason remains valid; reads and writes validate
+  the enum and require a failed terminal state when it is present.
+- No route or UI work was added; no provider calls were made and no owner data
+  was accessed.
+
+### Validation evidence for this checkpoint
+
+- Full Bun suite: 3,658 passed, 1 skipped, 0 failed.
+- Typecheck, browser typecheck, lint, format check, and `git diff --check` passed.
+- Independent reviewer accepted the implementation.
+
 ## Phase 2d11j — internal Jev Run preview and prepared controller
 
 Checkpointed on `design/jev-similarity`, after Phase 2d11i. The overall Phase 2

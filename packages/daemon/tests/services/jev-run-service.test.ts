@@ -307,6 +307,7 @@ describe("JevRunService attempt barriers", () => {
       pairCount: 3,
       completedPairs: 2,
       failedPairs: 1,
+      stopReason: "provider-limit",
     });
   });
 
@@ -342,7 +343,38 @@ describe("JevRunService attempt barriers", () => {
       pairCount: 3,
       completedPairs: 1,
       failedPairs: 1,
+      stopReason: "provider-unconfigured",
     });
+  });
+
+  test("ordinary gateway failures remain pair-local and have no provider stop reason", async () => {
+    const capture = fixture(["a", "b", "c"]);
+    const { cache } = cacheFake();
+    let evaluations = 0;
+    const service = new JevRunService({
+      storageService: {},
+      cache,
+      loadCapture: () => Promise.resolve(capture),
+      readCurrent: () =>
+        Promise.resolve({
+          collection: capture.collection,
+          sourceVectorIdentity: "vector",
+          policyIdentity: "policy",
+          canTransmitNotes: false,
+        }),
+      createGateway: () => ({
+        evaluatePair: () => {
+          evaluations++;
+          return Promise.reject(new JevGatewayError("http-failure", "Temporary fake failure"));
+        },
+      }),
+    });
+
+    const progress = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    expect(evaluations).toBe(3);
+    expect(progress.state).toBe("failed");
+    expect(progress.failedPairs).toBe(3);
+    expect(progress.stopReason).toBeUndefined();
   });
 
   test("each retry re-enters the coordinator and starts only after admission", async () => {
@@ -439,6 +471,7 @@ describe("JevRunService attempt barriers", () => {
     expect(admissionCount).toBe(2);
     expect(rows.size).toBe(0);
     expect(done.state).toBe("interrupted");
+    expect(done.stopReason).toBeUndefined();
   });
 
   test("real SQLite cache checkpoints a complete run and activates only complete coverage", async () => {

@@ -1,5 +1,5 @@
 import type { Collection, GameWithScore, RedundancyComponentWeights } from "@shelf-judge/shared";
-import type { JevPairCache, JevRunProgress } from "./jev-pair-cache-service.js";
+import type { JevPairCache, JevRunProgress, JevRunStopReason } from "./jev-pair-cache-service.js";
 import { computeJevPairCoverage, type JevPredictionCaptureIdentity } from "./jev-pair-coverage.js";
 import {
   profileSourceCoordinatorFor,
@@ -204,6 +204,7 @@ export class JevRunService {
     };
     let capture: JevRunCapture;
     let originalScope: JevRunScope;
+    let terminalStopReason: JevRunStopReason | undefined;
     try {
       if (prepared) {
         capture = prepared.capture;
@@ -305,7 +306,8 @@ export class JevRunService {
           activeAdmission = null;
           if (!controller.signal.aborted) {
             progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
-            if (isRunTerminalGatewayError(error)) break;
+            terminalStopReason = terminalStopReasonFor(error);
+            if (terminalStopReason) break;
           }
           continue;
         }
@@ -355,6 +357,7 @@ export class JevRunService {
           ? "failed"
           : "completed";
       const terminal = this.nextProgress(progress, {}, state);
+      if (state === "failed" && terminalStopReason) terminal.stopReason = terminalStopReason;
       if (state !== "completed") {
         return this.finishTerminal(terminal, controller, startedAt, state);
       }
@@ -582,6 +585,7 @@ export class JevRunService {
         ? "interrupted"
         : (requestedState ?? "failed");
       terminal = { ...progress, state, updatedAt: this.now().toISOString() };
+      if (state !== "failed") delete terminal.stopReason;
       this.options.cache.finishRun({ activation: null, progress: terminal });
     });
     return terminal;
@@ -696,11 +700,11 @@ function pairForIds(scope: JevRunScope, pair: JevRunPair): JevRunPair | undefine
   return scope.pairForIds(pair.gameAId, pair.gameBId);
 }
 
-function isRunTerminalGatewayError(error: unknown): boolean {
-  return (
-    error instanceof JevGatewayError &&
-    (error.code === "budget-exhausted" || error.code === "not-configured")
-  );
+function terminalStopReasonFor(error: unknown): JevRunStopReason | undefined {
+  if (!(error instanceof JevGatewayError)) return undefined;
+  if (error.code === "budget-exhausted") return "provider-limit";
+  if (error.code === "not-configured") return "provider-unconfigured";
+  return undefined;
 }
 
 function sameAuthority(capture: JevRunCapture, current: JevRunCurrentState): boolean {

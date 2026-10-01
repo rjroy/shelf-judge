@@ -1,6 +1,6 @@
 import type { JevPairCoverageDigest, JevPairSignalCoverage } from "./jev-pair-coverage.js";
 import type { JevPairReadResult } from "./jev-pair-read-service.js";
-import type { JevRunProgress } from "./jev-pair-cache-service.js";
+import type { JevRunProgress, JevRunStopReason } from "./jev-pair-cache-service.js";
 
 export interface JevSignalCoverageCounts {
   covered: number;
@@ -24,6 +24,7 @@ export type JevStatusProgress = null | {
   cacheHits: number;
   cacheMisses: number;
   failedPairs: number;
+  stopReason?: JevRunStopReason;
 };
 
 interface JevStatusBase {
@@ -76,6 +77,13 @@ function projectedProgress(progress: JevRunProgress | null): JevStatusProgress {
     )
   )
     return null;
+  if (
+    progress.stopReason !== undefined &&
+    ((progress.stopReason !== "provider-limit" &&
+      progress.stopReason !== "provider-unconfigured") ||
+      progress.state !== "failed")
+  )
+    return null;
   return {
     state: progress.state === "running" ? "last-known-running" : progress.state,
     pairCount: progress.pairCount,
@@ -83,6 +91,7 @@ function projectedProgress(progress: JevRunProgress | null): JevStatusProgress {
     cacheHits: progress.cacheHits,
     cacheMisses: progress.cacheMisses,
     failedPairs: progress.failedPairs,
+    ...(progress.stopReason ? { stopReason: progress.stopReason } : {}),
   };
 }
 

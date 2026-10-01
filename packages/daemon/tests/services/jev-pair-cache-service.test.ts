@@ -89,6 +89,26 @@ describe("Jev pair cache", () => {
       reopened.lookup({ gameAId: "stable-b", gameBId: "stable-a", signal: "D" }),
     ).not.toBeNull();
     expect(reopened.getRunProgress()?.runId).toBe("run-checkpoint");
+    expect(reopened.getRunProgress()).not.toHaveProperty("stopReason");
+    reopened.close();
+  });
+
+  test("persists a sanitized provider stop reason through SQLite reopen", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    cache.finishRun({
+      activation: null,
+      progress: { ...progress("failed"), stopReason: "provider-limit" },
+    });
+    expect(cache.getRunProgress()).toMatchObject({ state: "failed", stopReason: "provider-limit" });
+    cache.close();
+
+    const reopened = await createJevPairCache(dir);
+    expect(reopened.getRunProgress()).toMatchObject({
+      runId: "run-checkpoint",
+      state: "failed",
+      stopReason: "provider-limit",
+    });
     reopened.close();
   });
 
@@ -106,7 +126,25 @@ describe("Jev pair cache", () => {
     expect(() =>
       cache.checkpointPair({ judgments: [record()], progress: { ...progress(), pairCount: -1 } }),
     ).toThrow();
+    expect(() =>
+      cache.saveRunProgress({ ...progress("failed"), stopReason: "raw-provider-error" as never }),
+    ).toThrow();
+    expect(() => cache.saveRunProgress({ ...progress(), stopReason: "provider-limit" })).toThrow();
     expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toBeNull();
+    cache.close();
+  });
+
+  test("rejects malformed stop reasons when reading persisted progress", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    cache.finishRun({
+      activation: null,
+      progress: { ...progress("failed"), stopReason: "provider-unconfigured" },
+    });
+    const db = new Database(join(dir, "jev-pair-cache.sqlite"));
+    db.query("UPDATE run_progress SET stop_reason='raw-error' WHERE singleton=1").run();
+    db.close();
+    expect(cache.getRunProgress()).toBeNull();
     cache.close();
   });
 
@@ -604,6 +642,7 @@ describe("Jev pair cache", () => {
     CREATE TABLE activation (singleton INTEGER PRIMARY KEY, identity TEXT NOT NULL, activated_at TEXT NOT NULL);
     INSERT INTO judgments VALUES ('a','b','C','C_ONLY',0.5,NULL,'m','r','q','s','map','p','now','[]');
     INSERT INTO activation VALUES (1,'old','now');
+    INSERT INTO run_progress VALUES (1,'legacy-run','failed',1,1,0,1,1,'legacy-time');
     PRAGMA user_version = 1;`);
     db.close();
 
@@ -611,6 +650,21 @@ describe("Jev pair cache", () => {
     expect(cache.available).toBe(true);
     expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })).toBeNull();
     expect(cache.getActivation()).toBeNull();
+    expect(cache.getRunProgress()).toEqual({
+      runId: "legacy-run",
+      state: "failed",
+      pairCount: 1,
+      completedPairs: 1,
+      cacheHits: 0,
+      cacheMisses: 1,
+      failedPairs: 1,
+      updatedAt: "legacy-time",
+    });
+    cache.finishRun({
+      activation: null,
+      progress: { ...progress("failed"), stopReason: "provider-unconfigured" },
+    });
+    expect(cache.getRunProgress()?.stopReason).toBe("provider-unconfigured");
     cache.upsert(record());
     expect(
       cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })?.collectionId,

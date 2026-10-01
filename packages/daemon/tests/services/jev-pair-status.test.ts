@@ -166,6 +166,8 @@ describe("projectJevPairStatus", () => {
       { ...progress, pairCount: 1.5 },
       { ...progress, failedPairs: Number.NaN },
       { ...progress, state: "active" },
+      { ...progress, state: "failed", stopReason: "raw-error-message" },
+      { ...progress, state: "interrupted", stopReason: "provider-limit" },
     ];
     for (const persisted of malformed) {
       const result = projectJevPairStatus({
@@ -202,5 +204,26 @@ describe("projectJevPairStatus", () => {
       cacheMisses: 2,
       failedPairs: 1,
     });
+  });
+
+  test("projects only the sanitized terminal stop reason", () => {
+    const result = projectJevPairStatus({
+      coverage: completeDigest,
+      readResult: ready,
+      progress: {
+        ...progress,
+        state: "failed",
+        pairCount: 1,
+        completedPairs: 1,
+        failedPairs: 1,
+        stopReason: "provider-limit",
+      },
+      cacheAvailable: true,
+    });
+    expect(result.progress).toMatchObject({ state: "failed", stopReason: "provider-limit" });
+    const serialized = JSON.stringify(result);
+    expect(serialized).toContain("provider-limit");
+    expect(serialized).not.toContain("provider-unconfigured");
+    expect(serialized).not.toContain("private-run-id");
   });
 });
