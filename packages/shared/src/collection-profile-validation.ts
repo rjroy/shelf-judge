@@ -973,7 +973,7 @@ const CollectionProfileGameFitnessEvidenceSchema = z
     vetoed: z.boolean(),
     redundancySimilarityInfo: z
       .object({
-        status: z.enum(["disabled", "factual", "not-ready", "stale", "ready"]),
+        status: z.enum(["disabled", "factual", "not-ready", "stale", "partial", "ready"]),
         generationId: IdSchema.nullable(),
       })
       .strict()

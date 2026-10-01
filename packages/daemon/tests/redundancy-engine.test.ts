@@ -290,7 +290,9 @@ describe("computeRedundancyAdjustments", () => {
     const settings = enabledSettings({ similarityThreshold: 0.7 });
     expect(computeRedundancyAdjustments(games, settings, getVector, table).size).toBe(2);
     expect(computeRedundancyAdjustments(games, settings, getVector).size).toBe(0);
-    const partial = pairTable([], { status: "not-ready" });
+    const partial = pairTable([{ gameAId: "a", gameBId: "c", factual, description: null }], {
+      status: "not-ready",
+    });
     const fallback = computeRedundancyAnalysis(games, settings, getVector, partial);
     expect(fallback.adjustments.size).toBe(0);
     expect(fallback.similarityInfo.get("a")?.status).toBe("not-ready");
@@ -361,17 +363,59 @@ describe("computeRedundancyAdjustments", () => {
       pairTable([{ gameAId: "a", gameBId: "b", factual }], {
         identity: { generationId: "", consentEpoch: "c1", settingsEpoch: "s1" },
       }),
-      pairTable([{ gameAId: "a", gameBId: "b", factual }], {
-        weights: { factual: 0, description: 0, ownerNote: 0 },
-      }),
-      pairTable([{ gameAId: "a", gameBId: "b", factual }], {
-        weights: { factual: 0, description: 5, ownerNote: 10 },
-      }),
     ]) {
       expect(() =>
         computeRedundancyAdjustments(games, enabledSettings(), getVector, bad),
       ).toThrow();
     }
+    const noSignals = pairTable([{ gameAId: "a", gameBId: "b", factual }], {
+      status: "partial",
+      weights: { factual: 0, description: 5, ownerNote: 10 },
+    });
+    expect(
+      computeRedundancyAdjustments(
+        games,
+        enabledSettings({ similarityThreshold: 0 }),
+        getVector,
+        noSignals,
+      ),
+    ).toEqual(new Map());
+  });
+
+  test("zero factual weight never restores factual neighbors at threshold zero", () => {
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9)),
+      makeGws(makeGame("b", "B"), makeScore(7)),
+    ];
+    const factual = factualSimilarity(
+      getVector(games[0].game),
+      getVector(games[1].game),
+      DEFAULT_REDUNDANCY_SETTINGS.componentWeights,
+    );
+    const noSignals = pairTable(
+      [{ gameAId: "a", gameBId: "b", factual, description: null, ownerNote: null }],
+      {
+        status: "not-ready",
+        weights: { factual: 0, description: 1, ownerNote: 1 },
+      },
+    );
+    expect(
+      computeRedundancyAdjustments(
+        games,
+        enabledSettings({ similarityThreshold: 0 }),
+        getVector,
+        noSignals,
+      ),
+    ).toEqual(new Map());
+    expect(
+      computeRedundancyAdjustments(
+        games,
+        enabledSettings({ similarityThreshold: 0 }),
+        getVector,
+        undefined,
+        false,
+      ),
+    ).toEqual(new Map());
   });
 
   test("predicted positive-score games remain in the complete pair universe", () => {

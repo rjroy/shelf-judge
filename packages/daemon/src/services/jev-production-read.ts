@@ -18,7 +18,6 @@ export function createJevProductionSemanticRead(cache: JevPairCache | null) {
     cache ?? {
       available: false,
       lookup: () => null,
-      getActivation: () => null,
     },
   );
 

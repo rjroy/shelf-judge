@@ -757,7 +757,7 @@ export interface FitnessResult {
 
 /** Public, note-free provenance/status for the pair similarities used by redundancy. */
 export interface RedundancySimilarityInfo {
-  status: "disabled" | "factual" | "not-ready" | "stale" | "ready";
+  status: "disabled" | "factual" | "not-ready" | "stale" | "partial" | "ready";
   generationId: string | null;
 }
 

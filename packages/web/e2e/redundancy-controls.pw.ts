@@ -55,10 +55,11 @@ async function installDaemon(page: Page) {
             });
           else {
             const stopReason = new URL(location.href).searchParams.get("stop");
+            const partial = new URL(location.href).searchParams.get("partial") === "1";
             response =
               window.localStorage.getItem("run-state") === "complete"
                 ? {
-                    status: "ready",
+                    status: partial ? "partial" : "ready",
                     measurement: "current",
                     eligibleGameCount: 3,
                     pairCount: 2,
@@ -74,12 +75,21 @@ async function installDaemon(page: Page) {
                     },
                   }
                 : {
-                    status: "ready",
+                    status: partial ? "partial" : "ready",
                     measurement: "current",
                     eligibleGameCount: 3,
                     pairCount: 2,
                     coverage: null,
-                    progress: null,
+                    progress: partial
+                      ? {
+                          state: "last-known-running",
+                          pairCount: 2,
+                          completedPairs: 1,
+                          cacheHits: 1,
+                          cacheMisses: 1,
+                          failedPairs: 0,
+                        }
+                      : null,
                   };
             if (stopReason) {
               const statusSnapshot = response as Record<string, unknown>;
@@ -179,6 +189,31 @@ test("aggregate Ready status does not conflict with stale settings status", asyn
   await expect(page.getByRole("heading", { name: "Similarity preferences" })).toBeVisible();
   await expect(page.locator(".redundancy-refresh-status")).toContainText("Ready");
   await expect(page.getByText(/Not ready — factual-only results are shown/)).toHaveCount(0);
+});
+
+test("partial coverage benefits current pairs during and after a run", async ({ page }) => {
+  await installDaemon(page);
+  await page.goto("/redundancy?partial=1");
+  const status = page.locator(".redundancy-refresh-status");
+  await expect(status).toContainText(
+    "Partial — available semantic results already affect relevant pairs",
+  );
+  await expect(status).not.toContainText("factual-only");
+
+  await page.getByRole("button", { name: "Preview one run" }).click();
+  await page.getByRole("button", { name: "Run one refresh" }).click();
+  await expect(status).toContainText(
+    "Partial — available semantic results already affect relevant pairs",
+  );
+  await expect(status).toContainText("Refresh is running now.");
+  await expect(status).not.toContainText("factual-only");
+
+  await page.getByRole("button", { name: "Cancel live run" }).click();
+  await expect(status).toContainText("Run completed.");
+  await expect(status).toContainText(
+    "Partial — available semantic results already affect relevant pairs",
+  );
+  await expect(status).not.toContainText("factual-only");
 });
 
 test("selected run limits bind the preview and changing them clears it", async ({

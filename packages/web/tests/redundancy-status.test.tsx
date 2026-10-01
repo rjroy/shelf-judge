@@ -15,4 +15,20 @@ describe("redundancy status", () => {
     expect(stale).toContain("stale; factual-only comparison");
     expect(stale).toContain('role="status"');
   });
+
+  test("explains partial semantic coverage without implying factual-only scoring", () => {
+    const partial = renderToStaticMarkup(
+      <RedundancyStatus info={{ status: "partial", generationId: "g1" }} />,
+    );
+    expect(partial).toContain("Partial semantic coverage; available results are used");
+    expect(partial).not.toContain("factual-only");
+  });
+
+  test("describes not-ready semantic status without assuming factual signals are enabled", () => {
+    const notReady = renderToStaticMarkup(
+      <RedundancyStatus info={{ status: "not-ready", generationId: null }} />,
+    );
+    expect(notReady).toContain("Semantic similarity is not ready");
+    expect(notReady).not.toContain("factual-only");
+  });
 });

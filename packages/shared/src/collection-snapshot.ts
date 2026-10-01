@@ -12,7 +12,7 @@ const NonNegativeInteger = z.number().int().nonnegative().safe();
 const Id = z.string().min(1);
 const RedundancySimilarityInfoSchema = z
   .object({
-    status: z.enum(["disabled", "factual", "not-ready", "stale", "ready"]),
+    status: z.enum(["disabled", "factual", "not-ready", "stale", "partial", "ready"]),
     generationId: Id.nullable(),
   })
   .strict()

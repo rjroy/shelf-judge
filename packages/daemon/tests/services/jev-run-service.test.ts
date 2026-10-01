@@ -16,6 +16,7 @@ import type {
   JevRunProgress,
 } from "../../src/services/jev-pair-cache-service.js";
 import { createJevPairCache } from "../../src/services/jev-pair-cache-service.js";
+import { computeJevPairCoverage } from "../../src/services/jev-pair-coverage.js";
 import { buildJevPairDependencies } from "../../src/services/jev-pair-identity.js";
 import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
 import {
@@ -1164,7 +1165,7 @@ describe("JevRunService attempt barriers", () => {
     }
   });
 
-  test("purge under coordinator with unchanged source identity cannot publish stale activation", async () => {
+  test("purge after a successful scoped Run leaves it completed without stale activation", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-purge-race-"));
     const capture = fixture();
     const cache = await createJevPairCache(dir);
@@ -1211,7 +1212,7 @@ describe("JevRunService attempt barriers", () => {
       });
       const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
       await purgePromise;
-      expect(result.state).toBe("failed");
+      expect(result.state).toBe("completed");
       expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })).toBeNull();
       expect(cache.getActivation()).toBeNull();
     } finally {
@@ -1220,7 +1221,7 @@ describe("JevRunService attempt barriers", () => {
     }
   });
 
-  test("three eligible games with only two descriptions treats other pairs as non-failures", async () => {
+  test("three eligible games with one genuinely missing description can complete coverage", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-missing-description-"));
     const capture = fixture(["a", "b", "c"]);
     capture.collection.games[2].bggData = null;
@@ -1268,14 +1269,24 @@ describe("JevRunService attempt barriers", () => {
       expect(result.pairCount).toBe(3);
       expect(result.failedPairs).toBe(0);
       expect(result.state).toBe("completed");
-      expect(cache.getActivation()).not.toBeNull();
+      const coverage = computeJevPairCoverage({
+        collection: capture.collection,
+        predictionCapture: capture.predictionCapture,
+        captureIdentity: capture.captureIdentity,
+        factualWeights: capture.factualWeights,
+        cache,
+      });
+      expect(coverage.complete).toBe(true);
+      expect(coverage.pairs.filter((pair) => pair.C.state === "covered")).toHaveLength(1);
+      expect(coverage.pairs.filter((pair) => pair.C.state === "unavailable")).toHaveLength(2);
+      expect(cache.getActivation()?.identity).toBe(coverage.identity);
     } finally {
       cache.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  test("newly eligible games are outside the original scope and prevent activation until covered", async () => {
+  test("newly eligible games remain outside the successful Run scope without failing its outcome", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-added-game-"));
     const original = fixture();
     const expandedBase = fixture(["a", "b", "c"]);
@@ -1323,7 +1334,7 @@ describe("JevRunService attempt barriers", () => {
       });
       const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
       expect(dispatches).toBe(1);
-      expect(result.state).toBe("failed");
+      expect(result.state).toBe("completed");
       expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })?.value).toBe(0.5);
       expect(cache.lookup({ gameAId: "a", gameBId: "c", signal: "C" })).toBeNull();
       expect(cache.getActivation()).toBeNull();

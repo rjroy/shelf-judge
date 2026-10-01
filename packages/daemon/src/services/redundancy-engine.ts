@@ -23,7 +23,13 @@ export const DEFAULT_REDUNDANCY_SETTINGS: RedundancySettings = {
   expectedNeighbors: 5,
 };
 
-export type RedundancySimilarityStatus = "disabled" | "factual" | "not-ready" | "stale" | "ready";
+export type RedundancySimilarityStatus =
+  | "disabled"
+  | "factual"
+  | "not-ready"
+  | "stale"
+  | "partial"
+  | "ready";
 
 /** Numeric pair judgment. Null means the enabled signal was genuinely unavailable. */
 export interface RedundancyPairScore {
@@ -40,7 +46,7 @@ export interface RedundancyPairIdentity {
   settingsEpoch: string;
 }
 
-/** Caller supplies the complete table for exactly the same eligible universe. */
+/** Caller supplies the complete factual universe and independently available semantic signals. */
 export interface RedundancyPairTable {
   status: RedundancySimilarityStatus;
   identity: RedundancyPairIdentity;
@@ -82,16 +88,12 @@ function sameIdentity(a: RedundancyPairIdentity, b: RedundancyPairIdentity): boo
 }
 
 function validatePairTable(table: RedundancyPairTable, eligibleIds: string[]): Map<string, number> {
-  if (table.status !== "ready") return new Map();
   if (!sameIdentity(table.identity, table.expectedIdentity)) {
     throw new Error("Redundancy pair table identity does not match the expected generation");
   }
   const { factual, description, ownerNote } = table.weights;
   const weights = [factual, description, ownerNote];
-  if (
-    weights.some((weight) => !Number.isFinite(weight) || weight < 0) ||
-    !weights.some((weight) => weight > 0)
-  ) {
+  if (weights.some((weight) => !Number.isFinite(weight) || weight < 0)) {
     throw new Error("Redundancy pair table weights must be finite, non-negative, and nonzero");
   }
   const expected = new Set<string>();
@@ -101,13 +103,15 @@ function validatePairTable(table: RedundancyPairTable, eligibleIds: string[]): M
     }
   }
   const composed = new Map<string, number>();
+  const seen = new Set<string>();
   for (const pair of table.pairs) {
     if (!pair.gameAId || !pair.gameBId || pair.gameAId === pair.gameBId) {
       throw new Error("Redundancy pair table contains an invalid pair identity");
     }
     const key = redundancyPairKey(pair.gameAId, pair.gameBId);
     if (!expected.has(key)) throw new Error("Redundancy pair table contains an extra pair");
-    if (composed.has(key)) throw new Error("Redundancy pair table contains a duplicate pair");
+    if (seen.has(key)) throw new Error("Redundancy pair table contains a duplicate pair");
+    seen.add(key);
     if (!Number.isFinite(pair.factual) || pair.factual < 0 || pair.factual > 1) {
       throw new Error("Redundancy factual pair score must be finite and in [0, 1]");
     }
@@ -126,14 +130,14 @@ function validatePairTable(table: RedundancyPairTable, eligibleIds: string[]): M
       available.push([ownerNote, pair.ownerNote]);
     }
     const total = available.reduce((sum, [weight]) => sum + weight, 0);
-    if (total <= 0 || !Number.isFinite(total)) {
-      throw new Error("Redundancy pair has no available positive-weight signal");
-    }
-    composed.set(key, available.reduce((sum, [weight, score]) => sum + weight * score, 0) / total);
+    if (total > 0 && Number.isFinite(total))
+      composed.set(
+        key,
+        available.reduce((sum, [weight, score]) => sum + weight * score, 0) / total,
+      );
   }
-  if (composed.size !== expected.size || [...expected].some((key) => !composed.has(key))) {
-    throw new Error("Redundancy pair table is incomplete for the eligible universe");
-  }
+  if (seen.size !== expected.size || [...expected].some((key) => !seen.has(key)))
+    throw new Error("Redundancy factual pair universe is incomplete");
   return composed;
 }
 
@@ -195,9 +199,16 @@ export function computeRedundancyAdjustments(
   settings: RedundancySettings,
   getFeatureVector: (game: Game) => FeatureVector,
   pairTable?: RedundancyPairTable,
+  allowFactualFallback = true,
 ): Map<string, RedundancyAdjustment> {
-  return computeRedundancyAnalysis(gamesWithScores, settings, getFeatureVector, pairTable)
-    .adjustments;
+  return computeRedundancyAnalysis(
+    gamesWithScores,
+    settings,
+    getFeatureVector,
+    pairTable,
+    undefined,
+    allowFactualFallback,
+  ).adjustments;
 }
 
 /** Computes adjustments and independent, note-free status for every eligible game. */
@@ -212,13 +223,14 @@ export function computeRedundancyAnalysis(
     : settings.enabled
       ? "factual"
       : "disabled",
+  allowFactualFallback = true,
 ): RedundancyAnalysis {
   const result = new Map<string, RedundancyAdjustment>();
   const similarityInfo = new Map<string, RedundancySimilarityInfo>();
 
-  const status: RedundancySimilarityStatus =
-    pairTable?.status === "ready" ? "ready" : fallbackStatus;
-  const generationId = status === "ready" ? pairTable!.identity.generationId : null;
+  const status: RedundancySimilarityStatus = pairTable?.status ?? fallbackStatus;
+  const generationId =
+    status === "ready" || status === "partial" ? pairTable!.identity.generationId : null;
   const defaultSimilarityInfo = { status, generationId };
   const eligible = gamesWithScores.filter(
     (gws) => gws.score !== null && !gws.score.vetoed && gws.score.score > 0,
@@ -234,7 +246,7 @@ export function computeRedundancyAnalysis(
     return { adjustments: result, similarityInfo, defaultSimilarityInfo };
 
   // Filter to eligible games: non-vetoed, non-null score, score > 0
-  if (pairTable?.status === "ready") {
+  if (pairTable) {
     // Compare the supplied factual layer to the current factual vectors before trusting
     // any semantic composition. This also catches pair-table/game identity drift.
     const factualPairs = validatePairTable(
@@ -266,13 +278,14 @@ export function computeRedundancyAnalysis(
     scoreNeighbors(
       eligible,
       settings,
-      (a, b) => factualPairs.get(redundancyPairKey(a.game.id, b.game.id)) ?? 0,
+      (a, b) => factualPairs.get(redundancyPairKey(a.game.id, b.game.id)) ?? Number.NaN,
       result,
     );
     return { adjustments: result, similarityInfo, defaultSimilarityInfo };
   }
 
-  if (eligible.length < 2) return { adjustments: result, similarityInfo, defaultSimilarityInfo };
+  if (!allowFactualFallback || eligible.length < 2)
+    return { adjustments: result, similarityInfo, defaultSimilarityInfo };
 
   // Cache feature vectors
   const vectors = new Map<string, FeatureVector>();
@@ -313,7 +326,7 @@ function scoreNeighbors(
     for (const other of eligible) {
       if (other.game.id === gws.game.id) continue;
       const sim = getSimilarity(gws, other);
-      if (sim >= settings.similarityThreshold) {
+      if (Number.isFinite(sim) && sim >= settings.similarityThreshold) {
         neighbors.push({ gws: other, similarity: sim });
       }
     }

@@ -148,21 +148,45 @@ describe("Jev pair cache", () => {
     cache.close();
   });
 
-  test("failed SQLite row lookup invalidates the mutation revision until reopen", async () => {
+  test("malformed row is unusable without poisoning valid rows or the mutation revision", async () => {
     const dir = await tempDir();
     const cache = await createJevPairCache(dir);
     cache.upsert(record());
-    expect(cache.mutationRevision()).not.toBeNull();
+    const valid = {
+      ...record(),
+      gameAId: "valid-a",
+      gameBId: "valid-b",
+      dependencies: record().dependencies.map((dependency, index) => ({
+        ...dependency,
+        gameId: index === 0 ? "valid-a" : "valid-b",
+      })),
+    };
+    cache.upsert(valid);
+    const revision = cache.mutationRevision();
+    expect(revision).toBe(2);
     const db = new Database(join(dir, "jev-pair-cache.sqlite"));
-    db.query("UPDATE judgments SET dependencies_json='not-json'").run();
+    db.query("UPDATE judgments SET dependencies_json='not-json' WHERE game_a='stable-a'").run();
+    db.close();
+
+    expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toBeNull();
+    expect(cache.mutationRevision()).toBe(revision);
+    expect(cache.lookup({ gameAId: "valid-a", gameBId: "valid-b", signal: "C" })).toEqual(valid);
+    expect(cache.mutationRevision()).toBe(revision);
+    cache.close();
+  });
+
+  test("SQLite lookup failure invalidates the mutation revision", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    cache.upsert(record());
+    expect(cache.mutationRevision()).toBe(1);
+    const db = new Database(join(dir, "jev-pair-cache.sqlite"));
+    db.exec("DROP TABLE judgments");
     db.close();
 
     expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toBeNull();
     expect(cache.mutationRevision()).toBeNull();
     cache.close();
-    const reopened = await createJevPairCache(dir);
-    expect(reopened.mutationRevision()).toBe(0);
-    reopened.close();
   });
 
   test("rolls back checkpoint rows and progress on SQLite failure", async () => {

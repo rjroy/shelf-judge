@@ -74,9 +74,10 @@ async function readRunSnapshot() {
 
 const statusCopy: Record<string, string> = {
   ready: "Ready",
-  stale: "Stale — factual-only results are shown",
+  stale: "Stale — no current semantic results are available",
+  partial: "Partial — available semantic results already affect relevant pairs",
   disabled: "Semantic comparison is off",
-  "not-ready": "Not ready — factual-only results are shown",
+  "not-ready": "Not ready — no usable semantic results are available",
   unavailable: "Unavailable",
 };
 
@@ -893,8 +894,9 @@ export default function RedundancyPage() {
                     {preview.scoringEffect === "integrated-fitness"
                       ? "Semantic results affect fitness scores."
                       : "Semantic results are annotations only."}{" "}
-                    Until every needed pair has current results, scoring falls back to factual
-                    comparisons. Preview expires {new Date(preview.expiresAt).toLocaleString()}.
+                    Pairs with usable semantic results can use them immediately. For pairs without
+                    one, scoring uses available factual and other configured signals. Preview
+                    expires {new Date(preview.expiresAt).toLocaleString()}.
                   </p>
                   {preview.noteBearingPairCount > 0 &&
                     preview.signalScope.ownerNotes &&

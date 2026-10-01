@@ -113,12 +113,12 @@ describe("ProfileService", () => {
       storageService: ctx.storageService,
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
-        ...makeDisplayedFitness(4, { status: "not-ready", generationId: null }),
+        ...makeDisplayedFitness(4, { status: "partial", generationId: "partial-generation" }),
         async listGamesFromSnapshot(snapshot, options) {
           recomputations += 1;
           return makeDisplayedFitness(4, {
-            status: "not-ready",
-            generationId: null,
+            status: "partial",
+            generationId: "partial-generation",
           }).listGamesFromSnapshot(snapshot, options);
         },
       },
@@ -130,7 +130,7 @@ describe("ProfileService", () => {
       throw new Error("Expected recomputed factual-only Profile");
     expect(quarantinedProfile.identity.classes.mechanic.entities[0]?.games[0]).toMatchObject({
       currentFitness: 4,
-      redundancySimilarityInfo: { status: "not-ready", generationId: null },
+      redundancySimilarityInfo: { status: "partial", generationId: "partial-generation" },
     });
   });
 

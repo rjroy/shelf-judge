@@ -4,8 +4,9 @@ import type { JevPairCache } from "./jev-pair-cache-service.js";
 import type { RedundancyPairTable } from "./redundancy-engine.js";
 
 export type JevPairReadResult =
-  | { status: "disabled" | "factual" | "not-ready" | "stale"; summary: string }
-  | { status: "ready"; summary: string; table: RedundancyPairTable };
+  | { status: "disabled" | "stale"; summary: string }
+  | { status: "factual" | "not-ready"; summary: string; table?: RedundancyPairTable }
+  | { status: "ready" | "partial"; summary: string; table: RedundancyPairTable };
 
 export interface JevPairReadInput {
   collection: Collection;
@@ -19,8 +20,8 @@ export interface JevPairReadInput {
 
 /** Source-free fence identifying the observable result of a single read snapshot. */
 export type JevPairReadProof =
-  | { status: "ready"; identity: string }
-  | { status: Exclude<JevPairReadResult["status"], "ready">; summary: string };
+  | { status: "ready" | "partial" | "factual" | "not-ready"; identity: string }
+  | { status: Exclude<JevPairReadResult["status"], "ready" | "partial">; summary: string };
 
 /** A read result and a synchronous check that its captured inputs still produce the same proof. */
 export interface JevPairReadProofFence {
@@ -29,7 +30,7 @@ export interface JevPairReadProofFence {
   isCurrent(): boolean;
 }
 
-type ReadCache = Pick<JevPairCache, "available" | "lookup" | "getActivation">;
+type ReadCache = Pick<JevPairCache, "available" | "lookup">;
 
 const DISABLED: JevPairReadResult = {
   status: "disabled",
@@ -40,7 +41,6 @@ const NOT_READY: JevPairReadResult = {
   status: "not-ready",
   summary: "Semantic redundancy is not ready.",
 };
-const STALE: JevPairReadResult = { status: "stale", summary: "Semantic redundancy data is stale." };
 
 /** Read-only adapter. It proves the whole capture and cache before exposing any semantic score. */
 export function createJevPairReadService(cache: ReadCache) {
@@ -48,7 +48,6 @@ export function createJevPairReadService(cache: ReadCache) {
     const settings = input.collection?.semanticRedundancy?.settings;
     if (input.factualEnabled === false) return DISABLED;
     if (settings?.enabled !== true) return FACTUAL;
-    if (settings.weights.description <= 0 && settings.weights.ownerNote <= 0) return FACTUAL;
     try {
       if (!cache.available) return NOT_READY;
       const coverage = computeJevPairCoverage({
@@ -58,30 +57,37 @@ export function createJevPairReadService(cache: ReadCache) {
         factualWeights: input.factualWeights,
         cache,
       });
-      const activation = cache.getActivation();
-      if (!activation) return NOT_READY;
-      if (!coverage.complete) {
-        if (coverage.pairs.some((pair) => pair.D.state === "blocked")) return NOT_READY;
-        return coverage.pairs.some(
-          (pair) => pair.C.state === "invalid-row" || pair.D.state === "invalid-row",
-        )
-          ? STALE
-          : NOT_READY;
-      }
-      if (activation.identity !== coverage.identity) return STALE;
+      const hasSemanticSignal = coverage.pairs.some(
+        (pair) => pair.C.state === "covered" || pair.D.state === "covered",
+      );
+      const factualWeight = input.collection.semanticRedundancy.settings.weights.factual;
+      const status = !hasSemanticSignal
+        ? factualWeight > 0
+          ? "factual"
+          : "not-ready"
+        : coverage.complete
+          ? "ready"
+          : "partial";
       const current = input.collection.semanticRedundancy;
       const identity = {
         // These are adapter labels, not writer-issued generations. The digest is the complete
         // deterministic capture identity; epochs below label the relevant current authority.
-        generationId: activation.identity,
+        generationId: coverage.identity,
         consentEpoch: String(current.consentEpoch),
         settingsEpoch: `${current.evidenceEpoch}:${current.factualWeightsEpoch}`,
       };
       return {
-        status: "ready",
-        summary: "Semantic redundancy is ready.",
+        status,
+        summary:
+          status === "ready"
+            ? "Semantic redundancy is ready."
+            : status === "partial"
+              ? "Some semantic redundancy signals are not available."
+              : status === "factual"
+                ? "Using factual redundancy only."
+                : "No enabled redundancy component is available.",
         table: {
-          status: "ready",
+          status,
           identity,
           expectedIdentity: { ...identity },
           weights: { ...current.settings.weights },
@@ -101,9 +107,11 @@ export function createJevPairReadService(cache: ReadCache) {
   }
 
   function proofFor(result: JevPairReadResult): JevPairReadProof {
-    return result.status === "ready"
-      ? { status: "ready", identity: result.table.identity.generationId }
-      : { status: result.status, summary: result.summary };
+    if (result.status === "ready" || result.status === "partial")
+      return { status: result.status, identity: result.table.identity.generationId };
+    if ((result.status === "factual" || result.status === "not-ready") && result.table)
+      return { status: result.status, identity: result.table.identity.generationId };
+    return { status: result.status, summary: result.summary };
   }
 
   return {

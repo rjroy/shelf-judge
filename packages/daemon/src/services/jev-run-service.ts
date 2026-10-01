@@ -758,17 +758,17 @@ export class JevRunService {
         const activation = digest.complete
           ? { identity: digest.identity, activatedAt: this.now().toISOString() }
           : null;
-        const finalProgress = digest.complete
-          ? terminal
-          : { ...terminal, state: "failed" as const };
-        control.progress = finalProgress;
-        this.options.cache.finishRun({ activation, progress: finalProgress });
-        if (digest.complete) control.successCommitted = true;
+        // Activation is only an advisory complete-universe marker. A Run succeeds
+        // when its authorized scope completed; unrelated/uncovered pairs do not
+        // rewrite that execution outcome as failed.
+        control.progress = terminal;
+        this.options.cache.finishRun({ activation, progress: terminal });
+        control.successCommitted = true;
         return {
           retry: false,
           complete: digest.complete,
           persisted: true,
-          terminalState: digest.complete ? ("completed" as const) : ("failed" as const),
+          terminalState: "completed" as const,
         };
       });
       if (control.terminalCause) return control.progress;
@@ -777,7 +777,7 @@ export class JevRunService {
         return this.finishTerminal(terminal, controller, startedAt, "interrupted", control);
       if (!result.persisted)
         return this.finishTerminal(terminal, controller, startedAt, "failed", control);
-      return result.complete ? terminal : { ...terminal, state: "failed" };
+      return terminal;
     }
     return this.finishTerminal(terminal, controller, startedAt, "failed", control);
   }

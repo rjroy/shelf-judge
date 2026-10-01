@@ -15,6 +15,7 @@ export type JevStatusState =
   | "factual"
   | "not-ready"
   | "stale"
+  | "partial"
   | "ready"
   | "unavailable";
 export type JevStatusProgress = null | {
@@ -112,22 +113,21 @@ export function projectJevPairStatus(input: {
     countState(C, pair.C);
     countState(D, pair.D);
   }
-  const hasBlocked = input.coverage.pairs.some(
-    (pair) => pair.C.state === "blocked" || pair.D.state === "blocked",
-  );
-  const hasInvalid = input.coverage.pairs.some(
-    (pair) => pair.C.state === "invalid-row" || pair.D.state === "invalid-row",
-  );
+  const hasUsableSemanticSignal = C.covered > 0 || D.covered > 0;
   const status: JevStatusState =
-    input.readResult.status !== "ready"
+    input.readResult.status === "disabled" ||
+    input.readResult.status === "not-ready" ||
+    input.readResult.status === "stale"
       ? input.readResult.status
-      : !input.cacheAvailable || hasBlocked
+      : !input.cacheAvailable
         ? "not-ready"
-        : hasInvalid
-          ? "stale"
-          : input.coverage.complete
+        : input.readResult.status === "factual" || !hasUsableSemanticSignal
+          ? "factual"
+          : input.coverage.complete && input.readResult.status === "ready"
             ? "ready"
-            : "not-ready";
+            : !input.coverage.complete
+              ? "partial"
+              : "not-ready";
   return {
     status,
     measurement: "current",

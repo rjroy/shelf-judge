@@ -695,6 +695,47 @@ describe("Jev pair coverage kernel", () => {
     expect(lookups).toBe(3); // two lookups for miss (C,D), only D for absent-description pair.
   });
 
+  test("coverage is complete when every computable signal is covered despite missing sources", () => {
+    const a = game("a", { note: null });
+    const b = game("b", { note: null });
+    const noNotes = collection([a, b]);
+    const cRow = judgment(noNotes, a, b, "C", "C_ONLY");
+
+    const covered = compute(noNotes, [cRow]);
+    expect(covered.pairs[0]?.C.state).toBe("covered");
+    expect(covered.pairs[0]?.D).toEqual({ state: "unavailable", reason: "missing-source" });
+    expect(covered.complete).toBe(true);
+
+    const missingC = compute(noNotes);
+    expect(missingC.pairs[0]?.C.state).toBe("missing-row");
+    expect(missingC.complete).toBe(false);
+    expect(missingC.identity).not.toBe(covered.identity);
+  });
+
+  test("present notes with a missing D row remain incomplete", () => {
+    const a = game("a");
+    const b = game("b");
+    const col = collection([a, b]);
+
+    const coverage = compute(col, [judgment(col, a, b, "C", "C_ONLY")]);
+    expect(coverage.pairs[0]?.C.state).toBe("covered");
+    expect(coverage.pairs[0]?.D.state).toBe("missing-row");
+    expect(coverage.complete).toBe(false);
+  });
+
+  test("positive-weight D blocked by note-use permission is incomplete", () => {
+    const a = game("a");
+    const b = game("b");
+    const col = collection([a, b], { cachedOwnerNoteUse: false });
+
+    const coverage = compute(col, [judgment(col, a, b, "C", "C_ONLY")]);
+    expect(coverage.pairs[0]?.D).toEqual({
+      state: "blocked",
+      reason: "note-use-not-permitted",
+    });
+    expect(coverage.complete).toBe(false);
+  });
+
   test("actual-axis count changes activation identity without invalidating reusable pair rows", () => {
     const a = game("a"),
       b = game("b");

@@ -111,15 +111,15 @@ describe("semantic redundancy routes", () => {
     }
   });
 
-  test("refresh-status returns only aggregate DTO fields with no-store and never invokes inference", async () => {
+  test("refresh-status accepts partial aggregate coverage with no-store and never invokes inference", async () => {
     let reads = 0;
     const response: JevStatusResponse = {
-      status: "not-ready",
+      status: "partial",
       measurement: "current",
       eligibleGameCount: 2,
       pairCount: 1,
       coverage: {
-        C: { covered: 0, missing: 1, invalid: 0, unavailable: 0, blocked: 0 },
+        C: { covered: 1, missing: 0, invalid: 0, unavailable: 0, blocked: 0 },
         D: { covered: 0, missing: 0, invalid: 0, unavailable: 1, blocked: 0 },
       },
       progress: {

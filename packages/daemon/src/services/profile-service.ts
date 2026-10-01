@@ -307,6 +307,7 @@ function containsQuarantinedSemanticActivation(profile: CollectionProfile): bool
     if (!redundancySimilarityInfo) return false;
     return (
       redundancySimilarityInfo.status === "ready" ||
+      redundancySimilarityInfo.status === "partial" ||
       redundancySimilarityInfo.status === "stale" ||
       redundancySimilarityInfo.generationId !== null
     );
@@ -330,7 +331,8 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         let fitnessCollection: Collection;
         let fitnessSourceVector: SourceVector | undefined;
         let semanticModeEnabled = false;
-        let redundancySimilarityStatus: "disabled" | "factual" | "not-ready" | "stale" = "disabled";
+        let redundancySimilarityStatus: "disabled" | "factual" | "not-ready" | "stale" | "partial" =
+          "disabled";
         try {
           const [collection, config, tournament, predictionSettings, redundancySettings] =
             await Promise.all([

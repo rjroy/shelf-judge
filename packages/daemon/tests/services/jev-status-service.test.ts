@@ -159,12 +159,22 @@ describe("Jev status service", () => {
       cache,
     }).read();
     expect(status).toMatchObject({
-      status: "ready",
+      status: "not-ready",
       measurement: "current",
       eligibleGameCount: 0,
       pairCount: 0,
-      coverage: { C: { covered: 0 }, D: { covered: 0 } },
-      progress: { state: "last-known-running" },
+      coverage: {
+        C: { covered: 0, missing: 0, invalid: 0, unavailable: 0, blocked: 0 },
+        D: { covered: 0, missing: 0, invalid: 0, unavailable: 0, blocked: 0 },
+      },
+      progress: {
+        state: "last-known-running",
+        pairCount: 0,
+        completedPairs: 0,
+        cacheHits: 0,
+        cacheMisses: 0,
+        failedPairs: 0,
+      },
     });
     expect(JSON.stringify(status)).not.toContain("secret");
     cache.close();
@@ -271,6 +281,7 @@ describe("Jev status service", () => {
 
   test("reports partial cache coverage without identifiers or note details", async () => {
     const f = fixture(["private-a", "private-b"]);
+    f.capture.collection.semanticRedundancy.settings.weights.ownerNote = 1;
     const cache = await createJevPairCache(await cacheDir());
     const status = await createJevStatusService({
       storageService: f.storage,
@@ -282,13 +293,44 @@ describe("Jev status service", () => {
       measurement: "current",
       eligibleGameCount: 2,
       pairCount: 1,
-      coverage: { C: { missing: 1 }, D: { unavailable: 1 } },
+      coverage: { C: { missing: 1 }, D: { blocked: 1 } },
     });
     expect(JSON.stringify(status)).not.toContain("private-");
+
+    const [a, b] = f.capture.collection.games;
+    if (!a || !b) throw new Error("fixture pair missing");
+    cache.upsert({
+      collectionId: f.capture.collection.id,
+      gameAId: a.id,
+      gameBId: b.id,
+      signal: "C",
+      dependencyKind: "C_ONLY",
+      value: 0,
+      modelId: JEV_JUDGMENT_CONTRACT.modelId,
+      rubricVersion: JEV_JUDGMENT_CONTRACT.rubricVersion,
+      questionVersion: JEV_JUDGMENT_CONTRACT.questionVersion,
+      requestSchemaVersion: JEV_JUDGMENT_CONTRACT.requestSchemaVersion,
+      scoreMappingVersion: JEV_JUDGMENT_CONTRACT.scoreMappingVersion,
+      semanticPolicyId: JEV_JUDGMENT_CONTRACT.semanticPolicyId,
+      completedAt: "fixture-time",
+      dependencies: buildJevPairDependencies(
+        "C_ONLY",
+        { gameId: a.id, name: a.name, description: a.bggData!.description! },
+        { gameId: b.id, name: b.name, description: b.bggData!.description! },
+      ),
+    });
+    const partiallyCovered = await createJevStatusService({
+      storageService: f.storage,
+      sourceAdapter: f.sourceAdapter,
+      cache,
+    }).read();
+    expect(partiallyCovered.status).toBe("partial");
+    expect(partiallyCovered.coverage?.C.covered).toBe(1);
+    expect(JSON.stringify(partiallyCovered)).not.toContain("private-");
     cache.close();
   });
 
-  test("reports ready coverage for a covered eligible pair", async () => {
+  test("reports ready coverage for a covered eligible pair without activation or provider access", async () => {
     const f = fixture(["a", "b"]);
     const cache = await createJevPairCache(await cacheDir());
     const sources = f.capture.collection.games.map((game) => ({
@@ -313,8 +355,7 @@ describe("Jev status service", () => {
       dependencies: buildJevPairDependencies("C_ONLY", sources[0], sources[1]),
     };
     cache.upsert(judgment);
-    const digest = computeJevPairCoverage({ ...f.capture, cache });
-    cache.setActivation({ identity: digest.identity, activatedAt: "now" });
+    expect(cache.getActivation()).toBeNull();
     const status = await createJevStatusService({
       storageService: f.storage,
       sourceAdapter: f.sourceAdapter,

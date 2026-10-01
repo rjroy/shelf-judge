@@ -16,6 +16,11 @@ import {
   type JevPairJudgment,
 } from "../../src/services/jev-pair-cache-service.js";
 import { createJevPairReadService } from "../../src/services/jev-pair-read-service.js";
+import {
+  computeRedundancyAnalysis,
+  DEFAULT_REDUNDANCY_SETTINGS,
+} from "../../src/services/redundancy-engine.js";
+import { createRedundancyFactualContext } from "../../src/services/redundancy-factual.js";
 
 const dirs: string[] = [];
 afterEach(async () =>
@@ -174,14 +179,7 @@ describe("Jev pair read adapter", () => {
     rows.forEach((item) => cache.upsert(item));
     const reader = createJevPairReadService(cache);
 
-    const notReady = reader.resolveWithProof(f);
-    expect(notReady.result.status).toBe("not-ready");
-    expect(notReady.isCurrent()).toBe(true);
-
     const identity = computeJevPairCoverage({ ...f, cache }).identity;
-    cache.setActivation({ identity, activatedAt: "2026-01-01T00:00:00Z" });
-    expect(notReady.isCurrent()).toBe(false);
-
     const ready = reader.resolveWithProof(f);
     expect(ready.result.status).toBe("ready");
     expect(ready.proof).toEqual({ status: "ready", identity });
@@ -191,9 +189,6 @@ describe("Jev pair read adapter", () => {
     f.games[0].name = "mutated after capture";
     expect(ready.isCurrent()).toBe(true);
 
-    cache.setActivation({ identity: "different-activation", activatedAt: "2026-01-02T00:00:00Z" });
-    expect(ready.isCurrent()).toBe(false);
-    cache.setActivation({ identity, activatedAt: "2026-01-01T00:00:00Z" });
     cache.upsert({ ...rows[0], value: 0.8 });
     expect(ready.isCurrent()).toBe(false);
 
@@ -204,7 +199,7 @@ describe("Jev pair read adapter", () => {
     cache.close();
   });
 
-  test("returns a complete ready numeric table from real SQLite and fails closed for misses/staleness/errors", async () => {
+  test("returns usable per-pair signals from real SQLite and fails closed for invalid reads", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-read-"));
     dirs.push(dir);
     const cache = await createJevPairCache(dir);
@@ -218,8 +213,6 @@ describe("Jev pair read adapter", () => {
         );
       }
     rows.forEach((item) => cache.upsert(item));
-    const digest = computeJevPairCoverage({ ...f, cache }).identity;
-    cache.setActivation({ identity: digest, activatedAt: "2026-01-01T00:00:00Z" });
     const reader = createJevPairReadService(cache);
     const ready = reader.resolve(f);
     expect(ready.status).toBe("ready");
@@ -241,19 +234,15 @@ describe("Jev pair read adapter", () => {
         },
       },
     };
-    expect(reader.resolve(revoked).status).toBe("not-ready");
-    expect("table" in reader.resolve(revoked)).toBe(false);
+    expect(reader.resolve(revoked).status).toBe("factual");
+    expect("table" in reader.resolve(revoked)).toBe(true);
     expect(reader.resolve(f).status).toBe("ready");
 
     cache.purgePair("a", "b", "C");
-    expect(reader.resolve(f).status).toBe("not-ready");
+    expect(reader.resolve(f).status).toBe("partial");
     rows.forEach((item) => cache.upsert(item));
-    cache.setActivation({
-      identity: computeJevPairCoverage({ ...f, cache }).identity,
-      activatedAt: "2026-01-01T00:00:00Z",
-    });
     cache.upsert({ ...rows[0], value: 0.8 });
-    expect(reader.resolve(f).status).toBe("stale");
+    expect(reader.resolve(f).status).toBe("ready");
     expect(createJevPairReadService({ ...cache, available: false }).resolve(f).status).toBe(
       "not-ready",
     );
@@ -263,32 +252,31 @@ describe("Jev pair read adapter", () => {
         lookup: () => {
           throw new Error("PRIVATE NOTE failure");
         },
-        getActivation: () => ({ identity: digest, activatedAt: "now" }),
       }).resolve(f).status,
     ).toBe("not-ready");
     expect(
       createJevPairReadService({
         available: true,
         lookup: () => null,
-        getActivation: () => {
-          throw new Error("activation read failed");
-        },
       }).resolve(f).status,
-    ).toBe("not-ready");
+    ).toBe("factual");
+    const factualOnly = createJevPairReadService({ available: true, lookup: () => null }).resolve(
+      f,
+    );
+    expect("table" in factualOnly ? (factualOnly.table?.pairs ?? []) : []).toHaveLength(3);
     expect(
       createJevPairReadService({
         available: true,
         lookup: () => null,
-        getActivation: () => null,
       }).resolve({ ...f, predictionCapture: [] }).status,
     ).toBe("not-ready");
     expect(JSON.stringify(reader.resolve(f))).not.toContain("PRIVATE NOTE");
     cache.close();
   });
 
-  test("respects settings and note permission without returning partial tables", () => {
+  test("respects settings and note permission while exposing usable description signals", () => {
     const f = fixture();
-    const cache = { available: true, lookup: () => null, getActivation: () => null };
+    const cache = { available: true, lookup: () => null };
     const reader = createJevPairReadService(cache);
     expect(reader.resolve({ ...f, factualEnabled: false }).status).toBe("disabled");
     expect(
@@ -303,8 +291,8 @@ describe("Jev pair read adapter", () => {
         },
       }).status,
     ).toBe("factual");
-    expect(reader.resolve(f).status).toBe("not-ready");
-    expect("table" in reader.resolve(f)).toBe(false);
+    expect(reader.resolve(f).status).toBe("factual");
+    expect("table" in reader.resolve(f)).toBe(true);
   });
 
   test("uses factual-only when both semantic weights are zero despite a matching activation", async () => {
@@ -329,7 +317,61 @@ describe("Jev pair read adapter", () => {
     cache.setActivation({ identity, activatedAt: "2026-01-01T00:00:00Z" });
     const result = createJevPairReadService(cache).resolve(zero);
     expect(result.status).toBe("factual");
-    expect("table" in result).toBe(false);
+    expect("table" in result).toBe(true);
     cache.close();
+  });
+
+  test("zero factual weight keeps a coherent empty-signal pair table and fences row arrival", () => {
+    const f = fixture();
+    const zero = {
+      ...f,
+      collection: {
+        ...f.collection,
+        semanticRedundancy: {
+          ...f.collection.semanticRedundancy,
+          settings: {
+            ...f.collection.semanticRedundancy.settings,
+            weights: { factual: 0, description: 1, ownerNote: 1 },
+          },
+        },
+      },
+    };
+    let present = false;
+    const reader = createJevPairReadService({
+      available: true,
+      lookup: (key) =>
+        present && key.gameAId === "a" && key.gameBId === "b" && key.signal === "C"
+          ? row(zero.collection, zero.games[0], zero.games[1], "C")
+          : null,
+    });
+    const before = reader.resolveWithProof(zero);
+    expect(before.result.status).toBe("not-ready");
+    expect("table" in before.result ? before.result.table?.pairs : []).toHaveLength(3);
+    expect(before.isCurrent()).toBe(true);
+    present = true;
+    expect(before.isCurrent()).toBe(false);
+    const after = reader.resolveWithProof(zero);
+    expect(after.result.status).toBe("partial");
+    expect(after.proof).not.toEqual(before.proof);
+
+    if (!("table" in before.result) || !before.result.table) throw new Error("expected pair table");
+    const context = createRedundancyFactualContext(
+      zero.collection.games,
+      DEFAULT_REDUNDANCY_SETTINGS.componentWeights,
+    );
+    const analysis = computeRedundancyAnalysis(
+      zero.predictionCapture,
+      { ...DEFAULT_REDUNDANCY_SETTINGS, enabled: true, similarityThreshold: 0 },
+      (game) => context.getFeatureVector(game),
+      before.result.table,
+    );
+    expect(analysis.adjustments.size).toBe(0);
+    expect(analysis.defaultSimilarityInfo).toEqual({ status: "not-ready", generationId: null });
+
+    const unavailable = createJevPairReadService({ available: false, lookup: () => null }).resolve(
+      zero,
+    );
+    expect(unavailable.status).toBe("not-ready");
+    expect("table" in unavailable).toBe(false);
   });
 });

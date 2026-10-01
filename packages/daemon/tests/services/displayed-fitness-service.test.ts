@@ -271,13 +271,13 @@ describe("DisplayedFitnessService", () => {
     const notReady = withRedundancyAdjustments(entries, settings, collection, tournament, entries, {
       ...table,
       status: "not-ready",
-      pairs: [],
+      pairs: [{ gameAId: "one", gameBId: "two", factual: factualScore, description: null }],
     });
     expect(notReady[0]?.score?.redundancySimilarityInfo?.status).toBe("not-ready");
     const stale = withRedundancyAdjustments(entries, settings, collection, tournament, entries, {
       ...table,
       status: "stale",
-      pairs: [],
+      pairs: [{ gameAId: "one", gameBId: "two", factual: factualScore, description: null }],
     });
     expect(stale[0]?.score?.redundancySimilarityInfo?.status).toBe("stale");
     expect(stale[0]?.score?.redundancyAdjustment).toBeNull();

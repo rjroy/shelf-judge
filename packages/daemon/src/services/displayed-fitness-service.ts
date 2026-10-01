@@ -122,7 +122,7 @@ function verifiedSemanticTable(
     !fence.isCurrent()
   )
     return undefined;
-  return fence.result.status === "ready" && fence.proof.status === "ready"
+  return "table" in fence.result && fence.result.table && fence.proof.status === fence.result.status
     ? fence.result.table
     : undefined;
 }
@@ -157,6 +157,7 @@ function applyRedundancy(
   universe?: GameWithScore[],
   pairTable?: RedundancyPairTable,
   fallbackStatus?: Exclude<RedundancySimilarityStatus, "ready">,
+  allowFactualFallback = true,
 ): void {
   const computeGames = universe ?? games;
   const effectiveStatus =
@@ -170,6 +171,7 @@ function applyRedundancy(
     tournamentData,
     pairTable,
     effectiveStatus,
+    allowFactualFallback,
   );
   applyAdjustments(games, settings, analysis.adjustments);
   applySimilarityInfo(games, analysis.similarityInfo, analysis.defaultSimilarityInfo);
@@ -182,6 +184,7 @@ function redundancyAnalysis(
   tournamentData: TournamentData,
   pairTable?: RedundancyPairTable,
   fallbackStatus?: Exclude<RedundancySimilarityStatus, "ready">,
+  allowFactualFallback = true,
 ) {
   // Factual similarity intentionally excludes personal/tournament axes. Sharing the
   // same context factory keeps pair-table validation aligned with display scoring.
@@ -203,6 +206,7 @@ function redundancyAnalysis(
     getFeatureVector,
     pairTable,
     effectiveStatus,
+    allowFactualFallback,
   );
 }
 
@@ -246,6 +250,7 @@ export function withRedundancyAdjustments(
   universe: readonly GameWithScore[] = entries,
   pairTable?: RedundancyPairTable,
   fallbackStatus?: Exclude<RedundancySimilarityStatus, "ready">,
+  allowFactualFallback = true,
 ): GameWithScore[] {
   const analysis = redundancyAnalysis(
     universe,
@@ -254,6 +259,7 @@ export function withRedundancyAdjustments(
     tournamentData,
     pairTable,
     fallbackStatus,
+    allowFactualFallback,
   );
   return withRedundancyMaps(
     entries,
@@ -274,6 +280,7 @@ export function withRedundancyAdjustmentsForVariants(
   universe: readonly GameWithScore[],
   pairTable?: RedundancyPairTable,
   fallbackStatus?: Exclude<RedundancySimilarityStatus, "ready">,
+  allowFactualFallback = true,
 ): { ordinary: GameWithScore[]; predicted: GameWithScore[] } {
   const analysis = redundancyAnalysis(
     universe,
@@ -282,6 +289,7 @@ export function withRedundancyAdjustmentsForVariants(
     tournamentData,
     pairTable,
     fallbackStatus,
+    allowFactualFallback,
   );
   return {
     ordinary: withRedundancyMaps(
@@ -484,6 +492,8 @@ export function createDisplayedFitnessService(
           options.redundancySimilarityStatus ??
             semanticStatus ??
             semanticFallbackStatus(collection, redundancySettings.enabled),
+          collection.semanticRedundancy === undefined ||
+            collection.semanticRedundancy.settings.weights.factual > 0,
         );
       }
 
@@ -702,6 +712,8 @@ export function createDisplayedFitnessService(
               ? "factual"
               : "disabled"
             : semanticFallbackStatus(privateCollection, snapshot.redundancySettings.enabled)),
+        privateCollection === undefined ||
+          privateCollection.semanticRedundancy?.settings.weights.factual !== 0,
       );
       return allGames.map((entry) => ({
         ...entry,

@@ -10,7 +10,7 @@ import { canonicalSha256 } from "./profile-source-coordinator.js";
 import type { JevPairJudgment, JevPairKey } from "./jev-pair-cache-service.js";
 import { validateJevCachedRow, type JevRowValidationGame } from "./jev-pair-read-proof.js";
 
-export const JEV_ACTIVATION_DIGEST_VERSION = "jev-activation-coverage-v4" as const;
+export const JEV_ACTIVATION_DIGEST_VERSION = "jev-activation-coverage-v5" as const;
 
 /** Durable identities for the exact capture; volatile process-local tokens do not belong here. */
 export interface JevPredictionCaptureIdentity {
@@ -66,6 +66,12 @@ function isArray(value: unknown): boolean {
 
 function compareIds(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function hasRequiredCacheGap(signal: JevPairSignalCoverage): boolean {
+  return (
+    signal.state === "blocked" || signal.state === "missing-row" || signal.state === "invalid-row"
+  );
 }
 
 export function validJevFactualWeights(weights: RedundancyComponentWeights): boolean {
@@ -250,7 +256,6 @@ export function computeJevPairCoverage(options: JevCoverageOptions): JevPairCove
         if (weight <= 0) return { state: "unavailable", reason: "zero-weight" };
         if (signal === "D" && !noteAllowed) {
           // Positive D weight is still required; permission cannot silently remove/renormalize it.
-          complete = false;
           return { state: "blocked", reason: "note-use-not-permitted" };
         }
         if (!sourceAvailable) return { state: "unavailable", reason: "missing-source" };
@@ -262,17 +267,23 @@ export function computeJevPairCoverage(options: JevCoverageOptions): JevPairCove
           signal,
         );
         if (!checked.valid) {
-          complete = false;
           return { state: checked.reason === "missing-row" ? "missing-row" : "invalid-row" };
         }
         return { state: "covered", rowIdentity: checked.identity, score: checked.value };
       };
+      const C = inspect("C", settings.weights.description, hasDescriptions);
+      const D = inspect("D", settings.weights.ownerNote, hasNotes);
+      // Only an eligible, enabled signal imposes a cache requirement. Missing
+      // source is genuinely unavailable and contributes no required row;
+      // permission-blocked D remains incomplete rather than silently dropping
+      // a positive-weight signal from coverage.
+      if (hasRequiredCacheGap(C) || hasRequiredCacheGap(D)) complete = false;
       pairs.push({
         gameAId: a.id,
         gameBId: b.id,
         factualScore: factual.similarity(a, b),
-        C: inspect("C", settings.weights.description, hasDescriptions),
-        D: inspect("D", settings.weights.ownerNote, hasNotes),
+        C,
+        D,
       });
     }
   }

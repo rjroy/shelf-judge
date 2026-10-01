@@ -481,15 +481,26 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
     },
     lookup(key) {
       if (!usable()) return null;
+      let pair: [string, string];
       try {
-        const [a, b] = canonicalPair(key.gameAId, key.gameBId);
-        const row = statements.get.get(a, b, key.signal);
-        if (!row) return null;
+        pair = canonicalPair(key.gameAId, key.gameBId);
+      } catch {
+        return null;
+      }
+      let row: JudgmentRow | null;
+      try {
+        row = statements.get.get(pair[0], pair[1], key.signal) ?? null;
+      } catch {
+        // A query/connection failure makes the cache state unreadable; callers
+        // must not treat it as a trustworthy miss.
+        invalidateRevision();
+        return null;
+      }
+      if (!row) return null;
+
+      try {
         const dependencies: unknown = JSON.parse(row.dependencies_json);
-        if (!Array.isArray(dependencies)) {
-          invalidateRevision();
-          return null;
-        }
+        if (!Array.isArray(dependencies)) return null;
         const judgment: JevPairJudgment = {
           gameAId: row.game_a,
           gameBId: row.game_b,
@@ -511,9 +522,8 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
         validate(judgment);
         return judgment;
       } catch {
-        // A failed lookup is not a cache miss: callers cannot safely publish a
-        // coverage digest computed across an unreadable cache state.
-        invalidateRevision();
+        // A malformed row is unusable in isolation. It does not make other
+        // rows unreadable or invalidate the cache's mutation revision.
         return null;
       }
     },

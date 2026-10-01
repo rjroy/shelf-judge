@@ -6,7 +6,7 @@ import { projectJevPairStatus } from "../../src/services/jev-pair-status.js";
 
 const covered = { state: "covered", rowIdentity: "private-row-id", score: 0.75 } as const;
 const mixedIncompleteDigest = {
-  version: "jev-activation-coverage-v4",
+  version: "jev-activation-coverage-v5",
   complete: false,
   identity: "private-fingerprint",
   eligibleGameIds: ["private-game-a", "private-game-b", "private-game-c"],
@@ -36,7 +36,7 @@ const mixedIncompleteDigest = {
 } as unknown as JevPairCoverageDigest;
 
 const completeDigest = {
-  version: "jev-activation-coverage-v4",
+  version: "jev-activation-coverage-v5",
   complete: true,
   identity: "private-complete-fingerprint",
   eligibleGameIds: ["private-ready-a", "private-ready-b"],
@@ -108,14 +108,32 @@ describe("projectJevPairStatus", () => {
     }
   });
 
-  test("aggregates mixed incomplete coverage and downgrades contradictory ready results", () => {
+  test("a vacuously complete digest with no usable semantic rows remains factual", () => {
+    const noSignals = {
+      ...completeDigest,
+      pairs: completeDigest.pairs.map((pair) => ({
+        ...pair,
+        C: { state: "unavailable", reason: "missing-source" },
+        D: { state: "unavailable", reason: "missing-source" },
+      })),
+    } as unknown as JevPairCoverageDigest;
+    const result = projectJevPairStatus({
+      coverage: noSignals,
+      readResult: { status: "factual", summary: "Using factual redundancy only." },
+      progress: null,
+      cacheAvailable: true,
+    });
+    expect(result.status).toBe("factual");
+  });
+
+  test("aggregates mixed incomplete coverage as partial when a semantic signal is usable", () => {
     const result = projectJevPairStatus({
       coverage: mixedIncompleteDigest,
       readResult: ready,
       progress: null,
       cacheAvailable: true,
     });
-    expect(result.status).toBe("not-ready");
+    expect(result.status).toBe("partial");
     expect(result.coverage).toEqual({
       C: { covered: 1, missing: 0, invalid: 1, unavailable: 1, blocked: 0 },
       D: { covered: 0, missing: 1, invalid: 0, unavailable: 1, blocked: 1 },
@@ -132,7 +150,24 @@ describe("projectJevPairStatus", () => {
         progress: null,
         cacheAvailable: true,
       }).status,
-    ).toBe("stale");
+    ).toBe("factual");
+  });
+
+  test("current partial coverage stays independent from running, interrupted, and failed run outcomes", () => {
+    for (const state of ["running", "interrupted", "failed"] as const) {
+      const result = projectJevPairStatus({
+        coverage: mixedIncompleteDigest,
+        readResult: {
+          status: "partial",
+          summary: "partial",
+          table: { status: "partial" },
+        } as unknown as JevPairReadResult,
+        progress: { ...progress, state },
+        cacheAvailable: true,
+      });
+      expect(result.status).toBe("partial");
+      expect(result.progress?.state).toBe(state === "running" ? "last-known-running" : state);
+    }
   });
 
   test("preserves not-ready/stale fallbacks and does not claim cached progress is active", () => {

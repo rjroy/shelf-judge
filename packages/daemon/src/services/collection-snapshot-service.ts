@@ -65,7 +65,7 @@ interface CapturedInputs {
   tournament: TournamentData;
   predictionSettings?: PredictionSettings;
   redundancySettings?: RedundancySettings;
-  redundancySimilarityStatus?: "disabled" | "factual" | "not-ready" | "stale";
+  redundancySimilarityStatus?: "disabled" | "factual" | "not-ready" | "stale" | "partial";
   nicheSettings?: NicheSettings;
   shelfConfig?: Awaited<ReturnType<StorageService["loadShelfConfig"]>>;
 }
@@ -434,10 +434,13 @@ export function createCollectionSnapshotService(
                 throw new Error("Semantic redundancy read proof is unavailable");
               }
               semanticRead = { status: "verified", ...fence };
-              if (fence.result.status === "ready") pairTable = fence.result.table;
-              else {
-                similarityStatus = fence.result.status;
-                snapshotSimilarityStatus = fence.result.status;
+              if ("table" in fence.result && fence.result.table) pairTable = fence.result.table;
+              if (!("table" in fence.result && fence.result.table)) {
+                similarityStatus = fence.result.status as Exclude<
+                  typeof fence.result.status,
+                  "ready"
+                >;
+                snapshotSimilarityStatus = similarityStatus;
               }
             }
           } else {
@@ -466,6 +469,7 @@ export function createCollectionSnapshotService(
             predictedCandidates,
             pairTable,
             similarityStatus,
+            input.collection.semanticRedundancy?.settings.weights.factual !== 0,
           );
           for (const entry of [...adjusted.ordinary, ...adjusted.predicted]) {
             if (entry.score !== null) FitnessResultResponseSchema.parse(entry.score);

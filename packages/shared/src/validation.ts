@@ -2657,7 +2657,7 @@ export const FitnessResultResponseSchema = z
     redundancyAdjustment: RedundancyAdjustmentResponseSchema.nullable(),
     redundancySimilarityInfo: z
       .object({
-        status: z.enum(["disabled", "factual", "not-ready", "stale", "ready"]),
+        status: z.enum(["disabled", "factual", "not-ready", "stale", "partial", "ready"]),
         generationId: z.string().min(1).nullable(),
       })
       .strict()

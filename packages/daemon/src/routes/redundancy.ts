@@ -500,7 +500,17 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
         body: {
           type: "object",
           properties: {
-            status: { enum: ["disabled", "factual", "not-ready", "stale", "ready", "unavailable"] },
+            status: {
+              enum: [
+                "disabled",
+                "factual",
+                "not-ready",
+                "stale",
+                "partial",
+                "ready",
+                "unavailable",
+              ],
+            },
             measurement: {
               enum: ["current", "not-applicable", "cache-unavailable", "source-unavailable"],
             },

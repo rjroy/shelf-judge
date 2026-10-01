@@ -209,23 +209,32 @@ function seededRow(
 }
 
 describe("semantic production app wiring", () => {
-  test("the shared production composition proves current SQLite activation and fails closed", async () => {
+  test("the shared production composition scores partial current cache without activation", async () => {
     const dir = await mkdtemp(join(tmpdir(), "semantic-production-wiring-"));
     dirs.push(dir);
     const cache = await createJevPairCache(dir);
     const input = semanticFixture();
     const reader = createJevProductionSemanticRead(cache);
     const initial = reader(input);
-    expect(initial.result.status).toBe("not-ready");
+    expect(initial.result.status).toBe("factual");
 
     cache.upsert(seededRow(input.collection, input.games, "C"));
+    const partial = reader(input);
+    expect(partial.result.status).toBe("partial");
+    if (partial.result.status !== "partial") throw new Error("Expected partial semantic table");
+    expect(partial.result.table.pairs[0]?.factual).toBeTypeOf("number");
+    expect(partial.result.table.pairs[0]?.description).toBe(0.7);
+    expect(partial.result.table.pairs[0]?.ownerNote).toBeNull();
+    expect(partial.proof.status).toBe("partial");
+    expect(cache.getActivation()).toBeNull();
+
     cache.upsert(seededRow(input.collection, input.games, "D"));
     const identity = computeJevPairCoverage({ ...input, cache }).identity;
-    cache.setActivation({ identity, activatedAt: "2026-01-01T00:00:00Z" });
     const ready = reader(input);
     expect(ready.result.status).toBe("ready");
     expect(ready.proof).toEqual({ status: "ready", identity });
     expect(JSON.stringify(ready.proof)).not.toContain("PRIVATE NOTE");
+    expect(cache.getActivation()).toBeNull();
 
     cache.close();
     const restarted = await createJevPairCache(dir);
@@ -245,7 +254,12 @@ describe("semantic production app wiring", () => {
         predictionCapture: changedCapture,
         captureIdentity: changedIdentity.identity,
       };
-      expect(createJevProductionSemanticRead(restarted)(changed).result.status).toBe("stale");
+      const changedRead = createJevProductionSemanticRead(restarted)(changed);
+      expect(changedRead.result.status).toBe("ready");
+      expect(changedRead.proof.status).toBe("ready");
+      if (changedRead.proof.status !== "ready" || ready.proof.status !== "ready")
+        throw new Error("Expected ready proofs");
+      expect(changedRead.proof.identity).not.toBe(ready.proof.identity);
       const unavailable = createJevProductionSemanticRead(null)(input);
       expect(unavailable.result.status).toBe("not-ready");
       const revoked = {
@@ -261,7 +275,7 @@ describe("semantic production app wiring", () => {
           },
         },
       };
-      expect(createJevProductionSemanticRead(restarted)(revoked).result.status).toBe("not-ready");
+      expect(createJevProductionSemanticRead(restarted)(revoked).result.status).toBe("factual");
     } finally {
       restarted.close();
     }
@@ -408,15 +422,13 @@ describe("semantic production app wiring", () => {
 
       cache.purgePair(games[0].id, games[1].id, "C");
       const missing = await readRoutes();
-      expect(["factual", "not-ready"]).toContain(
-        missing.snapshotGame.redundancySimilarityInfo.status,
-      );
-      expect(["factual", "not-ready"]).toContain(
-        missing.listGame.score?.redundancySimilarityInfo?.status ?? "missing",
-      );
-      expect(["factual", "not-ready"]).toContain(
-        missing.detail.score?.redundancySimilarityInfo?.status ?? "missing",
-      );
+      expect(missing.snapshotGame.redundancySimilarityInfo.status).toBe("partial");
+      expect(missing.listGame.score?.redundancySimilarityInfo?.status).toBe("partial");
+      expect(missing.detail.score?.redundancySimilarityInfo?.status).toBe("partial");
+      const partialIdentity = missing.snapshotGame.redundancySimilarityInfo.generationId;
+      expect(partialIdentity).not.toBe(ready.snapshotGame.redundancySimilarityInfo.generationId);
+      expect(missing.listGame.score?.redundancySimilarityInfo?.generationId).toBe(partialIdentity);
+      expect(missing.detail.score?.redundancySimilarityInfo?.generationId).toBe(partialIdentity);
       expect(missing.listGame.score?.score).toBe(
         ready.listGame.score?.redundancyAdjustment?.originalScore,
       );
@@ -426,15 +438,10 @@ describe("semantic production app wiring", () => {
       revokedCollection.semanticRedundancy.settings.cachedOwnerNoteUse = false;
       await context.storageService.saveCollection(revokedCollection);
       const revoked = await readRoutes();
-      expect(["factual", "not-ready"]).toContain(
-        revoked.snapshotGame.redundancySimilarityInfo.status,
-      );
-      expect(["factual", "not-ready"]).toContain(
-        revoked.listGame.score?.redundancySimilarityInfo?.status ?? "missing",
-      );
-      expect(["factual", "not-ready"]).toContain(
-        revoked.detail.score?.redundancySimilarityInfo?.status ?? "missing",
-      );
+      expect(revoked.snapshotGame.redundancySimilarityInfo.status).toBe("factual");
+      expect(revoked.listGame.score?.redundancySimilarityInfo?.status).toBe("factual");
+      expect(revoked.detail.score?.redundancySimilarityInfo?.status).toBe("factual");
+      expect(revoked.snapshotGame.redundancySimilarityInfo.generationId).toBeNull();
       expect(revoked.listGame.score?.score).toBe(
         ready.listGame.score?.redundancyAdjustment?.originalScore,
       );
