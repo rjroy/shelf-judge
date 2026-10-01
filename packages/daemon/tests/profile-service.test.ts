@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { CollectionProfileResultSchema, ProfileDataSchema } from "@shelf-judge/shared";
+import {
+  CollectionProfileResultSchema,
+  CURRENT_PROFILE_ALGORITHM_VERSION,
+  ProfileDataSchema,
+} from "@shelf-judge/shared";
 import type { DisplayedFitnessService } from "../src/services/displayed-fitness-service.js";
 import { createProfileService } from "../src/services/profile-service.js";
 import type { StorageService } from "../src/services/storage-service.js";
@@ -364,7 +368,7 @@ describe("ProfileService", () => {
     );
   });
 
-  test("keeps private semantic collection state for snapshot fitness without exposing it", async () => {
+  test("uses the public fitness fallback when the captured source vector is unavailable", async () => {
     const ctx = createTestApp();
     await ctx.gameService.addGame({ name: "Factual Profile source" });
     const enabled = await jsonRequest(ctx.app, "PATCH", "/api/redundancy/settings", {
@@ -373,12 +377,14 @@ describe("ProfileService", () => {
     expect(enabled.status).toBe(200);
 
     let snapshotCollectionHadSemanticState = false;
+    let snapshotKind: string | undefined;
     const profileService = createProfileService({
       storageService: ctx.storageService,
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
         async listGamesFromSnapshot(snapshot, options) {
+          snapshotKind = snapshot.kind;
           snapshotCollectionHadSemanticState =
             "semanticRedundancy" in snapshot.collection &&
             snapshot.collection.semanticRedundancy !== undefined;
@@ -389,7 +395,8 @@ describe("ProfileService", () => {
 
     const result = await profileService.getProfile();
     expect(result.status).toBe("available");
-    expect(snapshotCollectionHadSemanticState).toBe(true);
+    expect(snapshotKind).toBe("public");
+    expect(snapshotCollectionHadSemanticState).toBe(false);
     expect(JSON.stringify(result)).not.toContain("semanticRedundancy");
     expect(ctx.fileOps.files.get("/test/data/profile.json")).not.toContain("semanticRedundancy");
   });
@@ -453,7 +460,9 @@ describe("ProfileService", () => {
     if (result.status !== "available") throw new Error("Expected available profile");
     expect(result.attention.state).toBe("ranked");
     expect(result.attention.cards).toHaveLength(1);
-    expect((await ctx.storageService.loadProfile())?.algorithmVersion).toBe(13);
+    expect((await ctx.storageService.loadProfile())?.algorithmVersion).toBe(
+      CURRENT_PROFILE_ALGORITHM_VERSION,
+    );
   });
 
   test("recomputes a current-identity cache that does not match the collection source", async () => {

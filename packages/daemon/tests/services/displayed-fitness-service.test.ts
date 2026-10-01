@@ -38,6 +38,7 @@ import { cosineSimilarity } from "../../src/services/feature-vector.js";
 import { deriveDisplayStats } from "../../src/services/tournament-service.js";
 import { createSourceVectorService } from "../../src/services/source-vector.js";
 import { canonicalSha256 } from "../../src/services/profile-source-coordinator.js";
+import { projectProfileCollectionSource } from "../../src/services/game-projection.js";
 
 function game(id: string): Game {
   return {
@@ -260,6 +261,43 @@ describe("DisplayedFitnessService", () => {
     const listed = await service.listGames({ includePredicted: true });
     expect(calls).toEqual([["captured"]]);
     expect(listed[0]?.score?.redundancySimilarityInfo?.status).toBe("not-ready");
+
+    // The detail snapshot projection strips private semantic state. Even with a
+    // complete/current vector and a complete factual vector, it must use factual
+    // fallback instead of passing that sanitized collection to the semantic resolver.
+    let snapshotResolverCalls = 0;
+    const snapshotService = createDisplayedFitnessService({
+      gameService: {
+        listGames: () => Promise.resolve([entry]),
+        listGamesFromSnapshot: () => [entry],
+      } as unknown as GameService,
+      predictionService: {
+        listGamesWithPredictions: () => Promise.resolve([entry]),
+        listGamesWithPredictionsFromSnapshot: () => Promise.resolve([entry]),
+      } as unknown as PredictionService,
+      storageService: storage,
+      resolveRedundancyPairTable: ({ collection: resolverCollection }) => {
+        snapshotResolverCalls++;
+        // Models the production resolver's private-state dereference.
+        void resolverCollection.semanticRedundancy.publishedGeneration;
+        return undefined;
+      },
+    });
+    const snapshot = {
+      kind: "public" as const,
+      collection: projectProfileCollectionSource(collection),
+      tournament,
+      predictionSettings,
+      redundancySettings,
+      sourceVector: sourceVector.read(),
+    };
+    for (const includePredicted of [false, true]) {
+      const detailGames = await snapshotService.listGamesFromSnapshot(snapshot, {
+        includePredicted,
+      });
+      expect(detailGames[0]?.score?.redundancySimilarityInfo?.status).toBe("factual");
+    }
+    expect(snapshotResolverCalls).toBe(0);
 
     let staleResolverCalls = 0;
     const stalePredictionService = {
@@ -664,7 +702,8 @@ describe("DisplayedFitnessService", () => {
       expectedNeighbors: 2,
     };
     const snapshot = {
-      collection,
+      kind: "public" as const,
+      collection: projectProfileCollectionSource(collection),
       tournament,
       predictionSettings,
       redundancySettings,
@@ -700,5 +739,228 @@ describe("DisplayedFitnessService", () => {
     expect(targeted[0]?.score).not.toEqual(
       predictedFull.find((entry) => entry.game.id === "target")?.score,
     );
+  });
+
+  test("private snapshots resolve ready semantics from a fenced full predicted universe", async () => {
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    const bggData = {
+      communityRating: 8,
+      bayesAverage: 7.8,
+      weight: 2,
+      numWeightVotes: 100,
+      description: "Fictional vector fixture",
+      mechanics: [{ id: 1, name: "Cards" }],
+      categories: [{ id: 2, name: "Strategy" }],
+      families: [],
+      subdomains: [],
+      bestPlayerCount: null,
+      fetchedAt: timestamp,
+    };
+    const games = ["target", "peer-one", "peer-two"].map((id) => ({
+      ...game(id),
+      bggData,
+      ownerNote: {
+        state: "present" as const,
+        version: 1 as const,
+        updatedAt: timestamp,
+        text: `PRIVATE_SENTINEL_${id}`,
+      },
+    }));
+    const collection: Collection = {
+      schemaVersion: 9,
+      revision: 1,
+      id: "private-snapshot-fixture",
+      name: "Private snapshot fixture",
+      axes: [],
+      games,
+      intentions: [],
+      attentionDispositions: [],
+      commandReceipts: [],
+      entertainmentBenchmark: null,
+      semanticRedundancy: createInitialSemanticRedundancyState(),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    collection.semanticRedundancy.settings.enabled = true;
+    const tournament: TournamentData = {
+      settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
+      sessions: [],
+      gameStats: {},
+    };
+    const predictionSettings: PredictionSettings = {
+      stageThresholds: [5, 15, 30],
+      defaultK: 5,
+      minSimilarityThreshold: 0.2,
+    };
+    const redundancySettings: RedundancySettings = {
+      enabled: true,
+      stage: "integrated",
+      similarityThreshold: 0.8,
+      maxPenalty: 2,
+      componentWeights: { binary: 1, continuous: 0 },
+      minNeighbors: 1,
+      expectedNeighbors: 2,
+    };
+    const vector = createSourceVectorService();
+    vector.hydrate(
+      { id: collection.id, schemaVersion: 9, revision: collection.revision },
+      {
+        tournament: 1,
+        predictionSettings: 1,
+        nicheSettings: 1,
+        redundancySettings: 1,
+        shelfConfig: 1,
+      },
+    );
+    const ordinaryScores = new Map([
+      ["target", 8],
+      ["peer-one", 6],
+      ["peer-two", 4],
+    ]);
+    const predictedScores = new Map([
+      ["target", 8],
+      ["peer-one", 9],
+      ["peer-two", 4],
+    ]);
+    const scored = (source: readonly Game[], predicted: boolean): GameWithScore[] =>
+      source.map((sourceGame) => ({
+        game: sourceGame,
+        score: score({
+          score: (predicted ? predictedScores : ordinaryScores).get(sourceGame.id) ?? 0,
+          predictionMeta: predicted
+            ? {
+                readinessStage: 1,
+                confidence: "strong",
+                predictedAxisCount: 1,
+                actualAxisCount: 0,
+                referenceGameCount: 3,
+                coveragePercent: 1,
+              }
+            : null,
+        }),
+      }));
+    const gameService = {
+      listGames: () => Promise.resolve(scored(games, false)),
+      listGamesFromSnapshot: (
+        source: CollectionProfileCollectionSource,
+        _tournament: TournamentData,
+      ) => {
+        void _tournament;
+        expect("semanticRedundancy" in source).toBe(false);
+        expect(source.games.every((sourceGame) => !("ownerNote" in sourceGame))).toBe(true);
+        return scored(source.games, false);
+      },
+    } as unknown as GameService;
+    const predictionService = {
+      listGamesWithPredictions: () => Promise.resolve(scored(games, true)),
+      listGamesWithPredictionsFromSnapshot: (
+        source: CollectionProfileCollectionSource,
+        _tournament: TournamentData,
+        _settings: PredictionSettings,
+        targetIds?: readonly string[],
+      ) =>
+        Promise.resolve(
+          scored(
+            targetIds === undefined
+              ? source.games
+              : source.games.filter(({ id }) => targetIds.includes(id)),
+            true,
+          ),
+        ),
+    } as unknown as PredictionService;
+    const resolvedUniverses: string[][] = [];
+    let resolverCalls = 0;
+    const service = createDisplayedFitnessService({
+      gameService,
+      predictionService,
+      storageService: { sourceVector: () => vector.read() } as StorageService,
+      resolveRedundancyPairTable: ({ collection: privateInput, universe }) => {
+        resolverCalls++;
+        expect(privateInput.semanticRedundancy).toBeDefined();
+        expect(privateInput.games.some(({ ownerNote }) => ownerNote?.state === "present")).toBe(
+          true,
+        );
+        resolvedUniverses.push(universe.map(({ game: candidate }) => candidate.id).sort());
+        const identity = {
+          generationId: "ready-generation",
+          consentEpoch: "consent-1",
+          settingsEpoch: "settings-1",
+        };
+        return {
+          status: "ready",
+          identity,
+          expectedIdentity: identity,
+          weights: { factual: 1, description: 0, ownerNote: 0 },
+          pairs: [
+            ["target", "peer-one"],
+            ["target", "peer-two"],
+            ["peer-one", "peer-two"],
+          ].map(([gameAId, gameBId]) => ({ gameAId, gameBId, factual: 1 })),
+        };
+      },
+    });
+    const snapshot = {
+      kind: "private-capture" as const,
+      collection,
+      sourceVector: vector.read(),
+      tournament,
+      predictionSettings,
+      redundancySettings,
+    };
+
+    const targetScores: number[] = [];
+    for (const includePredicted of [false, true]) {
+      const result = await service.listGamesFromSnapshot(snapshot, {
+        includePredicted,
+        targetGameIds: ["target"],
+      });
+      expect(result).toHaveLength(1);
+      expect(result[0]?.score?.redundancySimilarityInfo).toEqual({
+        status: "ready",
+        generationId: "ready-generation",
+      });
+      targetScores.push(result[0]?.score?.score ?? 0);
+    }
+    expect(targetScores).toEqual([7, 7]);
+    expect(resolverCalls).toBe(2);
+    expect(resolvedUniverses).toEqual([
+      ["peer-one", "peer-two", "target"],
+      ["peer-one", "peer-two", "target"],
+    ]);
+
+    const racedPredictionService = {
+      listGamesWithPredictionsFromSnapshot: (
+        source: CollectionProfileCollectionSource,
+        _tournament: TournamentData,
+        _settings: PredictionSettings,
+        targetIds?: readonly string[],
+      ) => {
+        vector.publish("prediction-settings", 2);
+        return Promise.resolve(
+          scored(
+            targetIds === undefined
+              ? source.games
+              : source.games.filter(({ id }) => targetIds.includes(id)),
+            true,
+          ),
+        );
+      },
+    } as unknown as PredictionService;
+    let racedResolverCalls = 0;
+    const racedService = createDisplayedFitnessService({
+      gameService,
+      predictionService: racedPredictionService,
+      storageService: { sourceVector: () => vector.read() } as StorageService,
+      resolveRedundancyPairTable: () => {
+        racedResolverCalls++;
+        return undefined;
+      },
+    });
+    const racedResult = await racedService.listGamesFromSnapshot(
+      { ...snapshot, sourceVector: vector.read() },
+      { includePredicted: true },
+    );
+    expect(racedResolverCalls).toBe(0);
+    expect(racedResult[0]?.score?.redundancySimilarityInfo?.status).toBe("not-ready");
   });
 });

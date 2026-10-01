@@ -815,9 +815,21 @@ describe("Reflection deterministic evidence projections", () => {
   test("captures all deterministic inputs through one coordinated service boundary", async () => {
     const context = createTestApp({ now: () => "2026-08-27T12:00:00.000Z" });
     await context.gameService.addGame({ name: "Captured Game" });
+    const original = context.displayedFitnessService;
+    let captured: Parameters<typeof original.listGamesFromSnapshot>[0] | undefined;
+    const displayedFitnessService = {
+      ...original,
+      listGamesFromSnapshot(
+        snapshot: Parameters<typeof original.listGamesFromSnapshot>[0],
+        options: Parameters<typeof original.listGamesFromSnapshot>[1],
+      ) {
+        captured = snapshot;
+        return original.listGamesFromSnapshot(snapshot, options);
+      },
+    };
     const service = createReflectionProjectionSnapshotService({
       storageService: context.storageService,
-      displayedFitnessService: context.displayedFitnessService,
+      displayedFitnessService,
       now: () => "2026-08-27T12:00:00.000Z",
     });
 
@@ -828,5 +840,9 @@ describe("Reflection deterministic evidence projections", () => {
     );
     expect(snapshot.projections["repeated-values"].gameIds).toHaveLength(1);
     expect(JSON.stringify(snapshot)).not.toContain("ownerNote");
+    expect(captured).toMatchObject({ kind: "private-capture" });
+    if (captured?.kind !== "private-capture") throw new Error("Expected private scoring capture");
+    expect(captured.collection.games[0]).toHaveProperty("ownerNote");
+    expect(captured.sourceVector).toHaveProperty("processEpoch");
   });
 });

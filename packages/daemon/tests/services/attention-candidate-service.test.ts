@@ -17,13 +17,36 @@ import {
   type AttentionCandidateProductionSource,
 } from "../../src/services/attention-candidate-service.js";
 import type { DisplayedFitnessService } from "../../src/services/displayed-fitness-service.js";
+import type { SourceVector } from "../../src/services/source-vector.js";
 import { DEFAULT_PREDICTION_SETTINGS } from "../../src/services/prediction-engine.js";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "../../src/services/redundancy-engine.js";
 import { attentionRuleCatalog } from "../../src/services/attention-rule-catalog.js";
 import { projectPurchaseUtilization } from "../../src/services/purchase-utilization-projection.js";
+import { createTestApp } from "../helpers/test-app.js";
 
 const hash = "a".repeat(64);
 const observedAt = "2026-01-01T00:00:00.000Z";
+const sourceVector: SourceVector = {
+  available: false,
+  unavailableSources: ["startup"],
+  processEpoch: "test",
+  changeToken: 0,
+  collectionId: null,
+  collectionSchemaVersion: null,
+  collectionRevision: null,
+  semanticEvidenceEpoch: null,
+  semanticConsentEpoch: null,
+  factualWeightsEpoch: null,
+  factualWeightsFingerprint: null,
+  redundancyWeightsFingerprint: null,
+  tournamentRevision: null,
+  predictionSettingsRevision: null,
+  nicheSettingsRevision: null,
+  redundancySettingsRevision: null,
+  shelfConfigRevision: null,
+  representationVersion: 1,
+  algorithmVersion: 1,
+};
 const catalogRuleVersions = attentionRuleCatalog
   .map((rule) => ({
     ruleId: rule.id,
@@ -116,6 +139,8 @@ function productionSource(
   const base = source(revision, games);
   return {
     ...base,
+    kind: "private-capture",
+    sourceVector,
     collection: { ...base.collection, attentionDispositions },
     tournament: {
       settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
@@ -917,6 +942,8 @@ describe("AttentionCandidateService core", () => {
   test("production adapter uses the snapshot fitness oracle and projection path", async () => {
     const production: AttentionCandidateProductionSource = {
       ...source(1, [ownedGame("game")]),
+      kind: "private-capture",
+      sourceVector,
       tournament: {
         settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
         sessions: [],
@@ -948,8 +975,72 @@ describe("AttentionCandidateService core", () => {
       ["game"],
     );
 
-    expect(snapshots).toEqual([production]);
+    expect(snapshots).toEqual([
+      {
+        kind: "private-capture",
+        collection: production.collection,
+        sourceVector: production.sourceVector,
+        tournament: production.tournament,
+        predictionSettings: production.predictionSettings,
+        redundancySettings: production.redundancySettings,
+      },
+    ]);
     expect(result.evaluations.map((evaluation) => evaluation.gameId)).toEqual(["game"]);
+  });
+  test("stored-rule scoring omits a staged future note receipt without leaking private capture", async () => {
+    const pendingReceipt = {
+      receiptType: "owner-game-note",
+      commandId: "10000000-0000-4000-8000-000000000099",
+      operation: "set",
+      gameId: "game",
+      expectedVersion: 0,
+      requestFingerprint: hash,
+      accepted: {
+        commandId: "10000000-0000-4000-8000-000000000099",
+        gameId: "game",
+        operation: "set",
+        state: "present",
+        version: 1,
+        updatedAt: observedAt,
+        collectionRevision: 2,
+        alreadyClear: false,
+      },
+    } satisfies Collection["commandReceipts"][number];
+    const game = {
+      ...ownedGame("game"),
+      ownerNote: { state: "present" as const, version: 1, updatedAt: observedAt, text: "private" },
+    };
+    const production: AttentionCandidateProductionSource = {
+      ...productionSource(1, [game]),
+      collection: {
+        ...productionSource(1, [game]).collection,
+        commandReceipts: [pendingReceipt],
+      },
+    };
+    const app = createTestApp();
+    let captured: Parameters<DisplayedFitnessService["listGamesFromSnapshot"]>[0] | undefined;
+    const displayedFitness: DisplayedFitnessService = {
+      listGames: () => Promise.resolve([]),
+      listGamesFromSnapshot: (snapshot, options) => {
+        captured = snapshot;
+        return app.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+      },
+    };
+
+    const matches = await createAttentionCandidateOracle(displayedFitness).evaluateStoredRules(
+      production,
+      observedAt,
+      [{ gameId: "game", ruleId: "unknown-rule" }],
+    );
+
+    expect(matches).toEqual([]);
+    expect(captured).toMatchObject({ kind: "private-capture" });
+    if (captured?.kind !== "private-capture") throw new Error("Expected private scoring capture");
+    expect(captured.collection.revision).toBe(1);
+    expect(captured.collection.commandReceipts).toEqual([]);
+    expect(captured.collection.games[0]?.ownerNote).toMatchObject({ text: "private" });
+    expect(JSON.stringify(matches)).not.toContain("private");
+    expect(production.collection.commandReceipts).toEqual([pendingReceipt]);
   });
   test("production adapter projects only target output while preserving full evaluation parity", async () => {
     const production: AttentionCandidateProductionSource = {
@@ -992,6 +1083,8 @@ describe("AttentionCandidateService core", () => {
   test("production dependency resolver derives deterministic catalog and BGG indexes", () => {
     const production: AttentionCandidateProductionSource = {
       ...source(1, [{ ...ownedGame("game"), bggId: 7, additionalBggIds: [3, 7, 5] }]),
+      kind: "private-capture",
+      sourceVector,
       tournament: {
         settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
         sessions: [],

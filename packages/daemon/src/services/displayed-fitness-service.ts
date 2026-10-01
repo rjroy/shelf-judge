@@ -21,6 +21,7 @@ import {
 import { createRedundancyFactualContext } from "./redundancy-factual.js";
 import type { SourceVector } from "./source-vector.js";
 import { canonicalSha256 } from "./profile-source-coordinator.js";
+import { projectProfileCollectionSource } from "./game-projection.js";
 
 export interface DisplayedGameFitness extends GameWithScore {
   hasPredictedContribution: boolean;
@@ -39,17 +40,35 @@ export interface DisplayedFitnessOptions {
 export interface DisplayedFitnessService {
   listGames(options: DisplayedFitnessOptions): Promise<DisplayedGameFitness[]>;
   listGamesFromSnapshot(
-    snapshot: {
-      collection: CollectionProfileCollectionSource;
-      tournament: TournamentData;
-      predictionSettings: PredictionSettings;
-      redundancySettings: RedundancySettings;
-      nicheSettings?: NicheSettings;
-      sourceVector?: SourceVector;
-    },
+    snapshot: DisplayedFitnessSnapshot,
     options: DisplayedFitnessOptions,
   ): Promise<DisplayedGameFitness[]>;
 }
+
+/** Public snapshots intentionally cannot carry private semantic state. */
+export interface PublicDisplayedFitnessSnapshot {
+  kind: "public";
+  collection: CollectionProfileCollectionSource;
+  tournament: TournamentData;
+  predictionSettings: PredictionSettings;
+  redundancySettings: RedundancySettings;
+  nicheSettings?: NicheSettings;
+}
+
+/** A coherent private capture may validate semantic publications against its captured vector. */
+export interface PrivateDisplayedFitnessSnapshot {
+  kind: "private-capture";
+  collection: Collection;
+  sourceVector: SourceVector;
+  tournament: TournamentData;
+  predictionSettings: PredictionSettings;
+  redundancySettings: RedundancySettings;
+  nicheSettings?: NicheSettings;
+}
+
+export type DisplayedFitnessSnapshot =
+  | PublicDisplayedFitnessSnapshot
+  | PrivateDisplayedFitnessSnapshot;
 
 export interface DisplayedFitnessServiceDeps {
   gameService: GameService;
@@ -386,9 +405,13 @@ export function createDisplayedFitnessService(
     },
 
     async listGamesFromSnapshot(snapshot, options): Promise<DisplayedGameFitness[]> {
-      const capturedSourceVector = snapshot.sourceVector ?? storageService?.sourceVector?.();
       const targets = targetIds(options);
-      const collection = structuredClone(snapshot.collection);
+      const privateCollection =
+        snapshot.kind === "private-capture" ? structuredClone(snapshot.collection) : undefined;
+      const collection =
+        privateCollection === undefined
+          ? structuredClone(snapshot.collection)
+          : projectProfileCollectionSource(privateCollection);
       const tournament = structuredClone(snapshot.tournament);
       const completeGames = options.includePredicted
         ? await (() => {
@@ -462,34 +485,74 @@ export function createDisplayedFitnessService(
                   .listGamesFromSnapshot(collection, tournament)
                   .filter((entry) => entry.game.ownership !== "previously-owned");
               })();
-      const currentSourceVector = storageService?.sourceVector?.();
+      const privateSemanticUniverse =
+        snapshot.kind === "private-capture" && snapshot.redundancySettings.enabled
+          ? options.includePredicted && targets === undefined
+            ? Promise.resolve(ownedGames)
+            : options.includePredicted && redundancyUniverse !== undefined
+              ? Promise.resolve(redundancyUniverse)
+              : (() => {
+                  if (predictionService?.listGamesWithPredictionsFromSnapshot === undefined) {
+                    throw new Error(
+                      "Private semantic snapshot requires snapshot-capable prediction service",
+                    );
+                  }
+                  return predictionService
+                    .listGamesWithPredictionsFromSnapshot(
+                      collection,
+                      tournament,
+                      structuredClone(snapshot.predictionSettings),
+                    )
+                    .then((entries) =>
+                      entries.filter((entry) => entry.game.ownership !== "previously-owned"),
+                    );
+                })()
+          : undefined;
+      const semanticUniverse = await privateSemanticUniverse;
+      const currentSourceVector =
+        snapshot.kind === "private-capture" ? storageService?.sourceVector?.() : undefined;
       const sourceVectorIsCurrent =
-        capturedSourceVector !== undefined &&
+        snapshot.kind === "private-capture" &&
+        snapshot.sourceVector.available &&
         currentSourceVector !== undefined &&
-        capturedSourceVector.processEpoch === currentSourceVector.processEpoch &&
-        capturedSourceVector.changeToken === currentSourceVector.changeToken &&
-        currentSourceVector.available;
+        currentSourceVector.available &&
+        snapshot.sourceVector.collectionId === privateCollection?.id &&
+        snapshot.sourceVector.collectionSchemaVersion === privateCollection?.schemaVersion &&
+        snapshot.sourceVector.collectionRevision === privateCollection?.revision &&
+        snapshot.sourceVector.collectionId === currentSourceVector.collectionId &&
+        snapshot.sourceVector.collectionSchemaVersion ===
+          currentSourceVector.collectionSchemaVersion &&
+        snapshot.sourceVector.collectionRevision === currentSourceVector.collectionRevision &&
+        snapshot.sourceVector.processEpoch === currentSourceVector.processEpoch &&
+        snapshot.sourceVector.changeToken === currentSourceVector.changeToken;
       applyRedundancy(
         ownedGames,
         structuredClone(snapshot.redundancySettings),
         collection,
         tournament,
-        redundancyUniverse,
-        snapshot.redundancySettings.enabled && sourceVectorIsCurrent
+        semanticUniverse ?? redundancyUniverse,
+        snapshot.kind === "private-capture" &&
+          privateCollection !== undefined &&
+          sourceVectorIsCurrent &&
+          snapshot.redundancySettings.enabled
           ? resolveRedundancyPairTable?.({
-              universe: (redundancyUniverse ?? ownedGames).filter(
+              universe: (semanticUniverse ?? redundancyUniverse ?? ownedGames).filter(
                 ({ score }) => score !== null && !score.vetoed && score.score > 0,
               ),
               settings: snapshot.redundancySettings,
-              collection: collection as unknown as Collection,
+              collection: privateCollection,
               tournament,
               predictionSettings: structuredClone(snapshot.predictionSettings),
               predictionSettingsHash: canonicalSha256(snapshot.predictionSettings),
-              sourceVector: capturedSourceVector,
+              sourceVector: snapshot.sourceVector,
             })
           : undefined,
         options.redundancySimilarityStatus ??
-          (snapshot.redundancySettings.enabled ? "factual" : "disabled"),
+          (privateCollection === undefined
+            ? snapshot.redundancySettings.enabled
+              ? "factual"
+              : "disabled"
+            : semanticFallbackStatus(privateCollection, snapshot.redundancySettings.enabled)),
       );
       return allGames.map((entry) => ({
         ...entry,

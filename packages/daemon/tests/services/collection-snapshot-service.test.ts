@@ -44,7 +44,10 @@ import type { CollectionMutationService } from "../../src/services/collection-mu
 import { createCollectionSnapshotRoutes } from "../../src/routes/collection-snapshot.js";
 import { createStorageService } from "../../src/services/storage-service.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
-import { projectGameWithScore } from "../../src/services/game-projection.js";
+import {
+  projectGameWithScore,
+  projectProfileCollectionSource,
+} from "../../src/services/game-projection.js";
 import {
   semanticGenerationFixture,
   semanticSourceIdentityFixture,
@@ -1175,8 +1178,20 @@ describe("CollectionSnapshotService", () => {
   test("list, targeted detail, and snapshot preserve note-free similarity status with no neighbor", async () => {
     const fixture = parityFixture("annotation", true);
     fixture.redundancySettings.similarityThreshold = 1.01;
+    const publicCollection = projectProfileCollectionSource({
+      ...fixture.collection,
+      games: fixture.collection.games.map((game) => ({
+        ...game,
+        ratings: Object.fromEntries(
+          Object.entries(game.ratings).filter(
+            (entry): entry is [string, number] => typeof entry[1] === "number",
+          ),
+        ),
+      })),
+    });
     const source = {
-      collection: fixture.collection,
+      kind: "public" as const,
+      collection: publicCollection,
       tournament: fixture.tournament,
       predictionSettings: fixture.predictionSettings,
       redundancySettings: fixture.redundancySettings,

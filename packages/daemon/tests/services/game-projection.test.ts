@@ -237,12 +237,22 @@ describe("game projections", () => {
       ],
     };
 
-    const snapshot = createGameDetailSnapshot(durable, game.id);
+    const snapshot = createGameDetailSnapshot(durable, game.id, {
+      tournament: await context.storageService.loadTournament(),
+      predictionSettings: await context.storageService.loadPredictionSettings(),
+      redundancySettings: await context.storageService.loadRedundancySettings(),
+      nicheSettings: await context.storageService.loadNicheSettings(),
+      sourceVector: context.storageService.sourceVector!(),
+    });
 
     expect(snapshot.collectionRevision).toBe(collection.revision);
     expect(snapshot.game.ownerNote).toEqual(durable.games[0]?.ownerNote);
     expect(JSON.stringify(snapshot.collection)).not.toContain("ownerNote");
     expect(JSON.stringify(snapshot.collection)).not.toContain(SENTINEL);
+    if (snapshot.fitnessSnapshot === undefined) throw new Error("Expected private fitness input");
+    expect(snapshot.fitnessSnapshot.kind).toBe("private-capture");
+    const privateNote = snapshot.fitnessSnapshot.collection.games[0]?.ownerNote;
+    expect(privateNote?.state === "present" ? privateNote.text : null).toBe(SENTINEL);
   });
 
   test("captures detail snapshots through the collection mutation coordinator", async () => {
@@ -261,6 +271,7 @@ describe("game projections", () => {
     };
     let loads = 0;
     const reader = {
+      ...context.storageService,
       loadCollection: () => {
         loads += 1;
         return Promise.resolve(durable);

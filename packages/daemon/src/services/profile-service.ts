@@ -32,6 +32,7 @@ import {
   type ProfileSources,
 } from "./profile-source-coordinator.js";
 import type { AttentionCandidateReadFreshness } from "./attention-disposition-maintenance.js";
+import type { SourceVector } from "./source-vector.js";
 
 export interface ProfileService {
   getProfile(): Promise<CollectionProfileResult>;
@@ -311,6 +312,7 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         let cardLimit: number;
         let entityPolicy: CollectionProfile["entityPolicy"];
         let fitnessCollection: Collection;
+        let fitnessSourceVector: SourceVector | undefined;
         let redundancySimilarityStatus: "disabled" | "factual" | "not-ready" | "stale" = "disabled";
         try {
           const [collection, config, tournament, predictionSettings, redundancySettings] =
@@ -328,6 +330,10 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
           // Keep the private captured collection for snapshot-backed fitness and
           // semantic resolution. The Profile source itself remains projected.
           fitnessCollection = structuredClone(collection);
+          // The coordinator holds source writers while the collection/settings and
+          // vector are captured, so semantic publications can be checked against
+          // one coherent private snapshot by displayed fitness.
+          fitnessSourceVector = storageService.sourceVector?.();
           sources = structuredClone({
             collection: projectProfileCollectionSource(collection),
             tournament,
@@ -385,13 +391,27 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         try {
           if (!displayedFitnessService.listGamesFromSnapshot)
             throw new Error("Snapshot-backed displayed fitness is not configured");
-          const games = await displayedFitnessService.listGamesFromSnapshot(
-            { ...sources, collection: fitnessCollection },
-            {
-              includePredicted: true,
-              redundancySimilarityStatus,
-            },
-          );
+          const fitnessSnapshot =
+            fitnessSourceVector?.available === true
+              ? {
+                  kind: "private-capture" as const,
+                  collection: fitnessCollection,
+                  sourceVector: fitnessSourceVector,
+                  tournament: sources.tournament,
+                  predictionSettings: sources.predictionSettings,
+                  redundancySettings: sources.redundancySettings,
+                }
+              : {
+                  kind: "public" as const,
+                  collection: sources.collection,
+                  tournament: sources.tournament,
+                  predictionSettings: sources.predictionSettings,
+                  redundancySettings: sources.redundancySettings,
+                };
+          const games = await displayedFitnessService.listGamesFromSnapshot(fitnessSnapshot, {
+            includePredicted: true,
+            redundancySimilarityStatus,
+          });
           const fitnessResults = new Map<string, FitnessResult>();
           for (const entry of games) {
             if (entry.score !== null && entry.hasScoringContribution)

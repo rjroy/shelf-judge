@@ -1546,7 +1546,7 @@ export interface ProfilePublicationIdentity {
 
 export interface ProfileData {
   contractVersion: 11;
-  algorithmVersion: 13;
+  algorithmVersion: 14;
   publicationIdentity: ProfilePublicationIdentity;
   profile: CollectionProfile;
   computedAt: string;

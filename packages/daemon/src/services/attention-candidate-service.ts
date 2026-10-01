@@ -28,6 +28,54 @@ import {
   attentionRuleCatalog,
 } from "./attention-rule-catalog.js";
 import { ATTENTION_CANDIDATE_CALCULATION_VERSION } from "./attention-candidate-engine.js";
+import type { SourceVector } from "./source-vector.js";
+
+function unavailableSourceVector(): SourceVector {
+  return {
+    available: false,
+    unavailableSources: ["startup"],
+    processEpoch: "unavailable",
+    changeToken: 0,
+    collectionId: null,
+    collectionSchemaVersion: null,
+    collectionRevision: null,
+    semanticEvidenceEpoch: null,
+    semanticConsentEpoch: null,
+    factualWeightsEpoch: null,
+    factualWeightsFingerprint: null,
+    redundancyWeightsFingerprint: null,
+    tournamentRevision: null,
+    predictionSettingsRevision: null,
+    nicheSettingsRevision: null,
+    redundancySettingsRevision: null,
+    shelfConfigRevision: null,
+    representationVersion: 1,
+    algorithmVersion: 1,
+  };
+}
+
+/**
+ * Mutation disposition reconciliation runs before the collection revision is
+ * advanced. A newly staged owner-note receipt therefore points at the next
+ * revision, while every scoring input (including the note itself) is already
+ * final. Receipts are not scoring inputs; omit only that pending receipt from
+ * the transient fitness capture so ordinary Collection validation remains
+ * strict and the captured collection/vector still identify the current source.
+ */
+function collectionForStoredRuleScoring(collection: Collection): Collection {
+  const futureNoteReceipts = collection.commandReceipts.filter(
+    (receipt) =>
+      "receiptType" in receipt &&
+      receipt.receiptType === "owner-game-note" &&
+      receipt.accepted.collectionRevision === collection.revision + 1,
+  );
+  if (futureNoteReceipts.length === 0) return collection;
+  const pending = new Set(futureNoteReceipts);
+  return {
+    ...collection,
+    commandReceipts: collection.commandReceipts.filter((receipt) => !pending.has(receipt)),
+  };
+}
 
 export type AttentionMutationImpact =
   | { readonly kind: "games"; readonly gameIds: readonly string[] }
@@ -107,6 +155,8 @@ export interface AttentionDispositionCompatibilityOracle<
   ): Promise<readonly AttentionStoredRuleMatch[]>;
 }
 export interface AttentionCandidateProductionSource extends AttentionCandidateSource {
+  readonly kind: "private-capture";
+  readonly sourceVector: SourceVector;
   readonly tournament: TournamentData;
   readonly predictionSettings: PredictionSettings;
   readonly redundancySettings: RedundancySettings;
@@ -157,6 +207,7 @@ export function createAttentionCandidateProductionSourceLoader(storage: {
   loadTournament(): Promise<TournamentData>;
   loadPredictionSettings(): Promise<PredictionSettings>;
   loadRedundancySettings(): Promise<RedundancySettings>;
+  sourceVector?(): SourceVector;
 }): () => Promise<AttentionCandidateProductionSource> {
   return async () => {
     const [collection, tournament, predictionSettings, redundancySettings] = await Promise.all([
@@ -165,6 +216,7 @@ export function createAttentionCandidateProductionSourceLoader(storage: {
       storage.loadPredictionSettings(),
       storage.loadRedundancySettings(),
     ]);
+    const vectorAfter = storage.sourceVector?.();
     const identity = profileSourceIdentity({
       collection,
       tournament,
@@ -172,13 +224,17 @@ export function createAttentionCandidateProductionSourceLoader(storage: {
       redundancySettings,
     } satisfies ProfileSources);
     return {
+      kind: "private-capture",
       collection,
       tournament,
       predictionSettings,
       redundancySettings,
+      sourceVector: vectorAfter ?? unavailableSourceVector(),
       identity: {
         ...identity,
-        calculationVersion: ATTENTION_CANDIDATE_CALCULATION_VERSION,
+        // The snapshot's semantic input changed from public projection to a private
+        // source-vector capture; invalidate artifacts calculated under the old path.
+        calculationVersion: ATTENTION_CANDIDATE_CALCULATION_VERSION + 1,
         ruleCatalogVersion: ATTENTION_RULE_CATALOG_VERSION,
         dependencyVersion: ATTENTION_RULE_DEPENDENCY_VERSION,
         projectionVersion: PURCHASE_UTILIZATION_PROJECTION_VERSION,
@@ -205,6 +261,7 @@ export function createAttentionCandidateService(
       loadTournament(): Promise<TournamentData>;
       loadPredictionSettings(): Promise<PredictionSettings>;
       loadRedundancySettings(): Promise<RedundancySettings>;
+      sourceVector?(): SourceVector;
     } & Partial<AttentionCandidateSourceGeneration>;
   },
 ): AttentionCandidateService<AttentionCandidateProductionSource> {
@@ -242,10 +299,20 @@ export function createAttentionCandidateOracle(
     typeof displayedFitness === "function" ? displayedFitness() : displayedFitness;
   return {
     async evaluate(source, evaluatedAt, targetGameIds) {
-      const fitness = await fitnessService().listGamesFromSnapshot(source, {
-        includePredicted: true,
-        targetGameIds,
-      });
+      const fitness = await fitnessService().listGamesFromSnapshot(
+        {
+          kind: "private-capture",
+          collection: source.collection,
+          sourceVector: source.sourceVector,
+          tournament: source.tournament,
+          predictionSettings: source.predictionSettings,
+          redundancySettings: source.redundancySettings,
+        },
+        {
+          includePredicted: true,
+          targetGameIds,
+        },
+      );
       const projections = new Map(
         fitness.map((entry) => [
           entry.game.id,
@@ -269,10 +336,20 @@ export function createAttentionCandidateOracle(
     },
     async evaluateStoredRules(source, evaluatedAt, storedRules) {
       const targetGameIds = [...new Set(storedRules.map((stored) => stored.gameId))];
-      const fitness = await fitnessService().listGamesFromSnapshot(source, {
-        includePredicted: true,
-        targetGameIds,
-      });
+      const fitness = await fitnessService().listGamesFromSnapshot(
+        {
+          kind: "private-capture",
+          collection: collectionForStoredRuleScoring(source.collection),
+          sourceVector: source.sourceVector,
+          tournament: source.tournament,
+          predictionSettings: source.predictionSettings,
+          redundancySettings: source.redundancySettings,
+        },
+        {
+          includePredicted: true,
+          targetGameIds,
+        },
+      );
       const projections = new Map(
         fitness.map((entry) => [
           entry.game.id,

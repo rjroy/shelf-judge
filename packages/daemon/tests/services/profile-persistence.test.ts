@@ -109,6 +109,21 @@ describe("useful profile persistence", () => {
     });
   });
 
+  test("rejects Profile algorithm v13 caches and accepts v14 caches", async () => {
+    await withStorage(async ({ profilePath, storage }) => {
+      const current = await currentEntityData(storage);
+      expect(current.algorithmVersion).toBe(14);
+
+      await fs.writeFile(profilePath, JSON.stringify({ ...current, algorithmVersion: 13 }), "utf8");
+      expect(await storage.loadProfile()).toBeNull();
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects is thenable
+      await expect(fs.stat(profilePath)).rejects.toThrow();
+
+      await storage.saveProfile(current);
+      expect(await storage.loadProfile()).toEqual(current);
+    });
+  });
+
   test("deletes old, malformed, and non-finite caches", async () => {
     await withStorage(async ({ profilePath, storage }) => {
       const current = await currentData(storage);
@@ -144,9 +159,9 @@ describe("useful profile persistence", () => {
       const artifacts = [
         serialized
           .replace('"contractVersion":11', '"contractVersion":9')
-          .replace('"algorithmVersion":13', '"algorithmVersion":12'),
+          .replace('"algorithmVersion":14', '"algorithmVersion":12'),
         serialized.replace('"contractVersion":11', '"contractVersion":10'),
-        serialized.replace('"algorithmVersion":13', '"algorithmVersion":12'),
+        serialized.replace('"algorithmVersion":14', '"algorithmVersion":13'),
         serialized
           .replaceAll('"bestFit":', '"rating":')
           .replace(/"adjustedMeanCurrentFitness":[^,]+,/g, ""),

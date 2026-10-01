@@ -15,6 +15,10 @@ import {
   type AddGameResult,
   type Collection,
   type CollectionProfileCollectionSource,
+  type NicheSettings,
+  type PredictionSettings,
+  type RedundancySettings,
+  type TournamentData,
   type DurableGame,
   type Game,
   type GameDetailGame,
@@ -28,6 +32,8 @@ import {
   type TournamentNextPairResponse,
 } from "@shelf-judge/shared";
 import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
+import type { DisplayedFitnessSnapshot } from "./displayed-fitness-service.js";
+import type { SourceVector } from "./source-vector.js";
 
 type ProjectableGame = Game & Partial<Pick<DurableGame, "ownerNote">>;
 
@@ -156,11 +162,20 @@ export interface GameDetailSnapshot {
   collection: CollectionProfileCollectionSource;
   /** Captured note-free semantic mode status; private semantic state is not projected. */
   redundancySimilarityStatus: "not-ready" | "stale" | null;
+  /** Private immutable scoring input; never serialize this as part of the response. */
+  fitnessSnapshot?: Extract<DisplayedFitnessSnapshot, { kind: "private-capture" }>;
 }
 
 export function createGameDetailSnapshot(
   collection: Collection,
   gameId: string,
+  sources?: {
+    tournament: TournamentData;
+    predictionSettings: PredictionSettings;
+    redundancySettings: RedundancySettings;
+    nicheSettings: NicheSettings;
+    sourceVector: SourceVector;
+  },
 ): GameDetailSnapshot {
   const game = collection.games.find(({ id }) => id === gameId);
   if (game === undefined) throw new Error(`Game not found: ${gameId}`);
@@ -173,6 +188,15 @@ export function createGameDetailSnapshot(
         ? "stale"
         : "not-ready"
       : null,
+    ...(sources === undefined
+      ? {}
+      : {
+          fitnessSnapshot: {
+            kind: "private-capture" as const,
+            collection,
+            ...sources,
+          },
+        }),
   };
 }
 
@@ -182,13 +206,66 @@ export interface GameDetailSnapshotService {
 
 export function createGameDetailSnapshotService(collectionReader: {
   loadCollection(): Promise<Collection>;
+  loadTournament?(): Promise<TournamentData>;
+  loadPredictionSettings?(): Promise<PredictionSettings>;
+  loadRedundancySettings?(): Promise<RedundancySettings>;
+  loadNicheSettings?(): Promise<NicheSettings>;
+  sourceVector?(): SourceVector;
 }): GameDetailSnapshotService {
   const coordinator = profileSourceCoordinatorFor(collectionReader);
   return {
     capture(gameId) {
-      return coordinator.runExclusive(async () =>
-        createGameDetailSnapshot(await collectionReader.loadCollection(), gameId),
-      );
+      return coordinator.runExclusive(async () => {
+        const collection = await collectionReader.loadCollection();
+        const [tournament, predictionSettings, redundancySettings, nicheSettings] =
+          collectionReader.loadTournament !== undefined &&
+          collectionReader.loadPredictionSettings !== undefined &&
+          collectionReader.loadRedundancySettings !== undefined &&
+          collectionReader.loadNicheSettings !== undefined
+            ? await Promise.all([
+                collectionReader.loadTournament(),
+                collectionReader.loadPredictionSettings(),
+                collectionReader.loadRedundancySettings(),
+                collectionReader.loadNicheSettings(),
+              ])
+            : [];
+        if (
+          tournament === undefined ||
+          predictionSettings === undefined ||
+          redundancySettings === undefined ||
+          nicheSettings === undefined
+        ) {
+          return createGameDetailSnapshot(collection, gameId);
+        }
+        const sourceVector =
+          collectionReader.sourceVector?.() ?? unavailableSourceVector(collection);
+        return createGameDetailSnapshot(collection, gameId, {
+          tournament,
+          predictionSettings,
+          redundancySettings,
+          nicheSettings,
+          sourceVector,
+        });
+      });
     },
+  };
+}
+
+function unavailableSourceVector(collection: Collection): SourceVector {
+  return {
+    available: false,
+    unavailableSources: ["source-vector"],
+    processEpoch: "unavailable",
+    changeToken: -1,
+    collectionId: collection.id,
+    collectionSchemaVersion: collection.schemaVersion,
+    collectionRevision: collection.revision,
+    tournamentRevision: null,
+    predictionSettingsRevision: null,
+    nicheSettingsRevision: null,
+    redundancySettingsRevision: null,
+    shelfConfigRevision: null,
+    representationVersion: 1,
+    algorithmVersion: 1,
   };
 }
