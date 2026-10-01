@@ -262,6 +262,12 @@ export class JevRunController {
     return { status: 200, body: { state: "cancellation-requested" } };
   }
 
+  /** Returns only the process-local live run ID; durable progress is not run authority. */
+  activeRun(): { runId: string } | null {
+    const active = this.activeHandle;
+    return active ? { runId: active.runId } : null;
+  }
+
   private async startPrepared(input: {
     requestId: string;
     precondition: string;

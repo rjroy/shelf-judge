@@ -12,11 +12,15 @@ import {
 import { collectionMutationServiceFor } from "../services/collection-mutation-service.js";
 import { createSemanticRedundancyStateService } from "../services/semantic-redundancy-state-service.js";
 import type { createJevStatusService } from "../services/jev-status-service.js";
+import type { JevRunController } from "../services/jev-run-controller.js";
+
+type JevRunRouteController = Pick<JevRunController, "preview" | "start" | "cancel" | "activeRun">;
 
 export interface RedundancyRoutesDeps {
   storageService: StorageService;
   semanticStateService?: SemanticRedundancyStateService;
   jevStatusService?: Pick<ReturnType<typeof createJevStatusService>, "read">;
+  jevRunController?: JevRunRouteController;
   afterSourceSave?: (impact: AttentionMutationImpact) => Promise<void>;
 }
 
@@ -243,7 +247,107 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
     }
   });
 
-  routes.post("/redundancy/semantic/cancel", unavailable);
+  const setRunNoStore = (c: Context) => c.header("Cache-Control", "no-store");
+  const controllerError = (c: Context, status: number) => {
+    if (status === 409) return c.json({ error: "Run conflict" }, 409);
+    if (status === 412) return c.json({ error: "Run precondition failed" }, 412);
+    return c.json({ error: "Run is unavailable" }, 503);
+  };
+  const readStrictObject = async (
+    c: Context,
+    expectedKeys: readonly string[],
+  ): Promise<Record<string, unknown> | null> => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return null;
+    }
+    if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
+    const record = body as Record<string, unknown>;
+    return Object.keys(record).length === expectedKeys.length &&
+      expectedKeys.every((key) => Object.hasOwn(record, key))
+      ? record
+      : null;
+  };
+
+  routes.get("/redundancy/semantic/run-preview", async (c) => {
+    setRunNoStore(c);
+    const controller = deps.jevRunController;
+    if (!controller) return c.json({ error: "Run is unavailable" }, 503);
+    try {
+      const result = await controller.preview();
+      if (result.status === 200) return c.json(result.body, 200);
+      return controllerError(c, result.status);
+    } catch {
+      return c.json({ error: "Run is unavailable" }, 503);
+    }
+  });
+
+  routes.post("/redundancy/semantic/run", async (c) => {
+    setRunNoStore(c);
+    const body = await readStrictObject(c, [
+      "requestId",
+      "precondition",
+      "noteTransmissionAuthorized",
+    ]);
+    if (
+      !body ||
+      typeof body.requestId !== "string" ||
+      body.requestId.length === 0 ||
+      body.requestId.length > 100 ||
+      typeof body.precondition !== "string" ||
+      body.precondition.length === 0 ||
+      body.precondition.length > 256 ||
+      typeof body.noteTransmissionAuthorized !== "boolean"
+    )
+      return c.json({ error: "Invalid Run request" }, 400);
+    const controller = deps.jevRunController;
+    if (!controller) return c.json({ error: "Run is unavailable" }, 503);
+    try {
+      const result = await controller.start({
+        requestId: body.requestId,
+        precondition: body.precondition,
+        noteTransmissionAuthorized: body.noteTransmissionAuthorized,
+      });
+      if (result.status === 200) return c.json(result.body, 202);
+      return controllerError(c, result.status);
+    } catch {
+      return c.json({ error: "Run is unavailable" }, 503);
+    }
+  });
+
+  routes.post("/redundancy/semantic/cancel", async (c) => {
+    setRunNoStore(c);
+    const body = await readStrictObject(c, ["runId"]);
+    if (
+      !body ||
+      typeof body.runId !== "string" ||
+      body.runId.length === 0 ||
+      body.runId.length > 100
+    )
+      return c.json({ error: "Invalid cancellation request" }, 400);
+    const controller = deps.jevRunController;
+    if (!controller) return c.json({ error: "Run is unavailable" }, 503);
+    try {
+      const result = controller.cancel({ runId: body.runId });
+      if (result.status === 200) return c.json(result.body, 202);
+      return controllerError(c, result.status === 404 ? 409 : result.status);
+    } catch {
+      return c.json({ error: "Run is unavailable" }, 503);
+    }
+  });
+
+  routes.get("/redundancy/semantic/active-run", (c) => {
+    setRunNoStore(c);
+    const controller = deps.jevRunController;
+    if (!controller) return c.json({ error: "Run is unavailable" }, 503);
+    try {
+      return c.json(controller.activeRun(), 200);
+    } catch {
+      return c.json({ error: "Run is unavailable" }, 503);
+    }
+  });
 
   // PATCH /redundancy/settings
   routes.patch("/redundancy/settings", async (c) => {
@@ -416,6 +520,148 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
             "progress",
           ],
           additionalProperties: false,
+        },
+      },
+      hierarchy: { root: "shelf", feature: "redundancy" },
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.redundancy.get-semantic-run-preview",
+      name: "get-semantic-run-preview",
+      description: "Preview aggregate Jev Run scope and disclosure without provider work",
+      invocation: { method: "GET", path: "/api/redundancy/semantic/run-preview" },
+      response: {
+        body: {
+          type: "object",
+          properties: {
+            requestId: { type: "string" },
+            precondition: { type: "string" },
+            provider: { const: "TypeSafe" },
+            modelId: { type: "string" },
+            eligibleGameCount: { type: "integer" },
+            pairCount: { type: "integer" },
+            descriptionBearingPairCount: { type: "integer" },
+            noteBearingPairCount: { type: "integer" },
+            noteTransmissionPermitted: { type: "boolean" },
+            providerConfigured: { type: "boolean" },
+            signalScope: {
+              type: "object",
+              properties: { description: { type: "boolean" }, ownerNotes: { type: "boolean" } },
+              required: ["description", "ownerNotes"],
+              additionalProperties: false,
+            },
+            scoringEffect: { enum: ["integrated-fitness", "annotation-only"] },
+            retentionCaveat: { type: "string" },
+            limits: {
+              type: "object",
+              properties: {
+                maxEligiblePairs: { type: "integer" },
+                maxProviderAttempts: { type: "integer" },
+                maxRetriesPerEvaluation: { type: "integer" },
+                maxRunDurationMs: { type: "integer" },
+                reportedTokenStopThreshold: { type: "integer" },
+                reportedTokenThresholdIsBilledCeiling: { const: false },
+              },
+              required: [
+                "maxEligiblePairs",
+                "maxProviderAttempts",
+                "maxRetriesPerEvaluation",
+                "maxRunDurationMs",
+                "reportedTokenStopThreshold",
+                "reportedTokenThresholdIsBilledCeiling",
+              ],
+              additionalProperties: false,
+            },
+            withinPairLimit: { type: "boolean" },
+            expiresAt: { type: "string" },
+          },
+          required: [
+            "requestId",
+            "precondition",
+            "provider",
+            "modelId",
+            "eligibleGameCount",
+            "pairCount",
+            "descriptionBearingPairCount",
+            "noteBearingPairCount",
+            "noteTransmissionPermitted",
+            "providerConfigured",
+            "signalScope",
+            "scoringEffect",
+            "retentionCaveat",
+            "limits",
+            "withinPairLimit",
+            "expiresAt",
+          ],
+          additionalProperties: false,
+        },
+      },
+      hierarchy: { root: "shelf", feature: "redundancy" },
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.redundancy.start-semantic-run",
+      name: "start-semantic-run",
+      description: "Start a prepared Jev Run with per-run note transmission authorization",
+      invocation: { method: "POST", path: "/api/redundancy/semantic/run" },
+      request: {
+        body: {
+          type: "object",
+          properties: {
+            requestId: { type: "string", minLength: 1, maxLength: 100 },
+            precondition: { type: "string", minLength: 1, maxLength: 256 },
+            noteTransmissionAuthorized: { type: "boolean" },
+          },
+          required: ["requestId", "precondition", "noteTransmissionAuthorized"],
+          additionalProperties: false,
+        },
+      },
+      response: {
+        body: {
+          type: "object",
+          properties: { state: { const: "started" }, runId: { type: "string" } },
+          required: ["state", "runId"],
+          additionalProperties: false,
+        },
+      },
+      hierarchy: { root: "shelf", feature: "redundancy" },
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.redundancy.cancel-semantic-run",
+      name: "cancel-semantic-run",
+      description: "Request cancellation of the specified active Jev Run",
+      invocation: { method: "POST", path: "/api/redundancy/semantic/cancel" },
+      request: {
+        body: {
+          type: "object",
+          properties: { runId: { type: "string", minLength: 1, maxLength: 100 } },
+          required: ["runId"],
+          additionalProperties: false,
+        },
+      },
+      response: {
+        body: {
+          type: "object",
+          properties: { state: { const: "cancellation-requested" } },
+          required: ["state"],
+          additionalProperties: false,
+        },
+      },
+      hierarchy: { root: "shelf", feature: "redundancy" },
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.redundancy.get-active-semantic-run",
+      name: "get-active-semantic-run",
+      description: "Get the active Jev Run identifier if one exists",
+      invocation: { method: "GET", path: "/api/redundancy/semantic/active-run" },
+      response: {
+        body: {
+          oneOf: [
+            { type: "object", properties: { runId: { type: "string" } }, required: ["runId"] },
+            { type: "null" },
+          ],
         },
       },
       hierarchy: { root: "shelf", feature: "redundancy" },

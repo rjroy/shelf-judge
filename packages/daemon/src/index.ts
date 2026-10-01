@@ -46,6 +46,7 @@ import type { JevGatewayOptions } from "./services/jev/jev-gateway.js";
 import { JevRunService } from "./services/jev-run-service.js";
 import { createJevRunSourceAdapter } from "./services/jev-run-source-adapter.js";
 import { createJevStatusService } from "./services/jev-status-service.js";
+import { JevRunController } from "./services/jev-run-controller.js";
 import type { JevPairCache } from "./services/jev-pair-cache-service.js";
 import type { StorageService } from "./services/storage-service.js";
 import type { PredictionService } from "./services/prediction-service.js";
@@ -86,6 +87,33 @@ export function createJevRunWorker(options: {
         ...(options.fetch ? { fetch: options.fetch } : {}),
         logger: options.gatewayLogger ?? createLogger("jev-gateway"),
       }),
+  });
+}
+
+/** Composes the internal controller only for a usable lifecycle cache and worker. */
+export function composeJevRunController(options: {
+  storageService: StorageService;
+  predictionService: PredictionService;
+  cache: JevPairCache | null;
+  runService: JevRunService | null;
+}): JevRunController | null {
+  if (!options.cache?.available || !options.runService) return null;
+  const predictSnapshot = options.predictionService.listGamesWithPredictionsFromSnapshot?.bind(
+    options.predictionService,
+  );
+  if (!predictSnapshot) return null;
+  const sourceAdapter = createJevRunSourceAdapter({
+    storageService: options.storageService,
+    predictionService: {
+      listGamesWithPredictionsFromSnapshot: (collection, tournament, settings, targetGameIds) =>
+        predictSnapshot(collection, tournament, settings, targetGameIds),
+    },
+  });
+  return new JevRunController({
+    storageService: options.storageService,
+    sourceAdapter,
+    cache: options.cache,
+    runService: options.runService,
   });
 }
 
@@ -431,8 +459,21 @@ export async function main() {
       });
     }
     await recoverJevRunOnStartup(jevRunWorker, logger);
-    // Kept intentionally inactive until an approved explicit Run route is wired.
-    void jevRunWorker;
+    let jevRunController: JevRunController | null = null;
+    try {
+      jevRunController = composeJevRunController({
+        storageService,
+        predictionService,
+        cache: jevPairCache,
+        runService: jevRunWorker,
+      });
+    } catch (error) {
+      logger.error("Jev Run controller composition failed", {
+        trigger: "startup",
+        outcome: "unavailable",
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
     await recoverAttentionCandidatesOnStartup(attentionCandidateRecovery, logger);
 
     const profileService = createProfileService({
@@ -478,6 +519,7 @@ export async function main() {
       collectionSnapshotService,
       semanticRedundancyStateService: semanticStateService,
       jevStatusService: jevStatusService ?? undefined,
+      jevRunController: jevRunController ?? undefined,
       ownerGameNoteService,
       groundedAnalysisProvider,
       reflectionRuntime,

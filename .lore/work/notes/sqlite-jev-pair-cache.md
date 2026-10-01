@@ -418,3 +418,26 @@ implementation and feature remain in progress.
 - Full Bun suite: 3,631 passed, 1 skipped, 0 failed.
 - Typecheck, browser check, lint, format check, and `git diff --check` passed.
 - Independent reviewer accepted the implementation.
+
+## Phase 2d11l — explicit local Jev Run API
+
+Checkpointed on `design/jev-similarity`, after Phase 2d11i. The overall Phase 2
+implementation and feature remain in progress.
+
+- Added provider-free aggregate Run preview, strict explicit Run POST, targeted
+  cancellation, and process-live active-run identity. These endpoints use
+  no-store responses; no GET, startup, or settings operation starts a Run.
+- Legacy manifest/disclosure/page/acknowledge POSTs remain quarantined pending
+  `.12.32`. The Next trusted-device access model was confirmed by the owner;
+  page and CLI integrations remain on their previous flows and are not claimed
+  complete here.
+- Fake-transport HTTP integration verifies zero calls on startup, GETs,
+  invalid requests, and stale preconditions, with valid POST dispatch gated
+  through the controller. No live provider calls or owner data were accessed.
+
+### Validation evidence for this checkpoint
+
+- Full Bun suite: 3,665 passed, 1 skipped, 0 failed.
+- Typecheck, browser typecheck, lint, format check, and `git diff --check` passed.
+- Independent Bun reviewer accepted the final HTTP test; oracle review found no
+  implementation blocker for the trusted local API.

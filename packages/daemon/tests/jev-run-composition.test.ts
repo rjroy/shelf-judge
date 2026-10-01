@@ -12,6 +12,7 @@ import type {
 } from "@shelf-judge/shared";
 import { createInitialSemanticRedundancyStateV10 } from "@shelf-judge/shared";
 import {
+  composeJevRunController,
   composeJevStatusService,
   createJevRunWorker,
   recoverJevRunOnStartup,
@@ -134,7 +135,293 @@ function gatewayResponse(): Response {
   });
 }
 
+function deferred<Value>() {
+  let resolve!: (value: Value) => void;
+  const promise = new Promise<Value>((finish) => {
+    resolve = finish;
+  });
+  return { promise, resolve };
+}
+
+const json = (body: unknown): RequestInit => ({
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
 describe("Jev run production composition", () => {
+  test("real Run HTTP boundary keeps reads provider-free and fences explicit note-authorized work", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "jev-run-routes-integration-"));
+    const cache = await createJevPairCache(directory);
+    const sources = runtimeSources();
+    const storage = sources.storage as unknown as {
+      loadCollection(): Promise<Collection>;
+      loadRedundancySettings(): Promise<RedundancySettings>;
+      sourceVector(): SourceVector;
+    };
+    let collection = await storage.loadCollection();
+    for (const game of collection.games) {
+      game.ownerNote = {
+        state: "present",
+        version: 1,
+        updatedAt: "synthetic-fixture",
+        text: `synthetic-private-note-${game.id}`,
+      };
+    }
+    collection.semanticRedundancy.settings.weights.ownerNote = 1;
+    collection.semanticRedundancy.settings.cachedOwnerNoteUse = true;
+    let vector = storage.sourceVector();
+    storage.loadCollection = () => Promise.resolve(structuredClone(collection));
+    storage.loadRedundancySettings = () =>
+      Promise.resolve({
+        enabled: true,
+        stage: "integrated",
+        similarityThreshold: 0.7,
+        maxPenalty: 0.2,
+        componentWeights: { binary: 0, continuous: 0 },
+        minNeighbors: 1,
+        expectedNeighbors: 5,
+      });
+    storage.sourceVector = () => structuredClone(vector);
+    const mutateCollection = (mutation: (next: Collection) => void) => {
+      collection = structuredClone(collection);
+      mutation(collection);
+      collection.revision++;
+      vector = {
+        ...vector,
+        collectionRevision: collection.revision,
+        semanticConsentEpoch: collection.semanticRedundancy.consentEpoch,
+        semanticEvidenceEpoch: collection.semanticRedundancy.evidenceEpoch,
+      };
+    };
+
+    process.env.TYPESAFE_API_KEY = "integration-fake-key";
+    let transportCalls = 0;
+    let lastTransportBody = "";
+    const transportStarted = deferred<void>();
+    const releaseTransport = deferred<Response>();
+    try {
+      const worker = createJevRunWorker({
+        storageService: sources.storage,
+        predictionService: sources.predictionService,
+        cache,
+        fetch: async (_url, init) => {
+          await Promise.resolve();
+          transportCalls++;
+          lastTransportBody = typeof init?.body === "string" ? init.body : "";
+          transportStarted.resolve();
+          return releaseTransport.promise;
+        },
+      });
+      const controller = composeJevRunController({
+        storageService: sources.storage,
+        predictionService: sources.predictionService,
+        cache,
+        runService: worker,
+      });
+      const statusService = composeJevStatusService({
+        storageService: sources.storage,
+        predictionService: sources.predictionService,
+        cache,
+      });
+      expect(worker).not.toBeNull();
+      expect(controller).not.toBeNull();
+      expect(statusService).not.toBeNull();
+      const { routes } = createRedundancyRoutes({
+        storageService: sources.storage,
+        jevStatusService: statusService!,
+        jevRunController: controller!,
+      });
+      const app = new Hono();
+      app.route("/api", routes);
+      const request = (path: string, init?: RequestInit) =>
+        app.fetch(new Request(`http://daemon.test${path}`, init));
+
+      await recoverJevRunOnStartup(worker);
+      expect((await request("/api/redundancy/settings")).status).toBe(200);
+      expect((await request("/api/redundancy/semantic/refresh-status")).status).toBe(200);
+      expect(await (await request("/api/redundancy/semantic/active-run")).json()).toBeNull();
+      expect(transportCalls).toBe(0);
+
+      const invalidPreview = await request("/api/redundancy/semantic/run-preview");
+      expect(invalidPreview.status).toBe(200);
+      expect(invalidPreview.headers.get("Cache-Control")).toBe("no-store");
+      expect(transportCalls).toBe(0);
+      const invalidDisclosure = (await invalidPreview.json()) as {
+        requestId: string;
+        precondition: string;
+      };
+      const invalid = await request(
+        "/api/redundancy/semantic/run",
+        json({
+          requestId: invalidDisclosure.requestId,
+          precondition: "invalid-precondition",
+          noteTransmissionAuthorized: true,
+        }),
+      );
+      expect(invalid.status).toBe(412);
+      expect(transportCalls).toBe(0);
+
+      const controllerInternals = controller as unknown as {
+        options: { now?: () => Date; preconditionTtlMs?: number };
+      };
+      let fakeNow = Date.now();
+      controllerInternals.options.now = () => new Date(fakeNow);
+      controllerInternals.options.preconditionTtlMs = 5;
+      const expiredPreview = await request("/api/redundancy/semantic/run-preview");
+      expect(expiredPreview.status).toBe(200);
+      const expiredBody = (await expiredPreview.json()) as {
+        requestId: string;
+        precondition: string;
+      };
+      fakeNow += 6;
+      const expired = await request(
+        "/api/redundancy/semantic/run",
+        json({
+          requestId: expiredBody.requestId,
+          precondition: expiredBody.precondition,
+          noteTransmissionAuthorized: true,
+        }),
+      );
+      expect(expired.status).toBe(412);
+      expect(transportCalls).toBe(0);
+      controllerInternals.options.preconditionTtlMs = 120_000;
+
+      for (const mutation of ["note", "consent"] as const) {
+        const preview = await request("/api/redundancy/semantic/run-preview");
+        const body = (await preview.json()) as { requestId: string; precondition: string };
+        mutateCollection((next) => {
+          if (mutation === "note") {
+            next.games[0].ownerNote = {
+              state: "present",
+              version: 2,
+              updatedAt: "changed-synthetic-fixture",
+              text: "changed-synthetic-private-note",
+            };
+          } else {
+            next.semanticRedundancy.consentEpoch++;
+            next.semanticRedundancy.settings.cachedOwnerNoteUse = false;
+          }
+        });
+        const stale = await request(
+          "/api/redundancy/semantic/run",
+          json({
+            requestId: body.requestId,
+            precondition: body.precondition,
+            noteTransmissionAuthorized: true,
+          }),
+        );
+        expect(stale.status).toBe(412);
+        expect(transportCalls).toBe(0);
+      }
+
+      mutateCollection((next) => {
+        next.semanticRedundancy.settings.cachedOwnerNoteUse = true;
+      });
+      const validPreview = await request("/api/redundancy/semantic/run-preview");
+      const validDisclosure = (await validPreview.json()) as {
+        requestId: string;
+        precondition: string;
+        noteBearingPairCount: number;
+      };
+      expect(validDisclosure.noteBearingPairCount).toBe(1);
+      const startRequest = {
+        requestId: validDisclosure.requestId,
+        precondition: validDisclosure.precondition,
+        noteTransmissionAuthorized: false,
+      };
+      const start = await request("/api/redundancy/semantic/run", json(startRequest));
+      expect(start.status).toBe(202);
+      expect(start.headers.get("Cache-Control")).toBe("no-store");
+      const run = (await start.json()) as { runId: string; state: string };
+      await transportStarted.promise;
+      expect(transportCalls).toBe(1);
+      expect(lastTransportBody).not.toContain("synthetic-private-note");
+      expect(lastTransportBody).not.toContain("owner_note");
+
+      const duplicate = await request("/api/redundancy/semantic/run", json(startRequest));
+      expect(duplicate.status).toBe(202);
+      expect(await duplicate.json()).toEqual(run);
+      expect(transportCalls).toBe(1);
+      expect(await (await request("/api/redundancy/semantic/active-run")).json()).toEqual({
+        runId: run.runId,
+      });
+
+      const canceled = await request("/api/redundancy/semantic/cancel", json({ runId: run.runId }));
+      expect(canceled.status).toBe(202);
+      expect(await canceled.json()).toEqual({ state: "cancellation-requested" });
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (await (await request("/api/redundancy/semantic/active-run")).json()) {
+          await Promise.resolve();
+        } else break;
+      }
+      releaseTransport.resolve(gatewayResponse());
+      await Promise.resolve();
+      expect(transportCalls).toBe(1);
+      expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })).toBeNull();
+      expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "D" })).toBeNull();
+      expect(cache.getRunProgress()?.state).toBe("interrupted");
+      expect(transportCalls).toBe(1);
+    } finally {
+      cache.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("composes an internal controller from the lifecycle worker/cache without preview transport", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "jev-run-controller-composition-"));
+    const cache = await createJevPairCache(directory);
+    const sources = runtimeSources();
+    sources.storage.loadRedundancySettings = () =>
+      Promise.resolve({
+        enabled: true,
+        stage: "integrated",
+        similarityThreshold: 0.7,
+        maxPenalty: 0.2,
+        componentWeights: { binary: 0, continuous: 0 },
+        minNeighbors: 1,
+        expectedNeighbors: 5,
+      });
+    let transportCalls = 0;
+    try {
+      const worker = createJevRunWorker({
+        storageService: sources.storage,
+        predictionService: sources.predictionService,
+        cache,
+        fetch: async () => {
+          await Promise.resolve();
+          transportCalls++;
+          return gatewayResponse();
+        },
+      });
+      const controller = composeJevRunController({
+        storageService: sources.storage,
+        predictionService: sources.predictionService,
+        cache,
+        runService: worker,
+      });
+      expect(worker).not.toBeNull();
+      expect(controller).not.toBeNull();
+      expect(
+        composeJevRunController({
+          storageService: sources.storage,
+          predictionService: sources.predictionService,
+          cache: { available: false } as JevPairCache,
+          runService: worker,
+        }),
+      ).toBeNull();
+      const preview = await controller!.preview();
+      expect(preview.status).toBe(200);
+      if (preview.status !== 200) throw new Error("Expected provider-free Run preview");
+      expect(preview.body.providerConfigured).toBe(false);
+      expect(preview.body.pairCount).toBe(1);
+      expect(transportCalls).toBe(0);
+    } finally {
+      cache.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("composes aggregate status with the actual source adapter when lifecycle cache is absent", async () => {
     const sources = runtimeSources();
     sources.storage.loadRedundancySettings = () =>

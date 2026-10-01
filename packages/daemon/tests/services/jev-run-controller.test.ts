@@ -635,6 +635,73 @@ describe("JevRunController", () => {
     await startedRunCompletion(h);
   });
 
+  test("active run exposes only its live ID and clears after cancellation completion", async () => {
+    const h = harness({ pending: true });
+    const preview = await h.controller.preview();
+    if (preview.status !== 200) throw new Error("Expected preview");
+    const started = await h.controller.start({
+      requestId: preview.body.requestId,
+      precondition: preview.body.precondition,
+      noteTransmissionAuthorized: false,
+    });
+    if (started.status !== 200) throw new Error("Expected run start");
+    await h.started;
+
+    expect(h.controller.activeRun()).toEqual({ runId: started.body.runId });
+    expect(Object.keys(h.controller.activeRun()!)).toEqual(["runId"]);
+    expect(h.controller.cancel({ runId: started.body.runId })).toEqual({
+      status: 200,
+      body: { state: "cancellation-requested" },
+    });
+    expect(h.controller.activeRun()).toEqual({ runId: started.body.runId });
+
+    type Handle = { runId: string; completion: Promise<unknown>; cancel(): void };
+    const internals = h.controller as unknown as { activeHandle: Handle | null };
+    const acceptedHandle = internals.activeHandle;
+    if (!acceptedHandle) throw new Error("Expected controller active handle");
+    h.release();
+    await acceptedHandle.completion;
+    expect(h.controller.activeRun()).toBeNull();
+
+    const restarted = new JevRunController({
+      storageService: h.storage,
+      sourceAdapter: h.sourceAdapter,
+      cache: h.cache,
+      runService: h.runService,
+      gatewayConfigured: () => true,
+    });
+    expect(restarted.activeRun()).toBeNull();
+  });
+
+  test("stale old completion does not clear a replaced active run identity", async () => {
+    const h = harness({ pending: true });
+    const preview = await h.controller.preview();
+    if (preview.status !== 200) throw new Error("Expected preview");
+    const started = await h.controller.start({
+      requestId: preview.body.requestId,
+      precondition: preview.body.precondition,
+      noteTransmissionAuthorized: false,
+    });
+    if (started.status !== 200) throw new Error("Expected run start");
+    await h.started;
+
+    type Handle = { runId: string; completion: Promise<unknown>; cancel(): void };
+    const internals = h.controller as unknown as { activeHandle: Handle | null };
+    const oldHandle = internals.activeHandle;
+    if (!oldHandle) throw new Error("Expected controller active handle");
+    const replacement: Handle = {
+      runId: crypto.randomUUID(),
+      completion: Promise.resolve(undefined),
+      cancel: () => {},
+    };
+    internals.activeHandle = replacement;
+
+    h.release();
+    await oldHandle.completion;
+    expect(h.controller.activeRun()).toEqual({ runId: replacement.runId });
+    internals.activeHandle = null;
+  });
+
   test("active receipt survives TTL and capacity pressure through run and replay window", async () => {
     const h = harness({ pending: true, receiptTtlMs: 50, maxReceipts: 1 });
     const activePreview = await h.controller.preview();
