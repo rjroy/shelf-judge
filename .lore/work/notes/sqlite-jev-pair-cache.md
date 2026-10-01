@@ -163,6 +163,22 @@ Checkpointed on `design/jev-similarity`, after Phase 2d10c. The overall Phase
   `bun run format:check`, and `git diff --check` passed.
 - Independent `bun-typescript-reviewer` accepted the implementation.
 
+## Phase 2d11b — immutable Jev Run pair scope
+
+Checkpointed on `design/jev-similarity`. The overall Phase 2 implementation
+and feature remain in progress.
+
+- Added an immutable O(n) per-game fingerprint scope for one Run and lazy,
+  stable unordered-pair enumeration. Stale checks are signal-specific, and
+  absent owner notes short-circuit before pair enumeration.
+- No provider behavior, Run route, or collection lock was added.
+
+### Validation evidence for this checkpoint
+
+- Full Bun test suite: 3,574 passed, 1 skipped.
+- Typecheck, browser checks, lint, format check, and `git diff --check` passed.
+- Independent reviewer accepted JRS-1 and JRS-2.
+
 ## Phase 2d10e — aggregate-only pair status projection
 
 Checkpointed on `design/jev-similarity`, after Phase 2d10d. The overall Phase
