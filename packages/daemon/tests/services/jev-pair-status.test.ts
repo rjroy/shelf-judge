@@ -78,6 +78,7 @@ describe("projectJevPairStatus", () => {
 
     expect(result).toEqual({
       status: "ready",
+      measurement: "current",
       eligibleGameCount: 2,
       pairCount: 1,
       coverage: {

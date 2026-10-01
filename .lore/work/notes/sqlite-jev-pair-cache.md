@@ -163,6 +163,28 @@ Checkpointed on `design/jev-similarity`, after Phase 2d10c. The overall Phase
   `bun run format:check`, and `git diff --check` passed.
 - Independent `bun-typescript-reviewer` accepted the implementation.
 
+## Phase 2d11g — aggregate Jev status service
+
+Checkpointed on `design/jev-similarity`, after Phase 2d11f. The overall Phase 2
+implementation and feature remain in progress.
+
+- Added a read-only aggregate status service and projection. Counts are measured
+  only for a coherent current capture; disabled/factual states, including
+  enabled semantics with both semantic weights zero, and unavailable sources
+  or cache return null counts rather than invented zeroes.
+- The status read fences source identity and SQLite mutation revision around
+  coverage/read proof. Cache lookup errors invalidate the usable mutation
+  revision until reopen. Persisted progress is historical only; a stored
+  `running` marker is exposed as `last-known-running`.
+- No status route or provider calls were added, and no owner data was accessed.
+
+### Validation evidence for this checkpoint
+
+- Final full Bun suite: 3,624 passed, 1 skipped, 0 failed.
+- Typecheck, browser typecheck, lint, format check, and `git diff --check` passed.
+- Independent reviewer accepted before the final small precedence correction;
+  focused tests and quality checks passed after that correction.
+
 ## Phase 2d11f — daemon Jev Run composition
 
 Checkpointed on `design/jev-similarity`, after Phase 2d11e. The overall Phase 2

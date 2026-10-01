@@ -10,50 +10,57 @@ export interface JevSignalCoverageCounts {
   blocked: number;
 }
 
-export interface JevPairStatus {
-  status: JevPairReadResult["status"];
-  eligibleGameCount: number;
+export type JevStatusState =
+  | "disabled"
+  | "factual"
+  | "not-ready"
+  | "stale"
+  | "ready"
+  | "unavailable";
+export type JevStatusProgress = null | {
+  state: "last-known-running" | "completed" | "interrupted" | "failed";
   pairCount: number;
-  coverage: {
-    C: JevSignalCoverageCounts;
-    D: JevSignalCoverageCounts;
-  };
-  /** Last persisted progress only; this projection does not assert a run is currently active. */
-  progress: null | {
-    state: "last-known-running" | "completed" | "interrupted" | "failed";
-    pairCount: number;
-    completedPairs: number;
-    cacheHits: number;
-    cacheMisses: number;
-    failedPairs: number;
-  };
+  completedPairs: number;
+  cacheHits: number;
+  cacheMisses: number;
+  failedPairs: number;
+};
+
+interface JevStatusBase {
+  status: JevStatusState;
+  progress: JevStatusProgress;
 }
+
+export type JevStatusResponse =
+  | (JevStatusBase & {
+      measurement: "current";
+      eligibleGameCount: number;
+      pairCount: number;
+      coverage: { C: JevSignalCoverageCounts; D: JevSignalCoverageCounts };
+    })
+  | (JevStatusBase & {
+      measurement: "not-applicable" | "cache-unavailable" | "source-unavailable";
+      eligibleGameCount: null;
+      pairCount: null;
+      coverage: null;
+    });
 
 function emptyCounts(): JevSignalCoverageCounts {
   return { covered: 0, missing: 0, invalid: 0, unavailable: 0, blocked: 0 };
 }
 
 function countState(counts: JevSignalCoverageCounts, coverage: JevPairSignalCoverage): void {
-  switch (coverage.state) {
-    case "covered":
-      counts.covered++;
-      break;
-    case "missing-row":
-      counts.missing++;
-      break;
-    case "invalid-row":
-      counts.invalid++;
-      break;
-    case "unavailable":
-      counts.unavailable++;
-      break;
-    case "blocked":
-      counts.blocked++;
-      break;
-  }
+  counts[
+    coverage.state === "missing-row"
+      ? "missing"
+      : coverage.state === "invalid-row"
+        ? "invalid"
+        : coverage.state
+  ]++;
 }
 
-function isValidProgress(progress: JevRunProgress): boolean {
+function projectedProgress(progress: JevRunProgress | null): JevStatusProgress {
+  if (!progress) return null;
   const counters = [
     progress.pairCount,
     progress.completedPairs,
@@ -61,17 +68,15 @@ function isValidProgress(progress: JevRunProgress): boolean {
     progress.cacheMisses,
     progress.failedPairs,
   ];
-  return (
-    ["running", "completed", "interrupted", "failed"].includes(progress.state) &&
-    counters.every((counter) => Number.isSafeInteger(counter) && counter >= 0) &&
-    progress.completedPairs <= progress.pairCount
-  );
-}
-
-function projectedProgress(progress: JevRunProgress | null): JevPairStatus["progress"] {
-  if (!progress || !isValidProgress(progress)) return null;
+  if (
+    !(
+      ["running", "completed", "interrupted", "failed"].includes(progress.state) &&
+      counters.every((n) => Number.isSafeInteger(n) && n >= 0) &&
+      progress.completedPairs <= progress.pairCount
+    )
+  )
+    return null;
   return {
-    // A persisted "running" marker can survive a restart; never present it as a live run.
     state: progress.state === "running" ? "last-known-running" : progress.state,
     pairCount: progress.pairCount,
     completedPairs: progress.completedPairs,
@@ -81,43 +86,55 @@ function projectedProgress(progress: JevRunProgress | null): JevPairStatus["prog
   };
 }
 
-/** Projects validated internal read inputs into a compact aggregate-only status object. */
 export function projectJevPairStatus(input: {
   coverage: JevPairCoverageDigest;
   readResult: JevPairReadResult;
   progress: JevRunProgress | null;
   cacheAvailable: boolean;
-}): JevPairStatus {
+}): JevStatusResponse {
   const C = emptyCounts();
   const D = emptyCounts();
   for (const pair of input.coverage.pairs) {
     countState(C, pair.C);
     countState(D, pair.D);
   }
-
-  const hasBlockedCoverage = input.coverage.pairs.some(
+  const hasBlocked = input.coverage.pairs.some(
     (pair) => pair.C.state === "blocked" || pair.D.state === "blocked",
   );
-  const hasInvalidCoverage = input.coverage.pairs.some(
+  const hasInvalid = input.coverage.pairs.some(
     (pair) => pair.C.state === "invalid-row" || pair.D.state === "invalid-row",
   );
-  const status =
+  const status: JevStatusState =
     input.readResult.status !== "ready"
-      ? !input.cacheAvailable && input.readResult.status === "stale"
+      ? input.readResult.status
+      : !input.cacheAvailable || hasBlocked
         ? "not-ready"
-        : input.readResult.status
-      : !input.cacheAvailable || hasBlockedCoverage
-        ? "not-ready"
-        : hasInvalidCoverage
+        : hasInvalid
           ? "stale"
           : input.coverage.complete
             ? "ready"
             : "not-ready";
   return {
     status,
+    measurement: "current",
     eligibleGameCount: input.coverage.eligibleGameIds.length,
     pairCount: input.coverage.pairs.length,
     coverage: { C, D },
     progress: projectedProgress(input.progress),
+  };
+}
+
+export function unavailableJevPairStatus(
+  measurement: "not-applicable" | "cache-unavailable" | "source-unavailable",
+  progress: JevRunProgress | null,
+  status: JevStatusState = "unavailable",
+): JevStatusResponse {
+  return {
+    status,
+    measurement,
+    eligibleGameCount: null,
+    pairCount: null,
+    coverage: null,
+    progress: projectedProgress(progress),
   };
 }

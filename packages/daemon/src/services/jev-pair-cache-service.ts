@@ -399,6 +399,9 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
   const recordMutation = (): void => {
     revision = revision === null || revision >= Number.MAX_SAFE_INTEGER ? null : revision + 1;
   };
+  const invalidateRevision = (): void => {
+    revision = null;
+  };
   const assertUsable = (): void => {
     if (!usable()) throw new Error("Jev pair cache closed");
   };
@@ -447,7 +450,10 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
         const row = statements.get.get(a, b, key.signal);
         if (!row) return null;
         const dependencies: unknown = JSON.parse(row.dependencies_json);
-        if (!Array.isArray(dependencies)) return null;
+        if (!Array.isArray(dependencies)) {
+          invalidateRevision();
+          return null;
+        }
         const judgment: JevPairJudgment = {
           gameAId: row.game_a,
           gameBId: row.game_b,
@@ -469,6 +475,9 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
         validate(judgment);
         return judgment;
       } catch {
+        // A failed lookup is not a cache miss: callers cannot safely publish a
+        // coverage digest computed across an unreadable cache state.
+        invalidateRevision();
         return null;
       }
     },

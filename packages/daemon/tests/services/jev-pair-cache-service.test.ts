@@ -110,6 +110,23 @@ describe("Jev pair cache", () => {
     cache.close();
   });
 
+  test("failed SQLite row lookup invalidates the mutation revision until reopen", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    cache.upsert(record());
+    expect(cache.mutationRevision()).not.toBeNull();
+    const db = new Database(join(dir, "jev-pair-cache.sqlite"));
+    db.query("UPDATE judgments SET dependencies_json='not-json'").run();
+    db.close();
+
+    expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toBeNull();
+    expect(cache.mutationRevision()).toBeNull();
+    cache.close();
+    const reopened = await createJevPairCache(dir);
+    expect(reopened.mutationRevision()).toBe(0);
+    reopened.close();
+  });
+
   test("rolls back checkpoint rows and progress on SQLite failure", async () => {
     const dir = await tempDir();
     const cache = await createJevPairCache(dir);
