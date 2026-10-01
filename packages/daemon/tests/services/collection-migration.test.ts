@@ -3,11 +3,13 @@ import {
   AxisSchema,
   CURRENT_COLLECTION_SCHEMA_VERSION,
   CollectionSchema,
+  CollectionSchemaV10,
   CollectionSchemaV5,
 } from "@shelf-judge/shared";
 import {
   COLLECTION_MIGRATION_STEPS,
   migrateCollection,
+  migrateCollectionV9ToV10,
 } from "../../src/services/collection-migration.js";
 
 const NOW = "2026-01-01T00:00:00.000Z";
@@ -821,6 +823,92 @@ describe("migrateCollection", () => {
       execution: null,
       pairJudgments: [],
       publishedGeneration: null,
+    });
+  });
+
+  test("purely migrates v9 to strict inactive v10 while discarding legacy judgments", () => {
+    const v9 = migrateCollection(historicalCollection(), dependencies).data;
+    const source = {
+      ...v9,
+      games: v9.games.map((game) =>
+        game.id === "game-1"
+          ? {
+              ...game,
+              ownerNote: { state: "present", version: 2, updatedAt: NOW, text: "private note" },
+            }
+          : game,
+      ),
+      semanticRedundancy: {
+        ...v9.semanticRedundancy,
+        settings: {
+          enabled: true,
+          weights: { factual: 5, description: 2, ownerNote: 1 },
+          cachedOwnerNoteUse: true,
+        },
+        evidenceEpoch: 12,
+        consentEpoch: 8,
+        factualWeightsEpoch: 3,
+        factualWeightsFingerprint: "a".repeat(64),
+        pairJudgments: [{ gameA: "game-1", gameB: "game-2", description: null, ownerNote: null }],
+        disclosure: {
+          id: "private-id",
+          manifestDigest: "b".repeat(64),
+          evidenceEpoch: 1,
+          consentEpoch: 1,
+          pairCount: 1,
+          notePairCount: 1,
+          expiresAt: NOW,
+        },
+        authorization: {
+          id: "private-auth",
+          manifestDigest: "b".repeat(64),
+          evidenceEpoch: 1,
+          consentEpoch: 1,
+          pairCount: 1,
+          notePairCount: 1,
+          expiresAt: NOW,
+          state: "active",
+        },
+        execution: null,
+        disclosureManifest: null,
+        manifestDelivery: null,
+        publishedGeneration: null,
+      },
+    };
+    // Build a second canonical game so the v9 strict fixture's pair references are valid.
+    source.games.push({
+      ...source.games[0],
+      id: "game-2",
+      ownerNote: { state: "missing", version: 0, updatedAt: null },
+    });
+
+    const result = migrateCollectionV9ToV10(source);
+
+    expect(result.discardedLegacyPairCount).toBe(1);
+    expect(result.notice).toBe(
+      "Legacy semantic judgments were discarded during collection migration.",
+    );
+    expect(result.data.schemaVersion).toBe(10);
+    expect(result.data.games[0]?.ownerNote).toEqual({
+      state: "present",
+      version: 2,
+      updatedAt: NOW,
+      text: "private note",
+    });
+    expect(result.data.semanticRedundancy).toEqual({
+      settings: source.semanticRedundancy.settings,
+      evidenceEpoch: 12,
+      consentEpoch: 8,
+      factualWeightsEpoch: 3,
+      factualWeightsFingerprint: "a".repeat(64),
+    });
+    expect(JSON.stringify(result.data)).not.toContain("private-auth");
+    expect(JSON.stringify(result.data)).not.toContain("pairJudgments");
+    expect(CollectionSchemaV10.safeParse(result.data).success).toBe(true);
+    expect(migrateCollectionV9ToV10(result.data)).toMatchObject({
+      data: result.data,
+      discardedLegacyPairCount: 0,
+      notice: null,
     });
   });
 

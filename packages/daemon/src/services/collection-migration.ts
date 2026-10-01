@@ -7,12 +7,15 @@ import {
   CollectionSchemaV6,
   CollectionSchemaV7,
   CollectionSchemaV8,
+  CollectionSchemaV9,
+  CollectionSchemaV10,
   createInitialSemanticRedundancyState,
   createInitialEntityMetadata,
   isUsableSuggestedPlayerPoll,
   type Axis,
   type AxisBase,
   type Collection,
+  type CollectionV10,
   type DisabledLegacyAxis,
   type InvalidEvidence,
   type JsonValue,
@@ -25,6 +28,12 @@ export interface CollectionMigrationResult {
   sourceVersion: number;
   convertedAxisCount: number;
   disabledAxisCount: number;
+}
+
+export interface CollectionV9ToV10MigrationResult {
+  data: CollectionV10;
+  discardedLegacyPairCount: number;
+  notice: string | null;
 }
 
 export interface CollectionMigrationDependencies {
@@ -835,5 +844,51 @@ export function migrateCollection(
     sourceVersion,
     convertedAxisCount,
     disabledAxisCount,
+  };
+}
+
+/**
+ * Pure, inactive v9→v10 migration. Legacy judgments are always discarded because v9
+ * records do not prove every current name/model/question/schema/mapping dependency.
+ * This is intentionally not registered in the current migration chain before cutover.
+ */
+export function migrateCollectionV9ToV10(raw: unknown): CollectionV9ToV10MigrationResult {
+  if (
+    typeof raw === "object" &&
+    raw !== null &&
+    "schemaVersion" in raw &&
+    raw.schemaVersion === 10
+  ) {
+    return {
+      data: CollectionSchemaV10.parse(raw),
+      discardedLegacyPairCount: 0,
+      notice: null,
+    };
+  }
+  const source = CollectionSchemaV9.parse(raw);
+  const discardedLegacyPairCount = new Set(
+    source.semanticRedundancy.pairJudgments.map(({ gameA, gameB }) =>
+      gameA < gameB ? `${gameA}\u0000${gameB}` : `${gameB}\u0000${gameA}`,
+    ),
+  ).size;
+  const { semanticRedundancy: legacyState, ...collection } = source;
+  const data = CollectionSchemaV10.parse({
+    ...collection,
+    schemaVersion: 10,
+    semanticRedundancy: {
+      settings: legacyState.settings,
+      evidenceEpoch: legacyState.evidenceEpoch,
+      consentEpoch: legacyState.consentEpoch,
+      factualWeightsEpoch: legacyState.factualWeightsEpoch,
+      factualWeightsFingerprint: legacyState.factualWeightsFingerprint,
+    },
+  });
+  return {
+    data,
+    discardedLegacyPairCount,
+    notice:
+      discardedLegacyPairCount > 0
+        ? "Legacy semantic judgments were discarded during collection migration."
+        : null,
   };
 }

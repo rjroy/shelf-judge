@@ -586,6 +586,20 @@ export interface CollectionV9 extends Omit<CollectionV8, "schemaVersion"> {
   semanticRedundancy: SemanticRedundancyState;
 }
 
+/** Inactive v10 collection contract; current collection consumers remain on v9 until cutover. */
+export interface SemanticRedundancyStateV10 {
+  settings: SemanticRedundancySettings;
+  evidenceEpoch: number;
+  consentEpoch: number;
+  factualWeightsEpoch: number;
+  factualWeightsFingerprint: string | null;
+}
+
+export interface CollectionV10 extends Omit<CollectionV8, "schemaVersion"> {
+  schemaVersion: 10;
+  semanticRedundancy: SemanticRedundancyStateV10;
+}
+
 export type Collection = CollectionV9;
 
 /** Additive internal contracts for the future disposable attention projection. */

@@ -1979,6 +1979,46 @@ export const CollectionSchemaV9 = CollectionSchemaV9Base.strict().superRefine((s
   }
 });
 
+const SemanticRedundancyStateV10Schema = z
+  .object({
+    settings: z
+      .object({
+        enabled: z.boolean(),
+        weights: z
+          .object({
+            factual: SemanticWeightSchema,
+            description: SemanticWeightSchema,
+            ownerNote: SemanticWeightSchema,
+          })
+          .strict(),
+        cachedOwnerNoteUse: z.boolean(),
+      })
+      .strict(),
+    evidenceEpoch: SafeEpochSchema,
+    consentEpoch: SafeEpochSchema,
+    factualWeightsEpoch: SafeEpochSchema,
+    factualWeightsFingerprint: SemanticFingerprintSchema.nullable(),
+  })
+  .strict();
+
+export const CollectionSchemaV10 = CollectionSchemaV9Base.omit({
+  schemaVersion: true,
+  semanticRedundancy: true,
+})
+  .extend({
+    schemaVersion: z.literal(10),
+    semanticRedundancy: SemanticRedundancyStateV10Schema,
+  })
+  .strict()
+  .superRefine((source, context) => {
+    const { semanticRedundancy, ...v8Source } = source;
+    void semanticRedundancy;
+    const prior = CollectionSchemaV8.safeParse({ ...v8Source, schemaVersion: 8 });
+    if (!prior.success) for (const issue of prior.error.issues) context.addIssue(issue);
+  });
+
+export type CollectionV10Output = z.output<typeof CollectionSchemaV10>;
+
 export const CollectionSchema = CollectionSchemaV9;
 
 const CollectionProfileCollectionSourceV7Base = CollectionSchemaV6Base.omit({

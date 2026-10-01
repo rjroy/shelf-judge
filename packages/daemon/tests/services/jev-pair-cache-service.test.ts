@@ -7,6 +7,10 @@ import {
   createJevPairCache,
   type JevPairJudgment,
 } from "../../src/services/jev-pair-cache-service.js";
+import {
+  buildJevPairDependencies,
+  fingerprintJevSource,
+} from "../../src/services/jev-pair-identity.js";
 
 const directories: string[] = [];
 async function tempDir(): Promise<string> {
@@ -26,6 +30,8 @@ function record(
   fingerprint = "a".repeat(64),
 ): JevPairJudgment {
   return {
+    collectionId: "collection-1",
+    ...(kind === "C_ONLY" ? {} : { consentEpoch: "consent-epoch-1" }),
     gameAId: "stable-a",
     gameBId: "stable-b",
     signal: kind === "D_ONLY" ? "D" : "C",
@@ -64,6 +70,29 @@ describe("Jev pair cache", () => {
     const again = await createJevPairCache(dir);
     expect(again.available).toBe(true);
     again.close();
+  });
+
+  test("fingerprints exact sent source and builds independent/shared dependency sets", () => {
+    const base = {
+      gameId: "game-a",
+      name: " Name ",
+      description: " description\n",
+      note: { text: " note ", version: "note-v4" },
+    };
+    const other = { ...base, gameId: "game-b", name: "Other" };
+    expect(fingerprintJevSource(" Name ")).not.toBe(fingerprintJevSource("Name"));
+    const c = buildJevPairDependencies("C_ONLY", base, other);
+    expect(c).toHaveLength(2);
+    expect(c[0]).toHaveProperty("descriptionFingerprint");
+    expect(c[0]).not.toHaveProperty("noteFingerprint");
+    const d = buildJevPairDependencies("D_ONLY", base, other);
+    expect(d[0]).toHaveProperty("noteVersion", "note-v4");
+    expect(d[0]).not.toHaveProperty("descriptionFingerprint");
+    const shared = buildJevPairDependencies("SHARED_CD", base, other);
+    expect(shared[0]).toHaveProperty("descriptionFingerprint");
+    expect(shared[0]).toHaveProperty("noteFingerprint");
+    expect(shared[0]).toHaveProperty("noteVersion", "note-v4");
+    expect(() => buildJevPairDependencies("D_ONLY", { ...base, note: undefined }, other)).toThrow();
   });
 
   test("canonical ordering of mixed-case IDs matches dependency ordering", async () => {
@@ -107,6 +136,74 @@ describe("Jev pair cache", () => {
     expect(
       cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "D" })?.dependencyKind,
     ).toBe("D_ONLY");
+    cache.close();
+  });
+
+  test("purges only the requested signal from shared rows and invalidates both on source change", async () => {
+    const cache = await createJevPairCache(await tempDir());
+    cache.upsert(record("SHARED_CD"));
+    cache.upsert({ ...record("SHARED_CD"), signal: "D", value: 0.8 });
+    cache.setActivation({ identity: "ready", activatedAt: "now" });
+
+    expect(cache.purgeGame("stable-a", "C", "SHARED_CD")).toBe(1);
+    expect(cache.getActivation()).toBeNull();
+    expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toBeNull();
+    expect(
+      cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "D" })?.dependencyKind,
+    ).toBe("SHARED_CD");
+
+    cache.upsert(record("SHARED_CD"));
+    expect(cache.invalidateGame("stable-a", ["SHARED_CD"])).toBe(2);
+    expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toBeNull();
+    expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "D" })).toBeNull();
+    cache.close();
+  });
+
+  test("atomically invalidates selected classes while retaining independent judgments and withdrawing activation", async () => {
+    const cache = await createJevPairCache(await tempDir());
+    cache.upsert(record("C_ONLY"));
+    cache.upsert(record("D_ONLY"));
+    cache.setActivation({ identity: "ready", activatedAt: "now" });
+    expect(cache.invalidateGame("stable-a", ["D_ONLY", "SHARED_CD"])).toBe(1);
+    expect(cache.getActivation()).toBeNull();
+    expect(
+      cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })?.dependencyKind,
+    ).toBe("C_ONLY");
+    expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "D" })).toBeNull();
+    cache.close();
+  });
+
+  test("global note revocation purges D-dependent rows including unrelated/orphaned pair records", async () => {
+    const cache = await createJevPairCache(await tempDir());
+    cache.upsert(record("D_ONLY"));
+    const otherPair = record("D_ONLY");
+    otherPair.gameAId = "removed-a";
+    otherPair.gameBId = "removed-b";
+    otherPair.dependencies = otherPair.dependencies.map((dep, index) => ({
+      ...dep,
+      gameId: index === 0 ? "removed-a" : "removed-b",
+    }));
+    cache.upsert(otherPair);
+    const independent = record("C_ONLY");
+    cache.upsert(independent);
+    cache.setActivation({ identity: "ready", activatedAt: "now" });
+    expect(cache.purgeDDependent()).toBe(2);
+    expect(cache.getActivation()).toBeNull();
+    expect(cache.lookup({ gameAId: "removed-a", gameBId: "removed-b", signal: "D" })).toBeNull();
+    expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).not.toBeNull();
+    cache.close();
+  });
+
+  test("collection identity and consent epoch remain row policy dependencies", async () => {
+    const cache = await createJevPairCache(await tempDir());
+    const d = record("D_ONLY");
+    cache.upsert(d);
+    expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "D" })).toMatchObject({
+      collectionId: "collection-1",
+      consentEpoch: "consent-epoch-1",
+    });
+    expect(() => cache.upsert({ ...d, consentEpoch: undefined })).toThrow();
+    expect(() => cache.upsert({ ...record("C_ONLY"), consentEpoch: "irrelevant" })).toThrow();
     cache.close();
   });
 
@@ -270,12 +367,20 @@ describe("Jev pair cache", () => {
       collectionJsonChanged = true;
     }).toThrow("Jev pair cache unavailable");
     expect(() => unavailable.purgeGame("a")).toThrow("Jev pair cache unavailable");
+    expect(() => unavailable.upsert(record())).toThrow("Jev pair cache unavailable");
+    expect(() => unavailable.setActivation({ identity: "x", activatedAt: "now" })).toThrow(
+      "Jev pair cache unavailable",
+    );
     expect(collectionJsonChanged).toBe(false);
 
     const closed = await createJevPairCache(await tempDir());
     closed.close();
     expect(() => closed.purgePair("a", "b")).toThrow("Jev pair cache closed");
     expect(() => closed.purgeGame("a")).toThrow("Jev pair cache closed");
+    expect(() => closed.upsert(record())).toThrow("Jev pair cache closed");
+    expect(() => closed.setActivation({ identity: "x", activatedAt: "now" })).toThrow(
+      "Jev pair cache closed",
+    );
   });
 
   test("fails closed when schema version claims initialization but required table is missing", async () => {
@@ -288,5 +393,35 @@ describe("Jev pair cache", () => {
     expect(cache.available).toBe(false);
     expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })).toBeNull();
     expect(() => cache.purgePair("a", "b")).toThrow("Jev pair cache unavailable");
+  });
+
+  test("upgrades the prior repository schema conservatively by discarding unfenced rows", async () => {
+    const dir = await tempDir();
+    const db = new Database(join(dir, "jev-pair-cache.sqlite"), { create: true });
+    db.exec(`CREATE TABLE judgments (
+      game_a TEXT NOT NULL, game_b TEXT NOT NULL, signal TEXT NOT NULL, dependency_kind TEXT NOT NULL,
+      value REAL NOT NULL, confidence REAL, model_id TEXT NOT NULL, rubric_version TEXT NOT NULL,
+      question_version TEXT NOT NULL, request_schema_version TEXT NOT NULL, score_mapping_version TEXT NOT NULL,
+      semantic_policy_id TEXT NOT NULL, completed_at TEXT NOT NULL, dependencies_json TEXT NOT NULL,
+      PRIMARY KEY(game_a,game_b,signal)
+    );
+    CREATE TABLE run_progress (singleton INTEGER PRIMARY KEY, run_id TEXT NOT NULL, state TEXT NOT NULL,
+      pair_count INTEGER NOT NULL, completed_pairs INTEGER NOT NULL, cache_hits INTEGER NOT NULL,
+      cache_misses INTEGER NOT NULL, failed_pairs INTEGER NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE activation (singleton INTEGER PRIMARY KEY, identity TEXT NOT NULL, activated_at TEXT NOT NULL);
+    INSERT INTO judgments VALUES ('a','b','C','C_ONLY',0.5,NULL,'m','r','q','s','map','p','now','[]');
+    INSERT INTO activation VALUES (1,'old','now');
+    PRAGMA user_version = 1;`);
+    db.close();
+
+    const cache = await createJevPairCache(dir);
+    expect(cache.available).toBe(true);
+    expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })).toBeNull();
+    expect(cache.getActivation()).toBeNull();
+    cache.upsert(record());
+    expect(
+      cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })?.collectionId,
+    ).toBe("collection-1");
+    cache.close();
   });
 });
