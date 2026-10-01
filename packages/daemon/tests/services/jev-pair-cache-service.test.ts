@@ -55,7 +55,97 @@ function record(
   };
 }
 
+function progress(state: "running" | "completed" | "interrupted" | "failed" = "running") {
+  return {
+    runId: "run-checkpoint",
+    state,
+    pairCount: 1,
+    completedPairs: state === "completed" ? 1 : 0,
+    cacheHits: 0,
+    cacheMisses: 1,
+    failedPairs: state === "failed" ? 1 : 0,
+    updatedAt: "now",
+  } as const;
+}
+
 describe("Jev pair cache", () => {
+  test("checkpoints C and D judgments with progress atomically and persists after reopen", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    cache.checkpointPair({
+      judgments: [record("C_ONLY"), record("D_ONLY")],
+      progress: progress(),
+    });
+    expect(cache.getRunProgress()?.runId).toBe("run-checkpoint");
+    cache.close();
+
+    const reopened = await createJevPairCache(dir);
+    expect(
+      reopened.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" }),
+    ).not.toBeNull();
+    expect(
+      reopened.lookup({ gameAId: "stable-b", gameBId: "stable-a", signal: "D" }),
+    ).not.toBeNull();
+    expect(reopened.getRunProgress()?.runId).toBe("run-checkpoint");
+    reopened.close();
+  });
+
+  test("rejects malformed checkpoint inputs before writing any judgment", async () => {
+    const cache = await createJevPairCache(await tempDir());
+    const malformed = { ...record("D_ONLY"), value: 4 };
+    expect(() =>
+      cache.checkpointPair({ judgments: [record(), malformed], progress: progress() }),
+    ).toThrow();
+    expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toBeNull();
+    expect(cache.getRunProgress()).toBeNull();
+    expect(() =>
+      cache.checkpointPair({ judgments: [record(), record("C_ONLY", 0.8)], progress: progress() }),
+    ).toThrow();
+    expect(() =>
+      cache.checkpointPair({ judgments: [record()], progress: { ...progress(), pairCount: -1 } }),
+    ).toThrow();
+    expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toBeNull();
+    cache.close();
+  });
+
+  test("rolls back checkpoint rows and progress on SQLite failure", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    const db = new Database(join(dir, "jev-pair-cache.sqlite"));
+    db.exec(
+      "CREATE TRIGGER reject_progress BEFORE INSERT ON run_progress BEGIN SELECT RAISE(ABORT, 'test failure'); END;",
+    );
+    db.close();
+    expect(() =>
+      cache.checkpointPair({ judgments: [record(), record("D_ONLY")], progress: progress() }),
+    ).toThrow();
+    expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toBeNull();
+    expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "D" })).toBeNull();
+    expect(cache.getRunProgress()).toBeNull();
+    cache.close();
+  });
+
+  test("finishes run atomically and null activation preserves existing activation", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    cache.setActivation({ identity: "still-valid", activatedAt: "earlier" });
+    cache.finishRun({ activation: null, progress: progress("failed") });
+    expect(cache.getActivation()).toEqual({ identity: "still-valid", activatedAt: "earlier" });
+    const db = new Database(join(dir, "jev-pair-cache.sqlite"));
+    db.exec(
+      "CREATE TRIGGER reject_finish BEFORE INSERT ON run_progress BEGIN SELECT RAISE(ABORT, 'test failure'); END;",
+    );
+    db.close();
+    expect(() =>
+      cache.finishRun({
+        activation: { identity: "new", activatedAt: "now" },
+        progress: progress("completed"),
+      }),
+    ).toThrow();
+    expect(cache.getActivation()?.identity).toBe("still-valid");
+    expect(cache.getRunProgress()?.state).toBe("failed");
+    cache.close();
+  });
   test("canonicalizes unordered pair keys and persists after reopen with an idempotent schema", async () => {
     const dir = await tempDir();
     const first = await createJevPairCache(dir);
@@ -368,6 +458,12 @@ describe("Jev pair cache", () => {
     }).toThrow("Jev pair cache unavailable");
     expect(() => unavailable.purgeGame("a")).toThrow("Jev pair cache unavailable");
     expect(() => unavailable.upsert(record())).toThrow("Jev pair cache unavailable");
+    expect(() =>
+      unavailable.checkpointPair({ judgments: [record()], progress: progress() }),
+    ).toThrow("Jev pair cache unavailable");
+    expect(() => unavailable.finishRun({ activation: null, progress: progress("failed") })).toThrow(
+      "Jev pair cache unavailable",
+    );
     expect(() => unavailable.setActivation({ identity: "x", activatedAt: "now" })).toThrow(
       "Jev pair cache unavailable",
     );
@@ -378,6 +474,12 @@ describe("Jev pair cache", () => {
     expect(() => closed.purgePair("a", "b")).toThrow("Jev pair cache closed");
     expect(() => closed.purgeGame("a")).toThrow("Jev pair cache closed");
     expect(() => closed.upsert(record())).toThrow("Jev pair cache closed");
+    expect(() => closed.checkpointPair({ judgments: [record()], progress: progress() })).toThrow(
+      "Jev pair cache closed",
+    );
+    expect(() => closed.finishRun({ activation: null, progress: progress("failed") })).toThrow(
+      "Jev pair cache closed",
+    );
     expect(() => closed.setActivation({ identity: "x", activatedAt: "now" })).toThrow(
       "Jev pair cache closed",
     );

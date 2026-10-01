@@ -54,6 +54,17 @@ export interface JevAdvisoryActivation {
   activatedAt: string;
 }
 
+export interface JevPairCheckpoint {
+  judgments: [JevPairJudgment] | [JevPairJudgment, JevPairJudgment];
+  progress: JevRunProgress;
+}
+
+export interface JevRunFinish {
+  /** Null preserves any independently valid activation already in the cache. */
+  activation: JevAdvisoryActivation | null;
+  progress: JevRunProgress;
+}
+
 export interface JevPairCache {
   readonly available: boolean;
   lookup(key: JevPairKey): JevPairJudgment | null;
@@ -63,6 +74,8 @@ export interface JevPairCache {
   invalidateGame(gameId: string, dependencyKinds: readonly JevDependencyKind[]): number;
   purgeDDependent(): number;
   saveRunProgress(progress: JevRunProgress): void;
+  checkpointPair(checkpoint: JevPairCheckpoint): void;
+  finishRun(finish: JevRunFinish): void;
   getRunProgress(): JevRunProgress | null;
   setActivation(activation: JevAdvisoryActivation | null): void;
   getActivation(): JevAdvisoryActivation | null;
@@ -94,6 +107,43 @@ function requireFingerprint(value: string, field: string): void {
 function requireExactKeys(value: object, allowed: readonly string[], field: string): void {
   const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
   if (unknown.length > 0) throw new Error(`Unexpected ${field} properties`);
+}
+
+function validateProgress(progress: JevRunProgress): void {
+  if (!isRecord(progress)) throw new Error("Invalid run progress");
+  requireExactKeys(
+    progress,
+    [
+      "runId",
+      "state",
+      "pairCount",
+      "completedPairs",
+      "cacheHits",
+      "cacheMisses",
+      "failedPairs",
+      "updatedAt",
+    ],
+    "run progress",
+  );
+  if (!["running", "completed", "interrupted", "failed"].includes(progress.state))
+    throw new Error("Invalid run state");
+  for (const n of [
+    progress.pairCount,
+    progress.completedPairs,
+    progress.cacheHits,
+    progress.cacheMisses,
+    progress.failedPairs,
+  ])
+    if (!Number.isSafeInteger(n) || n < 0) throw new Error("Invalid progress counter");
+  requireText(progress.runId, "run ID");
+  requireText(progress.updatedAt, "updatedAt");
+}
+
+function validateActivation(activation: JevAdvisoryActivation): void {
+  if (!isRecord(activation)) throw new Error("Invalid activation");
+  requireExactKeys(activation, ["identity", "activatedAt"], "activation");
+  requireText(activation.identity, "activation identity");
+  requireText(activation.activatedAt, "activation timestamp");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -270,6 +320,12 @@ function noOpCache(): JevPairCache {
     saveRunProgress: () => {
       throw new Error("Jev pair cache unavailable");
     },
+    checkpointPair: () => {
+      throw new Error("Jev pair cache unavailable");
+    },
+    finishRun: () => {
+      throw new Error("Jev pair cache unavailable");
+    },
     getRunProgress: () => null,
     setActivation: () => {
       throw new Error("Jev pair cache unavailable");
@@ -340,6 +396,39 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
   const assertUsable = (): void => {
     if (!usable()) throw new Error("Jev pair cache closed");
   };
+  const writeJudgment = (judgment: JevPairJudgment): void => {
+    const [a, b] = canonicalPair(judgment.gameAId, judgment.gameBId);
+    statements?.upsert.run(
+      a,
+      b,
+      judgment.signal,
+      judgment.collectionId,
+      judgment.consentEpoch ?? null,
+      judgment.dependencyKind,
+      judgment.value,
+      judgment.confidence ?? null,
+      judgment.modelId,
+      judgment.rubricVersion,
+      judgment.questionVersion,
+      judgment.requestSchemaVersion,
+      judgment.scoreMappingVersion,
+      judgment.semanticPolicyId,
+      judgment.completedAt,
+      JSON.stringify(judgment.dependencies.map(projectDependency)),
+    );
+  };
+  const writeProgress = (progress: JevRunProgress): void => {
+    statements?.saveRunProgress.run(
+      progress.runId,
+      progress.state,
+      progress.pairCount,
+      progress.completedPairs,
+      progress.cacheHits,
+      progress.cacheMisses,
+      progress.failedPairs,
+      progress.updatedAt,
+    );
+  };
   return {
     available: true,
     lookup(key) {
@@ -377,26 +466,7 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
     upsert(judgment) {
       assertUsable();
       validate(judgment);
-      const [a, b] = canonicalPair(judgment.gameAId, judgment.gameBId);
-      const dependencies = judgment.dependencies.map(projectDependency);
-      statements.upsert.run(
-        a,
-        b,
-        judgment.signal,
-        judgment.collectionId,
-        judgment.consentEpoch ?? null,
-        judgment.dependencyKind,
-        judgment.value,
-        judgment.confidence ?? null,
-        judgment.modelId,
-        judgment.rubricVersion,
-        judgment.questionVersion,
-        judgment.requestSchemaVersion,
-        judgment.scoreMappingVersion,
-        judgment.semanticPolicyId,
-        judgment.completedAt,
-        JSON.stringify(dependencies),
-      );
+      writeJudgment(judgment);
     },
     purgePair(left, right, signal) {
       assertUsable();
@@ -459,42 +529,49 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
     },
     saveRunProgress(progress) {
       assertUsable();
-      requireExactKeys(
-        progress,
-        [
-          "runId",
-          "state",
-          "pairCount",
-          "completedPairs",
-          "cacheHits",
-          "cacheMisses",
-          "failedPairs",
-          "updatedAt",
-        ],
-        "run progress",
-      );
-      if (!["running", "completed", "interrupted", "failed"].includes(progress.state))
-        throw new Error("Invalid run state");
-      for (const n of [
-        progress.pairCount,
-        progress.completedPairs,
-        progress.cacheHits,
-        progress.cacheMisses,
-        progress.failedPairs,
-      ])
-        if (!Number.isSafeInteger(n) || n < 0) throw new Error("Invalid progress counter");
-      requireText(progress.runId, "run ID");
-      requireText(progress.updatedAt, "updatedAt");
-      statements.saveRunProgress.run(
-        progress.runId,
-        progress.state,
-        progress.pairCount,
-        progress.completedPairs,
-        progress.cacheHits,
-        progress.cacheMisses,
-        progress.failedPairs,
-        progress.updatedAt,
-      );
+      validateProgress(progress);
+      writeProgress(progress);
+    },
+    checkpointPair(checkpoint) {
+      assertUsable();
+      if (!isRecord(checkpoint)) throw new Error("Invalid pair checkpoint");
+      requireExactKeys(checkpoint, ["judgments", "progress"], "pair checkpoint");
+      const { judgments, progress } = checkpoint;
+      if (!Array.isArray(judgments) || (judgments.length !== 1 && judgments.length !== 2))
+        throw new Error("A checkpoint requires one or two judgments");
+      // Validate the entire bounded operation before opening its transaction.
+      judgments.forEach(validate);
+      const first = judgments[0];
+      if (!first) throw new Error("A checkpoint requires at least one judgment");
+      const pair = canonicalPair(first.gameAId, first.gameBId);
+      if (
+        judgments.some((judgment) => {
+          const otherPair = canonicalPair(judgment.gameAId, judgment.gameBId);
+          return otherPair[0] !== pair[0] || otherPair[1] !== pair[1];
+        })
+      )
+        throw new Error("Checkpoint judgments must identify the same unordered pair");
+      if (judgments.length === 2 && judgments[0]?.signal === judgments[1]?.signal)
+        throw new Error("Checkpoint judgments must have distinct signals");
+      validateProgress(progress);
+      db.transaction(() => {
+        judgments.forEach(writeJudgment);
+        writeProgress(progress);
+      })();
+    },
+    finishRun(finish) {
+      assertUsable();
+      if (!isRecord(finish)) throw new Error("Invalid run finish");
+      requireExactKeys(finish, ["activation", "progress"], "run finish");
+      const { activation, progress } = finish;
+      validateProgress(progress);
+      if (progress.state === "running") throw new Error("Run finish requires terminal progress");
+      if (activation !== null) validateActivation(activation);
+      db.transaction(() => {
+        if (activation !== null)
+          statements.setActivation.run(activation.identity, activation.activatedAt);
+        writeProgress(progress);
+      })();
     },
     getRunProgress() {
       if (!usable()) return null;

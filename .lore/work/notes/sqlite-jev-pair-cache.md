@@ -180,3 +180,19 @@ Checkpointed on `design/jev-similarity`, after Phase 2d10d. The overall Phase
 - Full Bun test suite: 3,564 passed, 1 skipped.
 - Typecheck, browser checks, lint, format check, and `git diff --check` passed.
 - Independent reviewer accepted JPS-1 and JPS-2.
+
+## Phase 2d11a — atomic SQLite Jev run writes
+
+Checkpointed on `design/jev-similarity`. The overall Phase 2 implementation
+and feature remain in progress.
+
+- Added atomic one-pair numeric C/D row plus progress writes, and atomic
+  terminal activation plus progress writes. Shared source coordination remains
+  future caller responsibility.
+- No provider calls or Run route were added.
+
+### Validation evidence for this checkpoint
+
+- Full Bun test suite: 3,568 passed, 1 skipped.
+- Typecheck, browser checks, lint, format check, and `git diff --check` passed.
+- Independent `bun-typescript-reviewer` accepted the implementation.
