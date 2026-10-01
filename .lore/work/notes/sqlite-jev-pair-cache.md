@@ -205,6 +205,33 @@ implementation and feature remain in progress.
 - Typecheck, browser typecheck, lint, format check, and `git diff --check` passed.
 - Independent reviewer accepted the implementation.
 
+## Phase 2d11j — internal Jev Run preview and prepared controller
+
+Checkpointed on `design/jev-similarity`, after Phase 2d11i. The overall Phase 2
+implementation and feature remain in progress.
+
+- Added an internal one-click preview/controller with aggregate disclosure,
+  provider/model and retention information, effective limits, and a short-lived
+  opaque process-bound precondition. Start binds the authorization to the
+  prepared source/policy/scope and per-run note permission, with bounded
+  idempotency receipts and targeted cancellation. Preview performs no provider
+  work; cache-only/no-key paths avoid constructing a gateway.
+- The computational universe guard is 25,000 eligible pairs; the separate
+  outbound HTTP attempt cap remains 100. Gateway budget exhaustion and missing
+  configuration stop the run while preserving valid checkpoints. Prepared
+  capture/scope validation and copying occur outside the coordinator; final
+  admission consumes a validated opaque reservation without pair enumeration.
+- No routes or UI were added; no live provider operation or owner data was
+  accessed. Before enabling UI, production work remains for partial-run and
+  sanitized stop-reason presentation, and for presenting an accurate authorized
+  scope.
+
+### Validation evidence for this checkpoint
+
+- Full Bun suite: 3,654 passed, 1 skipped, 0 failed.
+- Typecheck, browser typecheck, lint, format check, and `git diff --check` passed.
+- Independent Bun reviewer and oracle accepted after the bounded repairs.
+
 ## Phase 2d11d — fenced sequential Jev Run worker
 
 Checkpointed on `design/jev-similarity`, after Phase 2d11a–c. The overall

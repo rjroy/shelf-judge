@@ -15,11 +15,17 @@ export const JEV_RETENTION_CAVEAT =
 const MAX_GAME_NAME_CHARS = 200;
 const MAX_SOURCE_TEXT_CHARS = 12_000;
 const MAX_PAYLOAD_BYTES = 64 * 1024;
-const MAX_REQUESTS_PER_INSTANCE = 100;
-const MAX_CONCURRENT_REQUESTS = 2;
-const MAX_RETRIES = 2;
-const MAX_RETRY_AFTER_MS = 30_000;
-const MAX_REPORTED_TOKENS_PER_INSTANCE = 200_000;
+export const JEV_GATEWAY_LIMITS = Object.freeze({
+  maxRequestsPerInstance: 100,
+  maxConcurrentRequests: 2,
+  maxRetriesPerEvaluation: 2,
+  maxRetryAfterMs: 30_000,
+  maxReportedTokensPerInstance: 200_000,
+});
+
+export function isJevGatewayConfigured(): boolean {
+  return Boolean(process.env.TYPESAFE_API_KEY);
+}
 
 const GameNameSchema = z
   .string()
@@ -260,7 +266,7 @@ function parseRetryAfter(response: Response): number | null {
   const seconds = Number(value);
   const milliseconds = Number.isFinite(seconds) ? seconds * 1_000 : Date.parse(value) - Date.now();
   if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;
-  return Math.min(milliseconds, MAX_RETRY_AFTER_MS);
+  return Math.min(milliseconds, JEV_GATEWAY_LIMITS.maxRetryAfterMs);
 }
 
 function defaultWait(milliseconds: number, signal?: AbortSignal): Promise<void> {
@@ -286,8 +292,9 @@ export function createJevGateway(options: JevGatewayOptions = {}): JevGateway {
   const transport = options.fetch ?? globalThis.fetch;
   const logger = options.logger ?? createLogger("jev-gateway");
   const wait = options.wait ?? defaultWait;
-  const maxRequests = options.maxRequests ?? MAX_REQUESTS_PER_INSTANCE;
-  const maxReportedTokens = options.maxReportedTokens ?? MAX_REPORTED_TOKENS_PER_INSTANCE;
+  const maxRequests = options.maxRequests ?? JEV_GATEWAY_LIMITS.maxRequestsPerInstance;
+  const maxReportedTokens =
+    options.maxReportedTokens ?? JEV_GATEWAY_LIMITS.maxReportedTokensPerInstance;
   if (!Number.isSafeInteger(maxRequests) || maxRequests < 1)
     throw new RangeError("Jev maxRequests must be a positive safe integer");
   if (!Number.isSafeInteger(maxReportedTokens) || maxReportedTokens < 1)
@@ -311,7 +318,7 @@ export function createJevGateway(options: JevGatewayOptions = {}): JevGateway {
       throwIfAborted(signal);
       if (reportedTokens >= maxReportedTokens)
         throw new JevGatewayError("budget-exhausted", "Jev reported-token budget exhausted");
-      if (inFlight >= MAX_CONCURRENT_REQUESTS)
+      if (inFlight >= JEV_GATEWAY_LIMITS.maxConcurrentRequests)
         throw new JevGatewayError("capacity", "Jev gateway concurrency limit reached");
 
       const body = JSON.stringify(apiRequest);
@@ -435,7 +442,7 @@ async function thisCall(input: {
   nextAttemptId: () => string;
   consumeRequestAttempt: () => number;
 }): Promise<unknown> {
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+  for (let attempt = 0; attempt <= JEV_GATEWAY_LIMITS.maxRetriesPerEvaluation; attempt += 1) {
     throwIfAborted(input.signal);
     let receipt: JevDispatchReceipt;
     if (input.admitAndDispatch) {
@@ -479,14 +486,16 @@ async function thisCall(input: {
     }
     const response = await awaitWithAbort(receipt.response, input.signal);
     if (response.status === 429 || response.status === 529) {
-      if (attempt === MAX_RETRIES) {
+      if (attempt === JEV_GATEWAY_LIMITS.maxRetriesPerEvaluation) {
         throw new JevGatewayError(
           "rate-limited",
           "TypeSafe retry budget exhausted",
           response.status,
         );
       }
-      const delay = parseRetryAfter(response) ?? Math.min(250 * 2 ** attempt, MAX_RETRY_AFTER_MS);
+      const delay =
+        parseRetryAfter(response) ??
+        Math.min(250 * 2 ** attempt, JEV_GATEWAY_LIMITS.maxRetryAfterMs);
       input.logger.warn("jev request retry", {
         operationId: input.operationId,
         attempt: attempt + 1,

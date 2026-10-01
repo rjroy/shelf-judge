@@ -13,7 +13,12 @@ import {
   type JevRunPair,
   type JevRunScope,
 } from "./jev-run-scope.js";
-import type { JevAttemptAdmission, JevDispatchReceipt, JevGateway } from "./jev/jev-gateway.js";
+import {
+  JevGatewayError,
+  type JevAttemptAdmission,
+  type JevDispatchReceipt,
+  type JevGateway,
+} from "./jev/jev-gateway.js";
 
 export interface JevRunCapture {
   collection: Collection;
@@ -61,7 +66,21 @@ export interface JevPreparedRunInput {
   noteTransmissionAuthorized: boolean;
 }
 
-const DEFAULT_MAX_PAIRS = 10_000;
+declare const validatedPreparedRunBrand: unique symbol;
+export type ValidatedPreparedJevRun = { readonly [validatedPreparedRunBrand]: true };
+
+interface PreparedRunData {
+  capture: JevRunCapture;
+  scope: JevRunScope;
+  noteTransmissionAuthorized: boolean;
+}
+
+export interface JevRunEffectiveLimits {
+  maxEligiblePairs: number;
+  maxRunDurationMs: number;
+}
+
+const DEFAULT_MAX_PAIRS = 25_000;
 const DEFAULT_MAX_RUN_MS = 30 * 60_000;
 const DEFAULT_FINAL_CAPTURE_RETRIES = 2;
 const activeRuns = new WeakMap<object, JevRunHandle>();
@@ -75,6 +94,7 @@ export class JevRunService {
   private readonly maxRunMs: number;
   private readonly finalCaptureRetries: number;
   private readonly planScope: typeof planJevRunScope;
+  private readonly preparedRuns = new WeakMap<object, PreparedRunData>();
 
   constructor(private readonly options: JevRunServiceOptions) {
     this.coordinator = profileSourceCoordinatorFor(options.storageService);
@@ -85,22 +105,54 @@ export class JevRunService {
     this.planScope = options.planScope ?? planJevRunScope;
   }
 
+  get effectiveLimits(): JevRunEffectiveLimits {
+    return { maxEligiblePairs: this.maxPairs, maxRunDurationMs: this.maxRunMs };
+  }
+
   startRun(input: { noteTransmissionAuthorized: boolean }): JevRunHandle {
     return this.reserveRun(input.noteTransmissionAuthorized);
   }
 
-  /** Starts from a capture/scope already prepared by the explicit owner-action boundary. */
-  startPreparedRun(input: JevPreparedRunInput): JevRunHandle {
-    return this.reserveRun(input.noteTransmissionAuthorized, {
-      capture: structuredClone(input.capture),
-      scope: input.scope,
+  /**
+   * Validates and privately owns an already authorized snapshot before the short admission lock.
+   * Pair-scope correspondence is checked in bounded asynchronous slices outside the coordinator.
+   */
+  prepareValidatedPreparedRun(input: JevPreparedRunInput): Promise<ValidatedPreparedJevRun | null> {
+    return runOutsideProfileSourceCoordinator(async () => {
+      try {
+        if (typeof input.noteTransmissionAuthorized !== "boolean") return null;
+        const capture = structuredClone(input.capture);
+        const planned = this.planScope(capture.collection, capture.predictionCapture);
+        if (
+          !planned.ok ||
+          planned.scope.totalEligiblePairs > this.maxPairs ||
+          !(await this.scopeMatchesCapture(input.scope, planned.scope))
+        )
+          return null;
+        const reservation = Object.freeze({});
+        this.preparedRuns.set(reservation, {
+          capture,
+          scope: planned.scope,
+          noteTransmissionAuthorized: input.noteTransmissionAuthorized,
+        });
+        return reservation as ValidatedPreparedJevRun;
+      } catch {
+        return null;
+      }
     });
   }
 
-  private reserveRun(
-    noteAuthorized: boolean,
-    prepared?: { capture: JevRunCapture; scope: JevRunScope },
-  ): JevRunHandle {
+  /** Constant-time, one-shot active-run reservation for a previously validated input. */
+  reserveValidatedPreparedRun(reservation: ValidatedPreparedJevRun): JevRunHandle {
+    const key = reservation as object;
+    const prepared = this.preparedRuns.get(key);
+    if (!prepared) throw new Error("Prepared Jev reservation is invalid or already consumed");
+    if (activeRuns.has(this.options.storageService)) throw new Error("A Jev run is already active");
+    this.preparedRuns.delete(key);
+    return this.reserveRun(prepared.noteTransmissionAuthorized, prepared);
+  }
+
+  private reserveRun(noteAuthorized: boolean, prepared?: PreparedRunData): JevRunHandle {
     if (activeRuns.has(this.options.storageService)) throw new Error("A Jev run is already active");
     const runId = crypto.randomUUID();
     const controller = new AbortController();
@@ -137,7 +189,7 @@ export class JevRunService {
     runId: string,
     noteAuthorized: boolean,
     controller: AbortController,
-    prepared?: { capture: JevRunCapture; scope: JevRunScope },
+    prepared?: PreparedRunData,
   ): Promise<JevRunProgress> {
     const startedAt = this.now().getTime();
     let progress: JevRunProgress = {
@@ -156,8 +208,6 @@ export class JevRunService {
       if (prepared) {
         capture = prepared.capture;
         originalScope = prepared.scope;
-        if (!this.scopeMatchesCapture(capture, originalScope))
-          throw new Error("Prepared Jev scope does not match capture");
       } else {
         capture = await this.options.loadCapture();
         const planned = this.planScope(capture.collection, capture.predictionCapture);
@@ -251,10 +301,12 @@ export class JevRunService {
         let result: Awaited<ReturnType<JevGateway["evaluatePair"]>>;
         try {
           result = await getGateway().evaluatePair(ready.request, controller.signal);
-        } catch {
+        } catch (error) {
           activeAdmission = null;
-          if (!controller.signal.aborted)
+          if (!controller.signal.aborted) {
             progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
+            if (isRunTerminalGatewayError(error)) break;
+          }
           continue;
         }
         const mapped = mapJevPairResult(ready, result, this.now().toISOString());
@@ -336,7 +388,7 @@ export class JevRunService {
     throw new Error("Jev source vector changed repeatedly during refresh");
   }
 
-  private scopeMatchesCapture(capture: JevRunCapture, scope: JevRunScope): boolean {
+  private async scopeMatchesCapture(scope: JevRunScope, expected: JevRunScope): Promise<boolean> {
     try {
       if (
         !Object.isFrozen(scope) ||
@@ -346,9 +398,6 @@ export class JevRunService {
         scope.totalEligiblePairs > this.maxPairs
       )
         return false;
-      const planned = this.planScope(capture.collection, capture.predictionCapture);
-      if (!planned.ok) return false;
-      const expected = planned.scope;
       if (
         JSON.stringify(scope.eligibleGameIds) !== JSON.stringify(expected.eligibleGameIds) ||
         scope.totalEligiblePairs !== expected.totalEligiblePairs ||
@@ -378,6 +427,7 @@ export class JevRunService {
           return false;
         const pairLookup = scope.pairForIds(expectedPair.value.gameAId, expectedPair.value.gameBId);
         if (JSON.stringify(pairLookup) !== JSON.stringify(expectedPair.value)) return false;
+        if ((index & 0xff) === 0) await new Promise<void>((resolve) => setImmediate(resolve));
       }
       return expectedPairs.next().done === true && suppliedPairs.next().done === true;
     } catch {
@@ -644,6 +694,13 @@ export class JevRunService {
 
 function pairForIds(scope: JevRunScope, pair: JevRunPair): JevRunPair | undefined {
   return scope.pairForIds(pair.gameAId, pair.gameBId);
+}
+
+function isRunTerminalGatewayError(error: unknown): boolean {
+  return (
+    error instanceof JevGatewayError &&
+    (error.code === "budget-exhausted" || error.code === "not-configured")
+  );
 }
 
 function sameAuthority(capture: JevRunCapture, current: JevRunCurrentState): boolean {

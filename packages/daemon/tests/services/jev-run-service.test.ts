@@ -16,8 +16,14 @@ import type {
   JevRunProgress,
 } from "../../src/services/jev-pair-cache-service.js";
 import { createJevPairCache } from "../../src/services/jev-pair-cache-service.js";
+import { buildJevPairDependencies } from "../../src/services/jev-pair-identity.js";
 import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
-import type { JevPairResult } from "../../src/services/jev/jev-gateway.js";
+import {
+  createJevGateway,
+  JEV_MODEL_ID,
+  JevGatewayError,
+  type JevPairResult,
+} from "../../src/services/jev/jev-gateway.js";
 import {
   JEV_JUDGMENT_CONTRACT,
   JEV_QUESTION_VERSION,
@@ -131,6 +137,15 @@ function scoreResult(): JevPairResult {
   };
 }
 
+async function runPreparedForTest(
+  service: JevRunService,
+  input: Parameters<JevRunService["prepareValidatedPreparedRun"]>[0],
+): Promise<JevRunProgress> {
+  const reservation = await service.prepareValidatedPreparedRun(input);
+  if (!reservation) throw new Error("Expected a validated prepared run");
+  return service.reserveValidatedPreparedRun(reservation).completion;
+}
+
 function cacheFake() {
   const progress: JevRunProgress[] = [];
   const rows = new Map<string, JevPairJudgment>();
@@ -170,6 +185,166 @@ function cacheFake() {
 }
 
 describe("JevRunService attempt barriers", () => {
+  test("default computational scope admits a 200-game 19,900-pair universe", async () => {
+    const ids = Array.from({ length: 200 }, (_, index) => `game-${String(index).padStart(3, "0")}`);
+    const capture = fixture(ids);
+    const { cache, rows } = cacheFake();
+    const games = new Map(capture.collection.games.map((entry) => [entry.id, entry]));
+    for (let leftIndex = 0; leftIndex < ids.length; leftIndex++) {
+      for (let rightIndex = leftIndex + 1; rightIndex < ids.length; rightIndex++) {
+        const gameAId = ids[leftIndex];
+        const gameBId = ids[rightIndex];
+        const gameA = games.get(gameAId)!;
+        const gameB = games.get(gameBId)!;
+        rows.set(gameAId + gameBId + "C", {
+          collectionId: capture.collection.id,
+          gameAId,
+          gameBId,
+          signal: "C",
+          dependencyKind: "C_ONLY",
+          value: 0.5,
+          modelId: JEV_JUDGMENT_CONTRACT.modelId,
+          rubricVersion: JEV_JUDGMENT_CONTRACT.rubricVersion,
+          questionVersion: JEV_JUDGMENT_CONTRACT.questionVersion,
+          requestSchemaVersion: JEV_JUDGMENT_CONTRACT.requestSchemaVersion,
+          scoreMappingVersion: JEV_JUDGMENT_CONTRACT.scoreMappingVersion,
+          semanticPolicyId: JEV_JUDGMENT_CONTRACT.semanticPolicyId,
+          completedAt: "fixture-time",
+          dependencies: buildJevPairDependencies(
+            "C_ONLY",
+            {
+              gameId: gameAId,
+              name: gameA.name,
+              description: gameA.bggData!.description!,
+            },
+            {
+              gameId: gameBId,
+              name: gameB.name,
+              description: gameB.bggData!.description!,
+            },
+          ),
+        });
+      }
+    }
+    const service = new JevRunService({
+      storageService: {},
+      cache,
+      loadCapture: () => Promise.resolve(capture),
+      readCurrent: () =>
+        Promise.resolve({
+          collection: capture.collection,
+          sourceVectorIdentity: "vector",
+          policyIdentity: "policy",
+          canTransmitNotes: false,
+        }),
+      createGateway: () => {
+        throw new Error("No signals require provider work");
+      },
+    });
+
+    expect(service.effectiveLimits.maxEligiblePairs).toBeGreaterThanOrEqual(19_900);
+    const progress = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    expect(progress).toMatchObject({
+      state: "completed",
+      pairCount: 19_900,
+      completedPairs: 19_900,
+      cacheHits: 19_900,
+      failedPairs: 0,
+    });
+  });
+
+  test("gateway request-budget exhaustion preserves checkpoints and stops later pairs", async () => {
+    const capture = fixture(["a", "b", "c"]);
+    const { cache, rows } = cacheFake();
+    let transportCalls = 0;
+    const service = new JevRunService({
+      storageService: {},
+      cache,
+      loadCapture: () => Promise.resolve(capture),
+      readCurrent: () =>
+        Promise.resolve({
+          collection: capture.collection,
+          sourceVectorIdentity: "vector",
+          policyIdentity: "policy",
+          canTransmitNotes: false,
+        }),
+      createGateway: (admitAndDispatch) =>
+        createJevGateway({
+          apiKey: "fake-test-key",
+          maxRequests: 2,
+          wait: async () => {},
+          admitAndDispatch,
+          fetch: async () => {
+            await Promise.resolve();
+            transportCalls++;
+            if (transportCalls === 2) return new Response("", { status: 429 });
+            return new Response(
+              JSON.stringify({
+                model: JEV_MODEL_ID,
+                answers: {
+                  description_similarity: {
+                    type: "score",
+                    score: 2,
+                    legend: { "0": "Low", "1": "Some", "2": "High", "3": "Very high" },
+                    probabilities: { "0": 0, "1": 0, "2": 1, "3": 0 },
+                    confidence: 0.5,
+                  },
+                },
+                usage: { input_tokens: 4, output_tokens: 2 },
+              }),
+              { status: 200 },
+            );
+          },
+        }),
+    });
+
+    const progress = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    expect(transportCalls).toBe(2);
+    expect(progress.cacheMisses).toBe(2);
+    expect(rows.size).toBe(1);
+    expect(progress).toMatchObject({
+      state: "failed",
+      pairCount: 3,
+      completedPairs: 2,
+      failedPairs: 1,
+    });
+  });
+
+  test("not-configured is terminal instead of failing every remaining pair", async () => {
+    const capture = fixture(["a", "b", "c"]);
+    const { cache } = cacheFake();
+    let evaluations = 0;
+    const service = new JevRunService({
+      storageService: {},
+      cache,
+      loadCapture: () => Promise.resolve(capture),
+      readCurrent: () =>
+        Promise.resolve({
+          collection: capture.collection,
+          sourceVectorIdentity: "vector",
+          policyIdentity: "policy",
+          canTransmitNotes: false,
+        }),
+      createGateway: () => ({
+        evaluatePair: () => {
+          evaluations++;
+          return Promise.reject(
+            new JevGatewayError("not-configured", "Provider is not configured"),
+          );
+        },
+      }),
+    });
+
+    const progress = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    expect(evaluations).toBe(1);
+    expect(progress).toMatchObject({
+      state: "failed",
+      pairCount: 3,
+      completedPairs: 1,
+      failedPairs: 1,
+    });
+  });
+
   test("each retry re-enters the coordinator and starts only after admission", async () => {
     const capture = fixture();
     const { cache, rows } = cacheFake();
@@ -1037,11 +1212,11 @@ describe("JevRunService attempt barriers", () => {
       },
     });
 
-    const result = await service.startPreparedRun({
+    const result = await runPreparedForTest(service, {
       capture: original,
       scope: planned.scope,
       noteTransmissionAuthorized: false,
-    }).completion;
+    });
 
     expect(captureLoads).toBe(1);
     expect(gatewayConstructions).toBe(0);
@@ -1082,11 +1257,11 @@ describe("JevRunService attempt barriers", () => {
         return { evaluatePair: () => Promise.resolve(scoreResult()) };
       },
     });
-    const result = await service.startPreparedRun({
+    const result = await runPreparedForTest(service, {
       capture,
       scope: planned.scope,
       noteTransmissionAuthorized: false,
-    }).completion;
+    });
     expect(gatewayConstructions).toBe(0);
     expect(captureLoads).toBe(1); // final coverage only; not a replacement start capture
     expect(result.state).toBe("completed");
@@ -1124,11 +1299,11 @@ describe("JevRunService attempt barriers", () => {
         },
       }),
     });
-    const result = await service.startPreparedRun({
+    const result = await runPreparedForTest(service, {
       capture,
       scope: planned.scope,
       noteTransmissionAuthorized: false,
-    }).completion;
+    });
     expect(starts).toBe(1);
     expect(rows.has("abC")).toBe(true);
     expect(result.state).toBe("completed");
@@ -1160,15 +1335,101 @@ describe("JevRunService attempt barriers", () => {
         return { evaluatePair: () => Promise.resolve(scoreResult()) };
       },
     });
-    const result = await service.startPreparedRun({
+    const reservation = await service.prepareValidatedPreparedRun({
       capture,
       scope: wrongPlan.scope,
       noteTransmissionAuthorized: false,
-    }).completion;
-    expect(result.state).toBe("failed");
+    });
+    expect(reservation).toBeNull();
     expect(currentReads).toBe(0);
     expect(gatewayConstructions).toBe(0);
     expect(rows.size).toBe(0);
+  });
+
+  test("prepared scope validation yields outside the coordinator and reservation does no pair scan", async () => {
+    const capture = fixture(Array.from({ length: 200 }, (_, index) => `game-${index}`));
+    const planned = planJevRunScope(capture.collection, capture.predictionCapture);
+    if (!planned.ok) throw new Error("Expected valid 200-game scope");
+    const storage = {};
+    const coordinator = profileSourceCoordinatorFor(storage);
+    let currentVector = capture.sourceVectorIdentity;
+    let mutationCompleted = false;
+    let mutationDuringValidation = false;
+    let validationInProgress = true;
+    let mutationPromise: Promise<void> = Promise.resolve();
+    let mutationQueued = false;
+    let insideAdmission = false;
+    let plannerCalls = 0;
+    let plannersInsideAdmission = 0;
+    const suppliedScope = Object.freeze({
+      ...planned.scope,
+      pairs: function* () {
+        if (!mutationQueued) {
+          mutationQueued = true;
+          mutationPromise = coordinator.runExclusive(() => {
+            currentVector = "source-mutated-during-preparation";
+            mutationCompleted = true;
+            mutationDuringValidation = validationInProgress;
+            return Promise.resolve();
+          });
+        }
+        yield* planned.scope.pairs();
+      },
+    });
+    const { cache } = cacheFake();
+    let gatewayConstructions = 0;
+    const service = new JevRunService({
+      storageService: storage,
+      cache,
+      loadCapture: () => Promise.resolve(capture),
+      readCurrent: () =>
+        Promise.resolve({
+          collection: capture.collection,
+          sourceVectorIdentity: currentVector,
+          policyIdentity: capture.policyIdentity,
+          canTransmitNotes: false,
+        }),
+      planScope: (collection, predictions) => {
+        plannerCalls++;
+        if (insideAdmission) plannersInsideAdmission++;
+        return planJevRunScope(collection, predictions);
+      },
+      createGateway: () => {
+        gatewayConstructions++;
+        return { evaluatePair: () => Promise.resolve(scoreResult()) };
+      },
+    });
+
+    const reservation = await service.prepareValidatedPreparedRun({
+      capture,
+      scope: suppliedScope,
+      noteTransmissionAuthorized: false,
+    });
+    validationInProgress = false;
+    expect(reservation).not.toBeNull();
+    if (!mutationQueued) throw new Error("Expected validation-triggered source mutation");
+    await mutationPromise;
+    expect(mutationCompleted).toBe(true);
+    expect(mutationDuringValidation).toBe(true);
+    expect(plannerCalls).toBe(1);
+    const plannerCountBeforeAdmission = plannerCalls;
+    const reservedHandles: ReturnType<JevRunService["reserveValidatedPreparedRun"]>[] = [];
+    await coordinator.runExclusive(() => {
+      insideAdmission = true;
+      try {
+        reservedHandles.push(service.reserveValidatedPreparedRun(reservation!));
+      } finally {
+        insideAdmission = false;
+      }
+      return Promise.resolve();
+    });
+    expect(plannerCalls).toBe(plannerCountBeforeAdmission);
+    expect(plannersInsideAdmission).toBe(0);
+    const handle = reservedHandles[0];
+    if (!handle) throw new Error("Expected synchronous active-run reservation");
+    const progress = await handle.completion;
+    expect(progress.state).toBe("failed");
+    expect(gatewayConstructions).toBe(0);
   });
 
   test("run-progress storage failure before dispatch stops all paid requests", async () => {
