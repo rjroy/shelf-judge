@@ -7,10 +7,6 @@ type Weights = { factual: number; description: number; ownerNote: number };
 type Semantic = {
   settings: { enabled: boolean; weights: Weights; cachedOwnerNoteUse: boolean };
   status: string | { status?: unknown; publicationStatus?: unknown };
-  migrationNotice?: {
-    kind: "jev-cache-v9-to-v10";
-    discardedPairCount: number;
-  } | null;
 };
 type SettingsResponse = RedundancySettings & { semantic: Semantic; migrationNotice?: string };
 type Preview = {
@@ -139,22 +135,6 @@ function semanticStatusValue(status: Semantic["status"]): string {
   return typeof value === "string" ? value : "unavailable";
 }
 
-function semanticMigrationCopy(notice: Semantic["migrationNotice"]): string | null {
-  if (
-    !notice ||
-    notice.kind !== "jev-cache-v9-to-v10" ||
-    !Number.isSafeInteger(notice.discardedPairCount) ||
-    notice.discardedPairCount < 0
-  )
-    return null;
-  const preserved = "Your games, notes, and preferences were preserved.";
-  if (notice.discardedPairCount === 0)
-    return `Semantic cache storage was upgraded. No cached game-pair results were discarded. ${preserved}`;
-  if (notice.discardedPairCount === 1)
-    return `Semantic cache storage was upgraded. The cached result for 1 game pair was discarded because its inputs could not be verified. ${preserved}`;
-  return `Semantic cache storage was upgraded. Cached results for ${notice.discardedPairCount} game pairs were discarded because their inputs could not be verified. ${preserved}`;
-}
-
 function progressCopy(refresh: Refresh, activeRun: ActiveRun): string | null {
   const progress = refresh.progress;
   if (!progress) return null;
@@ -235,7 +215,10 @@ export default function RedundancyPage() {
     const activeRunId = activeRun?.runId;
     if (!activeRunId) return;
     let alive = true;
+    let inFlight = false;
     const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const latest = await readRunSnapshot();
         if (!alive) return;
@@ -247,10 +230,11 @@ export default function RedundancyPage() {
           setStatusError(
             e instanceof Error ? e.message : "Refresh status could not be loaded; retrying.",
           );
+      } finally {
+        inFlight = false;
       }
     };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 1500);
+    const timer = window.setInterval(() => void poll(), 60_000);
     return () => {
       alive = false;
       window.clearInterval(timer);
@@ -470,7 +454,6 @@ export default function RedundancyPage() {
   const dirty = saved !== null && JSON.stringify(settings) !== JSON.stringify(saved);
   const semanticDirty =
     savedSemantic !== null && JSON.stringify(semantic.settings) !== JSON.stringify(savedSemantic);
-  const semanticMigrationMessage = semanticMigrationCopy(semantic.migrationNotice);
   const clearPreparedDisclosure = () => {
     previewRevision.current += 1;
     setPreview(null);
@@ -523,11 +506,6 @@ export default function RedundancyPage() {
           {migrationNotice && (
             <div className="redundancy-stage-desc" role="status">
               Settings updated: {migrationNotice}
-            </div>
-          )}
-          {semanticMigrationMessage && (
-            <div className="success-banner" role="status">
-              {semanticMigrationMessage}
             </div>
           )}
 
@@ -727,11 +705,10 @@ export default function RedundancyPage() {
             ))}
             <p className="loading-text">
               Game facts are compared locally. BoardGameGeek descriptions come from cached source
-              text. Your notes are personal text and are sent only if you separately allow it for a
-              refresh below.
+              text.
             </p>
             <label className="redundancy-setting-row">
-              <span>Allow previously cached comparisons informed by my notes</span>
+              <span>Allow my game notes in JEV comparisons</span>
               <input
                 type="checkbox"
                 disabled={busy}
@@ -746,7 +723,10 @@ export default function RedundancyPage() {
               />
             </label>
             <p className="redundancy-help">
-              This controls reuse of an existing result; it does not send your note text.
+              Checking and saving this never sends your notes. It allows saved comparisons based on
+              your notes and makes them eligible to send to JEV during a run; you must still confirm
+              separately in that run&apos;s preview. Turning this off deletes saved comparisons
+              based on your notes.
             </p>
             <div className="redundancy-save-row">
               {semanticDirty || semanticSaving ? (

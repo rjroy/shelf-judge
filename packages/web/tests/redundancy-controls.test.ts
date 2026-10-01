@@ -24,5 +24,16 @@ describe("redundancy run controls", () => {
       "disabled={busy || !preview.withinPairLimit || preview.pairCount === 0}",
     );
     expect(page).toContain("note-based results may remain incomplete");
+    expect(page).toContain("setInterval(() => void poll(), 60_000)");
+    expect(page).not.toContain("setInterval(() => void poll(), 1500)");
+    expect(page).toContain("if (inFlight) return;");
+    expect(page).toContain("window.clearInterval(timer)");
+    expect(page).not.toContain("semanticMigrationCopy");
+    expect(page).not.toContain("Semantic cache storage was upgraded");
+    expect(page).toContain("Allow my game notes in JEV comparisons");
+    expect(page).toContain("Checking and saving this never sends your notes.");
+    expect(page).toContain("makes them eligible to send to JEV during a run");
+    expect(page).toContain("separately in that run&apos;s preview");
+    expect(page).toContain("Turning this off deletes saved comparisons");
   });
 });

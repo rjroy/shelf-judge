@@ -295,7 +295,14 @@ test("note consent is opt-in and declining still runs without note text", async 
 }, testInfo) => {
   await installDaemon(page);
   await page.goto("/redundancy");
-  await expect(page.getByText(/cached result for 1 game pair was discarded/)).toBeVisible();
+  await expect(page.getByText(/cached result for 1 game pair was discarded/)).toHaveCount(0);
+  await expect(page.getByLabel("Allow my game notes in JEV comparisons")).toBeVisible();
+  await expect(page.getByText(/Checking and saving this never sends your notes/i)).toBeVisible();
+  await expect(page.getByText(/eligible to send to JEV during a run/i)).toBeVisible();
+  await expect(page.getByText(/confirm separately in that run's preview/i)).toBeVisible();
+  await expect(
+    page.getByText(/Turning this off deletes saved comparisons based on your notes/i),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Preview one run" }).click();
   const preview = page.getByRole("region", { name: "Before you run" });
   await expect(preview).toContainText("TypeSafe");
@@ -440,6 +447,7 @@ test("cancel submits the run id shown when the user clicked", async ({ page }) =
   await page.addInitScript(() => window.localStorage.setItem("run-state", "running"));
   await page.goto("/redundancy?race=1");
   await expect(page.getByRole("button", { name: "Cancel live run" })).toBeVisible();
+  await page.getByRole("button", { name: "Reload status" }).click();
   await expect
     .poll(() =>
       page.evaluate(
@@ -460,4 +468,111 @@ test("cancel submits the run id shown when the user clicked", async ({ page }) =
     ).__redundancyCalls.find((entry) => entry.url.endsWith("/semantic/cancel")),
   );
   expect(cancellation?.body).toEqual({ runId: "shown-run" });
+});
+
+test("active-run polling waits one minute, while manual reload is immediate and polling stops on completion", async ({
+  page,
+}) => {
+  await page.clock.pauseAt(new Date("2025-01-01T00:00:00Z"));
+  await installDaemon(page);
+  await page.addInitScript(() => {
+    const target = window as typeof window & {
+      __pollIntervals: Array<{ id: number; startedAt: number }>;
+      __pollTimerTicks: number;
+    };
+    target.__pollIntervals = [];
+    target.__pollTimerTicks = 0;
+    const setInterval = window.setInterval.bind(window);
+    const clearInterval = window.clearInterval.bind(window);
+    window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      let wrappedHandler = handler;
+      let startedAt: number | null = null;
+      if (timeout === 60_000) {
+        startedAt = Date.now();
+        if (typeof handler === "function") {
+          const callback = handler as (...callbackArgs: unknown[]) => void;
+          wrappedHandler = (...callbackArgs: unknown[]) => {
+            target.__pollTimerTicks += 1;
+            callback(...callbackArgs);
+          };
+        }
+      }
+      const id = setInterval(wrappedHandler, timeout, ...args);
+      if (startedAt !== null) target.__pollIntervals.push({ id, startedAt });
+      return id;
+    }) as typeof window.setInterval;
+    window.clearInterval = ((id?: number) => {
+      target.__pollIntervals = target.__pollIntervals.filter((interval) => interval.id !== id);
+      return clearInterval(id);
+    }) as typeof window.clearInterval;
+  });
+  await page.addInitScript(() => window.localStorage.setItem("run-state", "running"));
+  await page.goto("/redundancy");
+  await expect(page.getByRole("button", { name: "Cancel live run" })).toBeVisible();
+
+  const activeRunCalls = () =>
+    page.evaluate(
+      () =>
+        (
+          window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+        ).__redundancyCalls.filter((entry) => entry.url.endsWith("/active-run")).length,
+    );
+  const initialCount = await activeRunCalls();
+  const activeIntervals = await page.evaluate(
+    () =>
+      (window as typeof window & { __pollIntervals: Array<{ id: number; startedAt: number }> })
+        .__pollIntervals,
+  );
+  expect(activeIntervals.length).toBe(1);
+  await page.getByRole("button", { name: "Reload status" }).click();
+  await expect.poll(activeRunCalls).toBeGreaterThan(initialCount);
+  const afterManualReload = await activeRunCalls();
+  await page.clock.fastForward(59_999);
+  expect(
+    await page.evaluate(
+      () => (window as typeof window & { __pollTimerTicks: number }).__pollTimerTicks,
+    ),
+  ).toBe(0);
+  await page.clock.fastForward(1);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as typeof window & { __pollTimerTicks: number }).__pollTimerTicks,
+      ),
+    )
+    .toBe(1);
+  await expect.poll(activeRunCalls).toBeGreaterThan(afterManualReload);
+
+  await page.evaluate(() => window.localStorage.setItem("run-state", "complete"));
+  await page.getByRole("button", { name: "Reload status" }).click();
+  await expect(page.getByRole("button", { name: "Cancel live run" })).toHaveCount(0);
+  const completedCount = await activeRunCalls();
+  await page.clock.fastForward(120_000);
+  expect(await activeRunCalls()).toBe(completedCount);
+});
+
+test("active-run polling stops when the page unmounts", async ({ page }) => {
+  await page.clock.pauseAt(new Date("2025-01-01T00:00:00Z"));
+  await installDaemon(page);
+  await page.addInitScript(() => window.localStorage.setItem("run-state", "running"));
+  await page.goto("/redundancy");
+  await expect(page.getByRole("button", { name: "Cancel live run" })).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const activeRunCalls = () =>
+    page.evaluate(
+      () =>
+        (
+          window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+        ).__redundancyCalls.filter((entry) => entry.url.endsWith("/active-run")).length,
+    );
+  await page.clock.fastForward(100);
+  const loadedCount = await activeRunCalls();
+  await page.clock.fastForward(100);
+  expect(await activeRunCalls()).toBe(loadedCount);
+  const beforeUnmount = await activeRunCalls();
+  await page.getByRole("link", { name: "Wishlist" }).click();
+  await expect(page).toHaveURL(/\/wishlist/);
+  await expect(page.getByRole("button", { name: "Cancel live run" })).toHaveCount(0);
+  await page.clock.fastForward(120_000);
+  expect(await activeRunCalls()).toBe(beforeUnmount);
 });
