@@ -302,7 +302,7 @@ describe("redundancy settings routes", () => {
       );
     });
 
-    test("settings failure leaves old file with semantic generation already withdrawn", async () => {
+    test("settings failure leaves the durable factual fence and discards v9 derived payloads", async () => {
       storage.collection.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
         id: "generation-1",
         sourceIdentity: semanticSourceIdentityFixture({ collectionId: storage.collection.id }),
@@ -342,10 +342,14 @@ describe("redundancy settings routes", () => {
       );
       expect(storage.collection.semanticRedundancy.factualWeightsEpoch).toBe(1);
       expect(storage.collection.semanticRedundancy.publishedGeneration).toBeNull();
-      expect(storage.collection.semanticRedundancy.authorization?.state).toBe("revoked");
+      expect(storage.collection.semanticRedundancy.authorization).toBeNull();
     });
 
     test("reports a durable factual settings write when profile invalidation fails afterward", async () => {
+      storage.collection.semanticRedundancy.publishedGeneration = semanticGenerationFixture({
+        id: "generation-durable-write",
+        sourceIdentity: semanticSourceIdentityFixture({ collectionId: storage.collection.id }),
+      });
       storage.saveRedundancySettings = (settings) => {
         storage.settings = structuredClone(settings);
         storage.settingsWrites += 1;

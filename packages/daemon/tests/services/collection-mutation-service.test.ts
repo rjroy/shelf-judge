@@ -8,7 +8,6 @@ import {
 import type { Collection } from "@shelf-judge/shared";
 import {
   SEMANTIC_FIXTURE_FINGERPRINT,
-  emptySemanticManifestFixture,
   semanticGenerationFixture,
   semanticSourceIdentityFixture,
 } from "../helpers/semantic-redundancy-fixtures.js";
@@ -618,8 +617,12 @@ describe("CollectionMutationService", () => {
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(1);
     expect(stored.semanticRedundancy.consentEpoch).toBe(0);
     expect(stored.semanticRedundancy.disclosure).toBeNull();
-    expect(stored.semanticRedundancy.authorization?.state).toBe("revoked");
+    expect(stored.semanticRedundancy.authorization).toBeNull();
+    expect(stored.semanticRedundancy.disclosureManifest).toBeNull();
+    expect(stored.semanticRedundancy.manifestDelivery).toBeNull();
+    expect(stored.semanticRedundancy.execution).toBeNull();
     expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
+    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
   });
 
   test("rejects an evidence change when the semantic epoch cannot advance safely", async () => {
@@ -651,7 +654,7 @@ describe("CollectionMutationService", () => {
     expect(stored).toEqual(initial);
   });
 
-  test("semantic settings advance consent epoch; publication remains disabled without a manifest", async () => {
+  test("semantic settings advance consent epoch and discard deprecated v9 payloads", async () => {
     const initial = withActiveSemanticRefresh(collection());
     let stored = structuredClone(initial);
     const storage: CollectionReader & CollectionPersistence = {
@@ -688,7 +691,7 @@ describe("CollectionMutationService", () => {
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
     expect(stored.semanticRedundancy.consentEpoch).toBe(1);
     expect(stored.semanticRedundancy.firstOptInInitialized).toBe(true);
-    expect(stored.semanticRedundancy.authorization?.state).toBe("revoked");
+    expect(stored.semanticRedundancy.authorization).toBeNull();
     expect(
       (
         await semantic.updateSettings(
@@ -703,68 +706,10 @@ describe("CollectionMutationService", () => {
     ).toBe("accepted");
     expect(stored.semanticRedundancy.consentEpoch).toBe(1);
 
-    const authorized = withActiveSemanticRefresh(stored);
-    // A new authorization is tied to the current stable evidence/consent identity.
-    authorized.semanticRedundancy.authorization!.evidenceEpoch = 0;
-    authorized.semanticRedundancy.authorization!.consentEpoch = 1;
-    authorized.semanticRedundancy.disclosure!.evidenceEpoch = 0;
-    authorized.semanticRedundancy.disclosure!.consentEpoch = 1;
-    stored = authorized;
-
-    const epochs = { evidenceEpoch: 0, consentEpoch: 1 };
-    expect(
-      (
-        await semantic.checkpointJudgments({
-          expected: epochs,
-          authorizationId: "authorization-1",
-          judgments: [],
-        })
-      ).outcome,
-    ).toBe("invalid-state");
-    expect(
-      (
-        await semantic.publishGeneration({
-          expected: epochs,
-          authorizationId: "authorization-1",
-          manifest: emptySemanticManifestFixture(
-            semanticSourceIdentityFixture({
-              collectionId: stored.id,
-              collectionRevision: 0,
-              evidenceEpoch: epochs.evidenceEpoch,
-              consentEpoch: epochs.consentEpoch,
-            }),
-          ),
-          eligibleGameIds: [],
-          sourceIdentity: semanticSourceIdentityFixture({
-            collectionId: stored.id,
-            collectionRevision: 0,
-            evidenceEpoch: epochs.evidenceEpoch,
-            consentEpoch: epochs.consentEpoch,
-          }),
-          generation: {
-            id: "generation-1",
-            evidenceEpoch: epochs.evidenceEpoch,
-            consentEpoch: epochs.consentEpoch,
-            manifestDigest: SEMANTIC_FIXTURE_FINGERPRINT,
-            modelId: "jev-pinned",
-            rubricVersion: 1,
-            scoringVersion: 1,
-            sourceIdentity: semanticSourceIdentityFixture({
-              collectionId: stored.id,
-              collectionRevision: 0,
-              evidenceEpoch: epochs.evidenceEpoch,
-              consentEpoch: epochs.consentEpoch,
-            }),
-            signalScope: "description-only",
-            publishedAt: "2026-01-01T00:02:00.000Z",
-          },
-        })
-      ).outcome,
-    ).toBe("not-authorized");
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
     expect(stored.semanticRedundancy.consentEpoch).toBe(1);
-    expect(stored.semanticRedundancy.authorization?.state).toBe("active");
-    expect(stored.semanticRedundancy.publishedGeneration).toMatchObject({ id: "generation-0" });
+    expect(stored.semanticRedundancy.authorization).toBeNull();
+    expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
   });
 
   test("factual-weight invalidation advances its own collection epoch without changing semantic epochs", async () => {
@@ -784,8 +729,9 @@ describe("CollectionMutationService", () => {
     expect(stored.semanticRedundancy.factualWeightsFingerprint).toBe("b".repeat(64));
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
     expect(stored.semanticRedundancy.consentEpoch).toBe(0);
-    expect(stored.semanticRedundancy.authorization?.state).toBe("revoked");
+    expect(stored.semanticRedundancy.authorization).toBeNull();
     expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
+    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
     const revisionAfterFirst = stored.revision;
 
     await semantic.invalidateForFactualWeights("b".repeat(64));
@@ -795,7 +741,7 @@ describe("CollectionMutationService", () => {
     expect(stored.semanticRedundancy.factualWeightsFingerprint).toBe("a".repeat(64));
   });
 
-  test("reconciles mixed cached signals against each pair's source dependencies", async () => {
+  test("note and BGG evidence changes advance the epoch and discard v9 judgments", async () => {
     let stored = collectionWithSemanticPairs();
     const storage: CollectionReader & CollectionPersistence = {
       loadCollection: () => Promise.resolve(structuredClone(stored)),
@@ -824,39 +770,26 @@ describe("CollectionMutationService", () => {
       },
     );
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(initialEpoch + 1);
-    expect(stored.semanticRedundancy.authorization?.state).toBe("revoked");
+    expect(stored.semanticRedundancy.authorization).toBeNull();
     expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
-    expect(stored.semanticRedundancy.pairJudgments).toMatchObject([
-      {
-        gameA: "game-a",
-        gameB: "game-b",
-        description: { status: "scored" },
-        ownerNote: null,
-      },
-      {
-        gameA: "game-b",
-        gameB: "game-c",
-        description: { status: "scored" },
-        ownerNote: { status: "scored" },
-      },
-    ]);
+    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
+    const afterNoteSetEpoch = stored.semanticRedundancy.evidenceEpoch;
 
-    const semantic = createSemanticRedundancyStateService({ collectionMutationService: mutations });
-    expect(
-      (
-        await semantic.checkpointJudgments({
-          expected: { evidenceEpoch: initialEpoch, consentEpoch: 0 },
-          authorizationId: "authorization-1",
-          judgments: [
-            scoredPair(
-              semanticGame("game-a", "A", "Description A"),
-              semanticGame("game-b", "B", "Description B"),
-              "description-only",
-            ),
-          ],
-        })
-      ).outcome,
-    ).toBe("stale");
+    await mutations.mutate(
+      { operation: "game.note.set", trigger: "owner", gameIds: ["game-a"] },
+      (candidate) => {
+        const game = candidate.games.find(({ id }) => id === "game-a")!;
+        if (game.ownerNote.state !== "present") throw new Error("Expected a present owner note");
+        game.ownerNote = {
+          state: "cleared",
+          version: game.ownerNote.version + 1,
+          updatedAt: game.ownerNote.updatedAt,
+        };
+        return { changed: true, value: undefined };
+      },
+    );
+    expect(stored.semanticRedundancy.evidenceEpoch).toBe(afterNoteSetEpoch + 1);
+    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
 
     await mutations.mutate(
       { operation: "game.bgg.refresh", trigger: "owner", gameIds: ["game-b"] },
@@ -866,14 +799,7 @@ describe("CollectionMutationService", () => {
         return { changed: true, value: undefined };
       },
     );
-    expect(stored.semanticRedundancy.pairJudgments).toMatchObject([
-      {
-        gameA: "game-b",
-        gameB: "game-c",
-        description: null,
-        ownerNote: { status: "scored" },
-      },
-    ]);
+    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
 
     await mutations.mutate(
       { operation: "game.ownership.set", trigger: "owner", gameIds: ["game-c"] },
@@ -882,7 +808,7 @@ describe("CollectionMutationService", () => {
         return { changed: true, value: undefined };
       },
     );
-    expect(stored.semanticRedundancy.pairJudgments).toHaveLength(1);
+    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
     const afterOwnershipEpoch = stored.semanticRedundancy.evidenceEpoch;
 
     await mutations.mutate(
@@ -893,15 +819,6 @@ describe("CollectionMutationService", () => {
       },
     );
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(afterOwnershipEpoch + 1);
-    expect(stored.semanticRedundancy.pairJudgments).toHaveLength(1);
-
-    await mutations.mutate(
-      { operation: "game.remove", trigger: "owner", gameIds: ["game-b"] },
-      (candidate) => {
-        candidate.games = candidate.games.filter(({ id }) => id !== "game-b");
-        return { changed: true, value: undefined };
-      },
-    );
     expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
 
     const restarted = createCollectionMutationService({ storageService: storage });
@@ -915,7 +832,32 @@ describe("CollectionMutationService", () => {
     expect(reopened.value).toEqual([]);
   });
 
-  test("revoking cached owner-note use purges D and shared C while retaining C-only scores", async () => {
+  test("game deletion persists after discarding legacy semantic references", async () => {
+    let stored = collectionWithSemanticPairs();
+    const storage: CollectionReader & CollectionPersistence = {
+      loadCollection: () => Promise.resolve(structuredClone(stored)),
+      saveCollection: (next) => {
+        stored = structuredClone(next);
+        return Promise.resolve();
+      },
+    };
+    const mutations = createCollectionMutationService({ storageService: storage });
+
+    await mutations.mutate(
+      { operation: "game.remove", trigger: "owner", gameIds: ["game-b"] },
+      (candidate) => {
+        candidate.games = candidate.games.filter(({ id }) => id !== "game-b");
+        return { changed: true, value: undefined };
+      },
+    );
+
+    expect(stored.games.some(({ id }) => id === "game-b")).toBe(false);
+    expect(stored.semanticRedundancy.evidenceEpoch).toBe(1);
+    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
+    expect(stored.semanticRedundancy.publishedGeneration).toBeNull();
+  });
+
+  test("changing cached owner-note preference advances consent and discards historical scores", async () => {
     let stored = collectionWithSemanticPairs();
     const storage: CollectionReader & CollectionPersistence = {
       loadCollection: () => Promise.resolve(structuredClone(stored)),
@@ -937,20 +879,7 @@ describe("CollectionMutationService", () => {
     expect(result.outcome).toBe("accepted");
     expect(stored.semanticRedundancy.evidenceEpoch).toBe(0);
     expect(stored.semanticRedundancy.consentEpoch).toBe(1);
-    expect(stored.semanticRedundancy.pairJudgments).toMatchObject([
-      {
-        gameA: "game-a",
-        gameB: "game-b",
-        description: { status: "scored" },
-        ownerNote: null,
-      },
-      {
-        gameA: "game-b",
-        gameB: "game-c",
-        description: { status: "scored" },
-        ownerNote: null,
-      },
-    ]);
+    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
   });
 
   test("isolates rejected and invalid candidates from active state", async () => {
