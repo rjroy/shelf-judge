@@ -50,3 +50,28 @@ overall Phase 2 implementation and feature remain in progress.
 - Typecheck and browser checks: passed.
 - Changed-file ESLint and Prettier: passed.
 - Independent reviewer: accepted.
+
+## Phase 2d9 — mutation invalidation and owner-note revocation
+
+Checkpointed on `design/jev-similarity`, after Phase 2d8 (`17d4f963`). The
+overall Phase 2 implementation and feature remain in progress. Run/read remain
+quarantined; no provider calls or owner-data access were performed.
+
+- Added per-source-game exact dependency purging so affected Jev pair rows are
+  removed while unrelated rows are preserved. Ordinary collection edits purge
+  affected rows before persisting JSON; authority-only edits can persist when
+  the cache is unavailable.
+- Owner-note revocation for cached-D data commits `permission=false` before
+  purge. `cleanupPending` truthfully represents failed cleanup, with startup
+  retry and a re-enable purge fence. Only narrowly recognized
+  committed-response-loss errors are treated as committed.
+
+### Validation evidence for this checkpoint
+
+- Full Bun test suite: 3,526 passed, 1 skipped.
+- Typecheck and browser checks: passed.
+- Full-project lint and format checks: passed.
+- Independent reviewer accepted P2D9-1, P2D9-2, and P2D9-3.
+- No live Jev/provider operation was run; Run/read behavior remains
+  quarantined. This checkpoint does not claim the SQLite cache feature is
+  complete.

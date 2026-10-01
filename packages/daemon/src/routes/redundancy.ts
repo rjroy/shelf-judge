@@ -199,7 +199,7 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
           { error: "Semantic settings update rejected", outcome: result.outcome },
           semanticErrorStatus(result.outcome),
         );
-      return c.json({ settings });
+      return c.json({ settings, cleanupPending: result.cleanupPending ?? false });
     } catch {
       return c.json({ error: "Semantic settings are unavailable" }, 503);
     }

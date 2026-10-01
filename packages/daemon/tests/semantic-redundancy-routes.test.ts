@@ -82,6 +82,7 @@ describe("semantic redundancy safety quarantine", () => {
       }),
     });
     expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ cleanupPending: false });
     expect(collection.semanticRedundancy.settings).toEqual({
       enabled: true,
       cachedOwnerNoteUse: true,

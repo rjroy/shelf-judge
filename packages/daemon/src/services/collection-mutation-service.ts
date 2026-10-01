@@ -18,6 +18,9 @@ import type { AttentionMutationImpact } from "./attention-candidate-service.js";
 import { applySemanticEvidenceTransition } from "./semantic-redundancy-state-service.js";
 import type { CollectionArtifactContext } from "./collection-artifacts.js";
 import { purgeSemanticDisplayArtifacts } from "./collection-artifacts.js";
+import { planJevMutationImpact } from "./jev-mutation-impact.js";
+import type { JevPairCache } from "./jev-pair-cache-service.js";
+import { purgeRevokedOwnerNoteCache } from "./jev-owner-note-revocation.js";
 
 export interface CollectionMutationContext {
   operation:
@@ -78,8 +81,20 @@ export type CollectionMutationDecision<Value> =
   | { changed: false; value: Value };
 
 export type CollectionMutationOutcome<Value> =
-  | { outcome: "accepted"; changed: true; value: Value; collection: Collection }
-  | { outcome: "no-op"; changed: false; value: Value; collection: Collection };
+  | {
+      outcome: "accepted";
+      changed: true;
+      value: Value;
+      collection: Collection;
+      cleanupPending: boolean;
+    }
+  | {
+      outcome: "no-op";
+      changed: false;
+      value: Value;
+      collection: Collection;
+      cleanupPending: false;
+    };
 
 export interface CollectionRevisionStrategy<Source = Collection> {
   identity(collection: Source): Readonly<Record<string, string | number>>;
@@ -129,6 +144,8 @@ export interface CollectionMutationServiceDeps {
   ) => Promise<readonly AttentionDispositionWinner[]>;
   /** Optional production wiring for purging persisted D-derived display caches. */
   semanticDisplayArtifactContext?: CollectionArtifactContext;
+  /** Daemon-local SQLite cache; absent in isolated/test callers that do not own it. */
+  jevPairCache?: JevPairCache | null;
 }
 
 const coordinators = new WeakMap<object, CollectionMutationService>();
@@ -287,6 +304,7 @@ export function createCollectionMutationService(
             changed: false,
             value: decision.value,
             collection: current,
+            cleanupPending: false,
           };
         }
 
@@ -323,8 +341,129 @@ export function createCollectionMutationService(
         }
 
         const after = revisionStrategy.identity(accepted);
+        const cachedOwnerNoteRevocation =
+          current.semanticRedundancy.settings.cachedOwnerNoteUse &&
+          !accepted.semanticRedundancy.settings.cachedOwnerNoteUse;
+        const cachedOwnerNoteReenable =
+          !current.semanticRedundancy.settings.cachedOwnerNoteUse &&
+          accepted.semanticRedundancy.settings.cachedOwnerNoteUse;
+        const jevImpact = planJevMutationImpact(current, accepted);
+        const requiresJevRowPurge = jevImpact.sourceInvalidations.length > 0;
+        if (cachedOwnerNoteReenable && "jevPairCache" in deps) {
+          const cache = deps.jevPairCache;
+          logger.log("JEV owner-note re-enable cache fence attempt", {
+            ...fields,
+            outcome: "attempting",
+          });
+          if (!cache || !cache.available) {
+            logger.error("JEV owner-note re-enable cache fence failed", {
+              ...fields,
+              outcome: "cache-unavailable",
+            });
+            throw new Error("JEV pair cache is unavailable to safely re-enable owner-note use");
+          }
+          try {
+            const purgedRows = cache.purgeDDependent();
+            logger.log("JEV owner-note re-enable cache fence completed", {
+              ...fields,
+              purgedRows,
+              outcome: "stale-rows-purged",
+            });
+          } catch (error) {
+            logger.error("JEV owner-note re-enable cache fence failed", {
+              ...fields,
+              outcome: "sqlite-write-failed",
+            });
+            throw error;
+          }
+        }
+        if (
+          requiresJevRowPurge &&
+          !cachedOwnerNoteRevocation &&
+          !cachedOwnerNoteReenable &&
+          "jevPairCache" in deps
+        ) {
+          const impactFields = {
+            operation: context.operation,
+            trigger: context.trigger,
+            affectedGameIds: jevImpact.sourceInvalidations.map(({ gameId }) => gameId),
+            affectedGameCount: jevImpact.sourceInvalidations.length,
+            gameDependencies: jevImpact.sourceInvalidations.map(({ gameId, kinds }) => ({
+              gameId,
+              kinds,
+            })),
+            withdrawAdvisory: jevImpact.withdrawAdvisory,
+          };
+          logger.log("JEV mutation cache invalidation attempt", impactFields);
+          const cache = deps.jevPairCache;
+          if (!cache || !cache.available) {
+            logger.error("JEV mutation cache invalidation failed", {
+              ...impactFields,
+              outcome: "cache-unavailable",
+            });
+            throw new Error(
+              "JEV pair cache is unavailable for required collection mutation impact",
+            );
+          }
+          try {
+            let purgedRows = 0;
+            for (const { gameId, kinds } of jevImpact.sourceInvalidations) {
+              purgedRows += cache.invalidateGame(gameId, kinds);
+            }
+            if (jevImpact.withdrawAdvisory) cache.setActivation(null);
+            logger.log("JEV mutation cache invalidation completed", {
+              ...impactFields,
+              gameCount: jevImpact.sourceInvalidations.length,
+              purgedRows,
+              activationWithdrawn: jevImpact.withdrawAdvisory,
+              outcome: "invalidated",
+            });
+          } catch (error) {
+            logger.error("JEV mutation cache invalidation failed", {
+              ...impactFields,
+              outcome: "sqlite-write-failed",
+            });
+            throw error;
+          }
+        } else if (
+          jevImpact.withdrawAdvisory &&
+          !requiresJevRowPurge &&
+          !cachedOwnerNoteRevocation &&
+          "jevPairCache" in deps
+        ) {
+          const cache = deps.jevPairCache;
+          if (cache?.available) {
+            logger.log("JEV advisory activation withdrawal attempt", {
+              operation: context.operation,
+              trigger: context.trigger,
+              outcome: "attempting",
+            });
+            try {
+              cache.setActivation(null);
+              logger.log("JEV advisory activation withdrawal completed", {
+                operation: context.operation,
+                trigger: context.trigger,
+                outcome: "withdrawn",
+              });
+            } catch {
+              // The accepted collection's current fence remains authoritative if cache cleanup is unavailable.
+              logger.warn("JEV advisory activation withdrawal deferred", {
+                operation: context.operation,
+                trigger: context.trigger,
+                outcome: "collection-fence-required",
+              });
+            }
+          } else {
+            logger.warn("JEV advisory activation withdrawal deferred", {
+              operation: context.operation,
+              trigger: context.trigger,
+              outcome: "collection-fence-required",
+            });
+          }
+        }
         if (
           deps.semanticDisplayArtifactContext &&
+          !cachedOwnerNoteRevocation &&
           invalidatesSemanticDisplayArtifacts(current, accepted)
         ) {
           logger.log("collection semantic display artifact purge attempt", { ...fields, after });
@@ -399,6 +538,42 @@ export function createCollectionMutationService(
           after,
           responseRecovered: persistenceResponseFailed,
         });
+        let cleanupPending = false;
+        if (cachedOwnerNoteRevocation) {
+          const cache = "jevPairCache" in deps ? deps.jevPairCache : null;
+          const cleanupFields = {
+            operation: context.operation,
+            trigger: context.trigger,
+            affectedGameIds: jevImpact.affectedGameIds,
+            affectedGameCount: jevImpact.affectedGameIds.length,
+            sourceInvalidationCount: jevImpact.sourceInvalidations.length,
+          };
+          cleanupPending = !purgeRevokedOwnerNoteCache(cache, logger, cleanupFields);
+          if (
+            deps.semanticDisplayArtifactContext &&
+            invalidatesSemanticDisplayArtifacts(current, accepted)
+          ) {
+            logger.log("collection semantic display artifact revocation cleanup attempt", {
+              ...fields,
+              after,
+            });
+            try {
+              await purgeSemanticDisplayArtifacts(deps.semanticDisplayArtifactContext);
+              logger.log("collection semantic display artifact revocation cleanup completed", {
+                ...fields,
+                after,
+              });
+            } catch (error) {
+              cleanupPending = true;
+              logger.error("collection semantic display artifact revocation cleanup failed", {
+                ...fields,
+                after,
+                reason: error instanceof Error ? error.message : String(error),
+                outcome: "authority-effective-cleanup-pending",
+              });
+            }
+          }
+        }
         if (decision.onPersistenceSuccess) {
           logger.log("collection mutation post-commit attempt", { ...fields, after });
           try {
@@ -437,6 +612,7 @@ export function createCollectionMutationService(
           changed: true,
           value: decision.value,
           collection: accepted,
+          cleanupPending,
         };
       }),
     );

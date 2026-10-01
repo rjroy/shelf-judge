@@ -18,7 +18,7 @@ export interface SemanticEpochIdentity {
 }
 
 export type SemanticStateMutationResult<Value> =
-  | { outcome: "accepted"; value: Value; current: SemanticEpochIdentity }
+  | { outcome: "accepted"; value: Value; current: SemanticEpochIdentity; cleanupPending?: boolean }
   | { outcome: "stale"; current: SemanticEpochIdentity }
   | { outcome: "not-authorized" }
   | { outcome: "invalid-state" };
@@ -256,7 +256,11 @@ export function createSemanticRedundancyStateService(deps: {
       callback,
     );
     if (result.value.outcome === "accepted") {
-      return { ...result.value, current: currentEpoch(result.collection) };
+      return {
+        ...result.value,
+        current: currentEpoch(result.collection),
+        cleanupPending: result.cleanupPending,
+      };
     }
     return result.value;
   }
@@ -271,6 +275,8 @@ export function createSemanticRedundancyStateService(deps: {
         if (!parsed.success) return { changed: false, value: { outcome: "invalid-state" } };
         const sameSettings = canonicalSha256(state.settings) === canonicalSha256(parsed.data);
         const firstOptIn = parsed.data.enabled && !state.firstOptInInitialized;
+        const cachedOwnerNoteRevocation =
+          state.settings.cachedOwnerNoteUse && !parsed.data.cachedOwnerNoteUse;
         if (sameSettings && !firstOptIn)
           return {
             changed: false,
@@ -285,6 +291,7 @@ export function createSemanticRedundancyStateService(deps: {
         return {
           changed: true,
           value: { outcome: "accepted", value: undefined, current: currentEpoch(collection) },
+          ...(cachedOwnerNoteRevocation ? { classifyPersistenceOutcome: true } : {}),
         };
       });
     },

@@ -39,6 +39,7 @@ import { createCollectionSnapshotService } from "./services/collection-snapshot-
 import { createCollectionSnapshotCacheService } from "./services/collection-snapshot-cache-service.js";
 import { createSemanticRedundancyStateService } from "./services/semantic-redundancy-state-service.js";
 import { openJevPairCacheLifecycle } from "./services/jev-pair-cache-lifecycle.js";
+import { purgeRevokedOwnerNoteCache } from "./services/jev-owner-note-revocation.js";
 
 const logger = createLogger("daemon");
 
@@ -81,6 +82,18 @@ export async function main() {
   const jevPairCacheLifecycle = await openJevPairCacheLifecycle(envConfig.dataDir, logger);
   // This local is the injection point for daemon services that consume JEV cache state.
   const jevPairCache = jevPairCacheLifecycle.cache;
+  try {
+    const collection = await storageService.loadCollection();
+    if (!collection.semanticRedundancy.settings.cachedOwnerNoteUse) {
+      purgeRevokedOwnerNoteCache(jevPairCache, logger, { trigger: "daemon-startup" });
+    }
+  } catch (error) {
+    // The durable permission=false fence remains authoritative; each startup retries cleanup.
+    logger.error("JEV owner-note revocation recovery failed", {
+      reason: error instanceof Error ? error.message : String(error),
+      outcome: "cleanup-pending",
+    });
+  }
   void jevPairCache;
   try {
     let displayedFitnessService: DisplayedFitnessService | null = null;
@@ -111,6 +124,7 @@ export async function main() {
     > | null = null;
     const collectionMutationService = createCollectionMutationService({
       storageService,
+      jevPairCache,
       semanticDisplayArtifactContext: createCollectionArtifactContext(
         envConfig.dataDir,
         fileOps,
