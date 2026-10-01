@@ -7903,19 +7903,19 @@ body {
   color: var(--warning-text);
   font-size: var(--text-sm);
 }
-.redundancy-authorize {
-  position: sticky;
-  bottom: 8px;
-  z-index: 2;
+.redundancy-run {
   display: grid;
   gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-surface);
 }
-.redundancy-authorize .btn-primary {
+.redundancy-run .btn-primary {
   min-height: 44px;
   justify-content: center;
+}
+.redundancy-refresh-status {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 
 .redundancy-setting-row {
@@ -8014,56 +8014,6 @@ body {
   border-radius: 6px;
   background: var(--bg-subtle);
 }
-.redundancy-manifest {
-  max-width: 100%;
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  background: var(--bg-surface);
-}
-.redundancy-manifest table {
-  width: 100%;
-  min-width: 640px;
-  border-collapse: collapse;
-  font-variant-numeric: tabular-nums;
-}
-.redundancy-manifest th,
-.redundancy-manifest td {
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  vertical-align: top;
-}
-.redundancy-manifest th {
-  background: var(--bg-subtle);
-}
-.redundancy-manifest td {
-  overflow-wrap: anywhere;
-}
-.redundancy-manifest-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-}
-.redundancy-manifest-pagination p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-}
-.redundancy-page-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.redundancy-manifest-pagination .btn {
-  min-height: 44px;
-}
-.redundancy-manifest-pagination-bottom {
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-.redundancy-manifest :focus-visible,
 .redundancy-settings-body :focus-visible {
   outline: 2px solid var(--action);
   outline-offset: 2px;
@@ -8107,24 +8057,9 @@ body {
     max-width: none;
     width: 100%;
   }
-  .redundancy-manifest-pagination {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .redundancy-page-buttons {
-    width: 100%;
-  }
-  .redundancy-page-buttons .btn {
-    flex: 1 1 auto;
-    margin: 0;
-  }
   .redundancy-steps {
     grid-template-columns: 1fr;
     gap: 8px;
-  }
-  .redundancy-authorize {
-    bottom: 4px;
-    padding: 10px;
   }
   .redundancy-save-row > .btn {
     min-height: 44px;

@@ -1,483 +1,318 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-test("redundancy disclosure is inspectable, C-only can be declined, and layout fits", async ({
-  page,
-}, testInfo) => {
-  await page.context().addInitScript(() => {
-    const fixtureExpiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+async function installDaemon(page: Page) {
+  await page.addInitScript(() => {
     const target = window as typeof window & {
       __redundancyCalls: Array<{ url: string; method: string; body?: unknown }>;
     };
     target.__redundancyCalls = [];
-    let disclosureAttempts = 0;
-    const originalFetch = window.fetch.bind(window);
+    const original = window.fetch.bind(window);
     window.fetch = Object.assign(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = new URL(input instanceof Request ? input.url : input, location.origin);
-        if (!url.pathname.startsWith("/api/daemon/redundancy/")) return originalFetch(input, init);
+        if (!url.pathname.startsWith("/api/daemon/redundancy/")) return original(input, init);
         const body =
-          typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
+          typeof init?.body === "string"
+            ? (JSON.parse(init.body) as Record<string, unknown>)
+            : undefined;
         target.__redundancyCalls.push({ url: url.pathname, method: init?.method ?? "GET", body });
         let response: unknown = {};
-        if (url.pathname.endsWith("/settings") && init?.method === "PATCH") response = body;
-        else if (url.pathname.endsWith("/semantic-settings")) {
-          const patch = body as {
-            enabled?: boolean;
-            weights?: { factual: number; description: number; ownerNote: number };
-            cachedOwnerNoteUse?: boolean;
-          };
-          response = {
-            settings: {
-              enabled: patch.enabled ?? true,
-              weights: patch.weights ?? { factual: 7, description: 5, ownerNote: 10 },
-              cachedOwnerNoteUse: patch.cachedOwnerNoteUse ?? false,
-            },
-          };
-        } else if (url.pathname.endsWith("/settings"))
+        const status = 200;
+        if (url.pathname.endsWith("/semantic-settings") && init?.method === "PATCH")
+          response = { settings: body };
+        else if (url.pathname.endsWith("/settings"))
           response = {
             enabled: true,
             stage: "annotation",
             similarityThreshold: 0.6,
             maxPenalty: 2,
-            componentWeights: { binary: 4 / 7, continuous: 3 / 7 },
             minNeighbors: 1,
             expectedNeighbors: 5,
+            componentWeights: { binary: 4 / 7, continuous: 3 / 7 },
             semantic: {
               settings: {
                 enabled: true,
                 weights: { factual: 7, description: 5, ownerNote: 10 },
                 cachedOwnerNoteUse: false,
               },
-              status: { status: "not-ready", publicationStatus: "not-ready" },
-              migrationNotice: {
-                kind: "jev-cache-v9-to-v10",
-                discardedPairCount: Number(
-                  new URL(location.href).searchParams.get("discardedPairCount") ?? 1,
-                ),
-              },
+              status: "ready",
+              migrationNotice: { kind: "jev-cache-v9-to-v10", discardedPairCount: 1 },
             },
           };
         else if (url.pathname.endsWith("/refresh-status")) {
-          const state = localStorage.getItem("fixture-refresh-state");
-          const id = localStorage.getItem("fixture-status-id");
-          const digest = localStorage.getItem("fixture-status-digest");
-          response =
-            state === "running" || state === "cancelled"
-              ? {
-                  status: "not-ready",
-                  publicationStatus: "not-ready",
-                  manifest: {
-                    id,
-                    digest,
-                    signalScope: "description-only",
-                    expiresAt: fixtureExpiresAt,
-                  },
-                  pairCount: 2,
-                  execution: {
-                    commandId: id,
-                    status: state,
-                    attemptCount: 1,
-                    completedPairCount: 0,
-                    failedPairCount: 0,
-                  },
-                }
-              : { status: "not-ready", publicationStatus: "not-ready" };
-        } else if (url.pathname.endsWith("/summary")) {
-          const state = localStorage.getItem("fixture-refresh-state");
-          const id = localStorage.getItem("fixture-summary-id");
-          const digest = localStorage.getItem("fixture-summary-digest");
-          response = {
-            status: "not-ready",
-            generation: null,
-            disclosure:
-              state && id
-                ? {
-                    id,
-                    digest,
-                    pairCount: 2,
-                    notePairCount: 1,
-                    expiresAt: fixtureExpiresAt,
-                  }
-                : null,
-          };
-        } else if (url.pathname.endsWith("/disclosure")) {
-          disclosureAttempts += 1;
-          if (disclosureAttempts === 4)
-            return new Response(JSON.stringify({ error: "Simulated disclosure interruption" }), {
+          if (
+            new URL(location.href).searchParams.get("status-fail") === "1" &&
+            window.localStorage.getItem("run-state") === "running"
+          )
+            return new Response(JSON.stringify({ error: "Status temporarily unavailable" }), {
               status: 503,
               headers: { "content-type": "application/json" },
             });
-          response = {
-            id: "manifest-1",
-            digest: "digest-1",
-            signalScope: (body as { signalScope: string }).signalScope,
-            providerId: "jev",
-            modelId: "pinned-model",
-            budget: { maxRequests: 20, maxTokens: 4000, maxDurationMs: 60000 },
-            expiresAt: fixtureExpiresAt,
-            pairCount: 2,
-            notePairCount: 1,
-            pageSize: 100,
-          };
-        } else if (url.pathname.endsWith("/disclosure/page"))
-          response = {
-            manifestId: "manifest-1",
-            manifestDigest: "digest-1",
-            offset: (body as { offset: number }).offset,
-            nextOffset: (body as { offset: number }).offset + 1,
-            complete: (body as { offset: number }).offset === 1,
-            pairs: [
-              (body as { offset: number }).offset === 0
+          else
+            response =
+              window.localStorage.getItem("run-state") === "complete"
                 ? {
-                    gameA: "game-a",
-                    gameB: "game-b",
-                    hasDescriptionA: true,
-                    hasDescriptionB: true,
-                    hasOwnerNoteA: true,
-                    hasOwnerNoteB: true,
+                    status: "ready",
+                    measurement: "current",
+                    eligibleGameCount: 3,
+                    pairCount: 2,
+                    coverage: null,
+                    progress: {
+                      state: "completed",
+                      pairCount: 2,
+                      completedPairs: 2,
+                      cacheHits: 0,
+                      cacheMisses: 2,
+                      failedPairs: 0,
+                    },
                   }
                 : {
-                    gameA: "game-c",
-                    gameB: "game-d",
-                    hasDescriptionA: false,
-                    hasDescriptionB: true,
-                    hasOwnerNoteA: false,
-                    hasOwnerNoteB: false,
-                  },
-            ],
-            receipt: "receipt",
-          };
-        else if (url.pathname.endsWith("/acknowledge-and-start")) {
-          localStorage.setItem("fixture-refresh-state", "running");
-          localStorage.setItem("fixture-status-id", "manifest-1");
-          localStorage.setItem("fixture-status-digest", "digest-1");
-          localStorage.setItem("fixture-summary-id", "manifest-1");
-          localStorage.setItem("fixture-summary-digest", "digest-1");
+                    status: "ready",
+                    measurement: "current",
+                    eligibleGameCount: 3,
+                    pairCount: 2,
+                    coverage: null,
+                    progress: null,
+                  };
+        } else if (url.pathname.endsWith("/run-preview"))
           response = {
-            disposition: "REPLAYED",
-            status: "running",
-            commandId: "manifest-1",
-            deadlineAt: fixtureExpiresAt,
-          };
-        } else if (url.pathname.endsWith("/cancel")) {
-          localStorage.setItem("fixture-refresh-state", "cancelled");
-          response = { outcome: "accepted" };
-        }
-        return new Response(JSON.stringify(response), {
-          status: url.pathname.endsWith("/cancel")
-            ? 200
-            : url.pathname.endsWith("/disclosure")
-              ? 201
-              : url.pathname.endsWith("/acknowledge-and-start")
-                ? 202
-                : 200,
-          headers: { "content-type": "application/json" },
-        });
-      },
-      { preconnect: originalFetch.preconnect },
-    );
-  });
-  await page.goto("/redundancy");
-  await expect(page.getByRole("heading", { name: "Redundancy scoring" })).toBeVisible();
-  await expect(
-    page.getByText(
-      "Semantic cache storage was upgraded. The cached result for 1 game pair was discarded because its inputs could not be verified. Your games, notes, and preferences were preserved.",
-    ),
-  ).toBeVisible();
-  const migrationPage = await page.context().newPage();
-  await migrationPage.goto("/redundancy?discardedPairCount=0");
-  await expect(
-    migrationPage.getByText(
-      "Semantic cache storage was upgraded. No cached game-pair results were discarded. Your games, notes, and preferences were preserved.",
-    ),
-  ).toBeVisible();
-  await migrationPage.goto("/redundancy?discardedPairCount=3");
-  await expect(
-    migrationPage.getByText(
-      "Semantic cache storage was upgraded. Cached results for 3 game pairs were discarded because their inputs could not be verified. Your games, notes, and preferences were preserved.",
-    ),
-  ).toBeVisible();
-  await migrationPage.close();
-  await expect(page.getByText(/Not ready/)).toBeVisible();
-  await expect(page.getByText(/only action that contacts JEV/i)).toBeVisible();
-  await expect(page.locator(".topbar").getByRole("button")).toHaveCount(0);
-  await page.getByLabel("BoardGameGeek descriptions weight").focus();
-  await page.keyboard.press("ArrowRight");
-  await expect(page.getByRole("button", { name: "Save similarity preferences" })).toBeEnabled();
-  await page.getByRole("button", { name: "Save similarity preferences" }).click();
-  await expect(page.getByRole("button", { name: "Save similarity preferences" })).toHaveCount(0);
-  await expect(
-    page.getByText(/Similarity preferences saved · Stored on this Shelf Judge instance/),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Integrated" }).click();
-  await expect(page.getByRole("button", { name: "Prepare pair list (offline)" })).toBeDisabled();
-  await expect(page.getByText(/Save factual scoring settings before preparing/i)).toBeVisible();
-  await page.getByRole("button", { name: "Save factual scoring settings" }).click();
-  await expect(page.getByRole("button", { name: "Save factual scoring settings" })).toHaveCount(0);
-  const factualPatch = await page.evaluate(() =>
-    (
-      window as typeof window & {
-        __redundancyCalls: Array<{ url: string; method: string; body?: Record<string, unknown> }>;
-      }
-    ).__redundancyCalls.find((call) => call.url.endsWith("/settings") && call.method === "PATCH"),
-  );
-  expect(Object.keys(factualPatch?.body ?? {}).sort()).toEqual([
-    "componentWeights",
-    "enabled",
-    "expectedNeighbors",
-    "maxPenalty",
-    "minNeighbors",
-    "similarityThreshold",
-    "stage",
-  ]);
-  await page.getByLabel("Evidence sent for this execution").selectOption("description-only");
-  await page.getByRole("button", { name: "Prepare pair list (offline)" }).click();
-  await expect(
-    page.getByRole("region", { name: "Complete disclosed game-pair manifest" }),
-  ).toContainText("game-a");
-  await expect(
-    page.getByRole("region", { name: "Complete disclosed game-pair manifest" }),
-  ).toContainText("A present");
-  await expect(
-    page.getByRole("region", { name: "Complete disclosed game-pair manifest" }),
-  ).toContainText("game-d");
-  await expect(page.getByText(/no note text is displayed/i)).toBeVisible();
-  await expect(page.getByText(/BGG descriptions only: no owner-note text/i)).toBeVisible();
-  await expect(page.getByLabel(/permit transmitting owner notes/)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Authorize one JEV refresh" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Authorize one JEV refresh" })).toBeInViewport();
-  await expect(page.getByText("Showing pairs 1–2 of 2")).toBeVisible();
-  await expect(
-    page
-      .getByRole("group", { name: "Manifest page controls" })
-      .getByRole("button", { name: "Next pair page" }),
-  ).toBeDisabled();
-  await expect(
-    page.getByRole("region", { name: "Complete disclosed game-pair manifest" }),
-  ).toHaveCSS("max-height", "none");
-  await page.getByLabel("Allow previously cached comparisons informed by my notes").check();
-  await expect(page.getByRole("button", { name: "Prepare pair list (offline)" })).toBeDisabled();
-  await expect(page.getByText(/Save similarity preferences before preparing/i)).toBeVisible();
-  await expect(
-    page.getByRole("region", { name: "Complete disclosed game-pair manifest" }),
-  ).toHaveCount(0);
-  await page.getByRole("button", { name: "Save similarity preferences" }).click();
-  await expect(page.getByRole("button", { name: "Prepare pair list (offline)" })).toBeEnabled();
-  await page.getByRole("button", { name: "Prepare pair list (offline)" }).click();
-  await expect(page.getByRole("button", { name: "Authorize one JEV refresh" })).toBeInViewport();
-  const beforeDecline = await page.evaluate(
-    () =>
-      (
-        window as typeof window & { __redundancyCalls: Array<{ url: string }> }
-      ).__redundancyCalls.filter((call) => call.url.endsWith("acknowledge-and-start")).length,
-  );
-  expect(beforeDecline).toBe(0); // leaving the authorization unchecked declines transmission
-  await expect(
-    page.getByRole("region", { name: "Complete disclosed game-pair manifest" }),
-  ).toBeVisible();
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
-  );
-  expect(overflow).toBe(false);
-  await page.waitForTimeout(100);
-  await page.screenshot({
-    path: testInfo.outputPath(`redundancy-authorization-${testInfo.project.name}.png`),
-  });
-  await page.locator(".main-scroll").evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  await page.screenshot({
-    path: testInfo.outputPath(`redundancy-overview-${testInfo.project.name}.png`),
-  });
-  await page.keyboard.press("Tab");
-  await expect(page.locator(":focus-visible")).toBeVisible();
-  await page.getByLabel(/reviewed all 2 pairs/).check();
-  await page.getByRole("button", { name: "Authorize one JEV refresh" }).click();
-  await expect(page.getByText(/recognized this request as a replay/i)).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Refresh progress" })).toBeVisible();
-  await expect(page.getByText(/0 of 2 pairs complete/)).toBeVisible();
-  const authorization = await page.evaluate(() =>
-    (
-      window as typeof window & {
-        __redundancyCalls: Array<{ url: string; body?: { noteTransmissionAuthorized?: boolean } }>;
-      }
-    ).__redundancyCalls.find((call) => call.url.endsWith("acknowledge-and-start")),
-  );
-  expect(authorization?.body?.noteTransmissionAuthorized).toBe(false);
-  await page.getByRole("button", { name: "Cancel refresh" }).click();
-  await expect(page.getByText(/Refresh: cancelled/)).toBeVisible();
-  await page.getByLabel("Use semantic comparisons in scoring").uncheck();
-  await page.getByRole("button", { name: "Save similarity preferences" }).click();
-  await expect(page.getByText("Semantic comparison is off")).toBeVisible();
-  const semanticRevocation = await page.evaluate(() =>
-    (
-      window as typeof window & {
-        __redundancyCalls: Array<{ url: string; method: string; body?: { enabled?: boolean } }>;
-      }
-    ).__redundancyCalls.find(
-      (call) =>
-        call.url.endsWith("/semantic-settings") &&
-        call.method === "PATCH" &&
-        call.body?.enabled === false,
-    ),
-  );
-  expect(semanticRevocation?.body?.enabled).toBe(false);
-  await page.getByLabel("Use semantic comparisons in scoring").check();
-  await page.getByRole("button", { name: "Save similarity preferences" }).click();
-  await page
-    .getByLabel("Evidence sent for this execution")
-    .selectOption("description-and-owner-notes");
-  await page.getByRole("button", { name: "Prepare pair list (offline)" }).click();
-  await expect(page.getByLabel(/permit transmitting owner notes/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Authorize one JEV refresh" })).toBeDisabled();
-  await page.getByLabel(/permit transmitting owner notes/).check();
-  await page.getByLabel(/permit use of cached note-derived judgments/).check();
-  await page.getByRole("button", { name: "Prepare pair list (offline)" }).click();
-  await expect(page.locator(".error-banner")).toContainText("Simulated disclosure interruption");
-  await page.getByRole("button", { name: "Prepare pair list (offline)" }).click();
-  await expect(page.getByLabel(/permit transmitting owner notes/)).not.toBeChecked();
-  await expect(page.getByLabel(/permit use of cached note-derived judgments/)).not.toBeChecked();
-  await expect(page.getByRole("button", { name: "Authorize one JEV refresh" })).toBeDisabled();
-  await page.getByLabel("Evidence sent for this execution").selectOption("owner-notes-only");
-  await page.getByRole("button", { name: "Prepare pair list (offline)" }).click();
-  await expect(page.getByText(/D-only · owner notes; no descriptions/)).toBeVisible();
-  await expect(page.getByLabel(/permit transmitting owner notes/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Authorize one JEV refresh" })).toBeDisabled();
-
-  // First request reads A from status then B from summary with colliding counts
-  // and expiry. Cancellation must remain closed until the IDs and digests match.
-  await page.evaluate(() => {
-    localStorage.setItem("fixture-refresh-state", "running");
-    localStorage.setItem("fixture-status-id", "run-a");
-    localStorage.setItem("fixture-status-digest", "digest-a");
-    localStorage.setItem("fixture-summary-id", "run-b");
-    localStorage.setItem("fixture-summary-digest", "digest-b");
-  });
-  const freshPage = await page.context().newPage();
-  await freshPage.goto("/redundancy");
-  await expect(freshPage.getByRole("heading", { name: "Refresh progress" })).toBeVisible();
-  await expect(freshPage.getByRole("button", { name: "Cancel refresh" })).toBeDisabled();
-  await expect(freshPage.getByText(/does not match the current disclosure/i)).toBeVisible();
-  expect(await freshPage.evaluate(() => sessionStorage.length)).toBe(0);
-  await freshPage.evaluate(() =>
-    sessionStorage.setItem("shelf-judge:redundancy-refresh-command", "stale-session-run"),
-  );
-  await page.evaluate(() => {
-    localStorage.setItem("fixture-status-id", "run-b");
-    localStorage.setItem("fixture-status-digest", "digest-b");
-  });
-  await freshPage.reload();
-  const cancelButton = freshPage.getByRole("button", { name: "Cancel refresh" });
-  await expect(cancelButton).toBeEnabled();
-  await cancelButton.focus();
-  await freshPage.keyboard.press("Enter");
-  await expect(freshPage.getByText(/Refresh: cancelled/)).toBeVisible();
-  const recoveredCancel = await freshPage.evaluate(() =>
-    (
-      window as typeof window & {
-        __redundancyCalls: Array<{ url: string; body?: { commandId?: string } }>;
-      }
-    ).__redundancyCalls.find((call) => call.url.endsWith("/cancel")),
-  );
-  expect(recoveredCancel?.body?.commandId).toBe("run-b");
-});
-
-test("large manifests paginate without a nested vertical scroll trap", async ({ page }) => {
-  await page.addInitScript(() => {
-    const fixturePairs = Array.from({ length: 51 }, (_, index) => ({
-      gameA: `Game ${String(index + 1).padStart(2, "0")}`,
-      gameB: `Neighbor ${String(index + 1).padStart(2, "0")}`,
-      hasDescriptionA: true,
-      hasDescriptionB: index % 2 === 0,
-      hasOwnerNoteA: false,
-      hasOwnerNoteB: false,
-    }));
-    const originalFetch = window.fetch.bind(window);
-    window.fetch = Object.assign(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = new URL(input instanceof Request ? input.url : input, location.origin);
-        if (!url.pathname.startsWith("/api/daemon/redundancy/")) return originalFetch(input, init);
-        let response: unknown = {};
-        let status = 200;
-        if (url.pathname.endsWith("/settings"))
-          response = {
-            enabled: true,
-            stage: "annotation",
-            similarityThreshold: 0.6,
-            maxPenalty: 2,
-            minNeighbors: 1,
-            expectedNeighbors: 5,
-            componentWeights: { binary: 4 / 7, continuous: 3 / 7 },
-            semantic: {
-              settings: {
-                enabled: true,
-                weights: { factual: 7, description: 5, ownerNote: 10 },
-                cachedOwnerNoteUse: false,
-              },
-              status: "not-ready",
+            requestId: "req-1",
+            precondition: "pre-1",
+            provider: "TypeSafe",
+            modelId: "model-1",
+            eligibleGameCount: 3,
+            pairCount: 2,
+            descriptionBearingPairCount: 2,
+            noteBearingPairCount: 1,
+            noteTransmissionPermitted: true,
+            providerConfigured: new URL(location.href).searchParams.get("no-key") !== "1",
+            signalScope: {
+              description: true,
+              ownerNotes: new URL(location.href).searchParams.get("scope") !== "C",
             },
+            scoringEffect: "annotation-only",
+            retentionCaveat: "Retention duration is unspecified.",
+            limits: {
+              maxEligiblePairs: 100,
+              maxProviderAttempts: 100,
+              reportedTokenStopThreshold: 50000,
+              reportedTokenThresholdIsBilledCeiling: false,
+            },
+            withinPairLimit: true,
+            expiresAt: new Date(Date.now() + 3600000).toISOString(),
           };
-        else if (url.pathname.endsWith("/refresh-status"))
-          response = { status: "not-ready", publicationStatus: "not-ready" };
-        else if (url.pathname.endsWith("/summary")) response = { disclosure: null };
-        else if (url.pathname.endsWith("/disclosure")) {
-          const body =
-            typeof init?.body === "string"
-              ? (JSON.parse(init.body) as { signalScope: string })
-              : { signalScope: "description-only" };
-          response = {
-            id: "large-manifest",
-            digest: "large-manifest-digest",
-            signalScope: body.signalScope,
-            providerId: "jev",
-            modelId: "pinned-model",
-            budget: { maxRequests: 20, maxTokens: 4000, maxDurationMs: 60000 },
-            expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-            pairCount: fixturePairs.length,
-            notePairCount: 0,
-            pageSize: fixturePairs.length,
-          };
-          status = 201;
-        } else if (url.pathname.endsWith("/disclosure/page"))
-          response = {
-            nextOffset: fixturePairs.length,
-            complete: true,
-            pairs: fixturePairs,
-          };
+        else if (url.pathname.endsWith("/active-run")) {
+          if (
+            new URL(location.href).searchParams.get("status-fail") === "1" &&
+            window.localStorage.getItem("run-state") === "running"
+          )
+            return new Response(JSON.stringify({ error: "Status temporarily unavailable" }), {
+              status: 503,
+              headers: { "content-type": "application/json" },
+            });
+          const query = new URL(location.href).searchParams;
+          const runId =
+            window.localStorage.getItem("replace-active") === "1"
+              ? "replacement-run"
+              : query.get("race") === "1"
+                ? "shown-run"
+                : "run-1";
+          response = window.localStorage.getItem("run-state") === "running" ? { runId } : null;
+        } else if (url.pathname.endsWith("/semantic/run")) {
+          if (new URL(location.href).searchParams.get("stale") === "1")
+            return new Response(JSON.stringify({ error: "Run precondition failed" }), {
+              status: 412,
+              headers: { "content-type": "application/json" },
+            });
+          window.localStorage.setItem("run-state", "running");
+          window.localStorage.setItem("run-id", "run-1");
+          response = { state: "started", runId: "run-1" };
+        } else if (url.pathname.endsWith("/semantic/cancel")) {
+          window.localStorage.setItem(
+            "cancelled-run-id",
+            typeof body?.runId === "string" ? body.runId : "",
+          );
+          window.localStorage.setItem("run-state", "complete");
+          response = { state: "cancellation-requested" };
+        }
         return new Response(JSON.stringify(response), {
           status,
           headers: { "content-type": "application/json" },
         });
       },
-      { preconnect: originalFetch.preconnect },
+      { preconnect: original.preconnect },
     );
   });
+}
 
+test("note consent is opt-in and declining still runs without note text", async ({
+  page,
+}, testInfo) => {
+  await installDaemon(page);
   await page.goto("/redundancy");
-  await page.getByRole("button", { name: "Prepare pair list (offline)" }).click();
-  const manifest = page.getByRole("region", { name: "Complete disclosed game-pair manifest" });
-  await expect(manifest).toContainText("Game 01");
-  await expect(page.getByText("Showing pairs 1–50 of 51")).toBeVisible();
-  await expect(manifest.locator("tbody tr")).toHaveCount(50);
-  await expect(manifest).toHaveCSS("max-height", "none");
-  expect(await manifest.evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);
-  await expect(manifest).toHaveCSS("overflow-x", "auto");
-  await expect(page.getByRole("button", { name: "Authorize one JEV refresh" })).toBeInViewport();
-  expect(
-    await page.evaluate(() => document.documentElement.scrollWidth === window.innerWidth),
-  ).toBe(true);
-
-  const next = page
-    .getByRole("group", { name: "Manifest page controls", exact: true })
-    .getByRole("button", { name: "Next pair page" });
-  await next.focus();
+  await expect(page.getByText(/cached result for 1 game pair was discarded/)).toBeVisible();
+  await page.getByRole("button", { name: "Preview one run" }).click();
+  const preview = page.getByRole("region", { name: "Before you run" });
+  await expect(preview).toContainText("TypeSafe");
+  await expect(preview).toContainText("2 game pairs");
+  await expect(preview).toContainText("unknown");
+  await expect(preview).toContainText("100 HTTP attempts");
+  await expect(preview).toContainText(/note-based results may remain incomplete/i);
+  const callsBefore = await page.evaluate(
+    () =>
+      (
+        window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+      ).__redundancyCalls.filter((call) => call.url.endsWith("/semantic/run")).length,
+  );
+  expect(callsBefore).toBe(0);
+  await expect(page.getByRole("button", { name: "Run one refresh" })).toBeEnabled();
+  await page.screenshot({
+    path: testInfo.outputPath(`redundancy-run-${testInfo.project.name}.png`),
+  });
+  await page.getByRole("button", { name: "Run one refresh" }).focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByText("Showing pairs 51–51 of 51")).toBeVisible();
-  await expect(manifest.locator("tbody tr")).toHaveCount(1);
-  await expect(manifest).toContainText("Game 51");
   await expect(
-    page.getByRole("group", { name: "Manifest page controls after table" }).getByRole("button", {
-      name: "Previous pair page",
-    }),
-  ).toBeEnabled();
+    page.getByText(/Run started\. Uncached comparisons may now be sent to the provider\./),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel live run" })).toBeVisible();
+  const call = await page.evaluate(() =>
+    (
+      window as typeof window & {
+        __redundancyCalls: Array<{ url: string; body?: Record<string, unknown> }>;
+      }
+    ).__redundancyCalls.find((entry) => entry.url.endsWith("/semantic/run")),
+  );
+  expect(call?.body).toMatchObject({
+    requestId: "req-1",
+    precondition: "pre-1",
+    noteTransmissionAuthorized: false,
+  });
+  await page.getByRole("button", { name: "Cancel live run" }).click();
+});
+
+test("owner-note text is authorized only after the per-run opt-in", async ({ page }) => {
+  await installDaemon(page);
+  await page.goto("/redundancy");
+  await page.getByRole("button", { name: "Preview one run" }).click();
+  await expect(page.getByLabel(/For this run only, allow owner notes/)).not.toBeChecked();
+  await page.getByLabel(/For this run only, allow owner notes/).check();
+  await page.getByRole("button", { name: "Run one refresh" }).click();
+  const call = await page.evaluate(() =>
+    (
+      window as typeof window & {
+        __redundancyCalls: Array<{ url: string; body?: Record<string, unknown> }>;
+      }
+    ).__redundancyCalls.find((entry) => entry.url.endsWith("/semantic/run")),
+  );
+  expect(call?.body).toMatchObject({ noteTransmissionAuthorized: true });
+});
+
+test("unsaved settings block preview and mobile run remains discoverable", async ({
+  page,
+}, testInfo) => {
+  await installDaemon(page);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/redundancy");
+  await page.getByLabel("BoardGameGeek descriptions weight").focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("button", { name: "Save similarity preferences" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Preview one run" })).toBeDisabled();
+  await expect(page.getByText(/Save similarity preferences before previewing/)).toBeVisible();
+  await page.getByRole("button", { name: "Save similarity preferences" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Save similarity preferences" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Preview one run" }).click();
+  await expect(page.getByRole("button", { name: "Run one refresh" })).toBeEnabled();
+  await expect(page.getByLabel(/For this run only, allow owner notes/)).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+  expect(overflow).toBe(false);
+  await page.screenshot({
+    path: testInfo.outputPath(`redundancy-mobile-run-${testInfo.project.name}.png`),
+  });
+});
+
+test("C-only preview runs without note consent or transmission", async ({ page }) => {
+  await installDaemon(page);
+  await page.goto("/redundancy?scope=C");
+  await page.getByRole("button", { name: "Preview one run" }).click();
+  await expect(page.getByLabel(/For this run only, allow owner notes/)).toHaveCount(0);
+  await page.getByRole("button", { name: "Run one refresh" }).click();
+  const call = await page.evaluate(() =>
+    (
+      window as typeof window & {
+        __redundancyCalls: Array<{ url: string; body?: Record<string, unknown> }>;
+      }
+    ).__redundancyCalls.find((entry) => entry.url.endsWith("/semantic/run")),
+  );
+  expect(call?.body).toMatchObject({ noteTransmissionAuthorized: false });
+});
+
+test("stale preview is closed and explained without starting a run", async ({ page }) => {
+  await installDaemon(page);
+  await page.goto("/redundancy?stale=1");
+  await page.getByRole("button", { name: "Preview one run" }).click();
+  await page.getByLabel(/For this run only, allow owner notes/).check();
+  await page.getByRole("button", { name: "Run one refresh" }).click();
+  await expect(page.locator(".error-banner")).toContainText(/changed after this preview/i);
+  await expect(page.getByRole("region", { name: "Before you run" })).toHaveCount(0);
+  const starts = await page.evaluate(
+    () =>
+      (
+        window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+      ).__redundancyCalls.filter((entry) => entry.url.endsWith("/semantic/run")).length,
+  );
+  expect(starts).toBe(1);
+});
+
+test("no provider key still allows a cache-only run", async ({ page }) => {
+  await installDaemon(page);
+  await page.goto("/redundancy?no-key=1");
+  await page.getByRole("button", { name: "Preview one run" }).click();
+  await expect(page.getByText(/No provider key is configured/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run one refresh" })).toBeEnabled();
+  await page.getByRole("button", { name: "Run one refresh" }).click();
+  await expect(
+    page.getByText(/Run started\. Uncached comparisons may now be sent to the provider\./),
+  ).toBeVisible();
+});
+
+test("accepted run stays cancellable when immediate status reads fail", async ({ page }) => {
+  await installDaemon(page);
+  await page.goto("/redundancy?status-fail=1");
+  await page.getByRole("button", { name: "Preview one run" }).click();
+  await page.getByRole("button", { name: "Run one refresh" }).click();
+  await expect(
+    page.getByText(/Run started\. Uncached comparisons may now be sent to the provider\./),
+  ).toBeVisible();
+  await expect(page.locator(".redundancy-refresh-status")).toContainText(
+    /(?:The run started, but status could not be refreshed: )?Status temporarily unavailable/i,
+  );
+  await expect(page.getByRole("button", { name: "Cancel live run" })).toBeEnabled();
+});
+
+test("cancel submits the run id shown when the user clicked", async ({ page }) => {
+  await installDaemon(page);
+  await page.addInitScript(() => window.localStorage.setItem("run-state", "running"));
+  await page.goto("/redundancy?race=1");
+  await expect(page.getByRole("button", { name: "Cancel live run" })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+          ).__redundancyCalls.filter((entry) => entry.url.endsWith("/active-run")).length,
+      ),
+    )
+    .toBeGreaterThanOrEqual(2);
+  await page.evaluate(() => localStorage.setItem("replace-active", "1"));
+  await page.getByRole("button", { name: "Cancel live run" }).click();
+  const cancellation = await page.evaluate(() =>
+    (
+      window as typeof window & {
+        __redundancyCalls: Array<{ url: string; body?: Record<string, unknown> }>;
+      }
+    ).__redundancyCalls.find((entry) => entry.url.endsWith("/semantic/cancel")),
+  );
+  expect(cancellation?.body).toEqual({ runId: "shown-run" });
 });

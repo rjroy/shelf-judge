@@ -4,26 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RedundancySettings } from "@shelf-judge/shared";
 
 type Weights = { factual: number; description: number; ownerNote: number };
-type Pair = {
-  gameA: string;
-  gameB: string;
-  hasDescriptionA: boolean;
-  hasDescriptionB: boolean;
-  hasOwnerNoteA: boolean;
-  hasOwnerNoteB: boolean;
-};
-type Manifest = {
-  id: string;
-  digest: string;
-  signalScope: "description-only" | "owner-notes-only" | "description-and-owner-notes";
-  providerId: string;
-  modelId: string;
-  budget: { maxRequests: number; maxTokens: number; maxDurationMs: number };
-  expiresAt: string;
-  pairCount: number;
-  notePairCount: number;
-  pageSize: number;
-};
 type Semantic = {
   settings: { enabled: boolean; weights: Weights; cachedOwnerNoteUse: boolean };
   status: string | { status?: unknown; publicationStatus?: unknown };
@@ -33,78 +13,56 @@ type Semantic = {
   } | null;
 };
 type SettingsResponse = RedundancySettings & { semantic: Semantic; migrationNotice?: string };
+type Preview = {
+  requestId: string;
+  precondition: string;
+  provider: string;
+  modelId: string;
+  eligibleGameCount: number;
+  pairCount: number;
+  descriptionBearingPairCount: number;
+  noteBearingPairCount: number;
+  noteTransmissionPermitted: boolean;
+  providerConfigured: boolean;
+  signalScope: { description: boolean; ownerNotes: boolean };
+  scoringEffect: "integrated-fitness" | "annotation-only";
+  retentionCaveat: string;
+  limits: {
+    maxEligiblePairs: number;
+    maxProviderAttempts: number;
+    reportedTokenStopThreshold: number;
+    reportedTokenThresholdIsBilledCeiling: false;
+  };
+  withinPairLimit: boolean;
+  expiresAt: string;
+};
 type Refresh = {
   status: string;
-  publicationStatus: string;
-  manifest?: {
-    id: string;
-    digest: string;
-    signalScope: Manifest["signalScope"];
-    expiresAt: string;
+  measurement: string;
+  eligibleGameCount: number | null;
+  pairCount: number | null;
+  coverage: Record<
+    string,
+    { covered: number; missing: number; invalid: number; unavailable: number; blocked: number }
+  > | null;
+  progress: null | {
+    state: "last-known-running" | "completed" | "interrupted" | "failed";
+    pairCount: number;
+    completedPairs: number;
+    cacheHits: number;
+    cacheMisses: number;
+    failedPairs: number;
+    stopReason?: "provider-limit" | "provider-unconfigured";
   };
-  execution?: {
-    commandId?: string;
-    status: string;
-    attemptCount: number;
-    completedPairCount: number;
-    failedPairCount: number;
-  };
-  pairCount?: number;
 };
-type SemanticSummary = {
-  disclosure?: { id: string; digest: string; pairCount: number; expiresAt: string } | null;
-};
+type ActiveRun = { runId: string } | null;
 
-const MANIFEST_REVIEW_PAGE_SIZE = 50;
-
-function activeCommandFromDaemon(refresh: Refresh, summary: SemanticSummary): string | undefined {
-  const execution = refresh.execution;
-  const disclosure = summary.disclosure;
-  const manifest = refresh.manifest;
-  if (
-    !execution ||
-    !["running", "queued"].includes(execution.status) ||
-    !disclosure ||
-    !manifest ||
-    !manifest.id ||
-    !manifest.digest ||
-    manifest.id !== disclosure.id ||
-    manifest.digest !== disclosure.digest ||
-    disclosure.pairCount !== refresh.pairCount ||
-    disclosure.expiresAt !== manifest.expiresAt ||
-    (execution.commandId !== undefined && execution.commandId !== manifest.id) ||
-    Date.parse(disclosure.expiresAt) <= Date.now()
-  ) {
-    return undefined;
-  }
-  // The daemon starts each execution under its immutable manifest ID; only the
-  // current summary disclosure is used, never a tab-local cached command ID.
-  return manifest.id;
-}
-
-async function readRefreshSnapshot(): Promise<{
-  refresh: Refresh;
-  commandId?: string;
-  identityMessage?: string;
-}> {
-  const refresh = await request<Refresh>("/api/daemon/redundancy/semantic/refresh-status");
-  const summary = await request<SemanticSummary>("/api/daemon/redundancy/semantic/summary").catch(
-    () => null,
-  );
-  const commandId = summary ? activeCommandFromDaemon(refresh, summary) : undefined;
-  const active = ["running", "queued"].includes(refresh.execution?.status ?? "");
-  const identityMessage = active
-    ? summary === null
-      ? "Could not read the current disclosure identity. Cancellation is disabled until status can be verified."
-      : commandId === undefined
-        ? "The active refresh identity does not match the current disclosure. Cancellation is disabled; reload status before retrying."
-        : undefined
-    : undefined;
-  return {
-    refresh,
-    ...(commandId ? { commandId } : {}),
-    ...(identityMessage ? { identityMessage } : {}),
-  };
+async function readRunSnapshot() {
+  const [refresh, activeRun] = await Promise.all([
+    request<Refresh>("/api/daemon/redundancy/semantic/refresh-status"),
+    request<ActiveRun>("/api/daemon/redundancy/semantic/active-run"),
+  ]);
+  return { refresh, activeRun };
 }
 
 const statusCopy: Record<string, string> = {
@@ -137,10 +95,17 @@ function semanticMigrationCopy(notice: Semantic["migrationNotice"]): string | nu
   return `Semantic cache storage was upgraded. Cached results for ${notice.discardedPairCount} game pairs were discarded because their inputs could not be verified. ${preserved}`;
 }
 
-function scopeDescription(scope: Manifest["signalScope"]): string {
-  if (scope === "description-only") return "C-only · cached BGG descriptions; no owner notes";
-  if (scope === "owner-notes-only") return "D-only · owner notes; no descriptions";
-  return "C + D · cached descriptions and owner notes";
+function progressCopy(refresh: Refresh, activeRun: ActiveRun): string | null {
+  const progress = refresh.progress;
+  if (!progress) return null;
+  const lead = activeRun ? "Refresh is running now." : "Last saved run status.";
+  if (progress.state === "last-known-running")
+    return `${lead} ${progress.completedPairs} of ${progress.pairCount} pairs completed; ${progress.cacheHits} reused from cache.`;
+  if (progress.state === "completed")
+    return `Run completed. ${progress.completedPairs} of ${progress.pairCount} pairs completed; ${progress.cacheHits} reused from cache.`;
+  if (progress.state === "interrupted")
+    return `Run interrupted. ${progress.completedPairs} of ${progress.pairCount} pairs completed; ${progress.failedPairs} failed.`;
+  return `Run failed. ${progress.completedPairs} of ${progress.pairCount} pairs completed; ${progress.failedPairs} failed.`;
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -161,16 +126,10 @@ export default function RedundancyPage() {
   const [semantic, setSemantic] = useState<Semantic | null>(null);
   const [savedSemantic, setSavedSemantic] = useState<Semantic["settings"] | null>(null);
   const [migrationNotice, setMigrationNotice] = useState<string>();
-  const [manifest, setManifest] = useState<Manifest | null>(null);
-  const [pairs, setPairs] = useState<Pair[]>([]);
-  const [manifestPage, setManifestPage] = useState(0);
-  const [deliveryComplete, setDeliveryComplete] = useState(false);
+  const [preview, setPreview] = useState<Preview | null>(null);
   const [refresh, setRefresh] = useState<Refresh | null>(null);
-  const [noteTransmission, setNoteTransmission] = useState(false);
-  const [cachedNotes, setCachedNotes] = useState(false);
-  const [ack, setAck] = useState(false);
-  const [signalScope, setSignalScope] = useState<Manifest["signalScope"]>("description-only");
-  const [commandId, setCommandId] = useState<string>();
+  const [activeRun, setActiveRun] = useState<ActiveRun>(null);
+  const [noteTransmissionAuthorized, setNoteTransmissionAuthorized] = useState(false);
   const [busy, setBusy] = useState(false);
   const [factualSaving, setFactualSaving] = useState(false);
   const [semanticSaving, setSemanticSaving] = useState(false);
@@ -178,13 +137,15 @@ export default function RedundancyPage() {
   const [error, setError] = useState<string>();
   const [message, setMessage] = useState<string>();
   const [statusError, setStatusError] = useState<string>();
-  const authorizeRef = useRef<HTMLDivElement>(null);
-  const disclosureRevision = useRef(0);
+  const runRef = useRef<HTMLDivElement>(null);
 
   const reload = useCallback(async () => {
     const [data, status] = await Promise.all([
       request<SettingsResponse>("/api/daemon/redundancy/settings"),
-      readRefreshSnapshot().catch(() => null),
+      readRunSnapshot().catch((cause: unknown) => {
+        setStatusError(cause instanceof Error ? cause.message : "Could not load refresh status.");
+        return null;
+      }),
     ]);
     setSettings(data);
     setSaved(data);
@@ -193,8 +154,7 @@ export default function RedundancyPage() {
     setMigrationNotice(data.migrationNotice);
     if (status) {
       setRefresh(status.refresh);
-      setCommandId(status.commandId);
-      setStatusError(status.identityMessage);
+      setActiveRun(status.activeRun);
     }
   }, []);
   useEffect(() => {
@@ -203,15 +163,16 @@ export default function RedundancyPage() {
       .finally(() => setLoading(false));
   }, [reload]);
   useEffect(() => {
-    if (!commandId && !["running", "queued"].includes(refresh?.execution?.status ?? "")) return;
+    const activeRunId = activeRun?.runId;
+    if (!activeRunId) return;
     let alive = true;
     const poll = async () => {
       try {
-        const latest = await readRefreshSnapshot();
+        const latest = await readRunSnapshot();
         if (!alive) return;
         setRefresh(latest.refresh);
-        setCommandId(latest.commandId);
-        setStatusError(latest.identityMessage);
+        setActiveRun(latest.activeRun);
+        setStatusError(undefined);
       } catch (e) {
         if (alive)
           setStatusError(
@@ -225,10 +186,7 @@ export default function RedundancyPage() {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [commandId, refresh?.execution?.status]);
-  useEffect(() => {
-    if (deliveryComplete) authorizeRef.current?.scrollIntoView({ block: "nearest" });
-  }, [deliveryComplete]);
+  }, [activeRun?.runId]);
 
   const saveFactual = async () => {
     if (!settings) return;
@@ -297,126 +255,86 @@ export default function RedundancyPage() {
       setBusy(false);
     }
   };
-  const disclose = async () => {
-    clearPreparedDisclosure();
-    const revision = disclosureRevision.current;
+  const loadPreview = async () => {
     setBusy(true);
     setError(undefined);
     setMessage(undefined);
-    setNoteTransmission(false);
-    setCachedNotes(false);
-    setManifest(null);
-    setPairs([]);
-    setDeliveryComplete(false);
-    setAck(false);
+    setPreview(null);
     try {
-      const created = await request<Manifest>(
-        "/api/daemon/redundancy/semantic/disclosure",
-        json({ signalScope }),
-      );
-      setManifest(created);
-      const collected: Pair[] = [];
-      for (let offset = 0; ; ) {
-        const page = await request<{ pairs: Pair[]; nextOffset: number; complete: boolean }>(
-          "/api/daemon/redundancy/semantic/disclosure/page",
-          json({ manifestId: created.id, manifestDigest: created.digest, offset }),
-        );
-        if (revision !== disclosureRevision.current) return;
-        collected.push(...page.pairs);
-        setPairs([...collected]);
-        if (
-          !Number.isSafeInteger(page.nextOffset) ||
-          page.nextOffset < offset ||
-          page.nextOffset > created.pairCount
-        ) {
-          throw new Error(
-            "The disclosure returned an invalid page position. Nothing was authorized.",
-          );
-        }
-        if (page.complete) {
-          if (page.nextOffset !== created.pairCount)
-            throw new Error(
-              "The complete disclosure did not cover every pair. Nothing was authorized.",
-            );
-          break;
-        }
-        if (page.nextOffset <= offset)
-          throw new Error(
-            "The disclosure did not advance to another page. Nothing was authorized.",
-          );
-        offset = page.nextOffset;
-      }
-      setDeliveryComplete(collected.length === created.pairCount);
-      if (collected.length !== created.pairCount)
-        throw new Error("The full pair list could not be delivered. Nothing was authorized.");
+      const result = await request<Preview>("/api/daemon/redundancy/semantic/run-preview");
+      setPreview(result);
+      setNoteTransmissionAuthorized(false);
+      runRef.current?.scrollIntoView({ block: "nearest" });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not prepare disclosure");
+      setError(e instanceof Error ? e.message : "Could not prepare run details");
     } finally {
       setBusy(false);
     }
   };
   const start = async () => {
-    if (!manifest || !deliveryComplete || !ack) return;
+    if (!preview) return;
     setBusy(true);
     setError(undefined);
     setMessage(undefined);
     try {
-      const result = await request<{
-        disposition?: "CREATED" | "REPLAYED";
-        status?: string;
-        commandId: string;
-      }>(
-        "/api/daemon/redundancy/semantic/acknowledge-and-start",
+      const result = await request<{ state: string; runId: string }>(
+        "/api/daemon/redundancy/semantic/run",
         json({
-          manifestId: manifest.id,
-          manifestDigest: manifest.digest,
-          pairCount: manifest.pairCount,
-          transmissionAuthorized: true,
+          requestId: preview.requestId,
+          precondition: preview.precondition,
           noteTransmissionAuthorized:
-            manifest.signalScope === "description-only" ? false : noteTransmission,
-          cachedOwnerNoteUseAuthorized: cachedNotes,
+            preview.signalScope.ownerNotes &&
+            preview.noteBearingPairCount > 0 &&
+            preview.noteTransmissionPermitted
+              ? noteTransmissionAuthorized
+              : false,
         }),
       );
-      setCommandId(result.commandId);
-      setMessage(
-        result.disposition === "REPLAYED"
-          ? "The daemon recognized this request as a replay; showing its existing refresh status."
-          : "One refresh was authorized. You can cancel it below.",
-      );
-      setAck(false);
-      setManifest(null);
-      setPairs([]);
-      setDeliveryComplete(false);
-      const status = await readRefreshSnapshot();
-      setRefresh(status.refresh);
-      setCommandId(status.commandId);
-      setStatusError(status.identityMessage);
-      void result;
+      setActiveRun({ runId: result.runId });
+      setMessage("Run started. Uncached comparisons may now be sent to the provider.");
+      setPreview(null);
+      try {
+        const status = await readRunSnapshot();
+        setRefresh(status.refresh);
+        setActiveRun(status.activeRun ?? { runId: result.runId });
+        setStatusError(undefined);
+      } catch (cause) {
+        setStatusError(
+          cause instanceof Error
+            ? `The run started, but status could not be refreshed: ${cause.message}`
+            : "The run started, but status could not be refreshed.",
+        );
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Refresh was not started");
+      const reason = e instanceof Error ? e.message : "Refresh was not started";
+      if (reason.toLowerCase().includes("precondition")) {
+        setPreview(null);
+        setError(
+          "Collection or saved settings changed after this preview. Nothing was started; load a fresh preview before trying again.",
+        );
+      } else setError(reason);
     } finally {
       setBusy(false);
     }
   };
-  const cancel = async () => {
+  const cancel = async (runId: string) => {
     setBusy(true);
     setError(undefined);
     try {
-      const latest = await readRefreshSnapshot();
-      setRefresh(latest.refresh);
-      setCommandId(latest.commandId);
-      setStatusError(latest.identityMessage);
-      if (!latest.commandId)
-        throw new Error(
-          "No current running refresh could be verified. Reload status before cancelling.",
+      await request("/api/daemon/redundancy/semantic/cancel", json({ runId }));
+      setMessage("Cancellation requested for this run.");
+      try {
+        const afterCancel = await readRunSnapshot();
+        setRefresh(afterCancel.refresh);
+        setActiveRun(afterCancel.activeRun);
+        setStatusError(undefined);
+      } catch (cause) {
+        setStatusError(
+          cause instanceof Error
+            ? `Cancellation was requested, but status could not be refreshed: ${cause.message}`
+            : "Cancellation was requested, but status could not be refreshed.",
         );
-      await request(
-        "/api/daemon/redundancy/semantic/cancel",
-        json({ commandId: latest.commandId }),
-      );
-      const afterCancel = await readRefreshSnapshot();
-      setRefresh(afterCancel.refresh);
-      setCommandId(afterCancel.commandId);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not cancel refresh");
     } finally {
@@ -473,29 +391,15 @@ export default function RedundancyPage() {
     savedSemantic !== null && JSON.stringify(semantic.settings) !== JSON.stringify(savedSemantic);
   const semanticMigrationMessage = semanticMigrationCopy(semantic.migrationNotice);
   const clearPreparedDisclosure = () => {
-    disclosureRevision.current += 1;
-    setManifest(null);
-    setPairs([]);
-    setManifestPage(0);
-    setDeliveryComplete(false);
-    setNoteTransmission(false);
-    setCachedNotes(false);
-    setAck(false);
+    setPreview(null);
+    setNoteTransmissionAuthorized(false);
   };
   const updateWeight = (key: keyof Weights, value: number) => {
-    clearPreparedDisclosure();
     setSemantic({
       ...semantic,
       settings: { ...semantic.settings, weights: { ...semantic.settings.weights, [key]: value } },
     });
   };
-  const manifestPageCount = Math.ceil(pairs.length / MANIFEST_REVIEW_PAGE_SIZE);
-  const visiblePairs = pairs.slice(
-    manifestPage * MANIFEST_REVIEW_PAGE_SIZE,
-    (manifestPage + 1) * MANIFEST_REVIEW_PAGE_SIZE,
-  );
-  const manifestRangeStart = pairs.length ? manifestPage * MANIFEST_REVIEW_PAGE_SIZE + 1 : 0;
-  const manifestRangeEnd = Math.min((manifestPage + 1) * MANIFEST_REVIEW_PAGE_SIZE, pairs.length);
 
   return (
     <>
@@ -510,18 +414,18 @@ export default function RedundancyPage() {
             descriptions or your notes. Saving either set of preferences only updates local
             settings. It never contacts JEV.
           </p>
-          <ol className="redundancy-steps" aria-label="Refresh steps">
+          <ol className="redundancy-steps" aria-label="How a refresh works">
             <li>
               <strong>Set preferences</strong>
               <span>Saved locally; no provider call.</span>
             </li>
             <li>
-              <strong>Review pairs</strong>
-              <span>Build and inspect the exact list offline.</span>
+              <strong>Preview the run</strong>
+              <span>Check provider, scope, limits, and note consent.</span>
             </li>
             <li>
-              <strong>Authorize refresh</strong>
-              <span>This is the only action that contacts JEV.</span>
+              <strong>Run once</strong>
+              <span>This explicit action contacts the provider.</span>
             </li>
           </ol>
           {error && (
@@ -786,266 +690,160 @@ export default function RedundancyPage() {
               )}
               {semanticDirty && <span role="status">Unsaved similarity changes</span>}
             </div>
-            <h3>Review and authorize one refresh</h3>
-            <p>
-              Preparing the pair list is offline: no game data is sent. Only “Authorize one refresh”
-              below starts a JEV request. Reusing an old note-informed result is separate from
-              sending note text for this refresh.
-            </p>
-            {(semanticDirty || dirty) && (
-              <p className="redundancy-inline-guidance" role="status">
-                {semanticDirty && "Save similarity preferences"}
-                {semanticDirty && dirty && " and "}
-                {dirty && "Save factual scoring settings"} before preparing a pair list. No refresh
-                can use unsaved preferences.
+            <div className="redundancy-run" ref={runRef}>
+              <h3>Run one semantic refresh</h3>
+              <p>
+                Preferences must be saved before preparing this offline preview. Saving or reading
+                status never contacts the provider.
               </p>
-            )}
-            <label className="redundancy-setting-row">
-              Evidence sent for this execution
-              <select
-                value={signalScope}
-                disabled={busy}
-                onChange={(e) => {
-                  clearPreparedDisclosure();
-                  setSignalScope(e.target.value as Manifest["signalScope"]);
-                }}
+              {(semanticDirty || dirty) && (
+                <p className="redundancy-inline-guidance" role="status">
+                  Save {semanticDirty ? "similarity preferences" : ""}
+                  {semanticDirty && dirty ? " and " : ""}
+                  {dirty ? "factual scoring settings" : ""} before previewing. The run will use
+                  saved settings.
+                </p>
+              )}
+              <button
+                className="btn btn-secondary"
+                disabled={busy || semanticDirty || dirty || !semantic.settings.enabled}
+                onClick={() => void loadPreview()}
               >
-                <option value="description-only">BGG descriptions only — no note text</option>
-                <option value="owner-notes-only">My notes only — no BGG descriptions</option>
-                <option value="description-and-owner-notes">BGG descriptions and my notes</option>
-              </select>
-            </label>
-            <button
-              className="btn btn-secondary"
-              disabled={busy || !semantic.settings.enabled || semanticDirty || dirty}
-              onClick={() => void disclose()}
-            >
-              {busy ? "Preparing list…" : "Prepare pair list (offline)"}
-            </button>
-            {manifest && (
-              <div className="redundancy-disclosure" aria-labelledby="disclosure-title">
-                <h3 id="disclosure-title">Exact refresh disclosure</h3>
-                <p>
-                  Provider: <strong>{manifest.providerId}</strong> · pinned model:{" "}
-                  <strong>{manifest.modelId}</strong>
+                {busy ? "Loading preview…" : "Preview one run"}
+              </button>
+              {!semantic.settings.enabled && (
+                <p className="redundancy-inline-guidance" role="status">
+                  Turn on semantic comparisons and save preferences before preparing a run.
                 </p>
-                <p>
-                  Scope: {scopeDescription(manifest.signalScope)} · {manifest.pairCount} game pairs
-                  · {manifest.notePairCount} pairs include notes on both games · expires{" "}
-                  {new Date(manifest.expiresAt).toLocaleString()}.
-                </p>
-                <p>
-                  Budget ceiling: {manifest.budget.maxRequests} requests,{" "}
-                  {manifest.budget.maxTokens} reported tokens,{" "}
-                  {Math.ceil(manifest.budget.maxDurationMs / 60000)} minutes. These are limits, not
-                  a price estimate. Provider data-retention terms apply; do not send notes unless
-                  comfortable with that disclosure.
-                </p>
-                <p>
-                  Full manifest delivered: {pairs.length} of {manifest.pairCount} pairs. Review the
-                  complete list below. Note flags show presence only; no note text is displayed.
-                  Large lists are split into pages; all pairs are available to inspect before you
-                  authorize.
-                </p>
+              )}
+              {preview && (
                 <div
-                  className="redundancy-manifest-pagination"
-                  role="group"
-                  aria-label="Manifest page controls"
-                >
-                  <p role="status" aria-live="polite">
-                    Showing pairs {manifestRangeStart}–{manifestRangeEnd} of {pairs.length}
-                    {manifestPageCount > 1
-                      ? ` · Page ${manifestPage + 1} of ${manifestPageCount}`
-                      : ""}
-                  </p>
-                  <div className="redundancy-page-buttons">
-                    <button
-                      className="btn btn-secondary"
-                      disabled={manifestPage === 0}
-                      onClick={() => setManifestPage((page) => Math.max(0, page - 1))}
-                    >
-                      Previous pair page
-                    </button>
-                    <button
-                      className="btn btn-secondary"
-                      disabled={manifestPage + 1 >= manifestPageCount}
-                      onClick={() =>
-                        setManifestPage((page) => Math.min(manifestPageCount - 1, page + 1))
-                      }
-                    >
-                      Next pair page
-                    </button>
-                  </div>
-                </div>
-                <div
-                  className="redundancy-manifest"
+                  className="redundancy-disclosure"
                   role="region"
-                  aria-label="Complete disclosed game-pair manifest"
-                  tabIndex={0}
+                  aria-labelledby="run-preview-heading"
                 >
-                  <table>
-                    <caption>Disclosed pairs and evidence availability</caption>
-                    <thead>
-                      <tr>
-                        <th scope="col">Game A</th>
-                        <th scope="col">Game B</th>
-                        <th scope="col">Description flags</th>
-                        <th scope="col">Owner-note flags</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visiblePairs.map((pair, index) => (
-                        <tr
-                          key={`${pair.gameA}:${pair.gameB}:${manifestPage * MANIFEST_REVIEW_PAGE_SIZE + index}`}
-                        >
-                          <td>{pair.gameA}</td>
-                          <td>{pair.gameB}</td>
-                          <td>
-                            {pair.hasDescriptionA ? "A present" : "A absent"};{" "}
-                            {pair.hasDescriptionB ? "B present" : "B absent"}
-                          </td>
-                          <td>
-                            {pair.hasOwnerNoteA ? "A present" : "A absent"};{" "}
-                            {pair.hasOwnerNoteB ? "B present" : "B absent"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {manifestPageCount > 1 && (
-                  <div
-                    className="redundancy-manifest-pagination redundancy-manifest-pagination-bottom"
-                    role="group"
-                    aria-label="Manifest page controls after table"
-                  >
-                    <span>
-                      Page {manifestPage + 1} of {manifestPageCount}
-                    </span>
-                    <div className="redundancy-page-buttons">
-                      <button
-                        className="btn btn-secondary"
-                        disabled={manifestPage === 0}
-                        onClick={() => setManifestPage((page) => Math.max(0, page - 1))}
-                      >
-                        Previous pair page
-                      </button>
-                      <button
-                        className="btn btn-secondary"
-                        disabled={manifestPage + 1 >= manifestPageCount}
-                        onClick={() =>
-                          setManifestPage((page) => Math.min(manifestPageCount - 1, page + 1))
-                        }
-                      >
-                        Next pair page
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {deliveryComplete && (
-                  <div className="redundancy-authorize" ref={authorizeRef}>
-                    {manifest.signalScope !== "description-only" ? (
+                  <h3 id="run-preview-heading">Before you run</h3>
+                  <p>
+                    <strong>{preview.provider}</strong> · model <strong>{preview.modelId}</strong>.{" "}
+                    {preview.pairCount} game pairs from {preview.eligibleGameCount} eligible games;
+                    descriptions are available for {preview.descriptionBearingPairCount} pairs and
+                    notes for {preview.noteBearingPairCount} pair
+                    {preview.noteBearingPairCount === 1 ? "" : "s"}.
+                  </p>
+                  <p>
+                    Game names
+                    {preview.signalScope.description && preview.descriptionBearingPairCount > 0
+                      ? " and cached BoardGameGeek descriptions"
+                      : ""}{" "}
+                    may be sent to {preview.provider}
+                    {preview.signalScope.ownerNotes && preview.noteBearingPairCount > 0
+                      ? preview.noteTransmissionPermitted
+                        ? ". Note text is sent only if you allow it below; without permission, note-based results may remain incomplete"
+                        : ". Owner notes are in scope, but this source does not permit transmitting them; note-based results may remain incomplete"
+                      : ". No owner-note text will be sent in this run"}
+                    . Provider retention is unknown: {preview.retentionCaveat}
+                  </p>
+                  <p>
+                    Up to {preview.limits.maxProviderAttempts} HTTP attempts. A run can stop early
+                    and leave partial results. The reported-token stop threshold (
+                    {preview.limits.reportedTokenStopThreshold.toLocaleString()} tokens) is not a
+                    hard billing limit.
+                  </p>
+                  <p>
+                    {preview.scoringEffect === "integrated-fitness"
+                      ? "Semantic results affect fitness scores."
+                      : "Semantic results are annotations only."}{" "}
+                    Until every needed pair has current results, scoring falls back to factual
+                    comparisons. Preview expires {new Date(preview.expiresAt).toLocaleString()}.
+                  </p>
+                  {preview.noteBearingPairCount > 0 &&
+                    preview.signalScope.ownerNotes &&
+                    preview.noteTransmissionPermitted && (
                       <label className="redundancy-setting-row">
                         <span>
-                          For this execution only, permit transmitting owner notes to{" "}
-                          {manifest.providerId} ({manifest.modelId})
+                          For this run only, allow owner notes to be sent to {preview.provider}.
                         </span>
                         <input
                           type="checkbox"
-                          checked={noteTransmission}
-                          onChange={(e) => setNoteTransmission(e.target.checked)}
+                          checked={noteTransmissionAuthorized}
+                          onChange={(e) => setNoteTransmissionAuthorized(e.target.checked)}
                         />
                       </label>
-                    ) : (
-                      <p className="loading-text">
-                        BGG descriptions only: no owner-note text will be sent to JEV.
-                      </p>
                     )}
-                    <label className="redundancy-setting-row">
-                      <span>
-                        For this execution only, permit use of cached note-derived judgments
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={cachedNotes}
-                        onChange={(e) => setCachedNotes(e.target.checked)}
-                      />
-                    </label>
-                    <label className="redundancy-setting-row">
-                      <span>
-                        I reviewed all {manifest.pairCount} pairs and authorize one refresh within
-                        the disclosed budget.
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={ack}
-                        onChange={(e) => setAck(e.target.checked)}
-                      />
-                    </label>
-                    <button
-                      className="btn btn-primary"
-                      disabled={
-                        busy ||
-                        !ack ||
-                        (manifest.signalScope !== "description-only" && !noteTransmission)
-                      }
-                      onClick={() => void start()}
-                    >
-                      Authorize one JEV refresh
-                    </button>
-                    <p className="loading-text">
-                      No refresh runs unless you select this authorization. Settings saves and
-                      pair-list preparation never contact JEV.
+                  {!preview.providerConfigured && (
+                    <p className="redundancy-inline-guidance" role="status">
+                      No provider key is configured. The run can still reuse cached results; pairs
+                      without a cached result may be unavailable.
                     </p>
-                  </div>
-                )}
-              </div>
-            )}
-            {(commandId || refresh?.execution) && (
-              <div className="redundancy-refresh-status" role="status">
-                <h3>Refresh progress</h3>
-                {refresh?.execution ? (
-                  <>
-                    <p>
-                      Refresh: {refresh.execution.status}. {refresh.execution.completedPairCount} of{" "}
-                      {refresh.pairCount ?? "?"} pairs complete; {refresh.execution.failedPairCount}{" "}
-                      failed. {refresh.execution.attemptCount} attempts.
+                  )}
+                  {!preview.withinPairLimit && (
+                    <p className="redundancy-inline-guidance" role="status">
+                      This preview exceeds the {preview.limits.maxEligiblePairs} eligible-pair
+                      limit. Reduce the scope before running.
                     </p>
-                    {["running", "queued"].includes(refresh.execution.status) && (
-                      <button
-                        className="btn btn-secondary"
-                        disabled={busy || !commandId}
-                        onClick={() => void cancel()}
-                      >
-                        Cancel refresh
-                      </button>
-                    )}
-                    {["failed", "cancelled", "canceled", "incomplete"].includes(
-                      refresh.execution.status,
-                    ) && (
-                      <p>
-                        Refresh ended without a complete current result. Review status before
-                        preparing a new disclosure.
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <p>Waiting for daemon progress…</p>
-                )}
-                {["running", "queued"].includes(refresh?.execution?.status ?? "") && !commandId && (
-                  <p>
-                    The daemon reports an active refresh. Confirming its current cancellation ID;
-                    cancellation stays disabled until that ID matches the active disclosure.
+                  )}
+                  {preview.pairCount === 0 && (
+                    <p className="redundancy-inline-guidance" role="status">
+                      There are no eligible pairs to refresh right now.
+                    </p>
+                  )}
+                  <button
+                    className="btn btn-primary"
+                    disabled={busy || !preview.withinPairLimit || preview.pairCount === 0}
+                    onClick={() => void start()}
+                  >
+                    Run one refresh
+                  </button>
+                </div>
+              )}
+              <div className="redundancy-refresh-status">
+                <h3>Refresh status</h3>
+                <button
+                  className="btn btn-secondary"
+                  disabled={busy}
+                  onClick={() =>
+                    void readRunSnapshot()
+                      .then((latest) => {
+                        setRefresh(latest.refresh);
+                        setActiveRun(latest.activeRun);
+                      })
+                      .catch((e: unknown) =>
+                        setStatusError(e instanceof Error ? e.message : "Could not reload status."),
+                      )
+                  }
+                >
+                  Reload status
+                </button>
+                {refresh && (
+                  <p role="status">
+                    {statusCopy[refresh.status] ?? refresh.status}.{" "}
+                    {refresh.pairCount === null
+                      ? "Pair count unavailable."
+                      : `${refresh.pairCount} eligible pairs.`}{" "}
+                    {progressCopy(refresh, activeRun)}
                   </p>
                 )}
-                {statusError && (
-                  <p role="alert">
-                    Status unavailable: {statusError}. Progress will retry automatically; this does
-                    not start another request.
+                {activeRun && (
+                  <button
+                    className="btn btn-secondary"
+                    disabled={busy}
+                    onClick={() => void cancel(activeRun.runId)}
+                  >
+                    Cancel live run
+                  </button>
+                )}
+                {refresh?.progress?.stopReason === "provider-limit" && (
+                  <p role="status">
+                    A provider request or reported-token limit stopped this run. Results may be
+                    partial.
                   </p>
                 )}
+                {refresh?.progress?.stopReason === "provider-unconfigured" && (
+                  <p role="status">No provider key was available for remaining comparisons.</p>
+                )}
+                {statusError && <p role="alert">Status could not be loaded: {statusError}</p>}
               </div>
-            )}
+            </div>
           </section>
         </main>
       </div>

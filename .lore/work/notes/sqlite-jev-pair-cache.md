@@ -163,6 +163,26 @@ Checkpointed on `design/jev-similarity`, after Phase 2d10c. The overall Phase
   `bun run format:check`, and `git diff --check` passed.
 - Independent `bun-typescript-reviewer` accepted the implementation.
 
+## Phase 2d11n — direct Jev Run web experience
+
+Checkpointed on `design/jev-similarity`, after Phase 2d11m. The overall Phase 2
+implementation and feature remain in progress.
+
+- Replaced the redundancy manifest flow with an aggregate preview and explicit
+  one-click Run, optional per-run note transmission consent, clearly separated
+  settings saves, process-live versus historical/partial/provider-limit
+  progress, targeted cancellation, and mobile support.
+- Removed obsolete manifest UI, styling, and tests. No live provider calls or
+  owner data were accessed.
+
+### Validation evidence for this checkpoint
+
+- Full Bun suite: 3,662 passed, 1 skipped, 0 failed.
+- Typecheck, browser typecheck, lint, format check, and `git diff --check` passed.
+- Isolated-port Playwright: 16 mobile and desktop cases passed. Four behavior
+  reviewer findings were resolved; independent designer UX review found no
+  material defect.
+
 ## Phase 2d11g — aggregate Jev status service
 
 Checkpointed on `design/jev-similarity`, after Phase 2d11f. The overall Phase 2
