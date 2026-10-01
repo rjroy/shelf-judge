@@ -303,6 +303,7 @@ export {
   CollectionSchemaV9,
   CollectionSchemaV10,
   SemanticRedundancyStateSchema,
+  SemanticRedundancySettingsSchema,
   SemanticDisclosureManifestSchema,
   SemanticExecutionSchema,
   SemanticPublishedPairOutcomeSchema,

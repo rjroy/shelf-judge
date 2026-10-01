@@ -1688,21 +1688,23 @@ export const SemanticRedundancyGenerationSchema = z
       });
   });
 
-export const SemanticRedundancyStateSchema = z
+export const SemanticRedundancySettingsSchema = z
   .object({
-    settings: z
+    enabled: z.boolean(),
+    weights: z
       .object({
-        enabled: z.boolean(),
-        weights: z
-          .object({
-            factual: SemanticWeightSchema,
-            description: SemanticWeightSchema,
-            ownerNote: SemanticWeightSchema,
-          })
-          .strict(),
-        cachedOwnerNoteUse: z.boolean(),
+        factual: SemanticWeightSchema,
+        description: SemanticWeightSchema,
+        ownerNote: SemanticWeightSchema,
       })
       .strict(),
+    cachedOwnerNoteUse: z.boolean(),
+  })
+  .strict();
+
+export const SemanticRedundancyStateSchema = z
+  .object({
+    settings: SemanticRedundancySettingsSchema,
     evidenceEpoch: SafeEpochSchema,
     consentEpoch: SafeEpochSchema,
     factualWeightsEpoch: SafeEpochSchema.default(0),
@@ -1981,19 +1983,7 @@ export const CollectionSchemaV9 = CollectionSchemaV9Base.strict().superRefine((s
 
 const SemanticRedundancyStateV10Schema = z
   .object({
-    settings: z
-      .object({
-        enabled: z.boolean(),
-        weights: z
-          .object({
-            factual: SemanticWeightSchema,
-            description: SemanticWeightSchema,
-            ownerNote: SemanticWeightSchema,
-          })
-          .strict(),
-        cachedOwnerNoteUse: z.boolean(),
-      })
-      .strict(),
+    settings: SemanticRedundancySettingsSchema,
     evidenceEpoch: SafeEpochSchema,
     consentEpoch: SafeEpochSchema,
     factualWeightsEpoch: SafeEpochSchema,

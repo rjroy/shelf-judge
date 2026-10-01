@@ -176,8 +176,14 @@ function invalidatesSemanticDisplayArtifacts(prior: Collection, accepted: Collec
   return (
     prior.semanticRedundancy.evidenceEpoch !== accepted.semanticRedundancy.evidenceEpoch ||
     prior.semanticRedundancy.consentEpoch !== accepted.semanticRedundancy.consentEpoch ||
-    canonicalSha256(prior.semanticRedundancy.publishedGeneration) !==
-      canonicalSha256(accepted.semanticRedundancy.publishedGeneration)
+    prior.semanticRedundancy.factualWeightsEpoch !==
+      accepted.semanticRedundancy.factualWeightsEpoch ||
+    prior.semanticRedundancy.factualWeightsFingerprint !==
+      accepted.semanticRedundancy.factualWeightsFingerprint ||
+    (prior.schemaVersion === 9 &&
+      accepted.schemaVersion === 9 &&
+      canonicalSha256(prior.semanticRedundancy.publishedGeneration) !==
+        canonicalSha256(accepted.semanticRedundancy.publishedGeneration))
   );
 }
 

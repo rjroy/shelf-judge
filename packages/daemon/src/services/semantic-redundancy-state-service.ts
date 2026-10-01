@@ -1,6 +1,8 @@
 import {
-  SemanticRedundancyStateSchema,
+  SemanticRedundancySettingsSchema,
   type Collection,
+  type CollectionV9,
+  type CollectionV10,
   type SemanticRedundancySettings,
 } from "@shelf-judge/shared";
 import { canonicalSha256 } from "./profile-source-coordinator.js";
@@ -22,7 +24,8 @@ export type SemanticStateMutationResult<Value> =
   | { outcome: "invalid-state" };
 
 /** Clear deprecated v9 semantic results and in-flight state before canonical edits validate. */
-function discardLegacySemanticPayload(collection: Collection): void {
+function discardLegacySemanticPayload<T extends CollectionV9 | CollectionV10>(collection: T): void {
+  if (collection.schemaVersion !== 9) return;
   const state = collection.semanticRedundancy;
   state.disclosure = null;
   state.disclosureManifest = null;
@@ -33,41 +36,26 @@ function discardLegacySemanticPayload(collection: Collection): void {
   state.publishedGeneration = null;
 }
 
-function axisEvidence(axis: Collection["axes"][number]): Record<string, unknown> {
-  const {
-    id,
-    weight,
-    enabled,
-    source,
-    derivedField,
-    configuration,
-    preferenceShape,
-    idealValue,
-    tolerance,
-    toleranceWidth,
-    leanDirection,
-    veto,
-    legacyField,
-    reason,
-  } = axis as Collection["axes"][number] & Record<string, unknown>;
-  return Object.fromEntries(
-    Object.entries({
-      id,
-      weight,
-      enabled,
-      source,
-      derivedField,
-      configuration,
-      preferenceShape,
-      idealValue,
-      tolerance,
-      toleranceWidth,
-      leanDirection,
-      veto,
-      legacyField,
-      reason,
-    }).filter(([, value]) => value !== undefined),
-  );
+type SemanticCollection = CollectionV9 | CollectionV10;
+
+function axisEvidence(axis: SemanticCollection["axes"][number]): Record<string, unknown> {
+  const evidence = {
+    id: axis.id,
+    weight: axis.weight,
+    enabled: axis.enabled,
+    source: axis.source,
+    preferenceShape: axis.preferenceShape,
+    idealValue: axis.idealValue,
+    tolerance: axis.tolerance,
+    toleranceWidth: axis.toleranceWidth,
+    leanDirection: axis.leanDirection,
+    veto: axis.veto,
+    ...(axis.source === "derived"
+      ? { derivedField: axis.derivedField, configuration: axis.configuration }
+      : {}),
+    ...(axis.source === "legacy" ? { legacyField: axis.legacyField, reason: axis.reason } : {}),
+  };
+  return Object.fromEntries(Object.entries(evidence).filter(([, value]) => value !== undefined));
 }
 
 function evidenceRecord(value: {
@@ -84,7 +72,7 @@ function amountEvidence(value: { hundredths: number; source: string }): unknown 
   return { hundredths: value.hundredths, source: value.source };
 }
 
-function benchmarkEvidence(collection: Collection): unknown {
+function benchmarkEvidence(collection: SemanticCollection): unknown {
   const benchmark = collection.entertainmentBenchmark;
   if (benchmark === null) return null;
   return benchmark.state === "configured"
@@ -92,7 +80,7 @@ function benchmarkEvidence(collection: Collection): unknown {
     : benchmark;
 }
 
-function gameEvidence(game: Collection["games"][number]): Record<string, unknown> {
+function gameEvidence(game: SemanticCollection["games"][number]): Record<string, unknown> {
   const note =
     game.ownerNote.state === "present"
       ? { state: game.ownerNote.state, version: game.ownerNote.version, text: game.ownerNote.text }
@@ -196,7 +184,7 @@ export function semanticOwnerNoteSourceFingerprint(
 }
 
 /** Stable collection-owned inputs that determine scoring or game eligibility. */
-export function collectionRedundancyEvidenceIdentity(collection: Collection): string {
+export function collectionRedundancyEvidenceIdentity(collection: SemanticCollection): string {
   return canonicalSha256({
     axes: collection.axes
       .map(axisEvidence)
@@ -212,7 +200,10 @@ export function collectionRedundancyEvidenceIdentity(collection: Collection): st
 }
 
 /** Called by the serialized collection mutation boundary before evidence changes are validated. */
-export function applySemanticEvidenceTransition(prior: Collection, candidate: Collection): void {
+export function applySemanticEvidenceTransition<T extends CollectionV9 | CollectionV10>(
+  prior: T,
+  candidate: T,
+): void {
   if (
     collectionRedundancyEvidenceIdentity(prior) === collectionRedundancyEvidenceIdentity(candidate)
   ) {
@@ -276,11 +267,10 @@ export function createSemanticRedundancyStateService(deps: {
         const state = collection.semanticRedundancy;
         if (!epochsMatch(collection, expected))
           return { changed: false, value: { outcome: "stale", current: currentEpoch(collection) } };
-        const parsed = SemanticRedundancyStateSchema.safeParse({ ...state, settings });
+        const parsed = SemanticRedundancySettingsSchema.safeParse(settings);
         if (!parsed.success) return { changed: false, value: { outcome: "invalid-state" } };
-        const sameSettings =
-          canonicalSha256(state.settings) === canonicalSha256(parsed.data.settings);
-        const firstOptIn = parsed.data.settings.enabled && !state.firstOptInInitialized;
+        const sameSettings = canonicalSha256(state.settings) === canonicalSha256(parsed.data);
+        const firstOptIn = parsed.data.enabled && !state.firstOptInInitialized;
         if (sameSettings && !firstOptIn)
           return {
             changed: false,
@@ -288,9 +278,9 @@ export function createSemanticRedundancyStateService(deps: {
           };
         if (state.consentEpoch >= Number.MAX_SAFE_INTEGER)
           return { changed: false, value: { outcome: "invalid-state" } };
-        state.settings = parsed.data.settings;
+        state.settings = parsed.data;
         state.consentEpoch += 1;
-        if (parsed.data.settings.enabled) state.firstOptInInitialized = true;
+        if (parsed.data.enabled) state.firstOptInInitialized = true;
         discardLegacySemanticPayload(collection);
         return {
           changed: true,

@@ -5,6 +5,7 @@ import {
   SemanticExecutionSchema,
   SemanticPublishedPairOutcomeSchema,
   SemanticRedundancyGenerationSchema,
+  SemanticRedundancySettingsSchema,
   SemanticRedundancyStateSchema,
   semanticDisclosureManifestDigest,
 } from "../src/index.js";
@@ -72,6 +73,18 @@ const scoredBase = {
 };
 
 describe("semantic redundancy provenance schema", () => {
+  test("validates strict settings independently of legacy semantic payload", () => {
+    const settings = {
+      enabled: true,
+      weights: { factual: 7, description: 0, ownerNote: 0 },
+      cachedOwnerNoteUse: false,
+    };
+    expect(SemanticRedundancySettingsSchema.safeParse(settings).success).toBe(true);
+    expect(
+      SemanticRedundancySettingsSchema.safeParse({ ...settings, unknownLegacyField: true }).success,
+    ).toBe(false);
+  });
+
   test("accepts an empty and maximum-size canonical exact manifest, but no extra payload", () => {
     expect(SemanticDisclosureManifestSchema.safeParse(manifestFor([])).success).toBe(true);
     const maximum = manifestFor(

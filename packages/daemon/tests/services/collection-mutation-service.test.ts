@@ -4,6 +4,7 @@ import {
   createInitialSemanticRedundancyState,
   type SemanticPairJudgment,
   type SemanticPublishedSignalJudgment,
+  type CollectionV10,
 } from "@shelf-judge/shared";
 import type { Collection } from "@shelf-judge/shared";
 import {
@@ -18,9 +19,12 @@ import {
 } from "../../src/services/collection-mutation-service.js";
 import {
   createSemanticRedundancyStateService,
+  applySemanticEvidenceTransition,
+  collectionRedundancyEvidenceIdentity,
   semanticDescriptionSourceFingerprint,
   semanticOwnerNoteSourceFingerprint,
 } from "../../src/services/semantic-redundancy-state-service.js";
+import { canonicalSha256 } from "../../src/services/profile-source-coordinator.js";
 import type { Logger } from "../../src/services/logger.js";
 import type {
   CollectionPersistence,
@@ -288,6 +292,105 @@ function controlledStorage(options: { failFirstSave?: boolean } = {}) {
 }
 
 describe("CollectionMutationService", () => {
+  test("omits undefined optional axis evidence and persists ordinary axis mutations", async () => {
+    const initial = collection();
+    const axis = {
+      id: "axis-1",
+      name: "Preference",
+      description: null,
+      weight: 1,
+      enabled: true,
+      source: "personal",
+      createdAt: initialTime,
+      updatedAt: initialTime,
+    } satisfies Collection["axes"][number];
+    initial.axes = [axis];
+    const expectedInitialIdentity = canonicalSha256({
+      axes: [{ id: "axis-1", weight: 1, enabled: true, source: "personal" }],
+      games: [],
+      entertainmentBenchmark: null,
+      bggPlaySessions: [],
+    });
+    expect(collectionRedundancyEvidenceIdentity(initial)).toBe(expectedInitialIdentity);
+
+    let stored = structuredClone(initial);
+    const storage: CollectionReader & CollectionPersistence = {
+      loadCollection: () => Promise.resolve(structuredClone(stored)),
+      saveCollection: (next) => {
+        stored = structuredClone(next);
+        return Promise.resolve();
+      },
+    };
+    const mutations = createCollectionMutationService({ storageService: storage });
+    await mutations.mutate({ operation: "axis.update", trigger: "owner" }, (candidate) => {
+      candidate.axes[0].weight = 2;
+      return { changed: true, value: undefined };
+    });
+
+    expect(stored.axes[0]?.weight).toBe(2);
+    expect(stored.semanticRedundancy.evidenceEpoch).toBe(1);
+    expect(collectionRedundancyEvidenceIdentity(stored)).not.toBe(expectedInitialIdentity);
+  });
+
+  test("v10 evidence transitions advance only the retained evidence epoch", () => {
+    const v9 = collection();
+    const prior: CollectionV10 = {
+      ...v9,
+      schemaVersion: 10,
+      semanticRedundancy: {
+        settings: v9.semanticRedundancy.settings,
+        evidenceEpoch: 3,
+        consentEpoch: 2,
+        factualWeightsEpoch: 4,
+        factualWeightsFingerprint: "a".repeat(64),
+        firstOptInInitialized: true,
+      },
+    };
+    const candidate: CollectionV10 = structuredClone(prior);
+    candidate.entertainmentBenchmark = {
+      state: "configured",
+      amount: { hundredths: 500, source: "manual", confirmedAt: initialTime },
+    };
+
+    applySemanticEvidenceTransition(prior, candidate);
+
+    expect(candidate.semanticRedundancy).toEqual({
+      ...prior.semanticRedundancy,
+      evidenceEpoch: 4,
+    });
+  });
+
+  test("deleting a game clears orphaned v9 judgments before validation without touching wishlist", async () => {
+    const initial = collection();
+    initial.games = [
+      semanticGame("game-a", "A", "description"),
+      semanticGame("game-b", "B", "description"),
+    ];
+    initial.semanticRedundancy.pairJudgments = [
+      { gameA: "game-a", gameB: "game-b", description: null, ownerNote: null },
+    ];
+    let stored = structuredClone(initial);
+    const wishlist = [{ id: "wishlist-entry" }];
+    const storage: CollectionReader & CollectionPersistence = {
+      loadCollection: () => Promise.resolve(structuredClone(stored)),
+      saveCollection: (next) => {
+        stored = structuredClone(next);
+        return Promise.resolve();
+      },
+    };
+    const mutations = createCollectionMutationService({ storageService: storage });
+
+    await mutations.mutate({ operation: "game.remove", trigger: "owner" }, (candidate) => {
+      candidate.games = candidate.games.filter(({ id }) => id !== "game-a");
+      return { changed: true, value: undefined };
+    });
+
+    expect(stored.games.map(({ id }) => id)).toEqual(["game-b"]);
+    expect(stored.semanticRedundancy.evidenceEpoch).toBe(1);
+    expect(stored.semanticRedundancy.pairJudgments).toEqual([]);
+    expect(wishlist).toEqual([{ id: "wishlist-entry" }]);
+  });
+
   test("uses monotonic collection revision semantics", () => {
     const source: Collection = {
       ...collection(),
@@ -404,6 +507,43 @@ describe("CollectionMutationService", () => {
 
     expect(fileOps.files.get("/test/data/wishlist.json")).toBe("wishlist bytes");
     expect(ctx.saveCount()).toBe(1);
+  });
+
+  test("factual-weight durable fence changes purge semantic artifacts without touching wishlist", async () => {
+    let stored = collection();
+    const storage: CollectionReader & CollectionPersistence = {
+      loadCollection: () => Promise.resolve(structuredClone(stored)),
+      saveCollection: (next) => {
+        stored = structuredClone(next);
+        return Promise.resolve();
+      },
+    };
+    const fileOps = createMockFileOps({
+      "/test/data/profile.json": "stale profile",
+      "/test/data/attention-candidates.json": "stale candidates",
+      "/test/data/wishlist.json": "wishlist bytes",
+    });
+    const service = createCollectionMutationService({
+      storageService: storage,
+      semanticDisplayArtifactContext: createCollectionArtifactContext("/test/data", fileOps, {
+        log: () => {},
+        warn: () => {},
+        error: () => {},
+      }),
+    });
+
+    await service.mutate(
+      { operation: "semantic-redundancy.factual-weights.invalidate", trigger: "test" },
+      (candidate) => {
+        candidate.semanticRedundancy.factualWeightsEpoch += 1;
+        candidate.semanticRedundancy.factualWeightsFingerprint = "c".repeat(64);
+        return { changed: true, value: undefined };
+      },
+    );
+
+    expect(fileOps.files.has("/test/data/profile.json")).toBe(false);
+    expect(fileOps.files.has("/test/data/attention-candidates.json")).toBe(false);
+    expect(fileOps.files.get("/test/data/wishlist.json")).toBe("wishlist bytes");
   });
 
   test("does not purge on no-op or semantic bookkeeping-only checkpoint writes", async () => {
