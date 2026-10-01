@@ -163,6 +163,24 @@ Checkpointed on `design/jev-similarity`, after Phase 2d10c. The overall Phase
   `bun run format:check`, and `git diff --check` passed.
 - Independent `bun-typescript-reviewer` accepted the implementation.
 
+## Phase 2d11c — per-pair Run request and row mapping
+
+Checkpointed on `design/jev-similarity`. The overall Phase 2 implementation
+and feature remain in progress.
+
+- Added a pure per-pair C/D hit/miss adapter: it requests only missing signals,
+  requires both the current note permission and one-Run transmission
+  authorization only when notes will actually be sent, and maps complete
+  validated results to numeric rows with exact shared or independent
+  dependency provenance. Plaintext is excluded from persisted rows.
+- No provider invocation or Run route was added; this is not yet runtime-wired.
+
+### Validation evidence for this checkpoint
+
+- Full Bun test suite: 3,580 passed, 1 skipped.
+- Typecheck, browser checks, lint, format check, and `git diff --check` passed.
+- Independent reviewer accepted JRP-1 and JRP-2.
+
 ## Phase 2d11b — immutable Jev Run pair scope
 
 Checkpointed on `design/jev-similarity`. The overall Phase 2 implementation
