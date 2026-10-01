@@ -31,3 +31,22 @@ Checkpointed on `design/jev-similarity`, against baseline `f0785bd`.
 - After Prettier correction, focused tests: 31 passed.
 - Independent `bun-typescript-reviewer` review: CUTOVER-1 resolved; no other
   blockers reported.
+
+## Phase 2d8 — daemon-owned cache lifecycle
+
+Checkpointed on `design/jev-similarity`, after Phase 2d7 (`501d3dd`). The
+overall Phase 2 implementation and feature remain in progress.
+
+- The daemon opens a disposable SQLite pair cache after collection migration.
+- If opening the cache fails, the cache remains unavailable and the daemon
+  continues without it (fail closed). The cache is closed on API/signal
+  shutdown and on startup failure.
+- This slice does not inject the cache into services or infer pair results.
+  No provider calls were run.
+
+### Validation evidence for this checkpoint
+
+- Bun test suite: 3,512 passed, 1 skipped.
+- Typecheck and browser checks: passed.
+- Changed-file ESLint and Prettier: passed.
+- Independent reviewer: accepted.

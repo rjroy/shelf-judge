@@ -38,6 +38,7 @@ import { createPurchaseUtilizationService } from "./services/purchase-utilizatio
 import { createCollectionSnapshotService } from "./services/collection-snapshot-service.js";
 import { createCollectionSnapshotCacheService } from "./services/collection-snapshot-cache-service.js";
 import { createSemanticRedundancyStateService } from "./services/semantic-redundancy-state-service.js";
+import { openJevPairCacheLifecycle } from "./services/jev-pair-cache-lifecycle.js";
 
 const logger = createLogger("daemon");
 
@@ -77,285 +78,296 @@ export async function main() {
   // Run versioned collection migration and artifact invalidation before routes can fire.
   // The first request therefore sees only a validated current collection and clean caches.
   await storageService.loadCollection();
-  let displayedFitnessService: DisplayedFitnessService | null = null;
-  const dispositionOracle = createAttentionCandidateOracle(() => {
-    if (displayedFitnessService === null)
-      throw new Error("Displayed fitness is unavailable during attention initialization");
-    return displayedFitnessService;
-  });
-  const dispositionSource = createAttentionCandidateProductionSourceLoader(storageService);
-  const dispositionWinners = async (
-    _prior: import("@shelf-judge/shared").Collection,
-    collection: import("@shelf-judge/shared").Collection,
-    _context: import("./services/collection-mutation-service.js").CollectionMutationContext,
-    gameIds: readonly string[],
-  ) => {
-    const source = await dispositionSource();
-    return dispositionOracle.evaluateStoredRules(
-      { ...source, collection: { ...collection, attentionDispositions: [] } },
-      new Date().toISOString(),
-      collection.attentionDispositions
-        .filter((disposition) => gameIds.includes(disposition.gameId))
-        .map((disposition) => ({ gameId: disposition.gameId, ruleId: disposition.ruleId })),
-    );
-  };
-  let attentionCandidates: AttentionCandidateService | null = null;
-  let dispositionMaintenance: ReturnType<
-    typeof createAttentionDispositionGlobalMaintenance
-  > | null = null;
-  const collectionMutationService = createCollectionMutationService({
-    storageService,
-    semanticDisplayArtifactContext: createCollectionArtifactContext(
-      envConfig.dataDir,
-      fileOps,
-      logger,
-    ),
-    dispositionWinners,
-    async postCommitObserver(event) {
-      // Disposition commands report their own post-commit availability to the
-      // caller, so their maintenance must not be repeated by this observer.
-      if (
-        attentionCandidates === null ||
-        event.impact === null ||
-        event.context.trigger.startsWith("attention:")
-      )
-        return;
-      await attentionCandidates.maintainAfterCollectionCommit(event.impact);
-    },
-  });
-  const reflectionRuntime = createReflectionRuntime({
-    dataDir: envConfig.dataDir,
-    fileOps,
-    storageService,
-    providerIdentity:
-      groundedAnalysisProvider.configurationStatus.status === "configured"
-        ? groundedAnalysisProvider.configurationStatus.identity
-        : null,
-  });
-  logger.log("reflection recovery started", { trigger: "startup" });
+  const jevPairCacheLifecycle = await openJevPairCacheLifecycle(envConfig.dataDir, logger);
+  // This local is the injection point for daemon services that consume JEV cache state.
+  const jevPairCache = jevPairCacheLifecycle.cache;
+  void jevPairCache;
   try {
-    await reflectionRuntime.recover();
-    logger.log("reflection recovery completed", { trigger: "startup" });
-  } catch (error) {
-    logger.error("reflection recovery failed", {
-      trigger: "startup",
-      error: toErrorMessage(error),
+    let displayedFitnessService: DisplayedFitnessService | null = null;
+    const dispositionOracle = createAttentionCandidateOracle(() => {
+      if (displayedFitnessService === null)
+        throw new Error("Displayed fitness is unavailable during attention initialization");
+      return displayedFitnessService;
     });
-    throw error;
-  }
-
-  const fitnessService = createFitnessService();
-
-  const bggClient = createBggClient({
-    config: { bggAuthToken: appConfig.bggAuthToken, username: appConfig.username },
-  });
-
-  const axisService = createAxisService({ storageService, collectionMutationService });
-  attentionCandidates = createAttentionCandidateService({
-    coordinator: profileSourceCoordinatorFor(storageService),
-    storage: attentionCandidateStorageFor(storageService),
-    productionStorage: storageService,
-    clock: { now: () => new Date() },
-    oracle: dispositionOracle,
-    dependenciesForGame: productionAttentionCandidateDependenciesForGame,
-    recoveryRequired: () => dispositionMaintenance?.recoveryRequired() ?? false,
-  });
-  const maintainCandidateSource = (dispositionMaintenance =
-    createAttentionDispositionGlobalMaintenance({
-      collectionMutations: collectionMutationService,
-      storedRuleMatches: async (dispositions) => {
-        const source = await dispositionSource();
-        return dispositionOracle.evaluateStoredRules(
-          { ...source, collection: { ...source.collection, attentionDispositions: [] } },
-          new Date().toISOString(),
-          dispositions.map((disposition) => ({
-            gameId: disposition.gameId,
-            ruleId: disposition.ruleId,
-          })),
-        );
-      },
-      maintainCandidates: async (impact) => {
-        await attentionCandidates?.maintain(impact);
-      },
-      invalidateCandidates: async () => {
-        await attentionCandidates?.invalidate();
-      },
-    }));
-  const attentionCandidateRecovery = createAttentionCandidateMaintenanceRecovery({
-    recoverCompatibility: () => maintainCandidateSource.recover(),
-    ensureFresh: () => {
-      if (attentionCandidates === null) throw new Error("Attention candidates are unavailable");
-      return attentionCandidates.ensureFresh();
-    },
-  });
-  const attentionDispositionService = createAttentionDispositionService({
-    collectionMutations: collectionMutationService,
-    clock: { now: () => new Date() },
-    currentSelection: async (collection, gameId) => {
+    const dispositionSource = createAttentionCandidateProductionSourceLoader(storageService);
+    const dispositionWinners = async (
+      _prior: import("@shelf-judge/shared").Collection,
+      collection: import("@shelf-judge/shared").Collection,
+      _context: import("./services/collection-mutation-service.js").CollectionMutationContext,
+      gameIds: readonly string[],
+    ) => {
       const source = await dispositionSource();
-      const evaluation = await dispositionOracle.evaluate(
-        { ...source, collection },
+      return dispositionOracle.evaluateStoredRules(
+        { ...source, collection: { ...collection, attentionDispositions: [] } },
         new Date().toISOString(),
-        [gameId],
+        collection.attentionDispositions
+          .filter((disposition) => gameIds.includes(disposition.gameId))
+          .map((disposition) => ({ gameId: disposition.gameId, ruleId: disposition.ruleId })),
       );
-      const winner = evaluation.evaluations.find(
-        (candidate) => candidate.gameId === gameId,
-      )?.winner;
-      return winner === null || winner === undefined
-        ? null
-        : {
-            gameId,
-            ruleId: winner.ruleId,
-            ruleVersion: winner.ruleVersion,
-            fingerprint: winner.fingerprint,
-          };
-    },
-    maintenance: {
-      async maintainAfterCollectionCommit(impact) {
-        if (attentionCandidates === null) return { state: "unavailable" };
-        return attentionCandidates.maintainAfterCollectionCommit(impact);
+    };
+    let attentionCandidates: AttentionCandidateService | null = null;
+    let dispositionMaintenance: ReturnType<
+      typeof createAttentionDispositionGlobalMaintenance
+    > | null = null;
+    const collectionMutationService = createCollectionMutationService({
+      storageService,
+      semanticDisplayArtifactContext: createCollectionArtifactContext(
+        envConfig.dataDir,
+        fileOps,
+        logger,
+      ),
+      dispositionWinners,
+      async postCommitObserver(event) {
+        // Disposition commands report their own post-commit availability to the
+        // caller, so their maintenance must not be repeated by this observer.
+        if (
+          attentionCandidates === null ||
+          event.impact === null ||
+          event.context.trigger.startsWith("attention:")
+        )
+          return;
+        await attentionCandidates.maintainAfterCollectionCommit(event.impact);
       },
-    },
-  });
-  const tournamentService = createTournamentService({
-    storageService,
-    afterSourceSave: maintainCandidateSource,
-  });
-  const gameService = createGameService({
-    storageService,
-    collectionMutationService,
-    fitnessService,
-    bggClient,
-    onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
-    deletionLifecycle: reflectionRuntime.gameDeletionLifecycle,
-  });
-  const intentionService = createIntentionService({ collectionMutationService });
-  const ownerGameNoteService = createOwnerGameNoteService({
-    collectionMutationService,
-    invalidationLifecycle: reflectionRuntime.noteInvalidationLifecycle,
-  });
-
-  const predictionService = createPredictionService({
-    storageService,
-    fitnessService,
-    tournamentService,
-    bggClient,
-    afterSourceSave: maintainCandidateSource,
-  });
-  displayedFitnessService = createDisplayedFitnessService({
-    gameService,
-    predictionService,
-    storageService,
-  });
-  const purchaseUtilizationService = createPurchaseUtilizationService({
-    storageService,
-    collectionMutationService,
-  });
-  const collectionSnapshotBuilder = createCollectionSnapshotService({
-    storageService,
-    gameService,
-    predictionService,
-    purchaseUtilizationService,
-  });
-  const collectionSnapshotService = createCollectionSnapshotCacheService({
-    builder: collectionSnapshotBuilder,
-    storageService,
-    coordinator: profileSourceCoordinatorFor(storageService),
-  });
-  let tournamentReconciliationChanged = false;
-  logger.log("tournament reconciliation started", { trigger: "startup" });
-  try {
-    const result = await tournamentService.reconcileWithCollection();
-    tournamentReconciliationChanged = result.changed;
-    logger.log("tournament reconciliation completed", { trigger: "startup", ...result });
-  } catch (error) {
-    logger.error("tournament reconciliation failed", {
-      trigger: "startup",
-      error: toErrorMessage(error),
     });
+    const reflectionRuntime = createReflectionRuntime({
+      dataDir: envConfig.dataDir,
+      fileOps,
+      storageService,
+      providerIdentity:
+        groundedAnalysisProvider.configurationStatus.status === "configured"
+          ? groundedAnalysisProvider.configurationStatus.identity
+          : null,
+    });
+    logger.log("reflection recovery started", { trigger: "startup" });
+    try {
+      await reflectionRuntime.recover();
+      logger.log("reflection recovery completed", { trigger: "startup" });
+    } catch (error) {
+      logger.error("reflection recovery failed", {
+        trigger: "startup",
+        error: toErrorMessage(error),
+      });
+      throw error;
+    }
+
+    const fitnessService = createFitnessService();
+
+    const bggClient = createBggClient({
+      config: { bggAuthToken: appConfig.bggAuthToken, username: appConfig.username },
+    });
+
+    const axisService = createAxisService({ storageService, collectionMutationService });
+    attentionCandidates = createAttentionCandidateService({
+      coordinator: profileSourceCoordinatorFor(storageService),
+      storage: attentionCandidateStorageFor(storageService),
+      productionStorage: storageService,
+      clock: { now: () => new Date() },
+      oracle: dispositionOracle,
+      dependenciesForGame: productionAttentionCandidateDependenciesForGame,
+      recoveryRequired: () => dispositionMaintenance?.recoveryRequired() ?? false,
+    });
+    const maintainCandidateSource = (dispositionMaintenance =
+      createAttentionDispositionGlobalMaintenance({
+        collectionMutations: collectionMutationService,
+        storedRuleMatches: async (dispositions) => {
+          const source = await dispositionSource();
+          return dispositionOracle.evaluateStoredRules(
+            { ...source, collection: { ...source.collection, attentionDispositions: [] } },
+            new Date().toISOString(),
+            dispositions.map((disposition) => ({
+              gameId: disposition.gameId,
+              ruleId: disposition.ruleId,
+            })),
+          );
+        },
+        maintainCandidates: async (impact) => {
+          await attentionCandidates?.maintain(impact);
+        },
+        invalidateCandidates: async () => {
+          await attentionCandidates?.invalidate();
+        },
+      }));
+    const attentionCandidateRecovery = createAttentionCandidateMaintenanceRecovery({
+      recoverCompatibility: () => maintainCandidateSource.recover(),
+      ensureFresh: () => {
+        if (attentionCandidates === null) throw new Error("Attention candidates are unavailable");
+        return attentionCandidates.ensureFresh();
+      },
+    });
+    const attentionDispositionService = createAttentionDispositionService({
+      collectionMutations: collectionMutationService,
+      clock: { now: () => new Date() },
+      currentSelection: async (collection, gameId) => {
+        const source = await dispositionSource();
+        const evaluation = await dispositionOracle.evaluate(
+          { ...source, collection },
+          new Date().toISOString(),
+          [gameId],
+        );
+        const winner = evaluation.evaluations.find(
+          (candidate) => candidate.gameId === gameId,
+        )?.winner;
+        return winner === null || winner === undefined
+          ? null
+          : {
+              gameId,
+              ruleId: winner.ruleId,
+              ruleVersion: winner.ruleVersion,
+              fingerprint: winner.fingerprint,
+            };
+      },
+      maintenance: {
+        async maintainAfterCollectionCommit(impact) {
+          if (attentionCandidates === null) return { state: "unavailable" };
+          return attentionCandidates.maintainAfterCollectionCommit(impact);
+        },
+      },
+    });
+    const tournamentService = createTournamentService({
+      storageService,
+      afterSourceSave: maintainCandidateSource,
+    });
+    const gameService = createGameService({
+      storageService,
+      collectionMutationService,
+      fitnessService,
+      bggClient,
+      onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
+      deletionLifecycle: reflectionRuntime.gameDeletionLifecycle,
+    });
+    const intentionService = createIntentionService({ collectionMutationService });
+    const ownerGameNoteService = createOwnerGameNoteService({
+      collectionMutationService,
+      invalidationLifecycle: reflectionRuntime.noteInvalidationLifecycle,
+    });
+
+    const predictionService = createPredictionService({
+      storageService,
+      fitnessService,
+      tournamentService,
+      bggClient,
+      afterSourceSave: maintainCandidateSource,
+    });
+    displayedFitnessService = createDisplayedFitnessService({
+      gameService,
+      predictionService,
+      storageService,
+    });
+    const purchaseUtilizationService = createPurchaseUtilizationService({
+      storageService,
+      collectionMutationService,
+    });
+    const collectionSnapshotBuilder = createCollectionSnapshotService({
+      storageService,
+      gameService,
+      predictionService,
+      purchaseUtilizationService,
+    });
+    const collectionSnapshotService = createCollectionSnapshotCacheService({
+      builder: collectionSnapshotBuilder,
+      storageService,
+      coordinator: profileSourceCoordinatorFor(storageService),
+    });
+    let tournamentReconciliationChanged = false;
+    logger.log("tournament reconciliation started", { trigger: "startup" });
+    try {
+      const result = await tournamentService.reconcileWithCollection();
+      tournamentReconciliationChanged = result.changed;
+      logger.log("tournament reconciliation completed", { trigger: "startup", ...result });
+    } catch (error) {
+      logger.error("tournament reconciliation failed", {
+        trigger: "startup",
+        error: toErrorMessage(error),
+      });
+      throw error;
+    }
+    if (!tournamentReconciliationChanged)
+      await maintainCandidateSource({ kind: "global", reason: "tournament" });
+    logger.log("source vector hydration started", { trigger: "startup" });
+    try {
+      const vector = await storageService.hydrateSourceVector?.();
+      logger.log("source vector hydration completed", {
+        trigger: "startup",
+        available: vector?.available ?? false,
+        changeToken: vector?.changeToken ?? null,
+      });
+    } catch (error) {
+      logger.error("source vector hydration failed", {
+        trigger: "startup",
+        error: toErrorMessage(error),
+      });
+    }
+    await recoverAttentionCandidatesOnStartup(attentionCandidateRecovery, logger);
+
+    const profileService = createProfileService({
+      storageService,
+      displayedFitnessService,
+      attentionCandidates,
+    });
+
+    const semanticStateService = createSemanticRedundancyStateService({
+      collectionMutationService,
+    });
+
+    // Forward-declared so the shutdown route can reference the server.
+    // Using a wrapper object so the reference can be updated after Bun.serve()
+    // while keeping the variable const.
+    const serverRef: { current: ReturnType<typeof Bun.serve> | null } = { current: null };
+
+    const { app } = createApp({
+      storageService,
+      collectionMutationService,
+      axisService,
+      gameService,
+      tournamentService,
+      profileService,
+      predictionService,
+      displayedFitnessService,
+      intentionService,
+      attentionDispositionService,
+      collectionSnapshotService,
+      semanticRedundancyStateService: semanticStateService,
+      ownerGameNoteService,
+      groundedAnalysisProvider,
+      reflectionRuntime,
+      bggClient,
+      profileSourceCoordinator: profileSourceCoordinatorFor(storageService),
+      afterCandidateSourceSave: maintainCandidateSource,
+      onShutdown() {
+        logger.log("Shutting down via API...");
+        void serverRef.current?.stop();
+        jevPairCacheLifecycle.close();
+        process.exit(0);
+      },
+    });
+
+    serverRef.current = Bun.serve({
+      fetch: app.fetch,
+      unix: envConfig.socketPath,
+      idleTimeout: 0 as never,
+    });
+
+    logger.log(`shelf-judge daemon listening on ${envConfig.socketPath}`);
+    logger.log(
+      `BGG integration: ${bggClient.isConfigured() ? "configured" : "not configured (set bgg-token to enable)"}`,
+    );
+    logger.log(
+      `Grounded analysis: ${groundedAnalysisProvider.configurationStatus.status === "configured" ? "configured" : "not configured"}`,
+    );
+
+    function shutdown() {
+      logger.log("Shutting down...");
+      void serverRef.current?.stop();
+      jevPairCacheLifecycle.close();
+      process.exit(0);
+    }
+
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  } catch (error) {
+    jevPairCacheLifecycle.close();
     throw error;
   }
-  if (!tournamentReconciliationChanged)
-    await maintainCandidateSource({ kind: "global", reason: "tournament" });
-  logger.log("source vector hydration started", { trigger: "startup" });
-  try {
-    const vector = await storageService.hydrateSourceVector?.();
-    logger.log("source vector hydration completed", {
-      trigger: "startup",
-      available: vector?.available ?? false,
-      changeToken: vector?.changeToken ?? null,
-    });
-  } catch (error) {
-    logger.error("source vector hydration failed", {
-      trigger: "startup",
-      error: toErrorMessage(error),
-    });
-  }
-  await recoverAttentionCandidatesOnStartup(attentionCandidateRecovery, logger);
-
-  const profileService = createProfileService({
-    storageService,
-    displayedFitnessService,
-    attentionCandidates,
-  });
-
-  const semanticStateService = createSemanticRedundancyStateService({
-    collectionMutationService,
-  });
-
-  // Forward-declared so the shutdown route can reference the server.
-  // Using a wrapper object so the reference can be updated after Bun.serve()
-  // while keeping the variable const.
-  const serverRef: { current: ReturnType<typeof Bun.serve> | null } = { current: null };
-
-  const { app } = createApp({
-    storageService,
-    collectionMutationService,
-    axisService,
-    gameService,
-    tournamentService,
-    profileService,
-    predictionService,
-    displayedFitnessService,
-    intentionService,
-    attentionDispositionService,
-    collectionSnapshotService,
-    semanticRedundancyStateService: semanticStateService,
-    ownerGameNoteService,
-    groundedAnalysisProvider,
-    reflectionRuntime,
-    bggClient,
-    profileSourceCoordinator: profileSourceCoordinatorFor(storageService),
-    afterCandidateSourceSave: maintainCandidateSource,
-    onShutdown() {
-      logger.log("Shutting down via API...");
-      void serverRef.current?.stop();
-      process.exit(0);
-    },
-  });
-
-  serverRef.current = Bun.serve({
-    fetch: app.fetch,
-    unix: envConfig.socketPath,
-    idleTimeout: 0 as never,
-  });
-
-  logger.log(`shelf-judge daemon listening on ${envConfig.socketPath}`);
-  logger.log(
-    `BGG integration: ${bggClient.isConfigured() ? "configured" : "not configured (set bgg-token to enable)"}`,
-  );
-  logger.log(
-    `Grounded analysis: ${groundedAnalysisProvider.configurationStatus.status === "configured" ? "configured" : "not configured"}`,
-  );
-
-  function shutdown() {
-    logger.log("Shutting down...");
-    void serverRef.current?.stop();
-    process.exit(0);
-  }
-
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
 }
 
 if (import.meta.main) {
