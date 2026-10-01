@@ -11,10 +11,12 @@ import {
 } from "../services/profile-source-coordinator.js";
 import { collectionMutationServiceFor } from "../services/collection-mutation-service.js";
 import { createSemanticRedundancyStateService } from "../services/semantic-redundancy-state-service.js";
+import type { createJevStatusService } from "../services/jev-status-service.js";
 
 export interface RedundancyRoutesDeps {
   storageService: StorageService;
   semanticStateService?: SemanticRedundancyStateService;
+  jevStatusService?: Pick<ReturnType<typeof createJevStatusService>, "read">;
   afterSourceSave?: (impact: AttentionMutationImpact) => Promise<void>;
 }
 
@@ -231,7 +233,15 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
 
   routes.post("/redundancy/semantic/acknowledge-and-start", unavailable);
 
-  routes.get("/redundancy/semantic/refresh-status", unavailable);
+  routes.get("/redundancy/semantic/refresh-status", async (c) => {
+    c.header("Cache-Control", "no-store");
+    if (!deps.jevStatusService) return c.json({ error: "Semantic status is unavailable" }, 503);
+    try {
+      return c.json(await deps.jevStatusService.read());
+    } catch {
+      return c.json({ error: "Semantic status is unavailable" }, 503);
+    }
+  });
 
   routes.post("/redundancy/semantic/cancel", unavailable);
 
@@ -376,6 +386,38 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
       name: "get-semantic-summary",
       description: "Get safe semantic redundancy settings and publication summary",
       invocation: { method: "GET", path: "/api/redundancy/semantic/summary" },
+      hierarchy: { root: "shelf", feature: "redundancy" },
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.redundancy.get-semantic-refresh-status",
+      name: "get-semantic-refresh-status",
+      description: "Get aggregate, read-only semantic coverage status",
+      invocation: { method: "GET", path: "/api/redundancy/semantic/refresh-status" },
+      response: {
+        body: {
+          type: "object",
+          properties: {
+            status: { enum: ["disabled", "factual", "not-ready", "stale", "ready", "unavailable"] },
+            measurement: {
+              enum: ["current", "not-applicable", "cache-unavailable", "source-unavailable"],
+            },
+            eligibleGameCount: { type: ["number", "null"] },
+            pairCount: { type: ["number", "null"] },
+            coverage: { type: ["object", "null"] },
+            progress: { type: ["object", "null"] },
+          },
+          required: [
+            "status",
+            "measurement",
+            "eligibleGameCount",
+            "pairCount",
+            "coverage",
+            "progress",
+          ],
+          additionalProperties: false,
+        },
+      },
       hierarchy: { root: "shelf", feature: "redundancy" },
       idempotent: true,
     },

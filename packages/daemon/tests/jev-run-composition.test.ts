@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { Hono } from "hono";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +11,11 @@ import type {
   TournamentData,
 } from "@shelf-judge/shared";
 import { createInitialSemanticRedundancyStateV10 } from "@shelf-judge/shared";
-import { createJevRunWorker, recoverJevRunOnStartup } from "../src/index.js";
+import {
+  composeJevStatusService,
+  createJevRunWorker,
+  recoverJevRunOnStartup,
+} from "../src/index.js";
 import { createJevPairCache } from "../src/services/jev-pair-cache-service.js";
 import type { JevPairCache } from "../src/services/jev-pair-cache-service.js";
 import type { JevRunHandle } from "../src/services/jev-run-service.js";
@@ -18,6 +23,7 @@ import { canonicalSha256 } from "../src/services/profile-source-coordinator.js";
 import type { StorageService } from "../src/services/storage-service.js";
 import type { SourceVector } from "../src/services/source-vector.js";
 import { JEV_MODEL_ID } from "../src/services/jev/jev-gateway.js";
+import { createRedundancyRoutes } from "../src/routes/redundancy.js";
 
 const originalApiKey = process.env.TYPESAFE_API_KEY;
 afterEach(() => {
@@ -91,6 +97,7 @@ function runtimeSources() {
     loadTournament: () => Promise.resolve(structuredClone(tournament)),
     loadPredictionSettings: () => Promise.resolve(structuredClone(predictionSettings)),
     loadRedundancySettings: () => Promise.resolve(structuredClone(redundancySettings)),
+    saveCollection: () => Promise.resolve(),
     sourceVector: () => structuredClone(vector),
   } as unknown as StorageService;
   const predictionService = {
@@ -128,6 +135,51 @@ function gatewayResponse(): Response {
 }
 
 describe("Jev run production composition", () => {
+  test("composes aggregate status with the actual source adapter when lifecycle cache is absent", async () => {
+    const sources = runtimeSources();
+    sources.storage.loadRedundancySettings = () =>
+      Promise.resolve({
+        enabled: true,
+        stage: "annotation",
+        similarityThreshold: 0.7,
+        maxPenalty: 0.2,
+        componentWeights: { binary: 0, continuous: 0 },
+        minNeighbors: 2,
+        expectedNeighbors: 5,
+      });
+    let predictionCalls = 0;
+    const predictionService = {
+      listGamesWithPredictionsFromSnapshot: () => {
+        predictionCalls++;
+        return Promise.resolve([]);
+      },
+    } as unknown as typeof sources.predictionService;
+    const statusService = composeJevStatusService({
+      storageService: sources.storage,
+      predictionService,
+      cache: null,
+    });
+
+    expect(statusService).not.toBeNull();
+    const { routes } = createRedundancyRoutes({
+      storageService: sources.storage,
+      jevStatusService: statusService!,
+    });
+    const app = new Hono();
+    app.route("/api", routes);
+    const response = await app.request("/api/redundancy/semantic/refresh-status");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({
+      status: "not-ready",
+      measurement: "cache-unavailable",
+      eligibleGameCount: null,
+      pairCount: null,
+      coverage: null,
+    });
+    expect(predictionCalls).toBe(0);
+  });
+
   test("unavailable lifecycle cache produces no worker and startup recovery is skipped", async () => {
     let predictionCalls = 0;
     const sources = runtimeSources();

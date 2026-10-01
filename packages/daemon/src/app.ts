@@ -62,6 +62,7 @@ import type { ProfileSourceCoordinator } from "./services/profile-source-coordin
 import type { AttentionDispositionService } from "./services/attention-disposition-service.js";
 import type { CollectionSnapshotCacheService } from "./services/collection-snapshot-cache-service.js";
 import type { SemanticRedundancyStateService } from "./services/semantic-redundancy-state-service.js";
+import type { createJevStatusService } from "./services/jev-status-service.js";
 import { createCollectionSnapshotRoutes } from "./routes/collection-snapshot.js";
 
 export interface AppDeps {
@@ -77,6 +78,7 @@ export interface AppDeps {
   attentionDispositionService: AttentionDispositionService;
   collectionSnapshotService?: CollectionSnapshotCacheService;
   semanticRedundancyStateService?: SemanticRedundancyStateService;
+  jevStatusService?: Pick<ReturnType<typeof createJevStatusService>, "read">;
   ownerGameNoteService: OwnerGameNoteService;
   groundedAnalysisProvider: GroundedAnalysisProvider;
   reflectionRuntime: ReflectionRuntime;
@@ -100,6 +102,7 @@ export interface AppResult {
 export function createApp(deps: AppDeps): AppResult {
   const {
     storageService,
+    jevStatusService,
     collectionMutationService,
     axisService,
     gameService,
@@ -153,6 +156,7 @@ export function createApp(deps: AppDeps): AppResult {
   const nicheRouteModule = createNicheRoutes({ storageService });
   const redundancyRouteModule = createRedundancyRoutes({
     storageService,
+    jevStatusService,
     semanticStateService: deps.semanticRedundancyStateService,
     afterSourceSave: deps.afterCandidateSourceSave,
   });

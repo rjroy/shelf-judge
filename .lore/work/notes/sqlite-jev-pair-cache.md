@@ -329,3 +329,23 @@ and feature remain in progress.
 - Full Bun test suite: 3,568 passed, 1 skipped.
 - Typecheck, browser checks, lint, format check, and `git diff --check` passed.
 - Independent `bun-typescript-reviewer` accepted the implementation.
+
+## Phase 2d11h — aggregate Jev status endpoint
+
+Checkpointed on `design/jev-similarity`, after Phase 2d11g. The overall Phase 2
+implementation and feature remain in progress.
+
+- Composed the read-only aggregate status service into the daemon and exposed
+  it through GET `/redundancy/semantic/refresh-status` with `Cache-Control:
+  no-store` and a sanitized 503 when the dependency is missing or fails.
+- Missing cache remains a truthful unavailable/not-ready aggregate with null
+  counts. Legacy disclosure, page, acknowledge/start, and cancel POSTs remain
+  quarantined with 503 responses.
+- No Run service or provider was exposed or invoked, and no owner data was
+  accessed.
+
+### Validation evidence for this checkpoint
+
+- Full Bun suite: 3,627 passed, 1 skipped, 0 failed.
+- Typecheck, browser typecheck, lint, format check, and `git diff --check` passed.
+- Independent reviewer accepted the implementation.

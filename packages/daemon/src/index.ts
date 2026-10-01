@@ -45,6 +45,7 @@ import { createJevGateway } from "./services/jev/jev-gateway.js";
 import type { JevGatewayOptions } from "./services/jev/jev-gateway.js";
 import { JevRunService } from "./services/jev-run-service.js";
 import { createJevRunSourceAdapter } from "./services/jev-run-source-adapter.js";
+import { createJevStatusService } from "./services/jev-status-service.js";
 import type { JevPairCache } from "./services/jev-pair-cache-service.js";
 import type { StorageService } from "./services/storage-service.js";
 import type { PredictionService } from "./services/prediction-service.js";
@@ -115,6 +116,32 @@ export async function recoverJevRunOnStartup(
       errorName: error instanceof Error ? error.name : "UnknownError",
     });
   }
+}
+
+/** Composes only the read-only status dependency; cache absence remains reportable. */
+export function composeJevStatusService(options: {
+  storageService: StorageService;
+  predictionService: PredictionService;
+  cache: JevPairCache | null;
+}): ReturnType<typeof createJevStatusService> | null {
+  if (!options.predictionService.listGamesWithPredictionsFromSnapshot) return null;
+  const sourceAdapter = createJevRunSourceAdapter({
+    storageService: options.storageService,
+    predictionService: {
+      listGamesWithPredictionsFromSnapshot: (collection, tournament, settings, targetGameIds) =>
+        options.predictionService.listGamesWithPredictionsFromSnapshot!(
+          collection,
+          tournament,
+          settings,
+          targetGameIds,
+        ),
+    },
+  });
+  return createJevStatusService({
+    storageService: options.storageService,
+    sourceAdapter,
+    cache: options.cache,
+  });
 }
 
 export async function recoverAttentionCandidatesOnStartup(
@@ -422,6 +449,20 @@ export async function main() {
     // Using a wrapper object so the reference can be updated after Bun.serve()
     // while keeping the variable const.
     const serverRef: { current: ReturnType<typeof Bun.serve> | null } = { current: null };
+    let jevStatusService: ReturnType<typeof createJevStatusService> | null = null;
+    try {
+      jevStatusService = composeJevStatusService({
+        storageService,
+        predictionService,
+        cache: jevPairCache,
+      });
+    } catch (error) {
+      logger.error("Jev status service composition failed", {
+        trigger: "startup",
+        outcome: "unavailable",
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
 
     const { app } = createApp({
       storageService,
@@ -436,6 +477,7 @@ export async function main() {
       attentionDispositionService,
       collectionSnapshotService,
       semanticRedundancyStateService: semanticStateService,
+      jevStatusService: jevStatusService ?? undefined,
       ownerGameNoteService,
       groundedAnalysisProvider,
       reflectionRuntime,
