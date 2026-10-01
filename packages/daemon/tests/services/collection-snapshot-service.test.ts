@@ -12,22 +12,15 @@ import type {
   RedundancySettings,
   ShelfConfiguration,
   TournamentData,
-  SemanticPublishedPairOutcome,
 } from "@shelf-judge/shared";
 import { createSourceVectorService } from "../../src/services/source-vector.js";
 import {
   createInitialEntityMetadata,
   createInitialSemanticRedundancyState,
 } from "@shelf-judge/shared";
-import { semanticDescriptionSourceFingerprint } from "../../src/services/semantic-redundancy-state-service.js";
-import { resolveSemanticRedundancyPairTable } from "../../src/services/semantic-redundancy-pair-resolver.js";
-import type { SemanticGenerationSourceIdentity } from "../../src/services/source-vector.js";
-import type { SemanticRedundancyPairResolverSupport } from "../../src/services/semantic-redundancy-pair-resolver.js";
-import type { RedundancyPairScore } from "../../src/services/redundancy-engine.js";
 import { createCollectionSnapshotService } from "../../src/services/collection-snapshot-service.js";
 import { createCollectionSnapshotCacheService } from "../../src/services/collection-snapshot-cache-service.js";
 import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
-import { canonicalSha256 } from "../../src/services/profile-source-coordinator.js";
 import { enrichGameWithPurchaseUtilization } from "../../src/services/purchase-utilization-projection.js";
 import type { StorageService } from "../../src/services/storage-service.js";
 import type { GameService } from "../../src/services/game-service.js";
@@ -48,10 +41,6 @@ import {
   projectGameWithScore,
   projectProfileCollectionSource,
 } from "../../src/services/game-projection.js";
-import {
-  semanticGenerationFixture,
-  semanticSourceIdentityFixture,
-} from "../helpers/semantic-redundancy-fixtures.js";
 
 type GameWithNote = Game & { ownerNote: { state: "missing"; version: 0; updatedAt: null } };
 
@@ -69,94 +58,6 @@ function scoreWithSimilarityDefault(score: FitnessResult | null):
           generationId: null,
         },
       };
-}
-
-function pureSemanticResolver(options: {
-  calls: Array<{
-    ids: string[];
-    status: string;
-    generationId: string | null;
-    pairs: RedundancyPairScore[];
-  }>;
-  identityOverride?: Partial<ReturnType<typeof semanticSourceIdentityFixture>>;
-  noNeighbors?: boolean;
-}): NonNullable<
-  Parameters<typeof createCollectionSnapshotService>[0]["resolveRedundancyPairTable"]
-> {
-  return ({ collection, settings, universe, predictionSettings, predictionSettingsHash }) => {
-    expect(predictionSettingsHash).toBe(canonicalSha256(predictionSettings));
-    const sourceIdentity: SemanticGenerationSourceIdentity = {
-      collectionId: collection.id,
-      collectionSchemaVersion: 9,
-      evidenceEpoch: collection.semanticRedundancy.evidenceEpoch,
-      consentEpoch: collection.semanticRedundancy.consentEpoch,
-      tournamentRevision: 1,
-      predictionSettingsRevision: 1,
-      factualWeightsEpoch: collection.semanticRedundancy.factualWeightsEpoch,
-      fencedFactualWeightsFingerprint: collection.semanticRedundancy.factualWeightsFingerprint,
-      currentFactualWeightsFingerprint: "current-factual-fingerprint",
-    };
-    const publishedIdentity = semanticSourceIdentityFixture({
-      collectionId: collection.id,
-      evidenceEpoch: sourceIdentity.evidenceEpoch,
-      consentEpoch: sourceIdentity.consentEpoch,
-      factualWeightsEpoch: sourceIdentity.factualWeightsEpoch,
-      factualWeightsFingerprint: sourceIdentity.fencedFactualWeightsFingerprint,
-    });
-    const currentIdentity = { ...publishedIdentity, ...options.identityOverride };
-    const ordered = universe.map(({ game }) => game.id).sort();
-    const pairOutcomes: SemanticPublishedPairOutcome[] = [];
-    for (let i = 0; i < ordered.length; i++) {
-      for (let j = i + 1; j < ordered.length; j++) {
-        const gameA = collection.games.find(({ id }) => id === ordered[i])!;
-        const gameB = collection.games.find(({ id }) => id === ordered[j])!;
-        pairOutcomes.push({
-          gameA: gameA.id,
-          gameB: gameB.id,
-          description: {
-            status: "scored",
-            score: 0.75,
-            confidence: null,
-            modelId: "jev-pinned",
-            rubricVersion: 1,
-            sourceFingerprintA: semanticDescriptionSourceFingerprint(gameA)!,
-            sourceFingerprintB: semanticDescriptionSourceFingerprint(gameB)!,
-            noteVersionA: null,
-            noteVersionB: null,
-            requestContext: { kind: "description-only", descriptionRepresentationVersion: 1 },
-          },
-          ownerNote: null,
-        });
-      }
-    }
-    const generation = semanticGenerationFixture({
-      sourceIdentity: publishedIdentity,
-      eligibleGameIds: ordered,
-      weights: collection.semanticRedundancy.settings.weights,
-      pairOutcomes,
-    });
-    const support: SemanticRedundancyPairResolverSupport = {
-      modelId: "jev-pinned",
-      rubricVersion: 1,
-      scoringVersion: 1,
-      sourceIdentity: currentIdentity,
-    };
-    const result = resolveSemanticRedundancyPairTable({
-      collection,
-      sourceIdentity,
-      factualSettings: options.noNeighbors ? { ...settings, similarityThreshold: 1.01 } : settings,
-      universe,
-      generation,
-      support,
-    });
-    options.calls.push({
-      ids: ordered,
-      status: result.status,
-      generationId: result.status === "ready" ? result.identity.generationId : null,
-      pairs: result.pairs,
-    });
-    return result;
-  };
 }
 
 function setup(
@@ -297,13 +198,7 @@ function setup(
   };
 }
 
-function parityFixture(
-  stage: RedundancySettings["stage"],
-  enabled = true,
-  resolveRedundancyPairTable?: Parameters<
-    typeof createCollectionSnapshotService
-  >[0]["resolveRedundancyPairTable"],
-) {
+function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
   const now = "2026-02-01T00:00:00.000Z";
   const personalAxis = (id: string, name: string, veto = false): Axis => ({
     id,
@@ -390,36 +285,12 @@ function parityFixture(
     makeGame("prediction-only", "Prediction only", {}),
     makeGame("retired", "Previously owned", { fun: 10, theme: 10 }, "previously-owned"),
   ];
-  // The focused semantic seam fixture has exactly three owned candidates. Previously-
-  // owned rows remain in the captured factual collection and one is the BGG outlier.
-  if (resolveRedundancyPairTable) {
-    const semanticEligibleIds = new Set(["ref-1", "ref-2", "ref-3"]);
-    for (const candidate of games) {
-      if (!semanticEligibleIds.has(candidate.id)) candidate.ownership = "previously-owned";
-      if (candidate.bggData)
-        candidate.bggData.description = `Captured description for ${candidate.id}`;
-    }
-    const bggOutlier = games.find(({ id }) => id === "retired")!;
-    bggOutlier.minPlayers = 100;
-    bggOutlier.maxPlayers = 200;
-    const nonBggOutlier = makeGame(
-      "manual-outlier",
-      "Manual non-BGG outlier",
-      {},
-      "previously-owned",
-    );
-    nonBggOutlier.bggData = null;
-    nonBggOutlier.minPlayers = 100_000;
-    nonBggOutlier.maxPlayers = 200_000;
-    nonBggOutlier.playingTime = 1_000_000;
-    games.push(nonBggOutlier);
-  }
   games.find((game) => game.id === "prediction-only")!.ratings["unconfigured-null"] =
     null as unknown as number;
   const collection: Collection = {
     schemaVersion: 9,
     revision: 1,
-    id: resolveRedundancyPairTable ? "fixture-collection" : "parity-collection",
+    id: "parity-collection",
     name: "Parity collection",
     axes,
     games,
@@ -434,13 +305,6 @@ function parityFixture(
     createdAt: now,
     updatedAt: now,
   };
-  if (resolveRedundancyPairTable) {
-    collection.semanticRedundancy.settings = {
-      enabled: true,
-      weights: { factual: 7, description: 5, ownerNote: 0 },
-      cachedOwnerNoteUse: false,
-    };
-  }
   const tournament: TournamentData = {
     settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
     sessions: [],
@@ -553,7 +417,6 @@ function parityFixture(
     gameService,
     predictionService,
     purchaseUtilizationService,
-    resolveRedundancyPairTable,
   });
   const snapshotCache = createCollectionSnapshotCacheService({
     builder: snapshotService,
@@ -565,7 +428,6 @@ function parityFixture(
     gameService,
     predictionService,
     storageService: storage,
-    resolveRedundancyPairTable,
   });
   const capacityService = createCapacityService({ storageService: storage, gameService });
   return {
@@ -590,156 +452,31 @@ function parityFixture(
 }
 
 describe("CollectionSnapshotService", () => {
-  test("injects the pure published-generation resolver consistently through list, detail, and snapshot", async () => {
-    const outcomes: Array<{
-      ids: string[];
-      status: string;
-      generationId: string | null;
-      pairs: RedundancyPairScore[];
-    }> = [];
-    const stageProjectionScores: number[] = [];
-    const stagePairTables: RedundancyPairScore[][] = [];
-    for (const stage of ["annotation", "integrated"] as const) {
-      const fixture = parityFixture(
-        stage,
-        true,
-        pureSemanticResolver({ calls: outcomes, noNeighbors: true }),
-      );
-      fixture.redundancySettings.similarityThreshold = 1.01;
-      const eligibleIds = ["ref-1", "ref-2", "ref-3"];
-      const snapshot = (await fixture.snapshotService.buildSnapshot()).snapshot;
-      const listed = await fixture.displayedService.listGames({ includePredicted: true });
-      const detail = await fixture.displayedService.listGames({
-        includePredicted: true,
-        targetGameIds: ["ref-1"],
-      });
-
-      expect(snapshot.status).toBe("complete");
-      expect(JSON.stringify(snapshot)).not.toMatch(/semanticRedundancy|pairOutcomes|ownerNote/);
-      expect(detail.map(({ game }) => game.id)).toEqual(["ref-1"]);
-      expect(detail[0]?.score?.redundancySimilarityInfo).toEqual({
-        status: "ready",
-        generationId: "generation-fixture",
-      });
-      const snapshotPartial = snapshot.games.find(({ game }) => game.id === "ref-1")!;
-      expect(snapshotPartial.ordinary.score?.redundancySimilarityInfo).toEqual({
-        status: "ready",
-        generationId: "generation-fixture",
-      });
-      expect(snapshotPartial.predicted.availability).toBe("available");
-      if (snapshotPartial.predicted.availability === "available") {
-        expect(snapshotPartial.predicted.score?.redundancySimilarityInfo).toEqual({
-          status: "ready",
-          generationId: "generation-fixture",
-        });
-      }
-      expect(listed.filter(({ game }) => eligibleIds.includes(game.id))).toHaveLength(3);
-      expect(outcomes.slice(-3).map(({ ids }) => ids)).toEqual([
-        eligibleIds,
-        eligibleIds,
-        eligibleIds,
-      ]);
-      expect(
-        outcomes
-          .slice(-3)
-          .every(
-            ({ status, generationId }) =>
-              status === "ready" && generationId === "generation-fixture",
-          ),
-      ).toBe(true);
-      const ready = outcomes.slice(-3)[0];
-      expect(ready.pairs).toHaveLength(3);
-      expect(ready.pairs.every(({ description }) => description === 0.75)).toBe(true);
-      expect(ready.pairs.every(({ factual }) => Number.isFinite(factual))).toBe(true);
-      const semanticSimilarity =
-        (7 * ready.pairs[0].factual + 5 * ready.pairs[0].description!) / 12;
-      expect(semanticSimilarity).not.toBe(ready.pairs[0].factual);
-      expect(ready.ids).toEqual(eligibleIds);
-
-      const listedPartial = listed.find(({ game }) => game.id === "ref-1")!;
-      stageProjectionScores.push(listedPartial.score?.score ?? -1);
-      stagePairTables.push(ready.pairs);
-      expect(listedPartial.score?.score).toBe(snapshotPartial.ordinary.score?.score);
-      expect(detail[0]?.score?.score).toBe(listedPartial.score?.score);
-      // Threshold exceeds the similarity range, so status remains ready with no neighbors.
-      expect(listedPartial.score?.redundancyAdjustment).toBeNull();
-      if (stage === "annotation") expect(listedPartial.score?.score).toBeGreaterThan(0);
-    }
-    expect(stageProjectionScores[0]).toBe(stageProjectionScores[1]);
-    expect(stagePairTables[0]).toEqual(stagePairTables[1]);
-  });
-
-  test("changed tournament, prediction, or factual identity yields stale factual-only list and snapshot projections", async () => {
-    const variants = [
-      { tournamentHash: "d".repeat(64) },
-      { predictionSettingsHash: "e".repeat(64) },
-      { redundancySettingsHash: "f".repeat(64) },
-    ];
-    for (const identityOverride of variants) {
-      const calls: Array<{
-        ids: string[];
-        status: string;
-        generationId: string | null;
-        pairs: RedundancyPairScore[];
-      }> = [];
-      const fixture = parityFixture(
-        "integrated",
-        true,
-        pureSemanticResolver({ calls, identityOverride }),
-      );
-      const snapshot = (await fixture.snapshotService.buildSnapshot()).snapshot;
-      expect(JSON.stringify(snapshot)).not.toMatch(/semanticRedundancy|pairOutcomes|ownerNote/);
-      const listed = await fixture.displayedService.listGames({ includePredicted: true });
-      const partial = snapshot.games.find(({ game }) => game.id === "ref-1")!;
-      const listPartial = listed.find(({ game }) => game.id === "ref-1")!;
-      expect(partial.ordinary.score?.redundancySimilarityInfo).toEqual({
-        status: "stale",
-        generationId: null,
-      });
-      expect(listPartial.score?.redundancySimilarityInfo).toEqual({
-        status: "stale",
-        generationId: null,
-      });
-      const staleSnapshotScore = partial.ordinary.score;
-      const staleListScore = listPartial.score;
-      expect(staleSnapshotScore).not.toBeNull();
-      expect(staleListScore).not.toBeNull();
-      const staleCalls = calls.slice();
-      expect(calls.every(({ ids }) => ids.join(",") === "ref-1,ref-2,ref-3")).toBe(true);
-
-      // Disable only semantic reuse while keeping the same factual redundancy settings,
-      // captured games, tournament, and predictions. This is the factual-only baseline.
-      fixture.collection.semanticRedundancy.settings.enabled = false;
-      const factualSnapshot = (await fixture.snapshotService.buildSnapshot()).snapshot;
-      const factualList = await fixture.displayedService.listGames({ includePredicted: true });
-      const factualRow = factualSnapshot.games.find(({ game }) => game.id === "ref-1")!;
-      const factualEntry = factualList.find(({ game }) => game.id === "ref-1")!;
-      expect(factualRow.ordinary.score?.redundancySimilarityInfo).toEqual({
-        status: "not-ready",
-        generationId: null,
-      });
-      expect(factualEntry.score?.redundancySimilarityInfo).toEqual({
-        status: "not-ready",
-        generationId: null,
-      });
-      expect(staleSnapshotScore).toMatchObject({
-        score: factualRow.ordinary.score?.score,
-        redundancyAdjustment: factualRow.ordinary.score?.redundancyAdjustment,
-      });
-      expect(staleListScore).toMatchObject({
-        score: factualEntry.score?.score,
-        redundancyAdjustment: factualEntry.score?.redundancyAdjustment,
-      });
-      expect(staleSnapshotScore?.redundancyAdjustment).toEqual(
-        staleListScore?.redundancyAdjustment,
-      );
-      expect(
-        staleCalls.every(({ status, generationId }) => status === "stale" && generationId === null),
-      ).toBe(true);
-      expect(calls.slice(staleCalls.length).every(({ status }) => status === "not-ready")).toBe(
-        true,
-      );
-    }
+  test("semantic publication remains not-ready while factual scoring is shared by list and snapshot", async () => {
+    const fixture = parityFixture("integrated", true);
+    fixture.redundancySettings.similarityThreshold = 1.01;
+    fixture.collection.semanticRedundancy.settings.enabled = true;
+    const snapshot = (await fixture.snapshotService.buildSnapshot()).snapshot;
+    const listed = await fixture.displayedService.listGames({ includePredicted: true });
+    const detail = await fixture.displayedService.listGames({
+      includePredicted: true,
+      targetGameIds: ["ref-1"],
+    });
+    const row = snapshot.games.find(({ game }) => game.id === "ref-1")!;
+    const entry = listed.find(({ game }) => game.id === "ref-1")!;
+    expect(snapshot.status).toBe("complete");
+    expect(JSON.stringify(snapshot)).not.toMatch(/semanticRedundancy|pairOutcomes|ownerNote/);
+    expect(row.ordinary.score?.redundancySimilarityInfo).toEqual({
+      status: "not-ready",
+      generationId: null,
+    });
+    expect(entry.score?.redundancySimilarityInfo).toEqual({
+      status: "not-ready",
+      generationId: null,
+    });
+    expect(detail.find(({ game }) => game.id === "ref-1")?.score?.score).toBe(entry.score?.score);
+    expect(row.ordinary.score?.score).toBe(entry.score?.score);
+    expect(row.ordinary.score?.redundancyAdjustment).toBeNull();
   });
 
   test("real scoring engines preserve legacy variants, niches, utilization, and raw capacity", async () => {

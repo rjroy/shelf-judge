@@ -54,13 +54,7 @@ import {
   productionAttentionCandidateDependenciesForGame,
   type AttentionCandidateService,
 } from "../../src/services/attention-candidate-service.js";
-import {
-  canonicalSha256,
-  profileSourceCoordinatorFor,
-} from "../../src/services/profile-source-coordinator.js";
-import { semanticGenerationSourceIdentity } from "../../src/services/source-vector.js";
-import { resolveSemanticRedundancyPairTable } from "../../src/services/semantic-redundancy-pair-resolver.js";
-import { JEV_MODEL_ID, JEV_RUBRIC_VERSION } from "../../src/services/jev/jev-gateway.js";
+import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
 import {
   createAttentionCandidateMaintenanceRecovery,
   createAttentionDispositionGlobalMaintenance,
@@ -219,56 +213,10 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     bggClient,
     afterSourceSave: maintainCandidateSource,
   });
-  const resolvePublishedRedundancy = (
-    input: Parameters<
-      NonNullable<
-        import("../../src/services/displayed-fitness-service.js").DisplayedFitnessServiceDeps["resolveRedundancyPairTable"]
-      >
-    >[0],
-  ) => {
-    const sourceIdentity = input.sourceVector
-      ? semanticGenerationSourceIdentity(input.sourceVector)
-      : null;
-    if (!sourceIdentity) return undefined;
-    return resolveSemanticRedundancyPairTable({
-      collection: input.collection,
-      universe: input.universe,
-      generation: input.collection.semanticRedundancy.publishedGeneration,
-      factualSettings: input.settings,
-      sourceIdentity,
-      support: {
-        modelId: JEV_MODEL_ID,
-        rubricVersion: JEV_RUBRIC_VERSION,
-        scoringVersion: 1,
-        sourceIdentity: {
-          collectionId: sourceIdentity.collectionId,
-          collectionSchemaVersion: 9,
-          collectionRevision: 0,
-          evidenceEpoch: sourceIdentity.evidenceEpoch,
-          consentEpoch: sourceIdentity.consentEpoch,
-          factualWeightsEpoch: sourceIdentity.factualWeightsEpoch,
-          factualWeightsFingerprint: sourceIdentity.currentFactualWeightsFingerprint,
-          tournamentHash: canonicalSha256({
-            revision: sourceIdentity.tournamentRevision,
-            data: input.tournament,
-          }),
-          predictionSettingsHash: canonicalSha256({
-            revision: sourceIdentity.predictionSettingsRevision,
-            settings: input.predictionSettings,
-          }),
-          redundancySettingsHash: canonicalSha256({
-            currentFactualWeightsFingerprint: sourceIdentity.currentFactualWeightsFingerprint,
-            settings: input.settings,
-          }),
-        },
-      },
-    });
-  };
   const displayedFitnessService = createDisplayedFitnessService({
     gameService,
     predictionService,
     storageService,
-    resolveRedundancyPairTable: resolvePublishedRedundancy,
   });
   attentionCandidateService = createAttentionCandidateService({
     coordinator: profileSourceCoordinatorFor(storageService),

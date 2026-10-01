@@ -13,7 +13,6 @@ import {
   createInitialEntityMetadata,
   createInitialSemanticRedundancyState,
 } from "@shelf-judge/shared";
-import { resolveSemanticRedundancyPairTable } from "../../src/services/semantic-redundancy-pair-resolver.js";
 import { semanticGenerationFixture } from "../helpers/semantic-redundancy-fixtures.js";
 import {
   createDisplayedFitnessService,
@@ -37,7 +36,6 @@ import {
 import { cosineSimilarity } from "../../src/services/feature-vector.js";
 import { deriveDisplayStats } from "../../src/services/tournament-service.js";
 import { createSourceVectorService } from "../../src/services/source-vector.js";
-import { canonicalSha256 } from "../../src/services/profile-source-coordinator.js";
 import { projectProfileCollectionSource } from "../../src/services/game-projection.js";
 
 function game(id: string): Game {
@@ -139,188 +137,6 @@ function services(actual: GameWithScore[], predicted: GameWithScore[]) {
 }
 
 describe("DisplayedFitnessService", () => {
-  test("passes one captured collection and complete owned universe into the pure resolver seam", async () => {
-    const capturedGame = {
-      ...game("captured"),
-      ownerNote: { state: "missing" as const, version: 0 as const, updatedAt: null },
-    };
-    const semanticRedundancy = createInitialSemanticRedundancyState();
-    semanticRedundancy.settings.enabled = true;
-    const collection: Collection = {
-      schemaVersion: 9,
-      revision: 2,
-      id: "fixture-collection",
-      name: "Captured",
-      axes: [],
-      games: [capturedGame],
-      intentions: [],
-      attentionDispositions: [],
-      commandReceipts: [],
-      entertainmentBenchmark: null,
-      semanticRedundancy,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    };
-    const tournament: TournamentData = {
-      settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
-      sessions: [],
-      gameStats: {},
-    };
-    const redundancySettings: RedundancySettings = {
-      enabled: true,
-      stage: "annotation",
-      similarityThreshold: 0.5,
-      maxPenalty: 2,
-      componentWeights: { binary: 1, continuous: 0 },
-      minNeighbors: 1,
-      expectedNeighbors: 2,
-    };
-    const predictionSettings: PredictionSettings = {
-      stageThresholds: [5, 15, 30],
-      defaultK: 5,
-      minSimilarityThreshold: 0.2,
-    };
-    const sourceVector = createSourceVectorService();
-    sourceVector.hydrate(
-      { id: collection.id, schemaVersion: 9, revision: collection.revision },
-      {
-        tournament: 1,
-        predictionSettings: 1,
-        nicheSettings: 1,
-        redundancySettings: 1,
-        shelfConfig: 1,
-      },
-    );
-    const storage = {
-      loadRedundancySettings: () => Promise.resolve(redundancySettings),
-      loadPredictionSettings: () => Promise.resolve(predictionSettings),
-      loadCollection: () => Promise.resolve(structuredClone(collection)),
-      loadTournament: () => Promise.resolve(structuredClone(tournament)),
-      sourceVector: () => sourceVector.read(),
-    } as StorageService;
-    const entry = { game: capturedGame, score: score() };
-    const gameService = { listGames: () => Promise.resolve([entry]) } as unknown as GameService;
-    const predictionService = {
-      listGamesWithPredictions: () => Promise.resolve([entry]),
-    } as unknown as PredictionService;
-    const sourceIdentity = {
-      collectionId: collection.id,
-      collectionSchemaVersion: 9 as const,
-      evidenceEpoch: 0,
-      consentEpoch: 0,
-      tournamentRevision: 1,
-      predictionSettingsRevision: 1,
-      factualWeightsEpoch: 0,
-      fencedFactualWeightsFingerprint: null,
-      currentFactualWeightsFingerprint: "current",
-    };
-    const calls: string[][] = [];
-    const service = createDisplayedFitnessService({
-      gameService,
-      predictionService,
-      storageService: storage,
-      resolveRedundancyPairTable: ({
-        universe,
-        settings,
-        collection: captured,
-        tournament: capturedTournament,
-        predictionSettings: capturedPredictionSettings,
-        predictionSettingsHash,
-      }) => {
-        calls.push(universe.map(({ game: candidate }) => candidate.id));
-        expect(captured.id).toBe(collection.id);
-        expect(capturedTournament).toEqual(tournament);
-        expect(capturedPredictionSettings).toEqual(predictionSettings);
-        expect(predictionSettingsHash).toBe(canonicalSha256(predictionSettings));
-        return resolveSemanticRedundancyPairTable({
-          collection: captured,
-          sourceIdentity,
-          factualSettings: settings,
-          universe,
-          generation: null,
-          support: {
-            modelId: "jev-pinned",
-            rubricVersion: 1,
-            scoringVersion: 1,
-            sourceIdentity: {
-              collectionId: collection.id,
-              collectionSchemaVersion: 9,
-              collectionRevision: 0,
-              evidenceEpoch: 0,
-              consentEpoch: 0,
-              factualWeightsEpoch: 0,
-              factualWeightsFingerprint: null,
-              tournamentHash: "a".repeat(64),
-              predictionSettingsHash: "b".repeat(64),
-              redundancySettingsHash: "c".repeat(64),
-            },
-          },
-        });
-      },
-    });
-    const listed = await service.listGames({ includePredicted: true });
-    expect(calls).toEqual([["captured"]]);
-    expect(listed[0]?.score?.redundancySimilarityInfo?.status).toBe("not-ready");
-
-    // The detail snapshot projection strips private semantic state. Even with a
-    // complete/current vector and a complete factual vector, it must use factual
-    // fallback instead of passing that sanitized collection to the semantic resolver.
-    let snapshotResolverCalls = 0;
-    const snapshotService = createDisplayedFitnessService({
-      gameService: {
-        listGames: () => Promise.resolve([entry]),
-        listGamesFromSnapshot: () => [entry],
-      } as unknown as GameService,
-      predictionService: {
-        listGamesWithPredictions: () => Promise.resolve([entry]),
-        listGamesWithPredictionsFromSnapshot: () => Promise.resolve([entry]),
-      } as unknown as PredictionService,
-      storageService: storage,
-      resolveRedundancyPairTable: ({ collection: resolverCollection }) => {
-        snapshotResolverCalls++;
-        // Models the production resolver's private-state dereference.
-        void resolverCollection.semanticRedundancy.publishedGeneration;
-        return undefined;
-      },
-    });
-    const snapshot = {
-      kind: "public" as const,
-      collection: projectProfileCollectionSource(collection),
-      tournament,
-      predictionSettings,
-      redundancySettings,
-      sourceVector: sourceVector.read(),
-    };
-    for (const includePredicted of [false, true]) {
-      const detailGames = await snapshotService.listGamesFromSnapshot(snapshot, {
-        includePredicted,
-      });
-      expect(detailGames[0]?.score?.redundancySimilarityInfo?.status).toBe("factual");
-    }
-    expect(snapshotResolverCalls).toBe(0);
-
-    let staleResolverCalls = 0;
-    const stalePredictionService = {
-      listGamesWithPredictions: () => {
-        // Model a source leaving and returning to the same value while scoring waits.
-        sourceVector.publish("prediction-settings", 2);
-        sourceVector.publish("prediction-settings", 1);
-        return Promise.resolve([entry]);
-      },
-    } as unknown as PredictionService;
-    const staleService = createDisplayedFitnessService({
-      gameService,
-      predictionService: stalePredictionService,
-      storageService: storage,
-      resolveRedundancyPairTable: () => {
-        staleResolverCalls += 1;
-        return undefined;
-      },
-    });
-    await staleService.listGames({ includePredicted: true });
-    expect(staleResolverCalls).toBe(0);
-  });
-
   test("owned predicted candidates exclude previously-owned games", () => {
     const owned = { game: game("owned"), score: score() };
     const retired = {
@@ -741,7 +557,7 @@ describe("DisplayedFitnessService", () => {
     );
   });
 
-  test("private snapshots resolve ready semantics from a fenced full predicted universe", async () => {
+  test("private snapshot scores remain factual-only and do not expose owner notes", async () => {
     const timestamp = "2026-01-01T00:00:00.000Z";
     const bggData = {
       communityRating: 8,
@@ -868,36 +684,10 @@ describe("DisplayedFitnessService", () => {
           ),
         ),
     } as unknown as PredictionService;
-    const resolvedUniverses: string[][] = [];
-    let resolverCalls = 0;
     const service = createDisplayedFitnessService({
       gameService,
       predictionService,
       storageService: { sourceVector: () => vector.read() } as StorageService,
-      resolveRedundancyPairTable: ({ collection: privateInput, universe }) => {
-        resolverCalls++;
-        expect(privateInput.semanticRedundancy).toBeDefined();
-        expect(privateInput.games.some(({ ownerNote }) => ownerNote?.state === "present")).toBe(
-          true,
-        );
-        resolvedUniverses.push(universe.map(({ game: candidate }) => candidate.id).sort());
-        const identity = {
-          generationId: "ready-generation",
-          consentEpoch: "consent-1",
-          settingsEpoch: "settings-1",
-        };
-        return {
-          status: "ready",
-          identity,
-          expectedIdentity: identity,
-          weights: { factual: 1, description: 0, ownerNote: 0 },
-          pairs: [
-            ["target", "peer-one"],
-            ["target", "peer-two"],
-            ["peer-one", "peer-two"],
-          ].map(([gameAId, gameBId]) => ({ gameAId, gameBId, factual: 1 })),
-        };
-      },
     });
     const snapshot = {
       kind: "private-capture" as const,
@@ -916,17 +706,14 @@ describe("DisplayedFitnessService", () => {
       });
       expect(result).toHaveLength(1);
       expect(result[0]?.score?.redundancySimilarityInfo).toEqual({
-        status: "ready",
-        generationId: "ready-generation",
+        status: "not-ready",
+        generationId: null,
       });
+      expect(JSON.stringify(result)).not.toContain("PRIVATE_SENTINEL");
+      expect(JSON.stringify(result)).not.toContain("ownerNote");
       targetScores.push(result[0]?.score?.score ?? 0);
     }
     expect(targetScores).toEqual([7, 7]);
-    expect(resolverCalls).toBe(2);
-    expect(resolvedUniverses).toEqual([
-      ["peer-one", "peer-two", "target"],
-      ["peer-one", "peer-two", "target"],
-    ]);
 
     const racedPredictionService = {
       listGamesWithPredictionsFromSnapshot: (
@@ -946,21 +733,15 @@ describe("DisplayedFitnessService", () => {
         );
       },
     } as unknown as PredictionService;
-    let racedResolverCalls = 0;
     const racedService = createDisplayedFitnessService({
       gameService,
       predictionService: racedPredictionService,
       storageService: { sourceVector: () => vector.read() } as StorageService,
-      resolveRedundancyPairTable: () => {
-        racedResolverCalls++;
-        return undefined;
-      },
     });
     const racedResult = await racedService.listGamesFromSnapshot(
       { ...snapshot, sourceVector: vector.read() },
       { includePredicted: true },
     );
-    expect(racedResolverCalls).toBe(0);
     expect(racedResult[0]?.score?.redundancySimilarityInfo?.status).toBe("not-ready");
   });
 });
