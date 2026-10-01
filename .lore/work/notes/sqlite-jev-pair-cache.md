@@ -349,3 +349,23 @@ implementation and feature remain in progress.
 - Full Bun suite: 3,627 passed, 1 skipped, 0 failed.
 - Typecheck, browser typecheck, lint, format check, and `git diff --check` passed.
 - Independent reviewer accepted the implementation.
+
+## Phase 2d11i — prepared Jev Run authorization
+
+Checkpointed on `design/jev-similarity`, after Phase 2d11h. The overall Phase 2
+implementation and feature remain in progress.
+
+- Added internal `startPreparedRun`, which validates and executes the already
+  authorized capture/scope rather than recapturing a replacement initial
+  authorization. The first coordinated authority check still precedes durable
+  run progress and any request.
+- Gateway construction is lazy and occurs only for a sendable cache miss.
+  Cache-only and no-required-signal paths do not construct one.
+- No route/UI wiring or live provider calls were added; no owner data was
+  accessed.
+
+### Validation evidence for this checkpoint
+
+- Full Bun suite: 3,631 passed, 1 skipped, 0 failed.
+- Typecheck, browser check, lint, format check, and `git diff --check` passed.
+- Independent reviewer accepted the implementation.

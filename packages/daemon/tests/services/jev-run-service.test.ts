@@ -138,7 +138,8 @@ function cacheFake() {
   const cache = {
     available: true,
     mutationRevision: () => revision,
-    lookup: () => null,
+    lookup: (key: { gameAId: string; gameBId: string; signal: string }) =>
+      rows.get(key.gameAId + key.gameBId + key.signal) ?? null,
     upsert: () => {
       revision++;
     },
@@ -977,6 +978,197 @@ describe("JevRunService attempt barriers", () => {
     const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
     expect(dispatches).toBe(1);
     expect(result.state).toBe("failed");
+  });
+
+  test("prepared authorization is not replaced when source capture changes before first admission", async () => {
+    const original = fixture();
+    const planned = planJevRunScope(original.collection, original.predictionCapture);
+    if (!planned.ok) throw new Error("Expected valid prepared scope");
+    const changed = structuredClone(original);
+    changed.collection.games[0].bggData = {
+      ...changed.collection.games[0].bggData!,
+      description: "changed before first admission",
+    };
+    changed.sourceVectorIdentity = "vector-after-edit";
+    const originalFingerprint = planned.scope.sourceForGame("a")?.descriptionFingerprint;
+    const changedPlan = planJevRunScope(changed.collection, changed.predictionCapture);
+    if (!changedPlan.ok) throw new Error("Expected valid changed scope");
+    expect(changedPlan.scope.sourceForGame("a")?.descriptionFingerprint).not.toBe(
+      originalFingerprint,
+    );
+    let current = original;
+    let reads = 0;
+    let captureLoads = 0;
+    let gatewayConstructions = 0;
+    let starts = 0;
+    const { cache, rows } = cacheFake();
+    const service = new JevRunService({
+      storageService: {},
+      cache,
+      loadCapture: () => {
+        captureLoads++;
+        return Promise.resolve(changed);
+      },
+      readCurrent: () => {
+        reads++;
+        if (reads >= 2) current = changed;
+        return Promise.resolve({
+          collection: current.collection,
+          sourceVectorIdentity: current.sourceVectorIdentity,
+          policyIdentity: "policy",
+          canTransmitNotes: false,
+        });
+      },
+      createGateway: (admit) => {
+        gatewayConstructions++;
+        return {
+          evaluatePair: async () => {
+            await admit({
+              mode: "description-only",
+              attemptId: "prepared-source-edit",
+              start: () => {
+                starts++;
+                return { response: Promise.resolve(new Response()) };
+              },
+            });
+            return scoreResult();
+          },
+        };
+      },
+    });
+
+    const result = await service.startPreparedRun({
+      capture: original,
+      scope: planned.scope,
+      noteTransmissionAuthorized: false,
+    }).completion;
+
+    expect(captureLoads).toBe(1);
+    expect(gatewayConstructions).toBe(0);
+    expect(starts).toBe(0);
+    expect(rows.size).toBe(0);
+    expect(planned.scope.sourceForGame("a")?.descriptionFingerprint).toBe(originalFingerprint);
+    expect(result.state).toBe("failed");
+  });
+
+  test("prepared no-required-signal run never constructs its gateway", async () => {
+    const capture = fixture();
+    capture.collection.semanticRedundancy.settings.weights = {
+      factual: 0,
+      description: 0,
+      ownerNote: 0,
+    };
+    const planned = planJevRunScope(capture.collection, capture.predictionCapture);
+    if (!planned.ok) throw new Error("Expected valid prepared scope");
+    const { cache } = cacheFake();
+    let gatewayConstructions = 0;
+    let captureLoads = 0;
+    const service = new JevRunService({
+      storageService: {},
+      cache,
+      loadCapture: () => {
+        captureLoads++;
+        return Promise.resolve(capture);
+      },
+      readCurrent: () =>
+        Promise.resolve({
+          collection: capture.collection,
+          sourceVectorIdentity: capture.sourceVectorIdentity,
+          policyIdentity: capture.policyIdentity,
+          canTransmitNotes: false,
+        }),
+      createGateway: () => {
+        gatewayConstructions++;
+        return { evaluatePair: () => Promise.resolve(scoreResult()) };
+      },
+    });
+    const result = await service.startPreparedRun({
+      capture,
+      scope: planned.scope,
+      noteTransmissionAuthorized: false,
+    }).completion;
+    expect(gatewayConstructions).toBe(0);
+    expect(captureLoads).toBe(1); // final coverage only; not a replacement start capture
+    expect(result.state).toBe("completed");
+  });
+
+  test("prepared C-only pair with absent notes sends descriptions without note authorization", async () => {
+    const capture = fixture();
+    const planned = planJevRunScope(capture.collection, capture.predictionCapture);
+    if (!planned.ok) throw new Error("Expected valid prepared scope");
+    const { cache, rows } = cacheFake();
+    let starts = 0;
+    const service = new JevRunService({
+      storageService: {},
+      cache,
+      loadCapture: () => Promise.resolve(capture),
+      readCurrent: () =>
+        Promise.resolve({
+          collection: capture.collection,
+          sourceVectorIdentity: capture.sourceVectorIdentity,
+          policyIdentity: capture.policyIdentity,
+          canTransmitNotes: false,
+        }),
+      createGateway: (admit) => ({
+        evaluatePair: async (request) => {
+          expect(request.mode).toBe("description-only");
+          await admit({
+            mode: "description-only",
+            attemptId: "prepared-c-only",
+            start: () => {
+              starts++;
+              return { response: Promise.resolve(new Response()) };
+            },
+          });
+          return scoreResult();
+        },
+      }),
+    });
+    const result = await service.startPreparedRun({
+      capture,
+      scope: planned.scope,
+      noteTransmissionAuthorized: false,
+    }).completion;
+    expect(starts).toBe(1);
+    expect(rows.has("abC")).toBe(true);
+    expect(result.state).toBe("completed");
+  });
+
+  test("prepared scope mismatch fails closed before current-state read or gateway construction", async () => {
+    const capture = fixture(["a", "b"]);
+    const wrongCapture = fixture(["a", "c"]);
+    const wrongPlan = planJevRunScope(wrongCapture.collection, wrongCapture.predictionCapture);
+    if (!wrongPlan.ok) throw new Error("Expected valid mismatched scope");
+    const { cache, rows } = cacheFake();
+    let currentReads = 0;
+    let gatewayConstructions = 0;
+    const service = new JevRunService({
+      storageService: {},
+      cache,
+      loadCapture: () => Promise.reject(new Error("Prepared execution must not recapture")),
+      readCurrent: () => {
+        currentReads++;
+        return Promise.resolve({
+          collection: capture.collection,
+          sourceVectorIdentity: capture.sourceVectorIdentity,
+          policyIdentity: capture.policyIdentity,
+          canTransmitNotes: false,
+        });
+      },
+      createGateway: () => {
+        gatewayConstructions++;
+        return { evaluatePair: () => Promise.resolve(scoreResult()) };
+      },
+    });
+    const result = await service.startPreparedRun({
+      capture,
+      scope: wrongPlan.scope,
+      noteTransmissionAuthorized: false,
+    }).completion;
+    expect(result.state).toBe("failed");
+    expect(currentReads).toBe(0);
+    expect(gatewayConstructions).toBe(0);
+    expect(rows.size).toBe(0);
   });
 
   test("run-progress storage failure before dispatch stops all paid requests", async () => {

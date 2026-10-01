@@ -55,6 +55,12 @@ export interface JevRunHandle {
   cancel(): void;
 }
 
+export interface JevPreparedRunInput {
+  capture: JevRunCapture;
+  scope: JevRunScope;
+  noteTransmissionAuthorized: boolean;
+}
+
 const DEFAULT_MAX_PAIRS = 10_000;
 const DEFAULT_MAX_RUN_MS = 30 * 60_000;
 const DEFAULT_FINAL_CAPTURE_RETRIES = 2;
@@ -80,11 +86,26 @@ export class JevRunService {
   }
 
   startRun(input: { noteTransmissionAuthorized: boolean }): JevRunHandle {
+    return this.reserveRun(input.noteTransmissionAuthorized);
+  }
+
+  /** Starts from a capture/scope already prepared by the explicit owner-action boundary. */
+  startPreparedRun(input: JevPreparedRunInput): JevRunHandle {
+    return this.reserveRun(input.noteTransmissionAuthorized, {
+      capture: structuredClone(input.capture),
+      scope: input.scope,
+    });
+  }
+
+  private reserveRun(
+    noteAuthorized: boolean,
+    prepared?: { capture: JevRunCapture; scope: JevRunScope },
+  ): JevRunHandle {
     if (activeRuns.has(this.options.storageService)) throw new Error("A Jev run is already active");
     const runId = crypto.randomUUID();
     const controller = new AbortController();
     const completion = runOutsideProfileSourceCoordinator(() =>
-      this.execute(runId, input.noteTransmissionAuthorized, controller),
+      this.execute(runId, noteAuthorized, controller, prepared),
     );
     const handle: JevRunHandle = { runId, completion, cancel: () => controller.abort() };
     activeRuns.set(this.options.storageService, handle);
@@ -116,6 +137,7 @@ export class JevRunService {
     runId: string,
     noteAuthorized: boolean,
     controller: AbortController,
+    prepared?: { capture: JevRunCapture; scope: JevRunScope },
   ): Promise<JevRunProgress> {
     const startedAt = this.now().getTime();
     let progress: JevRunProgress = {
@@ -131,15 +153,23 @@ export class JevRunService {
     let capture: JevRunCapture;
     let originalScope: JevRunScope;
     try {
-      capture = await this.options.loadCapture();
-      const planned = this.planScope(capture.collection, capture.predictionCapture);
-      if (!planned.ok) throw new Error("Invalid Jev capture");
-      originalScope = planned.scope;
+      if (prepared) {
+        capture = prepared.capture;
+        originalScope = prepared.scope;
+        if (!this.scopeMatchesCapture(capture, originalScope))
+          throw new Error("Prepared Jev scope does not match capture");
+      } else {
+        capture = await this.options.loadCapture();
+        const planned = this.planScope(capture.collection, capture.predictionCapture);
+        if (!planned.ok) throw new Error("Invalid Jev capture");
+        originalScope = planned.scope;
+      }
       if (originalScope.totalEligiblePairs > this.maxPairs)
         throw new Error("Jev run exceeds configured pair limit");
       progress = this.nextProgress(progress, { pairCount: originalScope.totalEligiblePairs });
       await this.coordinator.runExclusive(async () => {
         const current = await this.options.readCurrent();
+        if (this.stopped(controller, startedAt)) throw new Error("Jev run stopped");
         if (!sameAuthority(capture, current))
           throw new Error("Jev sources changed before run start");
         this.options.cache.saveRunProgress(progress);
@@ -148,27 +178,32 @@ export class JevRunService {
       let activeAdmission: { pair: JevRunPair; ready: ReadyAdmission } | null = null;
       let latestCapture = capture;
       let latestScope = originalScope;
-      const gateway = this.options.createGateway((attempt) => {
-        const bound = activeAdmission;
-        if (!bound) return Promise.reject(new Error("No active Jev pair admission"));
-        return this.admitAttempt({
-          runId,
-          noteAuthorized,
-          controller,
-          startedAt,
-          originalCapture: capture,
-          originalScope,
-          getLatest: () => latestCapture,
-          setLatest: (next, scope) => {
-            latestCapture = next;
-            latestScope = scope;
-          },
-          getLatestScope: () => latestScope,
-          pair: bound.pair,
-          ready: bound.ready,
-          attempt,
+      let gateway: JevGateway | null = null;
+      const getGateway = (): JevGateway => {
+        if (gateway) return gateway;
+        gateway = this.options.createGateway((attempt) => {
+          const bound = activeAdmission;
+          if (!bound) return Promise.reject(new Error("No active Jev pair admission"));
+          return this.admitAttempt({
+            runId,
+            noteAuthorized,
+            controller,
+            startedAt,
+            originalCapture: capture,
+            originalScope,
+            getLatest: () => latestCapture,
+            setLatest: (next, scope) => {
+              latestCapture = next;
+              latestScope = scope;
+            },
+            getLatestScope: () => latestScope,
+            pair: bound.pair,
+            ready: bound.ready,
+            attempt,
+          });
         });
-      });
+        return gateway;
+      };
 
       for (const originalPair of originalScope.pairs()) {
         if (this.stopped(controller, startedAt)) break;
@@ -215,7 +250,7 @@ export class JevRunService {
         activeAdmission = { pair: currentPair, ready };
         let result: Awaited<ReturnType<JevGateway["evaluatePair"]>>;
         try {
-          result = await gateway.evaluatePair(ready.request, controller.signal);
+          result = await getGateway().evaluatePair(ready.request, controller.signal);
         } catch {
           activeAdmission = null;
           if (!controller.signal.aborted)
@@ -299,6 +334,55 @@ export class JevRunService {
       if (refreshed.sourceVectorIdentity === current.sourceVectorIdentity) return refreshed;
     }
     throw new Error("Jev source vector changed repeatedly during refresh");
+  }
+
+  private scopeMatchesCapture(capture: JevRunCapture, scope: JevRunScope): boolean {
+    try {
+      if (
+        !Object.isFrozen(scope) ||
+        !Object.isFrozen(scope.eligibleGameIds) ||
+        !Number.isSafeInteger(scope.totalEligiblePairs) ||
+        scope.totalEligiblePairs < 0 ||
+        scope.totalEligiblePairs > this.maxPairs
+      )
+        return false;
+      const planned = this.planScope(capture.collection, capture.predictionCapture);
+      if (!planned.ok) return false;
+      const expected = planned.scope;
+      if (
+        JSON.stringify(scope.eligibleGameIds) !== JSON.stringify(expected.eligibleGameIds) ||
+        scope.totalEligiblePairs !== expected.totalEligiblePairs ||
+        scope.descriptionBearingPairCount !== expected.descriptionBearingPairCount ||
+        scope.ownerNoteBearingPairCount !== expected.ownerNoteBearingPairCount ||
+        scope.ownerNoteSignalBlocked !== expected.ownerNoteSignalBlocked ||
+        scope.cachedOwnerNoteUse !== expected.cachedOwnerNoteUse
+      )
+        return false;
+      for (const gameId of expected.eligibleGameIds) {
+        if (
+          JSON.stringify(scope.sourceForGame(gameId)) !==
+          JSON.stringify(expected.sourceForGame(gameId))
+        )
+          return false;
+      }
+      const expectedPairs = expected.pairs();
+      const suppliedPairs = scope.pairs();
+      for (let index = 0; index < expected.totalEligiblePairs; index++) {
+        const expectedPair = expectedPairs.next();
+        const suppliedPair = suppliedPairs.next();
+        if (
+          expectedPair.done ||
+          suppliedPair.done ||
+          JSON.stringify(expectedPair.value) !== JSON.stringify(suppliedPair.value)
+        )
+          return false;
+        const pairLookup = scope.pairForIds(expectedPair.value.gameAId, expectedPair.value.gameBId);
+        if (JSON.stringify(pairLookup) !== JSON.stringify(expectedPair.value)) return false;
+      }
+      return expectedPairs.next().done === true && suppliedPairs.next().done === true;
+    } catch {
+      return false;
+    }
   }
 
   private async admitAttempt(input: {
