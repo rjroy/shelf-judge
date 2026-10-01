@@ -199,7 +199,14 @@ export function prepareJevRunPair(options: JevPairRunOptions): JevPairPreparatio
     gameAId: pair.gameAId,
     gameBId: pair.gameBId,
     collectionId: collection.id,
-    ...(sendsNotes ? { consentEpoch: String(collection.semanticRedundancy.consentEpoch) } : {}),
+    ...(sendsNotes
+      ? {
+          consentEpoch: String(
+            collection.semanticRedundancy.ownerNoteConsentEpoch ??
+              collection.semanticRedundancy.consentEpoch,
+          ),
+        }
+      : {}),
     dependencies,
     contract: currentContract,
   };

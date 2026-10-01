@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Collection, DurableGame, GameWithScore } from "@shelf-judge/shared";
+import type {
+  Collection,
+  DurableGame,
+  GameWithScore,
+  SemanticRedundancySettings,
+} from "@shelf-judge/shared";
 import {
   createInitialEntityMetadata,
   createInitialSemanticRedundancyStateV10,
@@ -17,7 +22,14 @@ import type {
 } from "../../src/services/jev-pair-cache-service.js";
 import { createJevPairCache } from "../../src/services/jev-pair-cache-service.js";
 import { computeJevPairCoverage } from "../../src/services/jev-pair-coverage.js";
+import { createCollectionMutationService } from "../../src/services/collection-mutation-service.js";
+import { createSemanticRedundancyStateService } from "../../src/services/semantic-redundancy-state-service.js";
 import { buildJevPairDependencies } from "../../src/services/jev-pair-identity.js";
+import {
+  computeRedundancyAdjustments,
+  DEFAULT_REDUNDANCY_SETTINGS,
+} from "../../src/services/redundancy-engine.js";
+import type { RedundancyPairTable } from "../../src/services/redundancy-engine.js";
 import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
 import {
   createJevGateway,
@@ -1164,6 +1176,219 @@ describe("JevRunService attempt barriers", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test.each([
+    {
+      kind: "C_ONLY",
+      before: { factual: 7, description: 1, ownerNote: 0 },
+      after: { factual: 3, description: 4, ownerNote: 0 },
+    },
+    {
+      kind: "D_ONLY",
+      before: { factual: 7, description: 0, ownerNote: 1 },
+      after: { factual: 3, description: 0, ownerNote: 4 },
+    },
+    {
+      kind: "SHARED_CD",
+      before: { factual: 7, description: 1, ownerNote: 1 },
+      after: { factual: 3, description: 4, ownerNote: 2 },
+    },
+  ] as const)(
+    "weight-only changes preserve $kind cache rows for explicit Runs",
+    async ({ kind, before, after }) => {
+      const dir = await mkdtemp(join(tmpdir(), "jev-run-weight-cache-"));
+      const base = fixture();
+      const cache = await createJevPairCache(dir);
+      const notedGames = base.collection.games.map((entry, index) => ({
+        ...entry,
+        ownerNote: {
+          state: "present" as const,
+          version: 1,
+          updatedAt: "2026-01-01T00:00:00Z",
+          text: `synthetic note ${index}`,
+        },
+      }));
+      let stored: Collection = {
+        ...base.collection,
+        games: notedGames,
+        semanticRedundancy: {
+          ...base.collection.semanticRedundancy,
+          settings: {
+            enabled: true,
+            weights: before,
+            cachedOwnerNoteUse: true,
+          },
+        },
+      };
+      const storageService = {
+        loadCollection: () => Promise.resolve(structuredClone(stored)),
+        saveCollection: (next: Collection) => {
+          stored = structuredClone(next);
+          return Promise.resolve();
+        },
+      };
+      const mutations = createCollectionMutationService({ storageService, jevPairCache: cache });
+      const semanticState = createSemanticRedundancyStateService({
+        collectionMutationService: mutations,
+      });
+      let providerCalls = 0;
+      const loadCapture = (): Promise<JevRunCapture> =>
+        Promise.resolve({
+          ...base,
+          collection: structuredClone(stored),
+          policyIdentity: `policy-${stored.semanticRedundancy.consentEpoch}`,
+        });
+      const service = new JevRunService({
+        storageService,
+        cache,
+        loadCapture,
+        readCurrent: () =>
+          Promise.resolve({
+            collection: structuredClone(stored),
+            sourceVectorIdentity: "vector",
+            policyIdentity: `policy-${stored.semanticRedundancy.consentEpoch}`,
+            canTransmitNotes: true,
+          }),
+        createGateway: (admit) => ({
+          evaluatePair: async (request) => {
+            const requestMode = request.mode;
+            await admit({
+              mode: requestMode,
+              attemptId: `weight-cache-${kind}`,
+              start: () => {
+                providerCalls++;
+                return { response: Promise.resolve(new Response()) };
+              },
+            });
+            const score = {
+              score: requestMode === "owner-notes-only" ? 0.8 : 0.4,
+              confidence: null,
+              modelId: JEV_JUDGMENT_CONTRACT.modelId,
+              rubricVersion: JEV_RUBRIC_VERSION,
+              questionVersion: JEV_QUESTION_VERSION,
+            };
+            return {
+              description: requestMode === "owner-notes-only" ? null : score,
+              ownerNote: requestMode === "description-only" ? null : score,
+              usage: { inputTokens: 1, outputTokens: 1 },
+            };
+          },
+        }),
+      });
+
+      try {
+        const first = await service.startRun({ noteTransmissionAuthorized: true }).completion;
+        expect(first.state).toBe("completed");
+        expect(providerCalls).toBe(1);
+        const cRow = cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" });
+        const dRow = cache.lookup({ gameAId: "a", gameBId: "b", signal: "D" });
+        expect(cRow?.dependencyKind).toBe(
+          kind === "C_ONLY" ? "C_ONLY" : kind === "SHARED_CD" ? "SHARED_CD" : undefined,
+        );
+        expect(dRow?.dependencyKind).toBe(
+          kind === "D_ONLY" ? "D_ONLY" : kind === "SHARED_CD" ? "SHARED_CD" : undefined,
+        );
+        const cachedOwnerNoteEpoch = stored.semanticRedundancy.ownerNoteConsentEpoch;
+        const initialIdentity = computeJevPairCoverage({
+          collection: stored,
+          predictionCapture: base.predictionCapture,
+          captureIdentity: base.captureIdentity,
+          factualWeights: base.factualWeights,
+          cache,
+        }).identity;
+
+        const updateWeights = async (weights: SemanticRedundancySettings["weights"]) => {
+          const current = stored.semanticRedundancy;
+          const result = await semanticState.updateSettings(
+            { evidenceEpoch: current.evidenceEpoch, consentEpoch: current.consentEpoch },
+            { ...current.settings, weights },
+          );
+          expect(result.outcome).toBe("accepted");
+        };
+        await updateWeights({ factual: 3, description: 0, ownerNote: 0 });
+        const zeroRun = await service.startRun({ noteTransmissionAuthorized: true }).completion;
+        expect(zeroRun.state).toBe("completed");
+        expect(providerCalls).toBe(1);
+
+        await updateWeights(after);
+        const finalRun = await service.startRun({ noteTransmissionAuthorized: true }).completion;
+        expect(finalRun.state).toBe("completed");
+        expect(finalRun.cacheHits).toBe(1);
+        expect(providerCalls).toBe(1);
+        expect(stored.semanticRedundancy.ownerNoteConsentEpoch).toBe(cachedOwnerNoteEpoch);
+
+        const freshCoverage = computeJevPairCoverage({
+          collection: stored,
+          predictionCapture: base.predictionCapture,
+          captureIdentity: base.captureIdentity,
+          factualWeights: base.factualWeights,
+          cache,
+        });
+        expect(freshCoverage.identity).not.toBe(initialIdentity);
+        expect(freshCoverage.pairs[0]?.C).toMatchObject({
+          state: after.description > 0 ? "covered" : "unavailable",
+        });
+        expect(freshCoverage.pairs[0]?.D).toMatchObject({
+          state: after.ownerNote > 0 ? "covered" : "unavailable",
+        });
+        if (after.description > 0) expect(freshCoverage.pairs[0]?.C).toMatchObject({ score: 0.4 });
+        if (after.ownerNote > 0)
+          expect(freshCoverage.pairs[0]?.D).toMatchObject({ score: kind === "D_ONLY" ? 0.8 : 0.4 });
+        const currentPair = freshCoverage.pairs[0];
+        if (!currentPair) throw new Error("Expected one fresh coverage pair");
+        const table: RedundancyPairTable = {
+          status: "ready",
+          identity: { generationId: "fresh", consentEpoch: "current", settingsEpoch: "current" },
+          expectedIdentity: {
+            generationId: "fresh",
+            consentEpoch: "current",
+            settingsEpoch: "current",
+          },
+          weights: stored.semanticRedundancy.settings.weights,
+          pairs: [
+            {
+              gameAId: currentPair.gameAId,
+              gameBId: currentPair.gameBId,
+              factual: currentPair.factualScore,
+              description: currentPair.C.state === "covered" ? currentPair.C.score : null,
+              ownerNote: currentPair.D.state === "covered" ? currentPair.D.score : null,
+            },
+          ],
+        };
+        const freshScores = computeRedundancyAdjustments(
+          [...base.predictionCapture],
+          {
+            ...DEFAULT_REDUNDANCY_SETTINGS,
+            enabled: true,
+            similarityThreshold: 0,
+            minNeighbors: 1,
+          },
+          () => ({ binary: [], continuous: [], personalAxes: [] }),
+          table,
+        );
+        const freshSimilarity = freshScores.get("a")?.nicheNeighbors[0]?.similarity;
+        const weightedComponents = [
+          [after.factual, currentPair.factualScore],
+          ...(after.description > 0 && currentPair.C.state === "covered"
+            ? [[after.description, currentPair.C.score] as const]
+            : []),
+          ...(after.ownerNote > 0 && currentPair.D.state === "covered"
+            ? [[after.ownerNote, currentPair.D.score] as const]
+            : []),
+        ] as const;
+        const expectedFreshSimilarity =
+          Math.round(
+            (weightedComponents.reduce((sum, [weight, score]) => sum + weight * score, 0) /
+              weightedComponents.reduce((sum, [weight]) => sum + weight, 0)) *
+              1000,
+          ) / 1000;
+        expect(freshSimilarity).toBe(expectedFreshSimilarity);
+      } finally {
+        cache.close();
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("purge after a successful scoped Run leaves it completed without stale activation", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-purge-race-"));

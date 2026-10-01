@@ -106,6 +106,7 @@ function fixture() {
       },
       evidenceEpoch: 3,
       consentEpoch: 4,
+      ownerNoteConsentEpoch: 4,
       factualWeightsEpoch: 2,
       factualWeightsFingerprint: "factual-v2",
     },
@@ -145,7 +146,9 @@ function row(c: Collection, a: DurableGame, b: DurableGame, signal: "C" | "D"): 
   });
   return {
     collectionId: c.id,
-    consentEpoch: String(c.semanticRedundancy.consentEpoch),
+    consentEpoch: String(
+      c.semanticRedundancy.ownerNoteConsentEpoch ?? c.semanticRedundancy.consentEpoch,
+    ),
     gameAId: a.id,
     gameBId: b.id,
     signal,

@@ -150,6 +150,7 @@ describe("storage collection migration ordering and recovery", () => {
       },
       evidenceEpoch: 0,
       consentEpoch: 0,
+      ownerNoteConsentEpoch: 0,
       factualWeightsEpoch: 0,
       factualWeightsFingerprint: null,
       firstOptInInitialized: false,

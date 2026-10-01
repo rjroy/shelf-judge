@@ -13,6 +13,7 @@ export interface JevRowValidationCollection {
   semanticRedundancy: {
     settings: { cachedOwnerNoteUse: boolean };
     consentEpoch: number;
+    ownerNoteConsentEpoch?: number;
   };
 }
 
@@ -187,7 +188,12 @@ export function validateJevCachedRow(
     row.requestSchemaVersion !== contract.requestSchemaVersion ||
     row.scoreMappingVersion !== contract.scoreMappingVersion ||
     row.semanticPolicyId !== contract.semanticPolicyId ||
-    (noteDependent && row.consentEpoch !== String(collection.semanticRedundancy.consentEpoch))
+    (noteDependent &&
+      row.consentEpoch !==
+        String(
+          collection.semanticRedundancy.ownerNoteConsentEpoch ??
+            collection.semanticRedundancy.consentEpoch,
+        ))
   )
     return { valid: false, reason: "invalid-row" };
 

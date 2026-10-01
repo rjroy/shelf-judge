@@ -98,6 +98,7 @@ function setup(games = [game("a"), game("b")]) {
         cachedOwnerNoteUse: true,
       },
       consentEpoch: 7,
+      ownerNoteConsentEpoch: 7,
     },
   } as unknown as Collection;
   const sources = new Map(

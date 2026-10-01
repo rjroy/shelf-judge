@@ -911,6 +911,7 @@ export function migrateCollectionV9ToV10(raw: unknown): CollectionV9ToV10Migrati
       settings: legacyState.settings,
       evidenceEpoch: legacyState.evidenceEpoch,
       consentEpoch: legacyState.consentEpoch,
+      ownerNoteConsentEpoch: legacyState.consentEpoch,
       factualWeightsEpoch: legacyState.factualWeightsEpoch,
       factualWeightsFingerprint: legacyState.factualWeightsFingerprint,
       firstOptInInitialized: legacyState.firstOptInInitialized,

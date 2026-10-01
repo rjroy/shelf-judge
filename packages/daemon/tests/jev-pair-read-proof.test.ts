@@ -139,6 +139,38 @@ describe("validateJevCachedRow", () => {
     expect(verify(cRow, revoked)).toMatchObject({ valid: true });
   });
 
+  test("keeps note rows valid across scoring-policy consent changes only", () => {
+    const shared = judgment("SHARED_CD", "D");
+    const dOnly = judgment("D_ONLY", "D");
+    const cOnly = judgment("C_ONLY", "C");
+    const scoringChange = {
+      ...collection,
+      semanticRedundancy: {
+        ...collection.semanticRedundancy,
+        consentEpoch: 8,
+        ownerNoteConsentEpoch: 7,
+      },
+    };
+    expect(verify(shared, scoringChange).valid).toBe(true);
+    expect(verify(dOnly, scoringChange).valid).toBe(true);
+    expect(verify(cOnly, scoringChange).valid).toBe(true);
+    expect(
+      verify(cOnly, {
+        ...scoringChange,
+        semanticRedundancy: {
+          ...scoringChange.semanticRedundancy,
+          settings: { cachedOwnerNoteUse: false },
+        },
+      }).valid,
+    ).toBe(true);
+    expect(
+      verify(shared, {
+        ...scoringChange,
+        semanticRedundancy: { ...scoringChange.semanticRedundancy, ownerNoteConsentEpoch: 8 },
+      }).valid,
+    ).toBe(false);
+  });
+
   test("rejects missing required source separately from a missing row", () => {
     expect(validateJevCachedRow(null, collection, a, b, "C")).toEqual({
       valid: false,

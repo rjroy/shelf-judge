@@ -102,6 +102,7 @@ function semanticFixture() {
       },
       evidenceEpoch: 3,
       consentEpoch: 4,
+      ownerNoteConsentEpoch: 4,
       factualWeightsEpoch: 2,
       factualWeightsFingerprint: "factual-v2",
     },
@@ -191,7 +192,10 @@ function seededRow(
   });
   return {
     collectionId: collection.id,
-    consentEpoch: String(collection.semanticRedundancy.consentEpoch),
+    consentEpoch: String(
+      collection.semanticRedundancy.ownerNoteConsentEpoch ??
+        collection.semanticRedundancy.consentEpoch,
+    ),
     gameAId: a.id,
     gameBId: b.id,
     signal,

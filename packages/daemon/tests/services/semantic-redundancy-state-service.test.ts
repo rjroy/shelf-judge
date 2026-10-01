@@ -140,9 +140,55 @@ describe("semantic redundancy state service (V10 factual-only state)", () => {
       },
       evidenceEpoch: 0,
       consentEpoch: 1,
+      ownerNoteConsentEpoch: 0,
       factualWeightsEpoch: 0,
       factualWeightsFingerprint: null,
       firstOptInInitialized: true,
+    });
+  });
+
+  test("weight changes advance the broad fence but preserve note-row cache consent", async () => {
+    const initial = collection();
+    initial.semanticRedundancy.settings = {
+      enabled: true,
+      weights: { factual: 7, description: 3, ownerNote: 2 },
+      cachedOwnerNoteUse: true,
+    };
+    initial.semanticRedundancy.consentEpoch = 4;
+    initial.semanticRedundancy.ownerNoteConsentEpoch = 2;
+    const h = harness(initial);
+
+    const updated = await h.service.updateSettings(
+      { evidenceEpoch: 0, consentEpoch: 4 },
+      {
+        enabled: true,
+        weights: { factual: 8, description: 5, ownerNote: 1 },
+        cachedOwnerNoteUse: true,
+      },
+    );
+    expect(updated).toMatchObject({ outcome: "accepted", current: { consentEpoch: 5 } });
+    expect(h.read().semanticRedundancy).toMatchObject({
+      consentEpoch: 5,
+      ownerNoteConsentEpoch: 2,
+    });
+  });
+
+  test("legacy V10 state materializes prior consent before a first mutation", async () => {
+    const initial = collection();
+    initial.semanticRedundancy.consentEpoch = 6;
+    delete (initial.semanticRedundancy as { ownerNoteConsentEpoch?: number }).ownerNoteConsentEpoch;
+    const h = harness(initial);
+    const updated = await h.service.updateSettings(
+      { evidenceEpoch: 0, consentEpoch: 6 },
+      {
+        ...initial.semanticRedundancy.settings,
+        weights: { factual: 4, description: 2, ownerNote: 0 },
+      },
+    );
+    expect(updated).toMatchObject({ outcome: "accepted", current: { consentEpoch: 7 } });
+    expect(h.read().semanticRedundancy).toMatchObject({
+      consentEpoch: 7,
+      ownerNoteConsentEpoch: 6,
     });
   });
 });

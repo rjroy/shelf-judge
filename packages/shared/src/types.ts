@@ -591,6 +591,8 @@ export interface SemanticRedundancyStateV10 {
   settings: SemanticRedundancySettings;
   evidenceEpoch: number;
   consentEpoch: number;
+  /** Cache-row fence for owner-note permission; absent only in pre-upgrade V10 data. */
+  ownerNoteConsentEpoch?: number;
   factualWeightsEpoch: number;
   factualWeightsFingerprint: string | null;
   firstOptInInitialized: boolean;

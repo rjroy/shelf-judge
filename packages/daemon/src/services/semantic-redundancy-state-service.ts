@@ -256,10 +256,19 @@ export function createSemanticRedundancyStateService(deps: {
             changed: false,
             value: { outcome: "accepted", value: undefined, current: currentEpoch(collection) },
           };
-        if (state.consentEpoch >= Number.MAX_SAFE_INTEGER)
+        if (
+          state.consentEpoch >= Number.MAX_SAFE_INTEGER ||
+          (state.settings.cachedOwnerNoteUse !== parsed.data.cachedOwnerNoteUse &&
+            (state.ownerNoteConsentEpoch ?? state.consentEpoch) >= Number.MAX_SAFE_INTEGER)
+        )
           return { changed: false, value: { outcome: "invalid-state" } };
+        const notePermissionChanged =
+          state.settings.cachedOwnerNoteUse !== parsed.data.cachedOwnerNoteUse;
+        // Materialize legacy V10 state from its prior broad consent fence before changing it.
+        state.ownerNoteConsentEpoch ??= state.consentEpoch;
         state.settings = parsed.data;
         state.consentEpoch += 1;
+        if (notePermissionChanged) state.ownerNoteConsentEpoch += 1;
         if (parsed.data.enabled) state.firstOptInInitialized = true;
         discardLegacySemanticPayload(collection);
         return {
@@ -281,6 +290,7 @@ export function createSemanticRedundancyStateService(deps: {
           };
         if (state.factualWeightsEpoch >= Number.MAX_SAFE_INTEGER)
           return { changed: false, value: { outcome: "invalid-state" } };
+        state.ownerNoteConsentEpoch ??= state.consentEpoch;
         state.factualWeightsEpoch += 1;
         state.factualWeightsFingerprint = fingerprint;
         discardLegacySemanticPayload(collection);
