@@ -4,7 +4,6 @@ import { DurableSourcePostCommitError, type StorageService } from "../services/s
 import type { AttentionMutationImpact } from "../services/attention-candidate-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 import type { SemanticRedundancySettings } from "@shelf-judge/shared";
-import type { SemanticRefreshRuntime } from "../services/semantic-refresh-runtime.js";
 import type { SemanticRedundancyStateService } from "../services/semantic-redundancy-state-service.js";
 import {
   canonicalSha256,
@@ -15,8 +14,6 @@ import { createSemanticRedundancyStateService } from "../services/semantic-redun
 
 export interface RedundancyRoutesDeps {
   storageService: StorageService;
-  /** Semantic endpoints fail closed when either injected boundary is unavailable. */
-  semanticRuntime?: SemanticRefreshRuntime;
   semanticStateService?: SemanticRedundancyStateService;
   afterSourceSave?: (impact: AttentionMutationImpact) => Promise<void>;
 }
@@ -223,9 +220,7 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
 
   routes.post("/redundancy/semantic/acknowledge-and-start", unavailable);
 
-  routes.get("/redundancy/semantic/refresh-status", (c) =>
-    c.json({ status: "not-ready", publicationStatus: "not-ready" }),
-  );
+  routes.get("/redundancy/semantic/refresh-status", unavailable);
 
   routes.post("/redundancy/semantic/cancel", unavailable);
 
@@ -366,51 +361,10 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
       idempotent: true,
     },
     {
-      operationId: "shelf.redundancy.create-semantic-disclosure",
-      name: "create-semantic-disclosure",
-      description: "Create a scoped, bounded disclosure for an explicit semantic refresh",
-      invocation: { method: "POST", path: "/api/redundancy/semantic/disclosure" },
-      hierarchy: { root: "shelf", feature: "redundancy" },
-      idempotent: false,
-    },
-    {
       operationId: "shelf.redundancy.get-semantic-summary",
       name: "get-semantic-summary",
       description: "Get safe semantic redundancy settings and publication summary",
       invocation: { method: "GET", path: "/api/redundancy/semantic/summary" },
-      hierarchy: { root: "shelf", feature: "redundancy" },
-      idempotent: true,
-    },
-    {
-      operationId: "shelf.redundancy.deliver-semantic-disclosure-page",
-      name: "deliver-semantic-disclosure-page",
-      description: "Deliver and record one page of exact disclosed pair IDs and note-bearing flags",
-      invocation: { method: "POST", path: "/api/redundancy/semantic/disclosure/page" },
-      hierarchy: { root: "shelf", feature: "redundancy" },
-      idempotent: true,
-    },
-    {
-      operationId: "shelf.redundancy.acknowledge-and-start-semantic-refresh",
-      name: "acknowledge-and-start-semantic-refresh",
-      description:
-        "Acknowledge the complete disclosed pair set and explicitly authorize one refresh",
-      invocation: { method: "POST", path: "/api/redundancy/semantic/acknowledge-and-start" },
-      hierarchy: { root: "shelf", feature: "redundancy" },
-      idempotent: true,
-    },
-    {
-      operationId: "shelf.redundancy.get-semantic-refresh-status",
-      name: "get-semantic-refresh-status",
-      description: "Get bounded semantic refresh progress",
-      invocation: { method: "GET", path: "/api/redundancy/semantic/refresh-status" },
-      hierarchy: { root: "shelf", feature: "redundancy" },
-      idempotent: true,
-    },
-    {
-      operationId: "shelf.redundancy.cancel-semantic-refresh",
-      name: "cancel-semantic-refresh",
-      description: "Cancel the current explicitly authorized semantic refresh",
-      invocation: { method: "POST", path: "/api/redundancy/semantic/cancel" },
       hierarchy: { root: "shelf", feature: "redundancy" },
       idempotent: true,
     },

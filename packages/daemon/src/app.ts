@@ -61,7 +61,6 @@ import { createAnalystTurnService } from "./services/analyst-turn-service.js";
 import type { ProfileSourceCoordinator } from "./services/profile-source-coordinator.js";
 import type { AttentionDispositionService } from "./services/attention-disposition-service.js";
 import type { CollectionSnapshotCacheService } from "./services/collection-snapshot-cache-service.js";
-import type { SemanticRefreshRuntime } from "./services/semantic-refresh-runtime.js";
 import type { SemanticRedundancyStateService } from "./services/semantic-redundancy-state-service.js";
 import { createCollectionSnapshotRoutes } from "./routes/collection-snapshot.js";
 
@@ -77,7 +76,6 @@ export interface AppDeps {
   intentionService: IntentionService;
   attentionDispositionService: AttentionDispositionService;
   collectionSnapshotService?: CollectionSnapshotCacheService;
-  semanticRefreshRuntime?: SemanticRefreshRuntime;
   semanticRedundancyStateService?: SemanticRedundancyStateService;
   ownerGameNoteService: OwnerGameNoteService;
   groundedAnalysisProvider: GroundedAnalysisProvider;
@@ -155,7 +153,6 @@ export function createApp(deps: AppDeps): AppResult {
   const nicheRouteModule = createNicheRoutes({ storageService });
   const redundancyRouteModule = createRedundancyRoutes({
     storageService,
-    semanticRuntime: deps.semanticRefreshRuntime,
     semanticStateService: deps.semanticRedundancyStateService,
     afterSourceSave: deps.afterCandidateSourceSave,
   });

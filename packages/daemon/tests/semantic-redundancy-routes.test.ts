@@ -2,12 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { createInitialSemanticRedundancyState, type Collection } from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
-import type { SemanticRefreshRuntime } from "../src/services/semantic-refresh-runtime";
 import { createRedundancyRoutes } from "../src/routes/redundancy";
 import { createSettingsRouteStorageStub } from "./helpers/settings-route-storage";
 import { semanticGenerationFixture } from "./helpers/semantic-redundancy-fixtures";
 
-function harness(runtime?: SemanticRefreshRuntime) {
+function harness() {
   const collection: Collection = {
     schemaVersion: 9,
     revision: 0,
@@ -42,7 +41,7 @@ function harness(runtime?: SemanticRefreshRuntime) {
       }),
     saveRedundancySettings: () => Promise.resolve(),
   } as StorageService;
-  const route = createRedundancyRoutes({ storageService: storage, semanticRuntime: runtime });
+  const route = createRedundancyRoutes({ storageService: storage });
   const app = new Hono();
   app.route("/api", route.routes);
   return { app, collection, operations: route.operations };
@@ -64,7 +63,6 @@ describe("semantic redundancy safety quarantine", () => {
 
     const settings = await app.request("/api/redundancy/settings");
     const summary = await app.request("/api/redundancy/semantic/summary");
-    const refreshStatus = await app.request("/api/redundancy/semantic/refresh-status");
     expect(await settings.json()).toMatchObject({
       semantic: { status: { status: "not-ready", publicationStatus: "not-ready" } },
     });
@@ -73,10 +71,8 @@ describe("semantic redundancy safety quarantine", () => {
       generation: null,
       disclosure: null,
     });
-    expect(await refreshStatus.json()).toEqual({
-      status: "not-ready",
-      publicationStatus: "not-ready",
-    });
+    const refreshStatus = await app.request("/api/redundancy/semantic/refresh-status");
+    expect(refreshStatus.status).toBe(503);
   });
 
   test("semantic preferences remain writable without activating legacy inference", async () => {
@@ -98,18 +94,8 @@ describe("semantic redundancy safety quarantine", () => {
     });
   });
 
-  test("capture, page, start, and cancel endpoints are unavailable and never invoke an injected runtime", async () => {
-    let runtimeCalls = 0;
-    const runtime = Object.fromEntries(
-      ["capture", "deliverPage", "start", "status", "cancel"].map((method) => [
-        method,
-        () => {
-          runtimeCalls += 1;
-          throw new Error(`unexpected ${method}`);
-        },
-      ]),
-    ) as unknown as SemanticRefreshRuntime;
-    const { app } = harness(runtime);
+  test("legacy inference endpoints are explicitly unavailable", async () => {
+    const { app } = harness();
     const requests: [string, RequestInit][] = [
       ["/api/redundancy/semantic/disclosure", json({ signalScope: "description-only" })],
       ["/api/redundancy/semantic/disclosure/page", json({ manifestId: "m", offset: 0 })],
@@ -122,6 +108,5 @@ describe("semantic redundancy safety quarantine", () => {
       const responseBody = (await response.json()) as { error: string };
       expect(responseBody.error).toContain("unavailable");
     }
-    expect(runtimeCalls).toBe(0);
   });
 });

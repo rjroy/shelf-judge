@@ -69,7 +69,6 @@ import {
 } from "../../src/services/attention-disposition-maintenance.js";
 import type { AttentionDispositionWinner } from "../../src/services/attention-disposition-compatibility.js";
 import type { AttentionDisposition } from "@shelf-judge/shared";
-import type { SemanticRefreshRuntime } from "../../src/services/semantic-refresh-runtime.js";
 import type { SemanticRedundancyStateService } from "../../src/services/semantic-redundancy-state-service.js";
 import {
   createAttentionDispositionService,
@@ -100,7 +99,6 @@ export interface TestAppContext<TFileOps extends FileOps = MockFileOps> {
   groundedAnalysisProvider: GroundedAnalysisProvider;
   groundedAnalysisTransportController: GroundedAnalysisTransportController;
   reflectionRuntime: ReflectionRuntime;
-  semanticRefreshRuntime?: SemanticRefreshRuntime;
   fileOps: TFileOps;
 }
 
@@ -118,7 +116,6 @@ export interface TestAppOptions<TFileOps extends FileOps = MockFileOps> {
   storedRuleMatches?: (
     dispositions: readonly AttentionDisposition[],
   ) => Promise<readonly AttentionDispositionWinner[]>;
-  semanticRefreshRuntime?: SemanticRefreshRuntime;
   semanticRedundancyStateService?: SemanticRedundancyStateService;
 }
 
@@ -404,7 +401,6 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     ownerGameNoteService,
     groundedAnalysisProvider,
     reflectionRuntime,
-    semanticRefreshRuntime: options?.semanticRefreshRuntime,
     semanticRedundancyStateService: options?.semanticRedundancyStateService,
     bggClient,
     profileSourceCoordinator: profileSourceCoordinatorFor(storageService),
@@ -434,7 +430,6 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     groundedAnalysisProvider,
     groundedAnalysisTransportController,
     reflectionRuntime,
-    semanticRefreshRuntime: options?.semanticRefreshRuntime,
     fileOps,
   };
 }
