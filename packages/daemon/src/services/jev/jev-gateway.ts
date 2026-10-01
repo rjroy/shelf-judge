@@ -1,9 +1,13 @@
 import { z } from "zod";
 import { createLogger, type Logger } from "../logger.js";
+import {
+  JEV_JUDGMENT_CONTRACT,
+  JEV_QUESTION_VERSION,
+  JEV_RUBRIC_VERSION,
+} from "./jev-judgment-contract.js";
+export { JEV_QUESTION_VERSION, JEV_RUBRIC_VERSION } from "./jev-judgment-contract.js";
 
-export const JEV_MODEL_ID = "jev-1.13.0" as const;
-export const JEV_RUBRIC_VERSION = 2 as const;
-export const JEV_QUESTION_VERSION = 2 as const;
+export const JEV_MODEL_ID = JEV_JUDGMENT_CONTRACT.modelId;
 export const JEV_API_URL = "https://api.typesafe.ai/v1/systemone";
 export const JEV_RETENTION_CAVEAT =
   "TypeSafe's default retention duration is unspecified; do not promise provider-side erasure or a retention window.";

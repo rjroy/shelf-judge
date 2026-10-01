@@ -75,3 +75,26 @@ quarantined; no provider calls or owner-data access were performed.
 - No live Jev/provider operation was run; Run/read behavior remains
   quarantined. This checkpoint does not claim the SQLite cache feature is
   complete.
+
+## Phase 2d10a — Jev pair read-proof contracts
+
+Checkpointed on `design/jev-similarity`. The overall Phase 2 implementation
+and feature remain in progress.
+
+- Added a judgment contract that binds the model, rubric, question, request,
+  score, and policy descriptor to the Jev gateway.
+- Added pure row-read proof requiring the exact relevant source and current
+  consent, plus complete-coverage proof derived from the full owned prediction
+  scope, authoritative collection notes, factual normalization, and semantic
+  weights. Activation is bound by a versioned digest.
+- This is proof/contract groundwork only: no production SQLite reader or
+  service wiring, and no semantic readiness claim. Tests use seeded fake data;
+  no provider calls were made.
+
+### Validation evidence for this checkpoint
+
+- Full Bun test suite: 3,538 passed, 1 skipped.
+- Typecheck and browser checks passed before lint-only repairs; focused pair
+  coverage tests: 5 passed after repairs.
+- Full-project lint and `format:check` passed.
+- Independent reviewer accepted four proof fixes.

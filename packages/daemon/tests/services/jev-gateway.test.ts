@@ -7,6 +7,7 @@ import {
   type JevAttemptAdmission,
   type JevPairRequest,
 } from "../../src/services/jev/jev-gateway.js";
+import { JEV_JUDGMENT_CONTRACT } from "../../src/services/jev/jev-judgment-contract.js";
 import type { Logger } from "../../src/services/logger.js";
 
 function response(
@@ -72,6 +73,58 @@ function requestBody(body: BodyInit | null | undefined): string {
 }
 
 describe("Jev typed gateway", () => {
+  test("publishes the current explicit row-judgment contract without sending it to TypeSafe", async () => {
+    expect(JEV_JUDGMENT_CONTRACT).toEqual({
+      modelId: "jev-1.13.0",
+      rubricVersion: "2",
+      questionVersion: "2",
+      requestSchemaVersion: "typesafe-systemone-game-pair-v1",
+      scoreMappingVersion: "score-distribution-expected-level-0-through-3-normalized-v1",
+      semanticPolicyId: "game-description-and-owner-note-similarity-v1",
+    });
+    expect(Object.isFrozen(JEV_JUDGMENT_CONTRACT)).toBe(true);
+
+    let payload = "";
+    await createJevGateway({
+      apiKey: "secret-key",
+      fetch: async (_url, init) => {
+        await Promise.resolve();
+        payload = requestBody(init?.body);
+        return response(answers({ description: 1.5 }));
+      },
+    }).evaluatePair({
+      mode: "description-only",
+      gameA: { name: "A", bggDescription: "Description A" },
+      gameB: { name: "B", bggDescription: "Description B" },
+    });
+
+    const body = JSON.parse(payload) as {
+      model: string;
+      state: Record<string, Record<string, string>>;
+      questions: Record<string, { type: string; instructions: string; criteria: string[] }>;
+    };
+    expect(body.model).toBe(JEV_JUDGMENT_CONTRACT.modelId);
+    expect(body.state).toEqual({
+      game_a: { name: "A", bgg_description: "Description A" },
+      game_b: { name: "B", bgg_description: "Description B" },
+    });
+    expect(Object.keys(body.questions)).toEqual(["description_similarity"]);
+    expect(body.questions.description_similarity.type).toBe("score");
+    expect(body.questions.description_similarity.instructions).toContain(
+      "Compare only the two games' bgg_description evidence",
+    );
+    expect(body.questions.description_similarity.criteria).toHaveLength(4);
+    expect(body.questions.description_similarity.criteria[0]).toBe(
+      "The descriptions portray unrelated premises and activities.",
+    );
+    expect(body.questions.description_similarity.criteria[3]).toBe(
+      "They portray very similar premises and activities, with only minor differences.",
+    );
+    expect(payload).not.toContain("requestSchemaVersion");
+    expect(payload).not.toContain("semanticPolicyId");
+    expect(payload).not.toContain("scoreMappingVersion");
+  });
+
   test("sends C-only state without note fields and maps fractional Score separately from confidence", async () => {
     const sent: { value?: { url: string; init: RequestInit } } = {};
     const gateway = createJevGateway({
@@ -106,6 +159,8 @@ describe("Jev typed gateway", () => {
       score: 0.5,
       confidence: 0.73,
       modelId: JEV_MODEL_ID,
+      rubricVersion: 2,
+      questionVersion: 2,
     });
     expect(result.ownerNote).toBeNull();
     expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 7 });
