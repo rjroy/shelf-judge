@@ -1998,6 +1998,7 @@ const SemanticRedundancyStateV10Schema = z
     consentEpoch: SafeEpochSchema,
     factualWeightsEpoch: SafeEpochSchema,
     factualWeightsFingerprint: SemanticFingerprintSchema.nullable(),
+    firstOptInInitialized: z.boolean(),
   })
   .strict();
 

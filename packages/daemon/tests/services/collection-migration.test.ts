@@ -853,6 +853,7 @@ describe("migrateCollection", () => {
         consentEpoch: 8,
         factualWeightsEpoch: 3,
         factualWeightsFingerprint: "a".repeat(64),
+        firstOptInInitialized: true,
         pairJudgments: [{ gameA: "game-1", gameB: "game-2", description: null, ownerNote: null }],
         disclosure: {
           id: "private-id",
@@ -906,6 +907,7 @@ describe("migrateCollection", () => {
       consentEpoch: 8,
       factualWeightsEpoch: 3,
       factualWeightsFingerprint: "a".repeat(64),
+      firstOptInInitialized: true,
     });
     expect(JSON.stringify(result.data)).not.toContain("private-auth");
     expect(JSON.stringify(result.data)).not.toContain("pairJudgments");
@@ -930,6 +932,7 @@ describe("migrateCollection", () => {
         consentEpoch: currentV9.semanticRedundancy.consentEpoch,
         factualWeightsEpoch: currentV9.semanticRedundancy.factualWeightsEpoch,
         factualWeightsFingerprint: currentV9.semanticRedundancy.factualWeightsFingerprint,
+        firstOptInInitialized: currentV9.semanticRedundancy.firstOptInInitialized,
       },
     });
 
@@ -939,7 +942,48 @@ describe("migrateCollection", () => {
     expect(v10Fixture.semanticRedundancy).not.toHaveProperty("disclosure");
     expect(v10Fixture.semanticRedundancy).not.toHaveProperty("authorization");
     expect(JSON.stringify(v10Fixture)).not.toContain("legacyPayload");
+    const missingFlag = { ...v10Fixture, semanticRedundancy: { ...v10Fixture.semanticRedundancy } };
+    delete (missingFlag.semanticRedundancy as Partial<typeof v10Fixture.semanticRedundancy>)
+      .firstOptInInitialized;
+    expect(CollectionSchemaV10.safeParse(missingFlag).success).toBe(false);
   });
+
+  test.each([false, true])(
+    "copies v9 first-opt-in history unchanged during inactive migration (%s)",
+    (firstOptInInitialized) => {
+      const v9 = migrateCollection(historicalCollection(), dependencies).data;
+      const source = CollectionSchemaV9.parse({
+        ...v9,
+        semanticRedundancy: {
+          ...v9.semanticRedundancy,
+          settings: {
+            ...v9.semanticRedundancy.settings,
+            enabled: false,
+            weights: { factual: 4, description: 3, ownerNote: 1 },
+          },
+          firstOptInInitialized,
+        },
+      });
+
+      const migrated = migrateCollectionV9ToV10(source).data;
+
+      expect(migrated.semanticRedundancy).toEqual({
+        settings: source.semanticRedundancy.settings,
+        evidenceEpoch: source.semanticRedundancy.evidenceEpoch,
+        consentEpoch: source.semanticRedundancy.consentEpoch,
+        factualWeightsEpoch: source.semanticRedundancy.factualWeightsEpoch,
+        factualWeightsFingerprint: source.semanticRedundancy.factualWeightsFingerprint,
+        firstOptInInitialized,
+      });
+      expect(migrated.semanticRedundancy.settings.enabled).toBe(false);
+      expect(migrated.semanticRedundancy.settings.weights).toEqual({
+        factual: 4,
+        description: 3,
+        ownerNote: 1,
+      });
+      expect(migrateCollectionV9ToV10(migrated).data).toEqual(migrated);
+    },
+  );
 
   test.each([6, 7] as const)(
     "keeps semantic state out of v%s intermediates while completing sequential migration",

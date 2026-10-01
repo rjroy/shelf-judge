@@ -593,6 +593,7 @@ export interface SemanticRedundancyStateV10 {
   consentEpoch: number;
   factualWeightsEpoch: number;
   factualWeightsFingerprint: string | null;
+  firstOptInInitialized: boolean;
 }
 
 export interface CollectionV10 extends Omit<CollectionV8, "schemaVersion"> {

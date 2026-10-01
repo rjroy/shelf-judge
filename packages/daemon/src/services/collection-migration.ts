@@ -881,6 +881,7 @@ export function migrateCollectionV9ToV10(raw: unknown): CollectionV9ToV10Migrati
       consentEpoch: legacyState.consentEpoch,
       factualWeightsEpoch: legacyState.factualWeightsEpoch,
       factualWeightsFingerprint: legacyState.factualWeightsFingerprint,
+      firstOptInInitialized: legacyState.firstOptInInitialized,
     },
   });
   return {
