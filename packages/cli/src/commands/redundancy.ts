@@ -172,7 +172,47 @@ export async function redundancySet(
 }
 
 const SEMANTIC = "/api/redundancy/semantic";
-type SignalScope = "description-only" | "owner-notes-only" | "description-and-owner-notes";
+
+interface SemanticRunPreview {
+  requestId: string;
+  precondition: string;
+  provider: string;
+  modelId: string;
+  eligibleGameCount: number;
+  pairCount: number;
+  descriptionBearingPairCount: number;
+  noteBearingPairCount: number;
+  noteTransmissionPermitted: boolean;
+  providerConfigured: boolean;
+  scoringEffect: "integrated-fitness" | "annotation-only";
+  retentionCaveat: string;
+  limits: {
+    maxEligiblePairs: number;
+    maxProviderAttempts: number;
+    maxRunDurationMs: number;
+    reportedTokenStopThreshold: number;
+    reportedTokenThresholdIsBilledCeiling: false;
+  };
+  withinPairLimit: boolean;
+  expiresAt: string;
+}
+
+interface SemanticRunStatus {
+  status: string;
+  measurement: string;
+  eligibleGameCount: number | null;
+  pairCount: number | null;
+  coverage: unknown;
+  progress: null | {
+    state: string;
+    pairCount: number;
+    completedPairs: number;
+    cacheHits: number;
+    cacheMisses: number;
+    failedPairs: number;
+    stopReason?: "provider-limit" | "provider-unconfigured";
+  };
+}
 
 function fail(data: unknown, fallback: string): never {
   throw responseError(data, fallback);
@@ -180,14 +220,6 @@ function fail(data: unknown, fallback: string): never {
 
 function semanticOutput(data: unknown, opts: OutputOptions): string {
   return opts.json ? printOutput(data, opts) : JSON.stringify(data, null, 2);
-}
-
-function flags(args: string[]): Set<string> {
-  const parsed = new Set(args);
-  if (parsed.size !== args.length || args.some((arg) => !arg.startsWith("--"))) {
-    throw new Error("Unexpected or duplicate option");
-  }
-  return parsed;
 }
 
 export async function redundancySemanticSettings(
@@ -235,171 +267,116 @@ export async function redundancySemanticProgress(
   _args: string[],
   opts: OutputOptions,
 ): Promise<string> {
-  const { ok, data } = await client.get(`${SEMANTIC}/refresh-status`);
+  const { ok, data } = await client.get<SemanticRunStatus>(`${SEMANTIC}/refresh-status`);
   if (!ok) fail(data, "Failed to load semantic refresh progress");
-  return semanticOutput(data, opts);
+  return opts.json ? printOutput(data, opts) : formatRunStatus(data);
 }
 
-export async function redundancySemanticDisclosure(
-  client: DaemonClient,
-  args: string[],
-  opts: OutputOptions,
-): Promise<string> {
-  const [scope, ...extra] = args;
-  if (
-    extra.length ||
-    !["description-only", "owner-notes-only", "description-and-owner-notes"].includes(scope ?? "")
-  ) {
-    throw new Error(
-      "Usage: shelf-judge redundancy disclose <description-only|owner-notes-only|description-and-owner-notes>",
+function formatRunPreview(preview: SemanticRunPreview): string {
+  const tokenThreshold = preview.limits.reportedTokenStopThreshold.toLocaleString();
+  return [
+    "Semantic Run preview",
+    `Provider/model: ${preview.provider} / ${preview.modelId}`,
+    `Eligible games: ${preview.eligibleGameCount}; eligible pairs: ${preview.pairCount}`,
+    `Pairs with descriptions: ${preview.descriptionBearingPairCount}; pairs with notes: ${preview.noteBearingPairCount}`,
+    `Scoring effect: ${preview.scoringEffect}`,
+    `Note transmission permission available: ${preview.noteTransmissionPermitted ? "yes" : "no"}`,
+    `Provider configured: ${preview.providerConfigured ? "yes" : "no"}`,
+    `Limits: ${preview.limits.maxEligiblePairs.toLocaleString()} eligible pairs; ${preview.limits.maxProviderAttempts} provider attempts; ${Math.round(preview.limits.maxRunDurationMs / 1000)} seconds`,
+    `Reported-token stop threshold: ${tokenThreshold} (not a hard billed ceiling)`,
+    `Retention: ${preview.retentionCaveat}`,
+    `Preview expires: ${preview.expiresAt}`,
+    preview.withinPairLimit
+      ? "Scope is within the pair limit."
+      : "Scope exceeds the pair limit; no Run was started.",
+    "Note transmission is off by default. Add --authorize-notes only if you intend to send owner notes.",
+  ].join("\n");
+}
+
+function formatRunStatus(status: SemanticRunStatus): string {
+  const lines = [`Semantic status: ${status.status} (${status.measurement})`];
+  if (status.eligibleGameCount !== null && status.pairCount !== null) {
+    lines.push(`Eligible games: ${status.eligibleGameCount}; pairs: ${status.pairCount}`);
+  } else {
+    lines.push("Coverage counts: not measured");
+  }
+  if (status.progress) {
+    const progress = status.progress;
+    lines.push(
+      `Last run: ${progress.state}; ${progress.completedPairs}/${progress.pairCount} completed; ${progress.cacheHits} cache hits; ${progress.cacheMisses} misses; ${progress.failedPairs} failed`,
     );
-  }
-  const { ok, data } = await client.post(`${SEMANTIC}/disclosure`, {
-    signalScope: scope as SignalScope,
-  });
-  if (!ok) fail(data, "Failed to create redundancy disclosure");
-  return semanticOutput(data, opts);
-}
-
-interface ManifestPage {
-  manifestId: string;
-  manifestDigest: string;
-  offset: number;
-  nextOffset: number;
-  complete: boolean;
-  pairs: ManifestPair[];
-}
-
-interface ManifestPair {
-  gameA: string;
-  gameB: string;
-  hasDescriptionA: boolean;
-  hasDescriptionB: boolean;
-  hasOwnerNoteA: boolean;
-  hasOwnerNoteB: boolean;
-}
-
-function compareManifestPairs(left: ManifestPair, right: ManifestPair): number {
-  const a = left.gameA.localeCompare(right.gameA);
-  return a === 0 ? left.gameB.localeCompare(right.gameB) : a;
-}
-
-function validManifestPair(value: unknown): value is ManifestPair {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const pair = value as Record<string, unknown>;
-  return (
-    typeof pair.gameA === "string" &&
-    typeof pair.gameB === "string" &&
-    pair.gameA < pair.gameB &&
-    typeof pair.hasDescriptionA === "boolean" &&
-    typeof pair.hasDescriptionB === "boolean" &&
-    typeof pair.hasOwnerNoteA === "boolean" &&
-    typeof pair.hasOwnerNoteB === "boolean"
-  );
-}
-
-export async function redundancySemanticInspect(
-  client: DaemonClient,
-  args: string[],
-  opts: OutputOptions,
-): Promise<string> {
-  const [id, digest, countText, ...extra] = args;
-  const pairCount = Number(countText);
-  if (!id || !digest || extra.length || !Number.isSafeInteger(pairCount) || pairCount < 0) {
-    throw new Error("Usage: shelf-judge redundancy inspect <manifest-id> <digest> <pair-count>");
-  }
-  const pairs: unknown[] = [];
-  let previousPair: ManifestPair | undefined;
-  let offset = 0;
-  while (offset < pairCount || (pairCount === 0 && offset === 0)) {
-    const request = { manifestId: id, manifestDigest: digest, offset };
-    let response;
-    try {
-      response = await client.post<ManifestPage>(`${SEMANTIC}/disclosure/page`, request);
-    } catch {
-      // Page delivery is idempotent for the same manifest identity and offset.
-      response = await client.post<ManifestPage>(`${SEMANTIC}/disclosure/page`, request);
+    if (progress.stopReason === "provider-limit") {
+      lines.push(
+        "Run stopped at a provider attempt or reported-token limit; prior checkpoints are retained.",
+      );
+    } else if (progress.stopReason === "provider-unconfigured") {
+      lines.push(
+        "Run stopped because the provider is not configured; prior checkpoints are retained.",
+      );
     }
-    if (!response.ok)
-      fail(response.data, "Disclosure manifest retrieval failed; no acknowledgement sent");
-    const page = response.data;
-    if (
-      page.manifestId !== id ||
-      page.manifestDigest !== digest ||
-      page.offset !== offset ||
-      !Array.isArray(page.pairs) ||
-      !Number.isSafeInteger(page.nextOffset) ||
-      page.nextOffset !== offset + page.pairs.length ||
-      page.pairs.some((pair) => !validManifestPair(pair))
-    )
-      throw new Error("Manifest page identity or offset mismatch; no acknowledgement sent");
-    for (const pair of page.pairs) {
-      if (previousPair && compareManifestPairs(previousPair, pair) >= 0)
-        throw new Error("Manifest pair ordering is invalid; no acknowledgement sent");
-      previousPair = pair;
-    }
-    pairs.push(...page.pairs);
-    if (page.complete) {
-      if (pairs.length !== pairCount || page.nextOffset !== pairCount)
-        throw new Error("Manifest count mismatch; no acknowledgement sent");
-      break;
-    }
-    if (page.nextOffset <= offset || page.pairs.length === 0)
-      throw new Error("Invalid manifest pagination; no acknowledgement sent");
-    offset = page.nextOffset;
   }
-  if (pairs.length !== pairCount)
-    throw new Error("Manifest is incomplete; no acknowledgement sent");
-  const result = { manifestId: id, manifestDigest: digest, pairCount, pairs };
-  if (opts.json) return printOutput(result, opts);
-  const lines = [`Complete manifest ${digest} (${pairCount} pairs):`];
-  for (const pair of pairs) lines.push(JSON.stringify(pair));
   return lines.join("\n");
 }
 
-export async function redundancySemanticStart(
+export async function redundancySemanticRun(
   client: DaemonClient,
   args: string[],
   opts: OutputOptions,
 ): Promise<string> {
-  const [id, digest, countText, ...rawFlags] = args;
-  const pairCount = Number(countText);
-  const options = flags(rawFlags);
-  if (
-    !id ||
-    !digest ||
-    !Number.isSafeInteger(pairCount) ||
-    pairCount < 0 ||
-    !options.has("--authorize") ||
-    (options.has("--authorize-notes") && options.has("--decline-notes"))
-  ) {
-    throw new Error(
-      "Usage: shelf-judge redundancy refresh <manifest-id> <digest> <pair-count> --authorize [--authorize-notes|--decline-notes] [--use-cached-notes]",
-    );
+  const options = new Set(args);
+  if (options.size !== args.length || args.some((arg) => arg !== "--authorize-notes")) {
+    throw new Error("Usage: shelf-judge redundancy run [--authorize-notes] [--json]");
   }
-  const unknown = [...options].filter(
-    (flag) =>
-      !["--authorize", "--authorize-notes", "--decline-notes", "--use-cached-notes"].includes(flag),
+  const { ok: previewOk, data: preview } = await client.get<SemanticRunPreview>(
+    `${SEMANTIC}/run-preview`,
   );
-  if (unknown.length) throw new Error(`Unknown option ${unknown[0]}`);
-  const noteTransmissionAuthorized = options.has("--authorize-notes");
-  const body = {
-    manifestId: id,
-    manifestDigest: digest,
-    pairCount,
-    transmissionAuthorized: true,
-    noteTransmissionAuthorized,
-    cachedOwnerNoteUseAuthorized: options.has("--use-cached-notes"),
-  };
-  // This operation is explicitly replay-safe for an identical manifest-bound acknowledgement.
-  let response;
-  try {
-    response = await client.post(`${SEMANTIC}/acknowledge-and-start`, body);
-  } catch {
-    response = await client.post(`${SEMANTIC}/acknowledge-and-start`, body);
+  if (!previewOk) fail(preview, "Unable to preview semantic Run");
+  if (
+    typeof preview.requestId !== "string" ||
+    typeof preview.precondition !== "string" ||
+    !Number.isSafeInteger(preview.pairCount) ||
+    typeof preview.withinPairLimit !== "boolean"
+  ) {
+    throw new Error("Daemon returned an invalid semantic Run preview");
   }
-  if (!response.ok) fail(response.data, "Refresh was refused or the disclosure is stale");
-  return semanticOutput(response.data, opts);
+  if (!preview.withinPairLimit) {
+    const summary = formatRunPreview(preview);
+    if (opts.json)
+      return printOutput({ preview, state: "not-started", reason: "scope-over-limit" }, opts);
+    return `${summary}\nNo Run was started because the scope exceeds the pair limit.`;
+  }
+  if (!preview.providerConfigured) {
+    const summary = formatRunPreview(preview);
+    if (opts.json)
+      return printOutput({ preview, state: "not-started", reason: "provider-unconfigured" }, opts);
+    return `${summary}\nNo Run was started because the provider is not configured.`;
+  }
+  const noteTransmissionAuthorized = options.has("--authorize-notes");
+  if (noteTransmissionAuthorized && !preview.noteTransmissionPermitted) {
+    throw new Error("Note transmission is not currently permitted; no Run was started");
+  }
+  const { ok, data } = await client.post(`${SEMANTIC}/run`, {
+    requestId: preview.requestId,
+    precondition: preview.precondition,
+    noteTransmissionAuthorized,
+  });
+  if (!ok) {
+    const reason =
+      typeof data === "object" && data !== null && "error" in data ? data.error : undefined;
+    if (reason === "precondition-failed") {
+      throw new Error("Run preview expired or current sources/settings changed; run preview again");
+    }
+    if (reason === "run-conflict") throw new Error("Another semantic Run is already active");
+    if (reason === "scope-over-limit") {
+      throw new Error("Run scope exceeds the provider limit; no Run was started");
+    }
+    if (reason === "run-unavailable") {
+      throw new Error("Semantic Run is unavailable or provider configuration is missing");
+    }
+    fail(data, "Run was refused; preview may be stale or expired");
+  }
+  if (opts.json) return printOutput({ preview, result: data }, opts);
+  return `${formatRunPreview(preview)}\nRun accepted: ${JSON.stringify(data)}`;
 }
 
 export async function redundancySemanticCancel(
@@ -407,12 +384,26 @@ export async function redundancySemanticCancel(
   args: string[],
   opts: OutputOptions,
 ): Promise<string> {
-  const [commandId, ...extra] = args;
-  if (!commandId || extra.length)
-    throw new Error("Usage: shelf-judge redundancy cancel <command-id>");
-  const { ok, data } = await client.post(`${SEMANTIC}/cancel`, { commandId });
+  const [runId, ...extra] = args;
+  if (!runId || extra.length) throw new Error("Usage: shelf-judge redundancy cancel <run-id>");
+  const { ok, data } = await client.post(`${SEMANTIC}/cancel`, { runId });
   if (!ok) fail(data, "Failed to cancel semantic refresh");
   return semanticOutput(data, opts);
+}
+
+export async function redundancySemanticActiveRun(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+): Promise<string> {
+  if (args.length) throw new Error("Usage: shelf-judge redundancy active [--json]");
+  const { ok, data } = await client.get<{ runId: string } | null>(`${SEMANTIC}/active-run`);
+  if (!ok) fail(data, "Failed to load active semantic Run");
+  return opts.json
+    ? printOutput(data, opts)
+    : data
+      ? `Active Run: ${data.runId}`
+      : "No active Run.";
 }
 
 export async function redundancySemanticRevoke(

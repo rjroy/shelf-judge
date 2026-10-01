@@ -5,10 +5,11 @@ import {
   redundancySet,
   redundancySettings,
   redundancyStage,
-  redundancySemanticInspect,
-  redundancySemanticStart,
+  redundancySemanticRun,
+  redundancySemanticProgress,
+  redundancySemanticCancel,
+  redundancySemanticActiveRun,
   redundancySemanticSettings,
-  redundancySemanticDisclosure,
   redundancySemanticStatus,
 } from "../../src/commands/redundancy.js";
 import { createMockClient } from "../helpers/mock-client.js";
@@ -109,226 +110,206 @@ describe("semantic redundancy CLI consent boundary", () => {
     });
   });
 
-  test("fetches and verifies every page of the exact manifest", async () => {
-    const seen: number[] = [];
+  test("one Run invocation previews then starts with exact precondition and safe false note consent", async () => {
+    const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+    const preview = {
+      requestId: "request-1",
+      precondition: "opaque-token",
+      provider: "TypeSafe",
+      modelId: "model-safe",
+      eligibleGameCount: 4,
+      pairCount: 6,
+      descriptionBearingPairCount: 6,
+      noteBearingPairCount: 2,
+      noteTransmissionPermitted: true,
+      providerConfigured: true,
+      scoringEffect: "integrated-fitness",
+      retentionCaveat: "Provider retention applies.",
+      limits: {
+        maxEligiblePairs: 25_000,
+        maxProviderAttempts: 100,
+        maxRunDurationMs: 60_000,
+        reportedTokenStopThreshold: 10_000,
+        reportedTokenThresholdIsBilledCeiling: false,
+      },
+      withinPairLimit: true,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    };
     const client = createMockClient({
       routes: {
-        "POST /api/redundancy/semantic/disclosure/page": {
+        "GET /api/redundancy/semantic/run-preview": {
+          response: { ok: true, status: 200, data: preview },
+        },
+        "POST /api/redundancy/semantic/run": {
           response: (body) => {
-            const offset = (body as { offset: number }).offset;
-            seen.push(offset);
-            return {
-              ok: true,
-              status: 200,
-              data: {
-                manifestId: "m",
-                manifestDigest: "d",
-                offset,
-                nextOffset: offset === 0 ? 2 : 3,
-                complete: offset !== 0,
-                pairs:
-                  offset === 0
-                    ? [
-                        {
-                          gameA: "a",
-                          gameB: "b",
-                          hasDescriptionA: true,
-                          hasDescriptionB: false,
-                          hasOwnerNoteA: false,
-                          hasOwnerNoteB: true,
-                        },
-                        {
-                          gameA: "a",
-                          gameB: "c",
-                          hasDescriptionA: true,
-                          hasDescriptionB: true,
-                          hasOwnerNoteA: false,
-                          hasOwnerNoteB: false,
-                        },
-                      ]
-                    : [
-                        {
-                          gameA: "b",
-                          gameB: "c",
-                          hasDescriptionA: false,
-                          hasDescriptionB: true,
-                          hasOwnerNoteA: true,
-                          hasOwnerNoteB: true,
-                        },
-                      ],
-              },
-            };
+            calls.push({ method: "POST", path: "/api/redundancy/semantic/run", body });
+            return { ok: true, status: 202, data: { state: "started", runId: "run-1" } };
           },
         },
       },
     });
-    const result = await redundancySemanticInspect(client, ["m", "d", "3"], { json: true });
-    expect(seen).toEqual([0, 2]);
-    expect(JSON.parse(result)).toMatchObject({
-      pairCount: 3,
-      pairs: [
-        { gameA: "a", gameB: "b" },
-        { gameA: "a", gameB: "c" },
-        { gameA: "b", gameB: "c" },
-      ],
+    const output = await redundancySemanticRun(client, [], { json: false });
+    expect(output).toContain("100 provider attempts");
+    expect(output).toContain("not a hard billed ceiling");
+    expect(output).toContain("Note transmission is off by default");
+    // The preview is the only GET made; the mock has no manifest or page route.
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    expect(calls.find((call) => call.method === "POST")?.body).toEqual({
+      requestId: "request-1",
+      precondition: "opaque-token",
+      noteTransmissionAuthorized: false,
     });
   });
 
-  test("re-inspects a frozen 101-pair manifest after all pages were already delivered", async () => {
-    const pairs = Array.from({ length: 101 }, (_, index) => ({
-      gameA: `a${String(index).padStart(3, "0")}`,
-      gameB: `b${String(index).padStart(3, "0")}`,
-      hasDescriptionA: true,
-      hasDescriptionB: true,
-      hasOwnerNoteA: false,
-      hasOwnerNoteB: false,
-    }));
-    const deliveredOffsets: number[] = [];
-    let deliveryComplete = false;
-    const client = createMockClient({
-      routes: {
-        "POST /api/redundancy/semantic/disclosure/page": {
-          response: (body) => {
-            const { offset } = body as { offset: number };
-            deliveredOffsets.push(offset);
-            const pagePairs = pairs.slice(offset, offset + 100);
-            if (offset === 100) deliveryComplete = true;
-            return {
-              ok: true,
-              status: 200,
-              data: {
-                manifestId: "frozen",
-                manifestDigest: "digest",
-                offset,
-                nextOffset: offset + pagePairs.length,
-                // A replay's complete value describes this page, not aggregate receipt state.
-                complete: offset + pagePairs.length === pairs.length,
-                deliveryComplete,
-                pairs: pagePairs,
-              },
-            };
-          },
-        },
-      },
-    });
-
-    for (let inspection = 0; inspection < 2; inspection += 1) {
-      const result = JSON.parse(
-        await redundancySemanticInspect(client, ["frozen", "digest", "101"], { json: true }),
-      ) as { pairCount: number; pairs: Array<{ gameA: string; gameB: string }> };
-      expect(result.pairCount).toBe(101);
-      expect(result.pairs).toHaveLength(101);
-    }
-    expect(deliveredOffsets).toEqual([0, 100, 0, 100]);
-    expect(deliveryComplete).toBe(true);
-  });
-
-  test("inspects a zero-pair manifest with final numeric nextOffset", async () => {
-    const client = createMockClient({
-      routes: {
-        "POST /api/redundancy/semantic/disclosure/page": {
-          response: {
-            ok: true,
-            status: 200,
-            data: {
-              manifestId: "empty",
-              manifestDigest: "digest",
-              offset: 0,
-              nextOffset: 0,
-              complete: true,
-              pairs: [],
-              receipt: { pageIndex: 0, nextOffset: 0, complete: true },
-            },
-          },
-        },
-      },
-    });
-    expect(
-      await redundancySemanticInspect(client, ["empty", "digest", "0"], { json: true }),
-    ).toContain('"pairCount": 0');
-  });
-
-  test("treats exactly 100 pairs as one complete page", async () => {
-    const pairs = Array.from({ length: 100 }, (_, index) => ({
-      gameA: `a${String(index).padStart(3, "0")}`,
-      gameB: `b${String(index).padStart(3, "0")}`,
-      hasDescriptionA: true,
-      hasDescriptionB: true,
-      hasOwnerNoteA: false,
-      hasOwnerNoteB: false,
-    }));
-    const client = createMockClient({
-      routes: {
-        "POST /api/redundancy/semantic/disclosure/page": {
-          response: {
-            ok: true,
-            status: 200,
-            data: {
-              manifestId: "exact-boundary",
-              manifestDigest: "digest",
-              offset: 0,
-              nextOffset: 100,
-              complete: true,
-              pairs,
-            },
-          },
-        },
-      },
-    });
-    const result = JSON.parse(
-      await redundancySemanticInspect(client, ["exact-boundary", "digest", "100"], {
-        json: true,
-      }),
-    ) as { pairCount: number; pairs: unknown[] };
-    expect(result.pairCount).toBe(100);
-    expect(result.pairs).toHaveLength(100);
-  });
-
-  test("refuses stale disclosure and requires explicit authorization", async () => {
-    const client = createMockClient({
-      routes: {
-        "POST /api/redundancy/semantic/acknowledge-and-start": {
-          response: { ok: false, status: 409, data: { error: "Disclosure is not current" } },
-        },
-      },
-    });
-    try {
-      await redundancySemanticStart(client, ["m", "d", "0"], { json: false });
-      throw new Error("expected authorization refusal");
-    } catch (error) {
-      expect(String(error)).toContain("Usage:");
-    }
-    try {
-      await redundancySemanticStart(client, ["m", "d", "0", "--authorize"], { json: false });
-      throw new Error("expected stale disclosure refusal");
-    } catch (error) {
-      expect(String(error)).toContain("Disclosure is not current");
-    }
-  });
-
-  test("C-only refresh explicitly declines notes and does not request cached note use", async () => {
+  test("--authorize-notes is explicit, and C-only scopes run without it", async () => {
     let body: unknown;
+    const preview = {
+      requestId: "request-c",
+      precondition: "token-c",
+      provider: "TypeSafe",
+      modelId: "model-safe",
+      eligibleGameCount: 2,
+      pairCount: 1,
+      descriptionBearingPairCount: 1,
+      noteBearingPairCount: 0,
+      noteTransmissionPermitted: false,
+      providerConfigured: true,
+      scoringEffect: "annotation-only",
+      retentionCaveat: "Retention applies.",
+      limits: {
+        maxEligiblePairs: 25_000,
+        maxProviderAttempts: 100,
+        maxRunDurationMs: 60_000,
+        reportedTokenStopThreshold: 10_000,
+        reportedTokenThresholdIsBilledCeiling: false,
+      },
+      withinPairLimit: true,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    };
     const client = createMockClient({
       routes: {
-        "POST /api/redundancy/semantic/acknowledge-and-start": {
+        "GET /api/redundancy/semantic/run-preview": {
+          response: { ok: true, status: 200, data: preview },
+        },
+        "POST /api/redundancy/semantic/run": {
           response: (value) => {
             body = value;
-            return { ok: true, status: 202, data: { status: "running" } };
+            return { ok: true, status: 202, data: { state: "started", runId: "run-c" } };
           },
         },
       },
     });
-    await redundancySemanticStart(client, ["m", "d", "2", "--authorize", "--decline-notes"], {
-      json: true,
-    });
+    await redundancySemanticRun(client, [], { json: true });
     expect(body).toEqual({
-      manifestId: "m",
-      manifestDigest: "d",
-      pairCount: 2,
-      transmissionAuthorized: true,
+      requestId: "request-c",
+      precondition: "token-c",
       noteTransmissionAuthorized: false,
-      cachedOwnerNoteUseAuthorized: false,
     });
+    await expectError(
+      redundancySemanticRun(client, ["--authorize-notes"], { json: false }),
+      "not currently permitted",
+    );
+  });
+
+  test("over-limit or unconfigured preview does not start and stale precondition is safe", async () => {
+    let starts = 0;
+    const preview = {
+      requestId: "request-x",
+      precondition: "token-x",
+      provider: "TypeSafe",
+      modelId: "model-safe",
+      eligibleGameCount: 200,
+      pairCount: 19_900,
+      descriptionBearingPairCount: 0,
+      noteBearingPairCount: 0,
+      noteTransmissionPermitted: false,
+      providerConfigured: false,
+      scoringEffect: "annotation-only",
+      retentionCaveat: "Retention applies.",
+      limits: {
+        maxEligiblePairs: 25_000,
+        maxProviderAttempts: 100,
+        maxRunDurationMs: 60_000,
+        reportedTokenStopThreshold: 10_000,
+        reportedTokenThresholdIsBilledCeiling: false,
+      },
+      withinPairLimit: true,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    };
+    const client = createMockClient({
+      routes: {
+        "GET /api/redundancy/semantic/run-preview": {
+          response: { ok: true, status: 200, data: preview },
+        },
+        "POST /api/redundancy/semantic/run": {
+          response: () => {
+            starts += 1;
+            return { ok: false, status: 412, data: { error: "Run precondition failed" } };
+          },
+        },
+      },
+    });
+    expect(await redundancySemanticRun(client, [], { json: false })).toContain("not configured");
+    expect(starts).toBe(0);
+    preview.providerConfigured = true;
+    preview.withinPairLimit = false;
+    expect(await redundancySemanticRun(client, [], { json: false })).toContain(
+      "exceeds the pair limit",
+    );
+    expect(starts).toBe(0);
+    preview.withinPairLimit = true;
+    await expectError(
+      redundancySemanticRun(client, [], { json: false }),
+      "Run precondition failed",
+    );
+    expect(starts).toBe(1);
+  });
+
+  test("aggregate progress, active run, and cancellation use sanitized run identity", async () => {
+    let cancelBody: unknown;
+    const client = createMockClient({
+      routes: {
+        "GET /api/redundancy/semantic/refresh-status": {
+          response: {
+            ok: true,
+            status: 200,
+            data: {
+              status: "not-ready",
+              measurement: "current",
+              eligibleGameCount: 3,
+              pairCount: 3,
+              coverage: null,
+              progress: {
+                state: "failed",
+                pairCount: 3,
+                completedPairs: 1,
+                cacheHits: 0,
+                cacheMisses: 1,
+                failedPairs: 0,
+                stopReason: "provider-limit",
+              },
+            },
+          },
+        },
+        "GET /api/redundancy/semantic/active-run": {
+          response: { ok: true, status: 200, data: { runId: "live-run" } },
+        },
+        "POST /api/redundancy/semantic/cancel": {
+          response: (body) => {
+            cancelBody = body;
+            return { ok: true, status: 200, data: { state: "cancellation-requested" } };
+          },
+        },
+      },
+    });
+    const progress = await redundancySemanticProgress(client, [], { json: false });
+    expect(progress).toContain("provider attempt or reported-token limit");
+    expect(progress).not.toContain("game/");
+    expect(await redundancySemanticActiveRun(client, [], { json: false })).toBe(
+      "Active Run: live-run",
+    );
+    await redundancySemanticCancel(client, ["live-run"], { json: true });
+    expect(cancelBody).toEqual({ runId: "live-run" });
   });
 
   test("semantic settings and status are reads/settings only", async () => {
@@ -340,18 +321,12 @@ describe("semantic redundancy CLI consent boundary", () => {
         "GET /api/redundancy/semantic/summary": {
           response: { ok: true, status: 200, data: { status: "not-ready", generation: null } },
         },
-        "POST /api/redundancy/semantic/disclosure": {
-          response: { ok: true, status: 201, data: { id: "m", digest: "d" } },
-        },
       },
     });
     expect(
       await redundancySemanticSettings(client, ["enabled", "true"], { json: false }),
     ).toContain("enabled");
     expect(await redundancySemanticStatus(client, [], { json: true })).toContain("not-ready");
-    expect(
-      await redundancySemanticDisclosure(client, ["description-only"], { json: true }),
-    ).toContain("digest");
   });
 
   test("factual weight uses strict non-negative validation and maps into factual weight", async () => {
@@ -372,30 +347,6 @@ describe("semantic redundancy CLI consent boundary", () => {
       await expectRejected(redundancySemanticSettings(client, ["factual", value], { json: true }));
     }
   });
-
-  test("cached-note use is independent from fresh note transmission consent", async () => {
-    let body: unknown;
-    const client = createMockClient({
-      routes: {
-        "POST /api/redundancy/semantic/acknowledge-and-start": {
-          response: (value) => {
-            body = value;
-            return { ok: true, status: 202, data: { status: "running" } };
-          },
-        },
-      },
-    });
-    await redundancySemanticStart(
-      client,
-      ["m", "d", "2", "--authorize", "--decline-notes", "--use-cached-notes"],
-      { json: true },
-    );
-    expect(body).toMatchObject({
-      transmissionAuthorized: true,
-      noteTransmissionAuthorized: false,
-      cachedOwnerNoteUseAuthorized: true,
-    });
-  });
 });
 
 async function expectRejected(promise: Promise<unknown>): Promise<void> {
@@ -404,5 +355,14 @@ async function expectRejected(promise: Promise<unknown>): Promise<void> {
     throw new Error("Expected command to reject");
   } catch (error) {
     expect(String(error)).toContain("non-negative number");
+  }
+}
+
+async function expectError(promise: Promise<unknown>, message: string): Promise<void> {
+  try {
+    await promise;
+    throw new Error("Expected command to reject");
+  } catch (error) {
+    expect(String(error)).toContain(message);
   }
 }

@@ -35,42 +35,33 @@ const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
       description: "Show semantic mode, generation, refresh, and publication status",
     },
   ],
-  "shelf.redundancy.create-semantic-disclosure": [
+  "shelf.redundancy.get-semantic-run-preview": [
     {
-      name: "disclose",
-      usage:
-        "shelf-judge redundancy disclose <description-only|owner-notes-only|description-and-owner-notes>",
-      description: "Create an explicit scoped manifest; this does not start a refresh",
-    },
-  ],
-  "shelf.redundancy.deliver-semantic-disclosure-page": [
-    {
-      name: "inspect",
-      usage: "shelf-judge redundancy inspect <manifest-id> <digest> <pair-count> [--json]",
-      description: "Retrieve and display the complete exact pair manifest before authorization",
-    },
-  ],
-  "shelf.redundancy.acknowledge-and-start-semantic-refresh": [
-    {
-      name: "refresh",
-      usage:
-        "shelf-judge redundancy refresh <manifest-id> <digest> <pair-count> --authorize [--authorize-notes|--decline-notes] [--use-cached-notes]",
+      name: "run",
+      usage: "shelf-judge redundancy run [--authorize-notes] [--json]",
       description:
-        "Explicitly authorize one bounded refresh; fresh note transmission and cached-note use are independent permissions",
+        "Preview aggregate scope, then explicitly start one bounded Run; note transmission is opt-in",
     },
   ],
   "shelf.redundancy.get-semantic-refresh-status": [
     {
       name: "progress",
       usage: "shelf-judge redundancy progress [--json]",
-      description: "Show active or latest semantic refresh progress",
+      description: "Show current aggregate coverage and historical Run progress",
     },
   ],
-  "shelf.redundancy.cancel-semantic-refresh": [
+  "shelf.redundancy.cancel-semantic-run": [
     {
       name: "cancel",
-      usage: "shelf-judge redundancy cancel <command-id> [--json]",
-      description: "Cancel an explicitly authorized refresh",
+      usage: "shelf-judge redundancy cancel <run-id> [--json]",
+      description: "Cancel the identified active Run",
+    },
+  ],
+  "shelf.redundancy.get-active-semantic-run": [
+    {
+      name: "active",
+      usage: "shelf-judge redundancy active [--json]",
+      description: "Show process-live active Run identity, if any",
     },
   ],
   "shelf.analyst.turn.stream": [

@@ -441,3 +441,21 @@ implementation and feature remain in progress.
 - Typecheck, browser typecheck, lint, format check, and `git diff --check` passed.
 - Independent Bun reviewer accepted the final HTTP test; oracle review found no
   implementation blocker for the trusted local API.
+
+## Phase 2d11m — direct Jev Run CLI
+
+Checkpointed on `design/jev-similarity`, after Phase 2d11l. The overall Phase 2
+implementation and feature remain in progress.
+
+- Replaced CLI manifest/disclose/inspect/refresh commands with one preview-bound
+  `redundancy run` invocation, plus aggregate progress/status, process-live
+  active-run lookup, and run-ID-targeted cancellation.
+- Note transmission defaults to false and requires explicit
+  `--authorize-notes`; old manifest CLI flows are removed. No live provider
+  calls or owner data were accessed. Web integration remains in progress.
+
+### Validation evidence for this checkpoint
+
+- 470 CLI tests passed, 0 failed; root typecheck passed.
+- Changed-file lint, format check, and `git diff --check` passed.
+- Independent `bun-typescript-reviewer` accepted the implementation.

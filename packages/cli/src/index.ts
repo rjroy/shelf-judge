@@ -66,10 +66,9 @@ import {
   redundancySemanticSettings,
   redundancySemanticStatus,
   redundancySemanticProgress,
-  redundancySemanticDisclosure,
-  redundancySemanticInspect,
-  redundancySemanticStart,
+  redundancySemanticRun,
   redundancySemanticCancel,
+  redundancySemanticActiveRun,
   redundancySemanticRevoke,
 } from "./commands/redundancy.js";
 import {
@@ -131,10 +130,9 @@ const COMMANDS: Record<string, number> = {
   "redundancy semantic-settings": 2,
   "redundancy status": 2,
   "redundancy progress": 2,
-  "redundancy disclose": 2,
-  "redundancy inspect": 2,
-  "redundancy refresh": 2,
+  "redundancy run": 2,
   "redundancy cancel": 2,
+  "redundancy active": 2,
   "redundancy revoke": 2,
   "wishlist list": 2,
   "wishlist add": 2,
@@ -608,17 +606,14 @@ async function main(): Promise<void> {
     case "redundancy progress":
       output = await redundancySemanticProgress(client, args, opts);
       break;
-    case "redundancy disclose":
-      output = await redundancySemanticDisclosure(client, args, opts);
-      break;
-    case "redundancy inspect":
-      output = await redundancySemanticInspect(client, args, opts);
-      break;
-    case "redundancy refresh":
-      output = await redundancySemanticStart(client, args, opts);
+    case "redundancy run":
+      output = await redundancySemanticRun(client, args, opts);
       break;
     case "redundancy cancel":
       output = await redundancySemanticCancel(client, args, opts);
+      break;
+    case "redundancy active":
+      output = await redundancySemanticActiveRun(client, args, opts);
       break;
     case "redundancy revoke":
       output = await redundancySemanticRevoke(client, args, opts);
