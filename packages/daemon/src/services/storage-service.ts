@@ -41,6 +41,7 @@ import {
 } from "./collection-migration.js";
 import {
   COLLECTION_ARTIFACTS,
+  collectionArtifactsForMigration,
   createCollectionArtifactContext,
   type CollectionArtifactDescriptor,
 } from "./collection-artifacts.js";
@@ -567,7 +568,12 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
             deps.quarantinePathForAttempt,
             deps.temporaryPathForAttempt,
           );
-          for (const artifact of artifacts) {
+          const migrationArtifacts = collectionArtifactsForMigration(
+            migration.sourceVersion,
+            validated.schemaVersion,
+            artifacts,
+          );
+          for (const artifact of migrationArtifacts) {
             const artifactPath = artifact.path(dataDir);
             logger.log(
               `artifact invalidation attempt identity=${artifact.identity} dependencyVersion=${artifact.dependencyVersion} path=${artifactPath}`,

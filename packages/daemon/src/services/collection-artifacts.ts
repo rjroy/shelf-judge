@@ -190,6 +190,22 @@ export const COLLECTION_ARTIFACTS: readonly CollectionArtifactDescriptor[] = [
   attentionCandidatesDescriptor,
 ];
 
+/**
+ * Choose artifacts invalidated by a collection schema transition. The future
+ * v9→v10 cutover changes semantic/display state only: factual wishlist
+ * predictions and redundancy previews remain valid and must not be rewritten.
+ * Historical migrations keep using the existing full manifest behavior.
+ */
+export function collectionArtifactsForMigration(
+  sourceVersion: number,
+  targetVersion: number,
+  artifacts: readonly CollectionArtifactDescriptor[] = COLLECTION_ARTIFACTS,
+): readonly CollectionArtifactDescriptor[] {
+  if (sourceVersion !== 9 || targetVersion !== 10) return artifacts;
+  const semanticDisplayArtifacts = new Set(["collection-profile", "attention-candidates"]);
+  return artifacts.filter((artifact) => semanticDisplayArtifacts.has(artifact.identity));
+}
+
 export function createCollectionArtifactContext(
   dataDir: string,
   fileOps: FileOps,

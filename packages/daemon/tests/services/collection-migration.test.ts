@@ -4,7 +4,10 @@ import {
   CURRENT_COLLECTION_SCHEMA_VERSION,
   CollectionSchema,
   CollectionSchemaV10,
+  CollectionSchemaV9,
   CollectionSchemaV5,
+  type CollectionV10,
+  type CollectionV9,
 } from "@shelf-judge/shared";
 import {
   COLLECTION_MIGRATION_STEPS,
@@ -805,6 +808,7 @@ describe("migrateCollection", () => {
     const result = migrateCollection({ ...v8Collection, schemaVersion: 8 }, dependencies);
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 8 });
+    expect(result.data.schemaVersion).toBe(9);
     expect(result.data.semanticRedundancy).toEqual({
       settings: {
         enabled: false,
@@ -881,8 +885,9 @@ describe("migrateCollection", () => {
       id: "game-2",
       ownerNote: { state: "missing", version: 0, updatedAt: null },
     });
+    const validatedV9: CollectionV9 = CollectionSchemaV9.parse(source);
 
-    const result = migrateCollectionV9ToV10(source);
+    const result = migrateCollectionV9ToV10(validatedV9);
 
     expect(result.discardedLegacyPairCount).toBe(1);
     expect(result.notice).toBe(
@@ -910,6 +915,30 @@ describe("migrateCollection", () => {
       discardedLegacyPairCount: 0,
       notice: null,
     });
+  });
+
+  test("strictly parses and roundtrips a v10 collection without legacy semantic payload", () => {
+    const currentV9: CollectionV9 = CollectionSchemaV9.parse(
+      migrateCollection(historicalCollection(), dependencies).data,
+    );
+    const v10Fixture: CollectionV10 = CollectionSchemaV10.parse({
+      ...currentV9,
+      schemaVersion: 10,
+      semanticRedundancy: {
+        settings: currentV9.semanticRedundancy.settings,
+        evidenceEpoch: currentV9.semanticRedundancy.evidenceEpoch,
+        consentEpoch: currentV9.semanticRedundancy.consentEpoch,
+        factualWeightsEpoch: currentV9.semanticRedundancy.factualWeightsEpoch,
+        factualWeightsFingerprint: currentV9.semanticRedundancy.factualWeightsFingerprint,
+      },
+    });
+
+    expect(CollectionSchemaV10.parse(v10Fixture)).toEqual(v10Fixture);
+    expect(v10Fixture.schemaVersion).toBe(10);
+    expect(v10Fixture.semanticRedundancy).not.toHaveProperty("pairJudgments");
+    expect(v10Fixture.semanticRedundancy).not.toHaveProperty("disclosure");
+    expect(v10Fixture.semanticRedundancy).not.toHaveProperty("authorization");
+    expect(JSON.stringify(v10Fixture)).not.toContain("legacyPayload");
   });
 
   test.each([6, 7] as const)(

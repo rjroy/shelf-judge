@@ -6,6 +6,8 @@ import { CollectionSchema, CollectionSchemaV5 } from "@shelf-judge/shared";
 import type { Collection } from "@shelf-judge/shared";
 import {
   COLLECTION_ARTIFACTS,
+  collectionArtifactsForMigration,
+  createCollectionArtifactContext,
   type CollectionArtifactDescriptor,
 } from "../../src/services/collection-artifacts.js";
 import { createStorageService } from "../../src/services/storage-service.js";
@@ -17,6 +19,7 @@ const DATA_DIR = "/test/data";
 const COLLECTION_PATH = `${DATA_DIR}/collection.json`;
 const PROFILE_PATH = `${DATA_DIR}/profile.json`;
 const WISHLIST_PATH = `${DATA_DIR}/wishlist.json`;
+const ATTENTION_CANDIDATES_PATH = `${DATA_DIR}/attention-candidates.json`;
 const NOW = "2026-01-01T00:00:00.000Z";
 const migrationDependencies = {
   createId: () => "real-filesystem-tournament-axis",
@@ -89,6 +92,44 @@ function makeService(artifacts: readonly CollectionArtifactDescriptor[] = COLLEC
 }
 
 describe("storage collection migration ordering and recovery", () => {
+  test("plans targeted v9-to-v10 invalidation without touching factual wishlist snapshots", async () => {
+    const factualWishlist = [
+      {
+        id: "wish-factual",
+        bggId: 456,
+        name: "Factual snapshot",
+        yearPublished: 2020,
+        thumbnailUrl: null,
+        addedAt: NOW,
+        predictedScore: 7.5,
+        predictionConfidence: "strong",
+        predictedBreakdown: [{ axisName: "Factual", rating: 7.5, confidence: "strong" }],
+        nicheImpact: null,
+        redundancyPreview: { penalty: 0.5, originalScore: 7.5, adjustedScore: 7 },
+      },
+    ];
+    const fileOps = createMockFileOps({
+      [PROFILE_PATH]: "semantic profile",
+      [ATTENTION_CANDIDATES_PATH]: "semantic attention display",
+      [WISHLIST_PATH]: JSON.stringify(factualWishlist),
+    });
+    const plan = collectionArtifactsForMigration(9, 10);
+
+    expect(plan.map(({ identity }) => identity)).toEqual([
+      "collection-profile",
+      "attention-candidates",
+    ]);
+    const context = createCollectionArtifactContext(DATA_DIR, fileOps, logger());
+    for (const artifact of plan) await artifact.invalidate(context);
+
+    expect(fileOps.files.has(PROFILE_PATH)).toBe(false);
+    expect(fileOps.files.has(ATTENTION_CANDIDATES_PATH)).toBe(false);
+    expect(fileOps.files.get(WISHLIST_PATH)).toBe(JSON.stringify(factualWishlist));
+
+    // Existing migrations continue to use their established full artifact manifest.
+    expect(collectionArtifactsForMigration(8, 9)).toBe(COLLECTION_ARTIFACTS);
+  });
+
   test("creates and validates a new collection with initial semantic-off state", async () => {
     const service = createStorageService({
       dataDir: DATA_DIR,
