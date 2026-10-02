@@ -18,6 +18,7 @@ import {
   type JevAttemptAdmission,
   type JevDispatchReceipt,
   type JevGateway,
+  type JevGatewayErrorCode,
 } from "./jev/jev-gateway.js";
 import {
   DEFAULT_JEV_RUN_BUDGET,
@@ -455,6 +456,11 @@ export class JevRunService {
             progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
             control.progress = progress;
             terminalStopReason = terminalStopReasonFor(error);
+            this.logger.error("Jev pair outcome", {
+              outcome: "pair-failed",
+              disposition: terminalStopReason ? "stop" : "continue",
+              reason: stablePairFailureReason(error),
+            });
             if (terminalStopReason) break;
           }
           continue;
@@ -949,6 +955,10 @@ function terminalStopReasonFor(error: unknown): JevRunStopReason | undefined {
   if (error.code === "budget-exhausted") return "provider-limit";
   if (error.code === "not-configured") return "provider-unconfigured";
   return undefined;
+}
+
+function stablePairFailureReason(error: unknown): JevGatewayErrorCode | "provider-failure" {
+  return error instanceof JevGatewayError ? error.code : "provider-failure";
 }
 
 function sameAuthority(capture: JevRunCapture, current: JevRunCurrentState): boolean {

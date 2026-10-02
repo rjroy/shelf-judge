@@ -90,11 +90,90 @@ export type JevGatewayErrorCode =
   | "admission-rejected"
   | "aborted";
 
+export type JevResponseInvalidReason =
+  | "invalid-json"
+  | "invalid-envelope"
+  | "unexpected-answer-ids"
+  | "invalid-answer-shape"
+  | "invalid-score-value"
+  | "invalid-score-probabilities"
+  | "invalid-answer-schema";
+
+interface JevGatewayErrorContext {
+  reason?: JevResponseInvalidReason | "unexpected-model";
+  fieldPath?: string;
+  answerCount?: number;
+  expectedAnswerCount?: number;
+}
+
+const SAFE_RESPONSE_REASONS = new Set<JevResponseInvalidReason | "unexpected-model">([
+  "invalid-json",
+  "invalid-envelope",
+  "unexpected-answer-ids",
+  "invalid-answer-shape",
+  "invalid-score-value",
+  "invalid-score-probabilities",
+  "invalid-answer-schema",
+  "unexpected-model",
+]);
+const SAFE_RESPONSE_FIELD_PATHS = new Set([
+  "response",
+  "model",
+  "answers",
+  "usage",
+  "usage.input_tokens",
+  "usage.output_tokens",
+  "answers.description_similarity",
+  "answers.description_similarity.score",
+  "answers.description_similarity.probabilities",
+  "answers.description_similarity.confidence",
+  "answers.description_similarity.legend",
+  "answers.note_similarity",
+  "answers.note_similarity.score",
+  "answers.note_similarity.probabilities",
+  "answers.note_similarity.confidence",
+  "answers.note_similarity.legend",
+]);
+
+function safeResponseErrorContext(error: JevGatewayError): JevGatewayErrorContext {
+  const context = error.context;
+  const reason = SAFE_RESPONSE_REASONS.has(
+    context.reason as JevResponseInvalidReason | "unexpected-model",
+  )
+    ? context.reason
+    : undefined;
+  const fieldPath =
+    context.fieldPath && SAFE_RESPONSE_FIELD_PATHS.has(context.fieldPath)
+      ? context.fieldPath
+      : undefined;
+  const answerCount = context.answerCount;
+  const expectedAnswerCount = context.expectedAnswerCount;
+  const safeAnswerCount =
+    answerCount !== undefined && Number.isSafeInteger(answerCount) && answerCount >= 0
+      ? answerCount
+      : undefined;
+  const safeExpectedAnswerCount =
+    expectedAnswerCount !== undefined &&
+    Number.isSafeInteger(expectedAnswerCount) &&
+    expectedAnswerCount >= 0
+      ? expectedAnswerCount
+      : undefined;
+  return {
+    ...(reason ? { reason } : {}),
+    ...(fieldPath ? { fieldPath } : {}),
+    ...(safeAnswerCount !== undefined ? { answerCount: safeAnswerCount } : {}),
+    ...(safeExpectedAnswerCount !== undefined
+      ? { expectedAnswerCount: safeExpectedAnswerCount }
+      : {}),
+  };
+}
+
 export class JevGatewayError extends Error {
   constructor(
     readonly code: JevGatewayErrorCode,
     message: string,
     readonly status?: number,
+    readonly context: JevGatewayErrorContext = {},
   ) {
     super(message);
     this.name = "JevGatewayError";
@@ -225,8 +304,26 @@ function parseScoreAnswer(
   value: unknown,
   expectedLevelCount: number,
   modelId: string,
+  fieldPath: "answers.description_similarity" | "answers.note_similarity",
 ): JevScoreResult {
-  const answer = ScoreAnswerSchema.parse(value);
+  const parsed = ScoreAnswerSchema.safeParse(value);
+  if (!parsed.success) {
+    const issuePath = parsed.error.issues[0]?.path[0];
+    const reason: JevResponseInvalidReason =
+      issuePath === "probabilities"
+        ? "invalid-score-probabilities"
+        : issuePath === "score"
+          ? "invalid-score-value"
+          : "invalid-answer-shape";
+    throw new JevGatewayError("response-invalid", "TypeSafe answer failed validation", undefined, {
+      reason,
+      fieldPath:
+        issuePath === "probabilities" || issuePath === "score" || issuePath === "confidence"
+          ? `${fieldPath}.${issuePath}`
+          : fieldPath,
+    });
+  }
+  const answer = parsed.data;
   const expectedKeys = Array.from({ length: expectedLevelCount }, (_, index) => String(index));
   const legendKeys = Object.keys(answer.legend).sort();
   const probabilityKeys = Object.keys(answer.probabilities).sort();
@@ -234,17 +331,31 @@ function parseScoreAnswer(
     (sum, probability) => sum + probability,
     0,
   );
-  if (
-    legendKeys.length !== expectedLevelCount ||
-    probabilityKeys.length !== expectedLevelCount ||
-    expectedKeys.some((key) => !Object.hasOwn(answer.legend, key)) ||
-    expectedKeys.some((key) => !Object.hasOwn(answer.probabilities, key)) ||
-    answer.score > expectedLevelCount - 1 ||
-    Math.abs(probabilityTotal - 1) > 0.001
-  )
+  const validLegend =
+    legendKeys.length === expectedLevelCount &&
+    expectedKeys.every((key) => Object.hasOwn(answer.legend, key));
+  const validProbabilities =
+    probabilityKeys.length === expectedLevelCount &&
+    expectedKeys.every((key) => Object.hasOwn(answer.probabilities, key)) &&
+    Math.abs(probabilityTotal - 1) <= 0.001;
+  const validScore = answer.score <= expectedLevelCount - 1;
+  if (!validLegend || !validProbabilities || !validScore)
     throw new JevGatewayError(
       "response-invalid",
       "TypeSafe Score levels or probabilities failed validation",
+      undefined,
+      {
+        reason: !validScore
+          ? "invalid-score-value"
+          : !validProbabilities
+            ? "invalid-score-probabilities"
+            : "invalid-answer-schema",
+        fieldPath: !validScore
+          ? `${fieldPath}.score`
+          : !validProbabilities
+            ? `${fieldPath}.probabilities`
+            : `${fieldPath}.legend`,
+      },
     );
   const weightedScore = expectedKeys.reduce(
     (sum, key, index) => sum + index * answer.probabilities[key],
@@ -335,6 +446,7 @@ export function createJevGateway(options: JevGatewayOptions = {}): JevGateway {
         );
       inFlight += 1;
       const operationId = ++operationIds;
+      let requestAttempt = 0;
       logger.log("jev request started", {
         operationId,
         modelId: JEV_MODEL_ID,
@@ -360,15 +472,45 @@ export function createJevGateway(options: JevGatewayOptions = {}): JevGateway {
                 "Jev application attempt limit reached",
               );
             requests += 1;
+            requestAttempt = requests;
             return requests;
           },
         });
         throwIfAborted(signal);
         const parsed = JevResponseSchema.safeParse(response);
-        if (!parsed.success)
-          throw new JevGatewayError("response-invalid", "TypeSafe response failed validation");
+        if (!parsed.success) {
+          const firstPath = parsed.error.issues[0]?.path;
+          const safeFieldPath =
+            firstPath?.[0] === "model"
+              ? "model"
+              : firstPath?.[0] === "answers"
+                ? "answers"
+                : firstPath?.[0] === "usage" &&
+                    (firstPath[1] === "input_tokens" || firstPath[1] === "output_tokens")
+                  ? `usage.${firstPath[1]}`
+                  : firstPath?.[0] === "usage"
+                    ? "usage"
+                    : "response";
+          throw new JevGatewayError(
+            "response-invalid",
+            "TypeSafe response failed validation",
+            undefined,
+            {
+              reason: "invalid-envelope",
+              fieldPath: safeFieldPath,
+            },
+          );
+        }
         if (parsed.data.model !== JEV_MODEL_ID)
-          throw new JevGatewayError("model-mismatch", "TypeSafe resolved an unexpected model");
+          throw new JevGatewayError(
+            "model-mismatch",
+            "TypeSafe resolved an unexpected model",
+            undefined,
+            {
+              reason: "unexpected-model",
+              fieldPath: "model",
+            },
+          );
         const answers = parsed.data.answers;
         const descriptionRequested = pairRequest.mode !== "owner-notes-only";
         const ownerNotesRequested = pairRequest.mode !== "description-only";
@@ -384,6 +526,13 @@ export function createJevGateway(options: JevGatewayOptions = {}): JevGateway {
           throw new JevGatewayError(
             "response-invalid",
             "TypeSafe response omitted or added an answer",
+            undefined,
+            {
+              reason: "unexpected-answer-ids",
+              fieldPath: "answers",
+              answerCount: Object.keys(answers).length,
+              expectedAnswerCount: expectedAnswerIds.length,
+            },
           );
 
         const description = descriptionRequested
@@ -391,6 +540,7 @@ export function createJevGateway(options: JevGatewayOptions = {}): JevGateway {
               answers.description_similarity,
               DESCRIPTION_CRITERIA.length,
               parsed.data.model,
+              "answers.description_similarity",
             )
           : null;
         let ownerNote: JevScoreResult | null = null;
@@ -399,6 +549,7 @@ export function createJevGateway(options: JevGatewayOptions = {}): JevGateway {
             answers.note_similarity,
             OWNER_NOTE_CRITERIA.length,
             parsed.data.model,
+            "answers.note_similarity",
           );
         }
         const usage = usageResult(parsed.data.usage);
@@ -412,6 +563,7 @@ export function createJevGateway(options: JevGatewayOptions = {}): JevGateway {
         logger.log("jev request outcome", {
           operationId,
           outcome: "validated",
+          attempt: requestAttempt,
           modelId: parsed.data.model,
           mode: pairRequest.mode,
           usage,
@@ -427,13 +579,29 @@ export function createJevGateway(options: JevGatewayOptions = {}): JevGateway {
           error instanceof JevGatewayError
             ? error
             : error instanceof z.ZodError
-              ? new JevGatewayError("response-invalid", "TypeSafe answer failed validation")
+              ? new JevGatewayError(
+                  "response-invalid",
+                  "TypeSafe answer failed validation",
+                  undefined,
+                  {
+                    reason: "invalid-answer-schema",
+                    fieldPath: "response",
+                  },
+                )
               : undefined;
+        const status = safeError?.status;
         logger.error("jev request outcome", {
           operationId,
           outcome: "failed",
           code: safeError?.code ?? "transport-failure",
-          status: safeError?.status ?? null,
+          status:
+            typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599
+              ? status
+              : null,
+          ...(safeError?.code === "response-invalid" ? { retryDisposition: "not-retried" } : {}),
+          attempt: requestAttempt,
+          mode: pairRequest.mode,
+          ...(safeError instanceof JevGatewayError ? safeResponseErrorContext(safeError) : {}),
         });
         throw safeError ?? new JevGatewayError("http-failure", "TypeSafe request failed");
       } finally {
@@ -470,7 +638,11 @@ async function thisCall(input: {
         started = true;
         throwIfAborted(input.signal);
         const requestAttempt = input.consumeRequestAttempt();
-        input.logger.log("jev request attempt", { operationId: input.operationId, requestAttempt });
+        input.logger.log("jev request attempt", {
+          operationId: input.operationId,
+          requestAttempt,
+          mode: input.mode,
+        });
         throwIfAborted(input.signal);
         dispatchedReceipt = { response: invokeFetch(input) };
         return dispatchedReceipt;
@@ -494,7 +666,11 @@ async function thisCall(input: {
     } else {
       throwIfAborted(input.signal);
       const requestAttempt = input.consumeRequestAttempt();
-      input.logger.log("jev request attempt", { operationId: input.operationId, requestAttempt });
+      input.logger.log("jev request attempt", {
+        operationId: input.operationId,
+        requestAttempt,
+        mode: input.mode,
+      });
       throwIfAborted(input.signal);
       receipt = { response: invokeFetch(input) };
     }
@@ -513,6 +689,7 @@ async function thisCall(input: {
       input.logger.warn("jev request retry", {
         operationId: input.operationId,
         attempt: attempt + 1,
+        mode: input.mode,
         status: response.status,
         delayMs: delay,
       });
@@ -533,6 +710,10 @@ async function thisCall(input: {
         "response-invalid",
         "TypeSafe response was not valid JSON",
         response.status,
+        {
+          reason: "invalid-json",
+          fieldPath: "response",
+        },
       );
     }
   }

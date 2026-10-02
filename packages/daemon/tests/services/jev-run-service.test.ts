@@ -1037,6 +1037,67 @@ describe("JevRunService attempt barriers", () => {
     expect(progress.stopReason).toBeUndefined();
   });
 
+  test("logs safe continue disposition after an invalid provider response and processes later pairs", async () => {
+    const capture = fixture(["a", "b", "c"]);
+    capture.collection.games = capture.collection.games.map((entry) => ({
+      ...entry,
+      name: "PRIVATE_PAIR_NAME_SENTINEL",
+      bggData: entry.bggData ? { ...entry.bggData, description: "PRIVATE_SOURCE_SENTINEL" } : null,
+    }));
+    const { cache } = cacheFake();
+    const logEntries: unknown[][] = [];
+    let evaluations = 0;
+    const service = new JevRunService({
+      storageService: {},
+      cache,
+      loadCapture: () => Promise.resolve(capture),
+      readCurrent: () =>
+        Promise.resolve({
+          collection: capture.collection,
+          sourceVectorIdentity: "vector",
+          policyIdentity: "policy",
+          canTransmitNotes: false,
+        }),
+      logger: {
+        log: (...args) => logEntries.push(args),
+        error: (...args) => logEntries.push(args),
+      },
+      createGateway: (admit) => ({
+        evaluatePair: async (request) => {
+          evaluations++;
+          await admit({
+            mode: request.mode,
+            attemptId: `invalid-then-continue-${evaluations}`,
+            start: () => ({ response: Promise.resolve(new Response()) }),
+          });
+          if (evaluations === 1)
+            throw new JevGatewayError("response-invalid", "Malformed synthetic provider result");
+          return scoreResult();
+        },
+      }),
+    });
+
+    const progress = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    expect(progress).toMatchObject({
+      state: "failed",
+      pairCount: 3,
+      completedPairs: 3,
+      failedPairs: 1,
+    });
+    expect(evaluations).toBe(3);
+    const pairFailure = logEntries.find(([message]) => message === "Jev pair outcome");
+    expect(pairFailure?.[1]).toEqual({
+      outcome: "pair-failed",
+      disposition: "continue",
+      reason: "response-invalid",
+    });
+    const serializedLogs = JSON.stringify(logEntries);
+    expect(serializedLogs).not.toContain("PRIVATE_PAIR_NAME_SENTINEL");
+    expect(serializedLogs).not.toContain("PRIVATE_SOURCE_SENTINEL");
+    expect(serializedLogs).not.toContain("gameAId");
+    expect(serializedLogs).not.toContain("gameBId");
+  });
+
   test("each retry re-enters the coordinator and starts only after admission", async () => {
     const capture = fixture();
     const { cache, rows } = cacheFake();
