@@ -2,7 +2,13 @@ import type { Collection, DurableGame } from "@shelf-judge/shared";
 import type { JevPairJudgment, JevPairKey } from "./jev-pair-cache-service.js";
 import type { JevDependencyKind, JevSignal } from "./jev-pair-cache-service.js";
 import { buildJevPairDependencies, type JevPairSource } from "./jev-pair-identity.js";
-import { jevRunPairSourcesChanged, type JevRunPair, type JevRunScope } from "./jev-run-scope.js";
+import {
+  jevRunCollectionLookupFor,
+  jevRunPairSourcesChanged,
+  type JevRunCollectionLookup,
+  type JevRunPair,
+  type JevRunScope,
+} from "./jev-run-scope.js";
 import { validateJevCachedRow } from "./jev-pair-read-proof.js";
 import { JEV_JUDGMENT_CONTRACT } from "./jev/jev-judgment-contract.js";
 import type { JevPairRequest, JevPairResult, JevScoreResult } from "./jev/jev-gateway.js";
@@ -37,6 +43,8 @@ export interface JevPairRunOptions {
   collection: Collection;
   cache: JevRunPairCacheReader;
   noteTransmissionAuthorized: boolean;
+  collectionLookup?: JevRunCollectionLookup;
+  getCollectionLookup?: () => JevRunCollectionLookup;
   contract?: typeof JEV_JUDGMENT_CONTRACT;
 }
 
@@ -59,10 +67,13 @@ function hasNote(
   );
 }
 
-function pairGames(collection: Collection, pair: JevRunPair): [DurableGame, DurableGame] | null {
-  const byId = new Map(collection.games.map((game) => [game.id, game]));
-  const a = byId.get(pair.gameAId);
-  const b = byId.get(pair.gameBId);
+function pairGames(
+  collection: Collection,
+  pair: JevRunPair,
+  lookup: JevRunCollectionLookup,
+): [DurableGame, DurableGame] | null {
+  const a = lookup.gameForId(pair.gameAId);
+  const b = lookup.gameForId(pair.gameBId);
   return a && b ? [a, b] : null;
 }
 
@@ -79,7 +90,10 @@ export function prepareJevRunPair(options: JevPairRunOptions): JevPairPreparatio
       ? { status: "blocked", reason: "note-use-not-permitted" }
       : { status: "skip", reason: "no-required-signal" };
   }
-  const games = pairGames(collection, pair);
+  const collectionLookup =
+    options.getCollectionLookup?.() ??
+    jevRunCollectionLookupFor(collection, options.collectionLookup);
+  const games = pairGames(collection, pair, collectionLookup);
   if (!games) return { status: "skip", reason: "stale-source" };
   const [gameA, gameB] = games;
 
@@ -110,7 +124,14 @@ export function prepareJevRunPair(options: JevPairRunOptions): JevPairPreparatio
     misses.includes("C") &&
     plannedA.descriptionPresent &&
     plannedB.descriptionPresent &&
-    !jevRunPairSourcesChanged(scope, collection, pair.gameAId, pair.gameBId, "C_ONLY");
+    !jevRunPairSourcesChanged(
+      scope,
+      collection,
+      pair.gameAId,
+      pair.gameBId,
+      "C_ONLY",
+      collectionLookup,
+    );
   const noteUsePermitted =
     options.noteTransmissionAuthorized &&
     collection.semanticRedundancy.settings.cachedOwnerNoteUse === true;
@@ -119,7 +140,14 @@ export function prepareJevRunPair(options: JevPairRunOptions): JevPairPreparatio
     plannedA.ownerNotePresent &&
     plannedB.ownerNotePresent &&
     noteUsePermitted &&
-    !jevRunPairSourcesChanged(scope, collection, pair.gameAId, pair.gameBId, "D_ONLY");
+    !jevRunPairSourcesChanged(
+      scope,
+      collection,
+      pair.gameAId,
+      pair.gameBId,
+      "D_ONLY",
+      collectionLookup,
+    );
   if (!canSendC && !canSendD) {
     if (misses.includes("D") && !noteUsePermitted) {
       return { status: "blocked", reason: "note-use-not-permitted" };
@@ -127,14 +155,28 @@ export function prepareJevRunPair(options: JevPairRunOptions): JevPairPreparatio
     if (
       misses.includes("C") &&
       (plannedA.descriptionPresent || plannedB.descriptionPresent) &&
-      jevRunPairSourcesChanged(scope, collection, pair.gameAId, pair.gameBId, "C_ONLY")
+      jevRunPairSourcesChanged(
+        scope,
+        collection,
+        pair.gameAId,
+        pair.gameBId,
+        "C_ONLY",
+        collectionLookup,
+      )
     ) {
       return { status: "skip", reason: "stale-source" };
     }
     if (
       misses.includes("D") &&
       (plannedA.ownerNotePresent || plannedB.ownerNotePresent) &&
-      jevRunPairSourcesChanged(scope, collection, pair.gameAId, pair.gameBId, "D_ONLY")
+      jevRunPairSourcesChanged(
+        scope,
+        collection,
+        pair.gameAId,
+        pair.gameBId,
+        "D_ONLY",
+        collectionLookup,
+      )
     ) {
       return { status: "skip", reason: "stale-source" };
     }
@@ -144,7 +186,16 @@ export function prepareJevRunPair(options: JevPairRunOptions): JevPairPreparatio
   const dependencyKind: JevDependencyKind =
     selectedSignals.length === 2 ? "SHARED_CD" : selectedSignals[0] === "C" ? "C_ONLY" : "D_ONLY";
   const sendsNotes = selectedSignals.includes("D");
-  if (jevRunPairSourcesChanged(scope, collection, pair.gameAId, pair.gameBId, dependencyKind)) {
+  if (
+    jevRunPairSourcesChanged(
+      scope,
+      collection,
+      pair.gameAId,
+      pair.gameBId,
+      dependencyKind,
+      collectionLookup,
+    )
+  ) {
     return { status: "skip", reason: "stale-source" };
   }
   const sendsDescription = selectedSignals.includes("C");

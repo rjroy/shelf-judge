@@ -17,7 +17,10 @@ import {
 import { buildJevPairDependencies } from "../../src/services/jev-pair-identity.js";
 import { validateJevCachedRow } from "../../src/services/jev-pair-read-proof.js";
 import { mapJevPairResult, prepareJevRunPair } from "../../src/services/jev-run-pair.js";
-import type { JevRunScope } from "../../src/services/jev-run-scope.js";
+import {
+  createJevRunCollectionLookup,
+  type JevRunScope,
+} from "../../src/services/jev-run-scope.js";
 
 const hash = (value: string): string => createHash("sha256").update(value, "utf8").digest("hex");
 
@@ -268,6 +271,55 @@ describe("prepareJevRunPair", () => {
         noteTransmissionAuthorized: false,
       }),
     ).toEqual({ status: "skip", reason: "stale-source" });
+  });
+
+  test("defers lookup creation past invalid and no-signal early exits, then reuses it for cache hits", () => {
+    const { collection, scope, games } = setup();
+    const unexpectedLookup = (): never => {
+      throw new Error("lookup should not be needed");
+    };
+    expect(
+      prepareJevRunPair({
+        plannedPair: { ...pair(), gameAId: "b" },
+        scope,
+        collection,
+        cache: { lookup: () => null },
+        noteTransmissionAuthorized: true,
+        getCollectionLookup: unexpectedLookup,
+      }),
+    ).toEqual({ status: "skip", reason: "invalid-pair" });
+    expect(
+      prepareJevRunPair({
+        plannedPair: pair(false, false),
+        scope,
+        collection,
+        cache: { lookup: () => null },
+        noteTransmissionAuthorized: true,
+        getCollectionLookup: unexpectedLookup,
+      }),
+    ).toEqual({ status: "skip", reason: "no-required-signal" });
+
+    const rows = [
+      judgment("SHARED_CD", "C", requiredGame(games, "a"), requiredGame(games, "b")),
+      judgment("SHARED_CD", "D", requiredGame(games, "a"), requiredGame(games, "b")),
+    ];
+    let lookupRequests = 0;
+    let lookup: ReturnType<typeof createJevRunCollectionLookup> | undefined;
+    const cached = () => {
+      lookupRequests++;
+      return (lookup ??= createJevRunCollectionLookup(collection));
+    };
+    expect(
+      prepareJevRunPair({
+        plannedPair: pair(),
+        scope,
+        collection,
+        cache: { lookup: ({ signal }) => rows.find((row) => row.signal === signal) ?? null },
+        noteTransmissionAuthorized: true,
+        getCollectionLookup: cached,
+      }),
+    ).toEqual({ status: "skip", reason: "both-cached" });
+    expect(lookupRequests).toBe(1);
   });
 
   test("blocks unauthorized note use; missing note source is unavailable", () => {

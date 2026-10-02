@@ -220,6 +220,50 @@ function cacheFake() {
 }
 
 describe("JevRunService attempt barriers", () => {
+  test("reuses one capture lookup across pair preparation, dispatch, and checkpoints", async () => {
+    const capture = fixture(["a", "b", "c"]);
+    const games = capture.collection.games;
+    const originalMap = games.map.bind(games);
+    let collectionMapCalls = 0;
+    games.map = ((...args: Parameters<typeof games.map>) => {
+      collectionMapCalls++;
+      return originalMap(...args);
+    }) as typeof games.map;
+    const { cache } = cacheFake();
+    let dispatches = 0;
+    const service = new JevRunService({
+      storageService: {},
+      cache,
+      loadCapture: () => Promise.resolve(capture),
+      readCurrent: () =>
+        Promise.resolve({
+          collection: capture.collection,
+          sourceVectorIdentity: "vector",
+          policyIdentity: "policy",
+          canTransmitNotes: false,
+        }),
+      createGateway: (admit) => ({
+        evaluatePair: async () => {
+          await admit({
+            mode: "description-only",
+            attemptId: `structural-${dispatches}`,
+            start: () => {
+              dispatches++;
+              return { response: Promise.resolve(new Response()) };
+            },
+          });
+          return scoreResult();
+        },
+      }),
+    });
+
+    const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    expect(result).toMatchObject({ state: "completed", completedPairs: 3 });
+    expect(dispatches).toBe(3);
+    // One source-index build for scope planning and one lazy run lookup, independent of pair count.
+    expect(collectionMapCalls).toBe(2);
+  });
+
   test("default computational scope admits a 200-game 19,900-pair universe", async () => {
     const ids = Array.from({ length: 200 }, (_, index) => `game-${String(index).padStart(3, "0")}`);
     const capture = fixture(ids);

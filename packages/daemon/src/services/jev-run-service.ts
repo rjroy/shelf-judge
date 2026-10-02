@@ -8,8 +8,10 @@ import {
 } from "./profile-source-coordinator.js";
 import { mapJevPairResult, prepareJevRunPair } from "./jev-run-pair.js";
 import {
+  createJevRunCollectionLookup,
   jevRunPairSourcesChanged,
   planJevRunScope,
+  type JevRunCollectionLookup,
   type JevRunPair,
   type JevRunScope,
 } from "./jev-run-scope.js";
@@ -370,6 +372,15 @@ export class JevRunService {
       let activeAdmission: { pair: JevRunPair; ready: ReadyAdmission } | null = null;
       let latestCapture = capture;
       let latestScope = originalScope;
+      let indexedCapture = latestCapture;
+      let collectionLookup: JevRunCollectionLookup | undefined;
+      const lookupForCapture = (current: JevRunCapture): JevRunCollectionLookup => {
+        if (current !== indexedCapture) {
+          indexedCapture = current;
+          collectionLookup = undefined;
+        }
+        return (collectionLookup ??= createJevRunCollectionLookup(current.collection));
+      };
       let gateway: JevGateway | null = null;
       const getGateway = (): JevGateway => {
         if (gateway) return gateway;
@@ -424,6 +435,7 @@ export class JevRunService {
           plannedPair: originalPair,
           scope: originalScope,
           collection: currentCapture.collection,
+          getCollectionLookup: () => lookupForCapture(currentCapture),
           cache: this.options.cache,
           noteTransmissionAuthorized: noteAuthorized,
         });

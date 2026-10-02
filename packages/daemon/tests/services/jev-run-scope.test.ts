@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { CollectionV10, DurableGame, GameWithScore } from "@shelf-judge/shared";
 import {
+  createJevRunCollectionLookup,
   jevRunPairSourcesChanged,
   planJevRunScope,
   type JevRunPair,
@@ -205,6 +206,66 @@ describe("Jev run scope planner", () => {
         "b",
         "SHARED_CD",
       ),
+    ).toBe(true);
+  });
+
+  test("reuses an explicit lookup for one capture and rebuilds on a changed capture", () => {
+    const games = [
+      game("a", { description: "desc-a", note: "note-a" }),
+      game("b", { description: "desc-b", note: "note-b" }),
+    ];
+    const capturedCollection = collection(games);
+    const changedGames = structuredClone(games);
+    const changedA = changedGames.find((entry) => entry.id === "a");
+    if (changedA?.ownerNote.state === "present") changedA.ownerNote.text = "new note";
+    const planned = planJevRunScope(capturedCollection, capture(games));
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) return;
+    let mapCalls = 0;
+    const originalMap = games.map.bind(games);
+    games.map = ((...args: Parameters<typeof games.map>) => {
+      mapCalls++;
+      return originalMap(...args);
+    }) as typeof games.map;
+    const lookup = createJevRunCollectionLookup(capturedCollection);
+
+    expect(
+      jevRunPairSourcesChanged(planned.scope, capturedCollection, "a", "b", "C_ONLY", lookup),
+    ).toBe(false);
+    expect(
+      jevRunPairSourcesChanged(planned.scope, capturedCollection, "a", "b", "D_ONLY", lookup),
+    ).toBe(false);
+    expect(mapCalls).toBe(1);
+
+    const changedCollection = collection(changedGames);
+    expect(
+      jevRunPairSourcesChanged(planned.scope, changedCollection, "a", "b", "D_ONLY", lookup),
+    ).toBe(true);
+  });
+
+  test("refreshes a lookup when its captured games array or indexed entry is replaced", () => {
+    const games = [
+      game("a", { description: "desc-a", note: "note-a" }),
+      game("b", { description: "desc-b", note: "note-b" }),
+    ];
+    const capturedCollection = collection(games);
+    const planned = planJevRunScope(capturedCollection, capture(games));
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) return;
+    const lookup = createJevRunCollectionLookup(capturedCollection);
+
+    capturedCollection.games = structuredClone(games);
+    const replacedArrayA = capturedCollection.games.find((entry) => entry.id === "a");
+    if (replacedArrayA?.ownerNote.state === "present") replacedArrayA.ownerNote.text = "array edit";
+    expect(
+      jevRunPairSourcesChanged(planned.scope, capturedCollection, "a", "b", "D_ONLY", lookup),
+    ).toBe(true);
+
+    const replacementA = structuredClone(capturedCollection.games[0]);
+    if (replacementA.ownerNote.state === "present") replacementA.ownerNote.text = "entry edit";
+    capturedCollection.games[0] = replacementA;
+    expect(
+      jevRunPairSourcesChanged(planned.scope, capturedCollection, "a", "b", "D_ONLY", lookup),
     ).toBe(true);
   });
 

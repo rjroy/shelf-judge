@@ -36,6 +36,41 @@ export interface JevRunScope {
   pairs(): IterableIterator<JevRunPair>;
 }
 
+/** Explicit game index tied to one capture; validates its array and indexed entries on access. */
+export interface JevRunCollectionLookup {
+  readonly collection: Collection;
+  gameForId(gameId: string): DurableGame | undefined;
+}
+
+export function createJevRunCollectionLookup(collection: Collection): JevRunCollectionLookup {
+  let indexedGames = collection.games;
+  let byId = new Map(indexedGames.map((game, index) => [game.id, { index, game }] as const));
+  const rebuild = (): void => {
+    indexedGames = collection.games;
+    byId = new Map(indexedGames.map((game, index) => [game.id, { index, game }] as const));
+  };
+  return Object.freeze({
+    collection,
+    gameForId: (gameId: string) => {
+      if (collection.games !== indexedGames) rebuild();
+      let entry = byId.get(gameId);
+      if (entry && (indexedGames[entry.index] !== entry.game || entry.game.id !== gameId)) {
+        rebuild();
+        entry = byId.get(gameId);
+      }
+      return entry?.game;
+    },
+  });
+}
+
+/** A lookup is only reusable with the exact collection capture from which it was built. */
+export function jevRunCollectionLookupFor(
+  collection: Collection,
+  lookup?: JevRunCollectionLookup,
+): JevRunCollectionLookup {
+  return lookup?.collection === collection ? lookup : createJevRunCollectionLookup(collection);
+}
+
 export type JevRunScopeResult = { ok: true; scope: JevRunScope } | { ok: false; reason: string };
 
 function fingerprint(text: string): string {
@@ -204,12 +239,25 @@ export function jevRunPairSourcesChanged(
   gameAId: string,
   gameBId: string,
   dependencyKind: JevDependencyKind,
+  lookup?: JevRunCollectionLookup,
 ): boolean {
   const plannedA = scope.sourceForGame(gameAId);
   const plannedB = scope.sourceForGame(gameBId);
-  const currentById = new Map(collection.games.map((game) => [game.id, game]));
-  const gameA = currentById.get(gameAId);
-  const gameB = currentById.get(gameBId);
+  let gameA: DurableGame | undefined;
+  let gameB: DurableGame | undefined;
+  if (lookup) {
+    const currentLookup = jevRunCollectionLookupFor(collection, lookup);
+    gameA = currentLookup.gameForId(gameAId);
+    gameB = currentLookup.gameForId(gameBId);
+  } else {
+    // Fresh authoritative reads are intentionally scanned directly, not checked against a
+    // possibly older capture index or indexed into a new full-collection Map per fence.
+    for (const game of collection.games) {
+      if (game.id === gameAId) gameA = game;
+      if (game.id === gameBId) gameB = game;
+      if (gameA && gameB) break;
+    }
+  }
   if (!plannedA || !plannedB || !gameA || !gameB) return true;
   return (
     !sameSource(plannedA, sourceFor(gameA), dependencyKind) ||

@@ -3,7 +3,12 @@ import type { Collection, RedundancySettings } from "@shelf-judge/shared";
 import type { JevPairCache } from "./jev-pair-cache-service.js";
 import type { JevRunCapture, JevRunHandle, JevRunService } from "./jev-run-service.js";
 import type { JevRunSourceAdapter } from "./jev-run-source-adapter.js";
-import { planJevRunScope, type JevRunScope } from "./jev-run-scope.js";
+import {
+  createJevRunCollectionLookup,
+  planJevRunScope,
+  type JevRunCollectionLookup,
+  type JevRunScope,
+} from "./jev-run-scope.js";
 import { prepareJevRunPair } from "./jev-run-pair.js";
 import {
   JEV_GATEWAY_LIMITS,
@@ -318,6 +323,7 @@ export class JevRunController {
       return { status: 409, body: { error: "scope-over-limit" } };
 
     if (!this.isGatewayConfigured()) {
+      let collectionLookup: JevRunCollectionLookup | undefined;
       for (const pair of planned.scope.pairs()) {
         const prepared = prepareJevRunPair({
           plannedPair: pair,
@@ -325,6 +331,8 @@ export class JevRunController {
           collection: capture.collection,
           cache: this.options.cache,
           noteTransmissionAuthorized: input.noteTransmissionAuthorized,
+          getCollectionLookup: () =>
+            (collectionLookup ??= createJevRunCollectionLookup(capture.collection)),
         });
         if (prepared.status === "ready") return { status: 503, body: { error: "run-unavailable" } };
       }
