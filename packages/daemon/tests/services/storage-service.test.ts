@@ -14,6 +14,9 @@ import {
   createInitialSemanticRedundancyState,
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
+  CollectionSchema,
+  PredictionSettingsSchema,
+  RedundancySettingsSchema,
   TournamentDataSchema,
 } from "@shelf-judge/shared";
 import { createStorageService } from "../../src/services/storage-service.js";
@@ -28,6 +31,21 @@ const COLLECTION_PATH = "/test/data/collection.json";
 const PROFILE_PATH = "/test/data/profile.json";
 const TOURNAMENT_PATH = "/test/data/tournament.json";
 const WISHLIST_PATH = "/test/data/wishlist.json";
+const PREDICTION_SETTINGS_PATH = "/test/data/prediction-settings.json";
+const REDUNDANCY_SETTINGS_PATH = "/test/data/redundancy-settings.json";
+
+async function expectPromiseToReject(
+  promise: Promise<unknown>,
+  expectedMessage: string,
+): Promise<void> {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes(expectedMessage)) return;
+    throw new Error(`Expected rejection containing: ${expectedMessage}`, { cause: error });
+  }
+  throw new Error(`Expected promise to reject containing: ${expectedMessage}`);
+}
 
 function makeService(initialFiles?: Record<string, string>) {
   const fileOps = createMockFileOps(initialFiles);
@@ -54,6 +72,369 @@ function captureLogger(): { entries: string[]; logger: Logger } {
     },
   };
 }
+
+describe("StorageService.loadJevSourceSnapshot", () => {
+  test("stats sources on every call, reuses unchanged parsed data, and protects cached values", async () => {
+    const { service, fileOps } = makeService();
+    const load = () => service.loadJevSourceSnapshot!();
+    expect(load).toBeDefined();
+    if (!load) return;
+
+    const first = await load();
+    expect(first.externalEpoch).toBe("0");
+    const readsAfterFirst = fileOps.calls.filter((call) => call.method === "readFile").length;
+    const statsAfterFirst = fileOps.calls.filter((call) => call.method === "stat").length;
+    first.collection.name = "caller mutation";
+    first.tournament.settings.kFactorThreshold = 999;
+    first.predictionSettings.defaultK = 999;
+
+    const second = await load();
+    expect(second.collection.name).toBe("My Collection");
+    expect(second.tournament.settings.kFactorThreshold).toBe(15);
+    expect(second.predictionSettings.defaultK).toBe(5);
+    expect(fileOps.calls.filter((call) => call.method === "readFile")).toHaveLength(
+      readsAfterFirst,
+    );
+    expect(fileOps.calls.filter((call) => call.method === "stat")).toHaveLength(
+      statsAfterFirst + 4,
+    );
+    expect(second.freshnessEpoch).toBe(first.freshnessEpoch);
+  });
+
+  test("reloads after internal writes and external replace or restored-mtime in-place edits", async () => {
+    const { service, fileOps } = makeService();
+    const load = () => service.loadJevSourceSnapshot!();
+    const first = await load();
+
+    await service.saveRedundancySettings({
+      ...first.redundancySettings,
+      componentWeights: { binary: 0.9, continuous: 0.1 },
+    });
+    const internallyUpdated = await load();
+    expect(internallyUpdated.redundancySettings.componentWeights.binary).toBe(0.9);
+    expect(internallyUpdated.freshnessEpoch).not.toBe(first.freshnessEpoch);
+    expect(internallyUpdated.externalEpoch).toBe(first.externalEpoch);
+
+    const rawTournament = TournamentDataSchema.passthrough().parse(
+      JSON.parse(fileOps.files.get(TOURNAMENT_PATH)!),
+    );
+    rawTournament.settings.kFactorThreshold = 16;
+    const replacement = JSON.stringify(rawTournament);
+    const previousMetadata = fileOps.metadata.get(TOURNAMENT_PATH)!;
+    fileOps.files.set(TOURNAMENT_PATH, replacement);
+    fileOps.metadata.set(TOURNAMENT_PATH, {
+      ...previousMetadata,
+      ino: previousMetadata.ino + 1000n,
+      size: BigInt(Buffer.byteLength(replacement)),
+      ctimeNs: previousMetadata.ctimeNs + 1000n,
+    });
+    const afterReplace = await load();
+    expect(afterReplace.tournament.settings.kFactorThreshold).toBe(16);
+    expect(afterReplace.freshnessEpoch).not.toBe(internallyUpdated.freshnessEpoch);
+    expect(afterReplace.externalEpoch).not.toBe(internallyUpdated.externalEpoch);
+
+    const rawCollection = CollectionSchema.parse(JSON.parse(fileOps.files.get(COLLECTION_PATH)!));
+    rawCollection.name = "External collection";
+    const collectionReplacement = JSON.stringify(rawCollection);
+    const previousCollectionMetadata = fileOps.metadata.get(COLLECTION_PATH)!;
+    fileOps.files.set(COLLECTION_PATH, collectionReplacement);
+    fileOps.metadata.set(COLLECTION_PATH, {
+      ...previousCollectionMetadata,
+      ino: previousCollectionMetadata.ino + 1001n,
+      size: BigInt(Buffer.byteLength(collectionReplacement)),
+      ctimeNs: previousCollectionMetadata.ctimeNs + 1001n,
+    });
+    const afterCollectionReplace = await load();
+    expect(afterCollectionReplace.collection.name).toBe("External collection");
+    expect(afterCollectionReplace.freshnessEpoch).not.toBe(afterReplace.freshnessEpoch);
+
+    const rawPrediction = PredictionSettingsSchema.passthrough().parse(
+      JSON.parse(fileOps.files.get(PREDICTION_SETTINGS_PATH)!),
+    );
+    rawPrediction.minSimilarityThreshold = 0.3;
+    const inPlaceContent = JSON.stringify(rawPrediction);
+    const previousPredictionMetadata = fileOps.metadata.get(PREDICTION_SETTINGS_PATH)!;
+    fileOps.files.set(PREDICTION_SETTINGS_PATH, inPlaceContent);
+    fileOps.metadata.set(PREDICTION_SETTINGS_PATH, {
+      ...previousPredictionMetadata,
+      size: BigInt(Buffer.byteLength(inPlaceContent)),
+      mtimeNs: previousPredictionMetadata.mtimeNs,
+      ctimeNs: previousPredictionMetadata.ctimeNs + 2000n,
+    });
+    const afterInPlaceEdit = await load();
+    expect(afterInPlaceEdit.predictionSettings.minSimilarityThreshold).toBe(0.3);
+    expect(afterInPlaceEdit.freshnessEpoch).not.toBe(afterCollectionReplace.freshnessEpoch);
+
+    const rawRedundancy = RedundancySettingsSchema.passthrough().parse(
+      JSON.parse(fileOps.files.get(REDUNDANCY_SETTINGS_PATH)!),
+    );
+    rawRedundancy.componentWeights.binary = 0.8;
+    const redundancyContent = JSON.stringify(rawRedundancy);
+    const previousRedundancyMetadata = fileOps.metadata.get(REDUNDANCY_SETTINGS_PATH)!;
+    fileOps.files.set(REDUNDANCY_SETTINGS_PATH, redundancyContent);
+    fileOps.metadata.set(REDUNDANCY_SETTINGS_PATH, {
+      ...previousRedundancyMetadata,
+      size: BigInt(Buffer.byteLength(redundancyContent)),
+      ctimeNs: previousRedundancyMetadata.ctimeNs + 3000n,
+    });
+    const afterSettingsEdit = await load();
+    expect(afterSettingsEdit.redundancySettings.componentWeights.binary).toBe(0.8);
+    expect(afterSettingsEdit.freshnessEpoch).not.toBe(afterInPlaceEdit.freshnessEpoch);
+  });
+
+  test("retries a source change during capture and fails closed after repeated incoherence", async () => {
+    const { service, fileOps } = makeService();
+    const load = () => service.loadJevSourceSnapshot!();
+    await load();
+    const initialTournament = TournamentDataSchema.passthrough().parse(
+      JSON.parse(fileOps.files.get(TOURNAMENT_PATH)!),
+    );
+    const initialMetadata = fileOps.metadata.get(TOURNAMENT_PATH)!;
+    const changedBeforeCapture = JSON.stringify({
+      ...initialTournament,
+      settings: { kFactorThreshold: 18, normalizationHalfWidth: 400 },
+    });
+    fileOps.files.set(TOURNAMENT_PATH, changedBeforeCapture);
+    fileOps.metadata.set(TOURNAMENT_PATH, {
+      ...initialMetadata,
+      ino: initialMetadata.ino + 400n,
+      size: BigInt(Buffer.byteLength(changedBeforeCapture)),
+      ctimeNs: initialMetadata.ctimeNs + 400n,
+    });
+    const originalRead = fileOps.readFile.bind(fileOps);
+    let changedDuringRead = false;
+    fileOps.readFile = async (filePath) => {
+      const value = await originalRead(filePath);
+      if (filePath === TOURNAMENT_PATH && !changedDuringRead) {
+        changedDuringRead = true;
+        const currentTournament = TournamentDataSchema.passthrough().parse(
+          JSON.parse(fileOps.files.get(filePath)!),
+        );
+        const content = JSON.stringify({
+          ...currentTournament,
+          settings: { kFactorThreshold: 19, normalizationHalfWidth: 400 },
+        });
+        const oldMetadata = fileOps.metadata.get(filePath)!;
+        fileOps.files.set(filePath, content);
+        fileOps.metadata.set(filePath, {
+          ...oldMetadata,
+          ino: oldMetadata.ino + 500n,
+          size: BigInt(Buffer.byteLength(content)),
+          ctimeNs: oldMetadata.ctimeNs + 500n,
+        });
+      }
+      return value;
+    };
+    const coherent = await load();
+    expect(coherent.tournament.settings.kFactorThreshold).toBe(19);
+
+    const beforeRepeatedRace = TournamentDataSchema.passthrough().parse(
+      JSON.parse(fileOps.files.get(TOURNAMENT_PATH)!),
+    );
+    const beforeRepeatedRaceMetadata = fileOps.metadata.get(TOURNAMENT_PATH)!;
+    const repeatedRaceContent = JSON.stringify({
+      ...beforeRepeatedRace,
+      settings: { kFactorThreshold: 20, normalizationHalfWidth: 400 },
+    });
+    fileOps.files.set(TOURNAMENT_PATH, repeatedRaceContent);
+    fileOps.metadata.set(TOURNAMENT_PATH, {
+      ...beforeRepeatedRaceMetadata,
+      ino: beforeRepeatedRaceMetadata.ino + 1n,
+      size: BigInt(Buffer.byteLength(repeatedRaceContent)),
+      ctimeNs: beforeRepeatedRaceMetadata.ctimeNs + 1n,
+    });
+    fileOps.readFile = async (filePath) => {
+      const value = await originalRead(filePath);
+      if (filePath === TOURNAMENT_PATH) {
+        const currentTournament = TournamentDataSchema.passthrough().parse(
+          JSON.parse(fileOps.files.get(filePath)!),
+        );
+        const content = JSON.stringify({
+          ...currentTournament,
+          settings: {
+            kFactorThreshold: currentTournament.settings.kFactorThreshold === 19 ? 20 : 19,
+            normalizationHalfWidth: 400,
+          },
+        });
+        const oldMetadata = fileOps.metadata.get(filePath)!;
+        fileOps.files.set(filePath, content);
+        fileOps.metadata.set(filePath, {
+          ...oldMetadata,
+          ino: oldMetadata.ino + 1n,
+          size: BigInt(Buffer.byteLength(content)),
+          ctimeNs: oldMetadata.ctimeNs + 1n,
+        });
+      }
+      return value;
+    };
+    await expectPromiseToReject(load(), "changed repeatedly");
+  });
+
+  test("rejects unusable metadata and missing established files without stale fallback or recreation", async () => {
+    const { service, fileOps } = makeService();
+    const load = () => service.loadJevSourceSnapshot!();
+    await load();
+
+    const stat = fileOps.metadata.get(PREDICTION_SETTINGS_PATH)!;
+    fileOps.metadata.set(PREDICTION_SETTINGS_PATH, { ...stat, isFile: false });
+    await expectPromiseToReject(load(), "metadata is unusable");
+    fileOps.metadata.set(PREDICTION_SETTINGS_PATH, stat);
+
+    fileOps.files.delete(TOURNAMENT_PATH);
+    fileOps.metadata.delete(TOURNAMENT_PATH);
+    await expectPromiseToReject(load(), "established JEV source file is missing");
+    expect(fileOps.files.has(TOURNAMENT_PATH)).toBe(false);
+    fileOps.files.set(
+      TOURNAMENT_PATH,
+      JSON.stringify({
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
+        sessions: [],
+        gameStats: {},
+        revision: 0,
+      }),
+    );
+    fileOps.metadata.set(TOURNAMENT_PATH, {
+      ...stat,
+      size: BigInt(Buffer.byteLength(fileOps.files.get(TOURNAMENT_PATH)!)),
+      ino: stat.ino + 800n,
+    });
+    expect((await load()).tournament.settings.kFactorThreshold).toBe(15);
+  });
+
+  test("attributes an external replacement before collection normalization rewrites it", async () => {
+    const { service, fileOps } = makeService();
+    const load = () => service.loadJevSourceSnapshot!();
+    const initial = await load();
+    const storedCollection = CollectionSchema.parse(
+      JSON.parse(fileOps.files.get(COLLECTION_PATH)!),
+    );
+    const replacement = JSON.stringify({
+      ...storedCollection,
+      games: [{ ...currentGame(), acquisition: null }],
+    });
+    const metadata = fileOps.metadata.get(COLLECTION_PATH)!;
+    fileOps.files.set(COLLECTION_PATH, replacement);
+    fileOps.metadata.set(COLLECTION_PATH, {
+      ...metadata,
+      ino: metadata.ino + 900n,
+      size: BigInt(Buffer.byteLength(replacement)),
+      ctimeNs: metadata.ctimeNs + 900n,
+    });
+
+    const normalized = await load();
+    expect(normalized.collection.games[0]?.acquisition.state).toBe("invalid");
+    expect(normalized.externalEpoch).not.toBe(initial.externalEpoch);
+  });
+
+  test("does not assign internal provenance to a same-byte external rename replacement", async () => {
+    const { service, fileOps } = makeService();
+    const load = () => service.loadJevSourceSnapshot!();
+    const initial = await load();
+    const originalRename = fileOps.rename.bind(fileOps);
+    fileOps.rename = async (from, to) => {
+      const sameBytes = fileOps.files.get(from)!;
+      await originalRename(from, to);
+      if (to !== TOURNAMENT_PATH) return;
+      fileOps.files.set(to, sameBytes);
+      const old = fileOps.metadata.get(to)!;
+      fileOps.metadata.set(to, {
+        ...old,
+        ino: old.ino + 901n,
+        size: BigInt(Buffer.byteLength(sameBytes)),
+        ctimeNs: old.ctimeNs + 901n,
+      });
+    };
+    const tournament = await service.loadTournament();
+    await expectPromiseToReject(
+      service.saveTournament({
+        ...tournament,
+        settings: { ...tournament.settings, kFactorThreshold: 22 },
+      }),
+      "changed after atomic write",
+    );
+    const captured = await load();
+    expect(captured.tournament.settings.kFactorThreshold).toBe(22);
+    expect(captured.externalEpoch).not.toBe(initial.externalEpoch);
+  });
+
+  test("recovers snapshots after failed relevant writes and transient stat failures", async () => {
+    const { service, fileOps } = makeService();
+    const load = () => service.loadJevSourceSnapshot!();
+    const initial = await load();
+    const originalRename = fileOps.rename.bind(fileOps);
+    fileOps.rename = () => Promise.reject(new Error("rename unavailable"));
+    const settings = await service.loadPredictionSettings();
+    await expectPromiseToReject(
+      service.savePredictionSettings({ ...settings, defaultK: settings.defaultK + 1 }),
+      "rename unavailable",
+    );
+    expect(service.sourceVector!().unavailableSources).toContain("prediction-settings");
+    fileOps.rename = originalRename;
+    const recovered = await load();
+    expect(recovered.predictionSettings.defaultK).toBe(initial.predictionSettings.defaultK);
+    expect(fileOps.calls.filter((call) => call.method === "readFile").length).toBeGreaterThan(0);
+
+    const originalStat = fileOps.stat?.bind(fileOps);
+    if (!originalStat) throw new Error("Mock file operations must provide stat");
+    let failOnce = true;
+    fileOps.stat = async (filePath) => {
+      if (filePath === REDUNDANCY_SETTINGS_PATH && failOnce) {
+        failOnce = false;
+        throw Object.assign(new Error("temporary stat failure"), { code: "EIO" });
+      }
+      return originalStat(filePath);
+    };
+    await expectPromiseToReject(load(), "temporary stat failure");
+    expect((await load()).redundancySettings).toEqual(initial.redundancySettings);
+  });
+
+  test("recovers collection source state after a failed atomic write", async () => {
+    const { service, fileOps } = makeService();
+    const load = () => service.loadJevSourceSnapshot!();
+    const initial = await load();
+    const originalRename = fileOps.rename.bind(fileOps);
+    fileOps.rename = () => Promise.reject(new Error("rename unavailable"));
+    await expectPromiseToReject(
+      service.saveCollection({ ...initial.collection, name: "uncommitted" }),
+      "rename unavailable",
+    );
+    expect(service.sourceVector!().unavailableSources).toContain("collection");
+    fileOps.rename = originalRename;
+
+    const recovered = await load();
+    expect(recovered.collection.name).toBe(initial.collection.name);
+  });
+
+  test("allows ordinary JEV source writes when the FileOps adapter has no stat", async () => {
+    const { service, fileOps } = makeService();
+    await service.hydrateSourceVector!();
+    fileOps.stat = undefined;
+
+    const collection = await service.loadCollection();
+    await service.saveCollection({ ...collection, name: "Saved without metadata" });
+    const tournament = await service.loadTournament();
+    await service.saveTournament({
+      ...tournament,
+      settings: { ...tournament.settings, kFactorThreshold: 17 },
+    });
+
+    expect(CollectionSchema.parse(JSON.parse(fileOps.files.get(COLLECTION_PATH)!)).name).toBe(
+      "Saved without metadata",
+    );
+    expect(
+      TournamentDataSchema.passthrough().parse(JSON.parse(fileOps.files.get(TOURNAMENT_PATH)!))
+        .settings.kFactorThreshold,
+    ).toBe(17);
+    expect(service.sourceVector!()).toMatchObject({
+      collectionRevision: collection.revision,
+      tournamentRevision: 1,
+    });
+    await expectPromiseToReject(
+      service.loadJevSourceSnapshot!(),
+      "JEV source freshness metadata is unavailable",
+    );
+  });
+});
 
 function currentCollection(overrides: Partial<Collection> = {}): Collection {
   const initialSemanticState = createInitialSemanticRedundancyState();

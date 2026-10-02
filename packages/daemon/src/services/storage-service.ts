@@ -32,7 +32,7 @@ import {
   AttentionCandidateArtifactSchema,
   createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
-import type { FileOps } from "./file-ops.js";
+import type { FileMetadata, FileOps } from "./file-ops.js";
 import { atomicWrite, type TemporaryPathForAttempt } from "./file-ops.js";
 import {
   migrateCollection,
@@ -99,6 +99,19 @@ export interface StorageService extends CollectionReader, CollectionPersistence 
   saveShelfConfig(config: ShelfConfiguration): Promise<void>;
   sourceVector?(): SourceVector;
   hydrateSourceVector?(): Promise<SourceVector>;
+  /** Fresh, metadata-coherent view for JEV source capture; returned data is caller-owned. */
+  loadJevSourceSnapshot?(): Promise<JevSourceSnapshot>;
+}
+
+export interface JevSourceSnapshot {
+  collection: Collection;
+  tournament: TournamentData;
+  predictionSettings: PredictionSettings;
+  redundancySettings: RedundancySettings;
+  /** Changes when any source file's filesystem identity or mutation metadata changes. */
+  freshnessEpoch: string;
+  /** Process-local generation for changes observed to originate outside storage writes. */
+  externalEpoch: string;
 }
 
 export class DurableSourcePostCommitError extends Error {
@@ -217,6 +230,26 @@ function safeErrorContext(error: unknown): Record<string, string | number | stri
   return context;
 }
 
+function hasErrorCode(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
+function fileMetadataIdentity(metadata: FileMetadata): string {
+  if (
+    !metadata.isFile ||
+    typeof metadata.dev !== "bigint" ||
+    typeof metadata.ino !== "bigint" ||
+    typeof metadata.size !== "bigint" ||
+    typeof metadata.mtimeNs !== "bigint" ||
+    typeof metadata.ctimeNs !== "bigint" ||
+    metadata.dev < 0n ||
+    metadata.ino < 0n ||
+    metadata.size < 0n
+  )
+    throw new Error("JEV source file metadata is unusable");
+  return [metadata.dev, metadata.ino, metadata.size, metadata.mtimeNs, metadata.ctimeNs].join(":");
+}
+
 function storedInvalidEvidence(value: unknown, present: boolean): InvalidEvidence {
   if (!present) return { presence: "missing" };
   if (!isJsonValue(value)) throw new Error("Malformed stored value is not JSON-safe");
@@ -333,6 +366,19 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     "shelf-config": path.join(dataDir, "shelf-config.json"),
   };
   const sourceVector = createSourceVectorService();
+  const jevSourcePaths = [
+    collectionPath,
+    tournamentPath,
+    sourcePaths["prediction-settings"],
+    sourcePaths["redundancy-settings"],
+  ] as const;
+  const establishedJevPaths = new Set<string>();
+  const unavailableJevPaths = new Set<string>();
+  const internalJevSignatures = new Map<string, string>();
+  let lastObservedJevSignatures: readonly (string | null)[] | undefined;
+  let externalJevEpoch = 0n;
+  let jevSnapshotCache: { signatures: readonly string[]; snapshot: JevSourceSnapshot } | undefined;
+  let collectionMustExistForJevSnapshot = false;
 
   // Per-file in-flight load promise. Serializes concurrent first-time loads so
   // two callers don't both race to write `<file>.tmp` and one ends up renaming
@@ -343,6 +389,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   const sourceCache = new Map<RevisionedSourceKind, DecodedStoredSource>();
   let profileOperations: Promise<void> = Promise.resolve();
   let attentionCandidateOperations: Promise<void> = Promise.resolve();
+  let jevSnapshotOperations: Promise<void> = Promise.resolve();
   let attentionCandidateSourceGeneration = 0;
   const advanceAttentionCandidateSourceGeneration = () => {
     attentionCandidateSourceGeneration += 1;
@@ -375,6 +422,15 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     return operation;
   }
 
+  function withJevSnapshotLock<T>(fn: () => Promise<T>): Promise<T> {
+    const operation = jevSnapshotOperations.then(fn, fn);
+    jevSnapshotOperations = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
   function withSourceLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
     const previous = sourceOperations.get(filePath) ?? Promise.resolve();
     const operation = previous.then(fn, fn);
@@ -398,20 +454,172 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     }
   }
 
-  async function readStoredSource(kind: RevisionedSourceKind): Promise<DecodedStoredSource> {
+  async function observeJevSourceFiles(): Promise<(string | null)[]> {
+    if (!fileOps.stat) throw new Error("JEV source freshness metadata is unavailable");
+    return Promise.all(
+      jevSourcePaths.map(async (filePath) => {
+        let metadata: FileMetadata;
+        try {
+          metadata = await fileOps.stat!(filePath);
+        } catch (error) {
+          if (hasErrorCode(error, "ENOENT")) {
+            invalidateJevPath(filePath);
+            return null;
+          }
+          invalidateJevPath(filePath);
+          throw error;
+        }
+        try {
+          return fileMetadataIdentity(metadata);
+        } catch (error) {
+          invalidateJevPath(filePath);
+          throw error;
+        }
+      }),
+    );
+  }
+
+  async function initializeMissingJevSource(filePath: string): Promise<void> {
+    if (filePath === collectionPath) {
+      await storage.loadCollection();
+      return;
+    }
+    const kind = (Object.entries(sourcePaths) as [RevisionedSourceKind, string][]).find(
+      ([, candidatePath]) => candidatePath === filePath,
+    )?.[0];
+    if (!kind) throw new Error("Unknown JEV source file");
+    await loadStoredSource(kind);
+  }
+
+  async function readJevSourceFiles(): Promise<JevSourceSnapshot> {
+    collectionMustExistForJevSnapshot = true;
+    let collection: Collection;
+    try {
+      collection = await storage.loadCollection();
+    } finally {
+      collectionMustExistForJevSnapshot = false;
+    }
+    const [tournament, predictionSettings, redundancySettings] = await Promise.all([
+      withSourceLock(tournamentPath, () => readStoredSource("tournament", false)),
+      withSourceLock(sourcePaths["prediction-settings"], () =>
+        readStoredSource("prediction-settings", false),
+      ),
+      withSourceLock(sourcePaths["redundancy-settings"], () =>
+        readStoredSource("redundancy-settings", false),
+      ),
+    ]);
+    return {
+      collection,
+      tournament: structuredClone(tournament.data as TournamentData),
+      predictionSettings: structuredClone(predictionSettings.data as PredictionSettings),
+      redundancySettings: structuredClone(redundancySettings.data as RedundancySettings),
+      freshnessEpoch: "",
+      externalEpoch: "",
+    };
+  }
+
+  function sameFileSignatures(left: readonly (string | null)[], right: readonly (string | null)[]) {
+    return (
+      left.length === right.length && left.every((signature, index) => signature === right[index])
+    );
+  }
+
+  function publishJevExternalEpoch(signatures: readonly (string | null)[]): void {
+    if (lastObservedJevSignatures) {
+      signatures.forEach((signature, index) => {
+        const filePath = jevSourcePaths[index];
+        if (!filePath || signature === lastObservedJevSignatures?.[index]) return;
+        if (signature === internalJevSignatures.get(filePath)) return;
+        externalJevEpoch++;
+        internalJevSignatures.delete(filePath);
+      });
+    }
+    lastObservedJevSignatures = [...signatures];
+  }
+
+  function invalidateJevPath(filePath: string, markSourceUnavailable = true): void {
+    if (!jevSourcePaths.includes(filePath)) return;
+    jevSnapshotCache = undefined;
+    internalJevSignatures.delete(filePath);
+    unavailableJevPaths.add(filePath);
+    if (!markSourceUnavailable) return;
+    if (filePath === collectionPath) sourceVector.markUnavailable("collection");
+    else {
+      const kind = (Object.entries(sourcePaths) as [RevisionedSourceKind, string][]).find(
+        ([, candidate]) => candidate === filePath,
+      )?.[0];
+      if (kind === "tournament" || kind === "prediction-settings" || kind === "redundancy-settings")
+        sourceVector.markUnavailable(kind);
+    }
+  }
+
+  async function captureJevSourceSnapshot(): Promise<JevSourceSnapshot> {
+    return withJevSnapshotLock(async () => {
+      try {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const before = await observeJevSourceFiles();
+          // Attribute the observed transition before a load/migration can rewrite
+          // the file and make an external change look like an internal commit.
+          publishJevExternalEpoch(before);
+          const missing = before
+            .map((signature, index) => (signature === null ? jevSourcePaths[index] : undefined))
+            .filter((filePath): filePath is string => filePath !== undefined);
+          if (missing.length > 0) {
+            if (jevSnapshotCache || missing.some((filePath) => establishedJevPaths.has(filePath))) {
+              jevSnapshotCache = undefined;
+              throw new Error("An established JEV source file is missing");
+            }
+            for (const filePath of missing) await initializeMissingJevSource(filePath);
+            continue;
+          }
+
+          if (jevSnapshotCache && sameFileSignatures(jevSnapshotCache.signatures, before))
+            if (jevSourcePaths.every((filePath) => !unavailableJevPaths.has(filePath)))
+              return structuredClone(jevSnapshotCache.snapshot);
+          // Invalidate before reading: stale data must never be paired with a newer stat epoch.
+          jevSnapshotCache = undefined;
+          const snapshot = await readJevSourceFiles();
+          const after = await observeJevSourceFiles();
+          if (sameFileSignatures(before, after) && after.every((signature) => signature !== null)) {
+            const stableSignatures = after;
+            publishJevExternalEpoch(stableSignatures);
+            unavailableJevPaths.clear();
+            snapshot.freshnessEpoch = canonicalSha256(stableSignatures);
+            snapshot.externalEpoch = externalJevEpoch.toString();
+            jevSnapshotCache = { signatures: after, snapshot };
+            return structuredClone(snapshot);
+          }
+        }
+        throw new Error("JEV source files changed repeatedly during snapshot capture");
+      } catch (error) {
+        jevSnapshotCache = undefined;
+        throw error;
+      }
+    });
+  }
+
+  async function readStoredSource(
+    kind: RevisionedSourceKind,
+    allowCreate = true,
+  ): Promise<DecodedStoredSource> {
     const filePath = sourcePaths[kind];
     try {
       if (!(await fileOps.exists(filePath))) {
+        if (!allowCreate) throw new Error("A required JEV source file disappeared");
         const prepared = prepareMissingStoredSource(kind, new Date().toISOString());
         await fileOps.mkdir(dataDir);
         await writeAtomically(filePath, JSON.stringify(prepared.stored, null, 2));
+        establishedJevPaths.add(filePath);
+        jevSnapshotCache = undefined;
         publishStoredSource(kind, prepared);
         advanceAttentionCandidateSourceGeneration();
         return prepared;
       }
+      establishedJevPaths.add(filePath);
       const decoded = decodeStoredSource(kind, JSON.parse(await fileOps.readFile(filePath)));
       if (decoded.migrated) {
         await writeAtomically(filePath, JSON.stringify(decoded.stored, null, 2));
+        jevSnapshotCache = undefined;
         advanceAttentionCandidateSourceGeneration();
       }
       publishStoredSource(kind, decoded);
@@ -451,6 +659,8 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       try {
         await fileOps.mkdir(dataDir);
         await writeAtomically(sourcePaths[kind], JSON.stringify(updated.stored, null, 2));
+        establishedJevPaths.add(sourcePaths[kind]);
+        jevSnapshotCache = undefined;
       } catch (error) {
         sourceCache.delete(kind);
         sourceVector.markUnavailable(kind);
@@ -464,7 +674,56 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   }
 
   async function writeAtomically(filePath: string, content: string): Promise<void> {
-    await atomicWrite(filePath, content, fileOps, deps.temporaryPathForAttempt);
+    const relevant = jevSourcePaths.includes(filePath);
+    // A write invalidates snapshot freshness, but is not itself a failed source
+    // operation. Keep vector availability unchanged until the write outcome is
+    // known; callers mark the source unavailable if the operation fails.
+    if (relevant) invalidateJevPath(filePath, false);
+    try {
+      let expectedFileIdentity: string | undefined;
+      await atomicWrite(
+        filePath,
+        content,
+        fileOps,
+        deps.temporaryPathForAttempt,
+        relevant && fileOps.stat
+          ? async (temporaryPath) => {
+              const metadata = await fileOps.stat!(temporaryPath);
+              fileMetadataIdentity(metadata);
+              expectedFileIdentity = `${metadata.dev}:${metadata.ino}`;
+            }
+          : undefined,
+      );
+      if (!relevant) return;
+      establishedJevPaths.add(filePath);
+      // Only bless a signature after confirming both the exact bytes and a
+      // stable identity around that read. Rename completion alone is not proof
+      // that the path still names our committed file.
+      // Metadata is required only for snapshot reads. Legacy/custom FileOps
+      // implementations can still perform ordinary atomic writes, but cannot
+      // establish internal provenance or permit a cached JEV snapshot.
+      if (!fileOps.stat) return;
+      const beforeMetadata = await fileOps.stat(filePath);
+      const before = fileMetadataIdentity(beforeMetadata);
+      const beforeFileIdentity = `${beforeMetadata.dev}:${beforeMetadata.ino}`;
+      if ((await fileOps.readFile(filePath)) !== content)
+        throw new Error("JEV source changed after atomic write");
+      const afterMetadata = await fileOps.stat(filePath);
+      const after = fileMetadataIdentity(afterMetadata);
+      const afterFileIdentity = `${afterMetadata.dev}:${afterMetadata.ino}`;
+      if (
+        before !== after ||
+        expectedFileIdentity === undefined ||
+        beforeFileIdentity !== expectedFileIdentity ||
+        afterFileIdentity !== expectedFileIdentity
+      )
+        throw new Error("JEV source changed after atomic write");
+      internalJevSignatures.set(filePath, after);
+      unavailableJevPaths.delete(filePath);
+    } catch (error) {
+      if (relevant) invalidateJevPath(filePath);
+      throw error;
+    }
   }
 
   async function invalidateProfile(
@@ -491,6 +750,8 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     logger.log(`collection persistence attempt path=${collectionPath}`);
     try {
       await writeAtomically(collectionPath, JSON.stringify(validated, null, 2));
+      establishedJevPaths.add(collectionPath);
+      jevSnapshotCache = undefined;
       logger.log(`collection persistence completed path=${collectionPath}`);
     } catch (error) {
       logger.error(`collection persistence failed path=${collectionPath}`, safeErrorContext(error));
@@ -524,12 +785,15 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       return withLoadLock(collectionPath, async () => {
         const exists = await fileOps.exists(collectionPath);
         if (!exists) {
+          if (collectionMustExistForJevSnapshot)
+            throw new Error("An established JEV collection file disappeared");
           const collection = createDefaultCollection(deps.collectionMigrationDependencies);
           await persistCollection(collection);
           advanceAttentionCandidateSourceGeneration();
           sourceVector.publishCollection(sourceIdentityForCollection(collection));
           return collection;
         }
+        establishedJevPaths.add(collectionPath);
 
         let rawText: string;
         try {
@@ -621,6 +885,10 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         sourceVector.markUnavailable("collection");
         throw error;
       });
+    },
+
+    loadJevSourceSnapshot(): Promise<JevSourceSnapshot> {
+      return captureJevSourceSnapshot();
     },
 
     async saveCollection(collection: Collection): Promise<void> {
@@ -882,6 +1150,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   const saveShelfConfig = storage.saveShelfConfig.bind(storage);
   const hydrateVector = storage.hydrateSourceVector?.bind(storage);
   const loadCollection = storage.loadCollection.bind(storage);
+  const loadJevSourceSnapshot = storage.loadJevSourceSnapshot?.bind(storage);
   const loadTournament = storage.loadTournament.bind(storage);
   const loadPredictionSettings = storage.loadPredictionSettings.bind(storage);
   const loadNicheSettings = storage.loadNicheSettings.bind(storage);
@@ -889,6 +1158,8 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   const loadRedundancySettingsRead = storage.loadRedundancySettingsRead?.bind(storage);
   const loadShelfConfig = storage.loadShelfConfig.bind(storage);
   storage.loadCollection = () => coordinate(loadCollection);
+  if (loadJevSourceSnapshot)
+    storage.loadJevSourceSnapshot = () => coordinate(loadJevSourceSnapshot);
   storage.loadTournament = () => coordinate(loadTournament);
   storage.loadPredictionSettings = () => coordinate(loadPredictionSettings);
   storage.loadNicheSettings = () => coordinate(loadNicheSettings);

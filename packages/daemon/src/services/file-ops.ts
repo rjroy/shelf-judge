@@ -3,6 +3,8 @@ import * as path from "node:path";
 
 export interface FileOps {
   readFile(filePath: string): Promise<string>;
+  /** Optional for existing adapters; required by freshness-sensitive storage snapshots. */
+  stat?(filePath: string): Promise<FileMetadata>;
   writeFile(filePath: string, content: string): Promise<void>;
   /** Write a new file without replacing an existing path. Returns false on collision. */
   writeFileExclusive(filePath: string, content: string): Promise<boolean>;
@@ -14,6 +16,15 @@ export interface FileOps {
   unlink(filePath: string): Promise<void>;
 }
 
+export interface FileMetadata {
+  readonly dev: bigint;
+  readonly ino: bigint;
+  readonly size: bigint;
+  readonly mtimeNs: bigint;
+  readonly ctimeNs: bigint;
+  readonly isFile: boolean;
+}
+
 function hasErrorCode(error: unknown, code: string): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
@@ -22,6 +33,18 @@ export function createFileOps(): FileOps {
   return {
     async readFile(filePath: string): Promise<string> {
       return fs.readFile(filePath, "utf-8");
+    },
+
+    async stat(filePath: string): Promise<FileMetadata> {
+      const stat = await fs.lstat(filePath, { bigint: true });
+      return {
+        dev: stat.dev,
+        ino: stat.ino,
+        size: stat.size,
+        mtimeNs: stat.mtimeNs,
+        ctimeNs: stat.ctimeNs,
+        isFile: stat.isFile(),
+      };
     },
 
     async writeFile(filePath: string, content: string): Promise<void> {
@@ -90,6 +113,7 @@ export async function atomicWrite(
   content: string,
   fileOps: FileOps,
   temporaryPathForAttempt: TemporaryPathForAttempt = defaultTemporaryPathForAttempt,
+  beforeRename?: (temporaryPath: string) => Promise<void>,
 ): Promise<void> {
   let attempt = 0;
   let tmpPath: string;
@@ -108,6 +132,7 @@ export async function atomicWrite(
     attempt += 1;
   }
   try {
+    await beforeRename?.(tmpPath);
     await fileOps.rename(tmpPath, filePath);
   } catch (error) {
     try {

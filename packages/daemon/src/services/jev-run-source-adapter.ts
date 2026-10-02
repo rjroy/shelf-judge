@@ -18,7 +18,17 @@ export interface JevRunSourceStorage {
   loadTournament(): Promise<TournamentData>;
   loadPredictionSettings(): Promise<PredictionSettings>;
   loadRedundancySettings(): Promise<RedundancySettings>;
+  loadJevSourceSnapshot?(): Promise<JevRunSourceSnapshot>;
   sourceVector?(): SourceVector;
+}
+
+export interface JevRunSourceSnapshot {
+  collection: Collection;
+  tournament: TournamentData;
+  predictionSettings: PredictionSettings;
+  redundancySettings: RedundancySettings;
+  freshnessEpoch: string;
+  externalEpoch: string;
 }
 
 export interface JevRunSnapshotPredictionService {
@@ -51,6 +61,8 @@ interface CapturedSources {
   sourceVector: SourceVector;
   sourceVectorIdentity: string;
   policyIdentity: string;
+  freshnessEpoch: string | null;
+  externalEpoch: string | null;
 }
 
 const DEFAULT_CAPTURE_RETRIES = 2;
@@ -71,24 +83,39 @@ export function createJevRunSourceAdapter(
   const maxCaptureRetries = options.maxCaptureRetries ?? DEFAULT_CAPTURE_RETRIES;
 
   async function readSources(): Promise<CapturedSources> {
-    const vectorBefore = storageService.sourceVector?.();
-    if (!isUsableVector(vectorBefore)) throw new JevRunSourceUnavailableError();
-    const [collection, tournament, predictionSettings, redundancySettings] = await Promise.all([
-      storageService.loadCollection(),
-      storageService.loadTournament(),
-      storageService.loadPredictionSettings(),
-      storageService.loadRedundancySettings(),
-    ]);
+    const snapshot = storageService.loadJevSourceSnapshot
+      ? await storageService.loadJevSourceSnapshot()
+      : undefined;
+    // Snapshot-capable storage may have recovered source-vector availability as
+    // part of revalidating the files. Validate the post-capture vector only.
+    const vectorBefore = snapshot ? undefined : storageService.sourceVector?.();
+    if (!snapshot && !isUsableVector(vectorBefore)) throw new JevRunSourceUnavailableError();
+    const [collection, tournament, predictionSettings, redundancySettings] = snapshot
+      ? [
+          snapshot.collection,
+          snapshot.tournament,
+          snapshot.predictionSettings,
+          snapshot.redundancySettings,
+        ]
+      : await Promise.all([
+          storageService.loadCollection(),
+          storageService.loadTournament(),
+          storageService.loadPredictionSettings(),
+          storageService.loadRedundancySettings(),
+        ]);
     const vectorAfter = storageService.sourceVector?.();
     if (
       !isUsableVector(vectorAfter) ||
-      sourceVectorIdentity(vectorBefore) !== sourceVectorIdentity(vectorAfter) ||
+      (vectorBefore !== undefined &&
+        sourceVectorIdentity(vectorBefore) !== sourceVectorIdentity(vectorAfter)) ||
       vectorAfter.collectionId !== collection.id ||
       vectorAfter.collectionSchemaVersion !== collection.schemaVersion ||
       vectorAfter.collectionRevision !== collection.revision
     )
       throw new JevRunSourceUnavailableError();
     const factualWeights = redundancySettings.componentWeights;
+    const freshnessEpoch = snapshot?.freshnessEpoch ?? null;
+    const externalEpoch = snapshot?.externalEpoch ?? null;
     return {
       collection,
       tournament,
@@ -96,8 +123,16 @@ export function createJevRunSourceAdapter(
       redundancySettings,
       factualWeights,
       sourceVector: vectorAfter,
-      sourceVectorIdentity: sourceVectorIdentity(vectorAfter),
-      policyIdentity: policyIdentity(collection, predictionSettings, factualWeights, vectorAfter),
+      sourceVectorIdentity: sourceVectorIdentity(vectorAfter, freshnessEpoch),
+      policyIdentity: policyIdentity(
+        collection,
+        predictionSettings,
+        factualWeights,
+        vectorAfter,
+        externalEpoch,
+      ),
+      freshnessEpoch,
+      externalEpoch,
     };
   }
 
@@ -141,7 +176,8 @@ export function createJevRunSourceAdapter(
       }
       if (
         current.sourceVectorIdentity !== sources.sourceVectorIdentity ||
-        current.policyIdentity !== sources.policyIdentity
+        current.policyIdentity !== sources.policyIdentity ||
+        current.freshnessEpoch !== sources.freshnessEpoch
       ) {
         if (attempt === maxCaptureRetries) throw new JevRunSourceUnavailableError();
         continue;
@@ -149,7 +185,17 @@ export function createJevRunSourceAdapter(
       return {
         collection: sources.collection,
         predictionCapture,
-        captureIdentity: durableIdentity.identity,
+        captureIdentity:
+          sources.freshnessEpoch === null
+            ? durableIdentity.identity
+            : {
+                ...durableIdentity.identity,
+                sourceVectorIdentity: canonicalSha256({
+                  domain: "jev-capture-storage-freshness-v1",
+                  sourceVectorIdentity: durableIdentity.identity.sourceVectorIdentity,
+                  freshnessEpoch: sources.freshnessEpoch,
+                }),
+              },
         factualWeights: sources.factualWeights,
         sourceVectorIdentity: sources.sourceVectorIdentity,
         policyIdentity: sources.policyIdentity,
@@ -161,28 +207,40 @@ export function createJevRunSourceAdapter(
   async function readCurrent(): Promise<JevRunCurrentState> {
     try {
       return await coordinator.runExclusive(async () => {
-        const vectorBefore = storageService.sourceVector?.();
-        if (!isUsableVector(vectorBefore)) throw new JevRunSourceUnavailableError();
-        const [collection, predictionSettings, redundancySettings] = await Promise.all([
-          storageService.loadCollection(),
-          storageService.loadPredictionSettings(),
-          storageService.loadRedundancySettings(),
-        ]);
+        const snapshot = storageService.loadJevSourceSnapshot
+          ? await storageService.loadJevSourceSnapshot()
+          : undefined;
+        const vectorBefore = snapshot ? undefined : storageService.sourceVector?.();
+        if (!snapshot && !isUsableVector(vectorBefore)) throw new JevRunSourceUnavailableError();
+        const [collection, predictionSettings, redundancySettings] = snapshot
+          ? [snapshot.collection, snapshot.predictionSettings, snapshot.redundancySettings]
+          : await Promise.all([
+              storageService.loadCollection(),
+              storageService.loadPredictionSettings(),
+              storageService.loadRedundancySettings(),
+            ]);
         const vectorAfter = storageService.sourceVector?.();
         if (
           !isUsableVector(vectorAfter) ||
-          sourceVectorIdentity(vectorBefore) !== sourceVectorIdentity(vectorAfter) ||
+          (vectorBefore !== undefined &&
+            sourceVectorIdentity(vectorBefore) !== sourceVectorIdentity(vectorAfter)) ||
           vectorAfter.collectionId !== collection.id ||
           vectorAfter.collectionSchemaVersion !== collection.schemaVersion ||
           vectorAfter.collectionRevision !== collection.revision
         )
           throw new JevRunSourceUnavailableError();
         const factualWeights = redundancySettings.componentWeights;
-        const policy = policyIdentity(collection, predictionSettings, factualWeights, vectorAfter);
+        const policy = policyIdentity(
+          collection,
+          predictionSettings,
+          factualWeights,
+          vectorAfter,
+          snapshot?.externalEpoch ?? null,
+        );
         const semantic = collection.semanticRedundancy;
         return {
           collection,
-          sourceVectorIdentity: sourceVectorIdentity(vectorAfter),
+          sourceVectorIdentity: sourceVectorIdentity(vectorAfter, snapshot?.freshnessEpoch ?? null),
           policyIdentity: policy,
           canTransmitNotes: semantic.settings.cachedOwnerNoteUse === true,
         };
@@ -200,8 +258,10 @@ export function createJevRunSourceAdapter(
   };
 }
 
-function sourceVectorIdentity(vector: SourceVector): string {
-  return canonicalSha256(vector);
+function sourceVectorIdentity(vector: SourceVector, freshnessEpoch: string | null = null): string {
+  return freshnessEpoch === null
+    ? canonicalSha256(vector)
+    : canonicalSha256({ domain: "jev-live-source-vector-v1", vector, freshnessEpoch });
 }
 
 function isUsableVector(vector: SourceVector | undefined): vector is SourceVector {
@@ -213,6 +273,7 @@ function policyIdentity(
   predictionSettings: PredictionSettings,
   factualWeights: RedundancyComponentWeights,
   vector: SourceVector,
+  externalEpoch: string | null = null,
 ): string {
   const semantic = collection.semanticRedundancy;
   if (
@@ -233,6 +294,7 @@ function policyIdentity(
     predictionSettings,
     predictionSettingsRevision: vector.predictionSettingsRevision,
     redundancySettingsRevision: vector.redundancySettingsRevision,
+    ...(externalEpoch === null ? {} : { externalEpoch }),
     judgmentContract: JEV_JUDGMENT_CONTRACT,
   });
 }

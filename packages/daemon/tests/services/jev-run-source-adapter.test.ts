@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import type {
   Collection,
   GameWithScore,
@@ -18,6 +21,8 @@ import {
 } from "../../src/services/profile-source-coordinator.js";
 import type { SourceVector } from "../../src/services/source-vector.js";
 import type { JevRunSnapshotPredictionService } from "../../src/services/jev-run-source-adapter.js";
+import { createFileOps } from "../../src/services/file-ops.js";
+import { createStorageService } from "../../src/services/storage-service.js";
 
 interface State {
   collection: Collection;
@@ -83,6 +88,37 @@ function sourceStorage(state: State): JevRunSourceStorage {
     loadPredictionSettings: () => Promise.resolve(structuredClone(state.predictionSettings)),
     loadRedundancySettings: () => Promise.resolve(structuredClone(state.redundancySettings)),
     sourceVector: () => structuredClone(state.vector),
+  };
+}
+
+function snapshotStorage(state: State) {
+  let freshnessEpoch = "fresh-1";
+  let externalEpoch = "external-1";
+  let snapshotCalls = 0;
+  let legacyCollectionLoads = 0;
+  const storage: JevRunSourceStorage = {
+    ...sourceStorage(state),
+    loadCollection: () => {
+      legacyCollectionLoads++;
+      return Promise.resolve(structuredClone(state.collection));
+    },
+    loadJevSourceSnapshot: () => {
+      snapshotCalls++;
+      return Promise.resolve({
+        collection: structuredClone(state.collection),
+        tournament: structuredClone(state.tournament),
+        predictionSettings: structuredClone(state.predictionSettings),
+        redundancySettings: structuredClone(state.redundancySettings),
+        freshnessEpoch,
+        externalEpoch,
+      });
+    },
+  };
+  return {
+    storage,
+    setFreshness: (value: string) => (freshnessEpoch = value),
+    setExternal: (value: string) => (externalEpoch = value),
+    counts: () => ({ snapshotCalls, legacyCollectionLoads }),
   };
 }
 
@@ -190,6 +226,209 @@ describe("JevRunSourceAdapter", () => {
     expect(capture.captureIdentity.sourceVectorIdentity).toMatch(/^[a-f0-9]{64}$/);
     expect(capture.captureIdentity.tournamentIdentity).toMatch(/^[a-f0-9]{64}$/);
     expect(capture.captureIdentity.predictionCaptureIdentity).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  test("uses coherent storage snapshots and incorporates freshness and external epochs", async () => {
+    const state = fixture();
+    const source = snapshotStorage(state);
+    const adapter = createJevRunSourceAdapter({
+      storageService: source.storage,
+      predictionService: {
+        listGamesWithPredictionsFromSnapshot: (collection) =>
+          Promise.resolve(predictionRows(collection)),
+      },
+    });
+
+    const first = await adapter.loadCapture();
+    const current = await adapter.readCurrent();
+    expect(source.counts()).toEqual({ snapshotCalls: 3, legacyCollectionLoads: 0 });
+    source.setFreshness("fresh-2");
+    const fresh = await adapter.readCurrent();
+    expect(fresh.sourceVectorIdentity).not.toBe(current.sourceVectorIdentity);
+    expect(fresh.policyIdentity).toBe(current.policyIdentity);
+    source.setExternal("external-2");
+    const replaced = await adapter.readCurrent();
+    expect(replaced.sourceVectorIdentity).toBe(fresh.sourceVectorIdentity);
+    expect(replaced.policyIdentity).not.toBe(fresh.policyIdentity);
+
+    source.setFreshness("fresh-3");
+    const second = await adapter.loadCapture();
+    expect(second.captureIdentity.sourceVectorIdentity).not.toBe(
+      first.captureIdentity.sourceVectorIdentity,
+    );
+    expect(source.counts().legacyCollectionLoads).toBe(0);
+  });
+
+  test("retries capture when snapshot freshness changes during prediction and fails closed on snapshot errors", async () => {
+    const state = fixture();
+    const source = snapshotStorage(state);
+    let calls = 0;
+    const adapter = createJevRunSourceAdapter({
+      storageService: source.storage,
+      predictionService: {
+        listGamesWithPredictionsFromSnapshot: (collection) => {
+          calls++;
+          if (calls === 1) source.setFreshness("fresh-during-prediction");
+          return Promise.resolve(predictionRows(collection));
+        },
+      },
+    });
+    const capture = await adapter.loadCapture();
+    expect(calls).toBe(2);
+    expect(capture.collection.revision).toBe(state.collection.revision);
+
+    source.storage.loadJevSourceSnapshot = () => Promise.reject(new Error("snapshot failed"));
+    await expectUnavailable(adapter.readCurrent());
+    await expectUnavailable(adapter.loadCapture());
+  });
+
+  test("real storage snapshots bound collection reads and fence external same-revision changes", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "jev-source-adapter-"));
+    const dataDir = path.join(tempDir, "data");
+    const collectionPath = path.join(dataDir, "collection.json");
+    const realOps = createFileOps();
+    let collectionReads = 0;
+    const fileOps = {
+      ...realOps,
+      readFile: async (filePath: string) => {
+        if (filePath === collectionPath) collectionReads++;
+        return realOps.readFile(filePath);
+      },
+    };
+    try {
+      const storage = createStorageService({
+        dataDir,
+        configPath: path.join(tempDir, "config.json"),
+        fileOps,
+      });
+      if (!storage.hydrateSourceVector) throw new Error("Storage source hydration unavailable");
+      await storage.hydrateSourceVector();
+      const adapter = createJevRunSourceAdapter({
+        storageService: storage,
+        predictionService: {
+          listGamesWithPredictionsFromSnapshot: (collection) =>
+            Promise.resolve(predictionRows(collection)),
+        },
+      });
+
+      await adapter.loadCapture();
+      const readsAfterWarmCapture = collectionReads;
+      for (let index = 0; index < 3; index++) {
+        await adapter.loadCapture();
+        await adapter.readCurrent();
+      }
+      expect(collectionReads).toBe(readsAfterWarmCapture);
+      expect(readsAfterWarmCapture).toBeLessThanOrEqual(2);
+
+      const before = await adapter.readCurrent();
+      const stored = JSON.parse(await fs.readFile(collectionPath, "utf8")) as Collection;
+      stored.name = "external same-revision edit";
+      await fs.writeFile(collectionPath, JSON.stringify(stored), "utf8");
+      const externallyChanged = await adapter.readCurrent();
+      expect(externallyChanged.collection.revision).toBe(before.collection.revision);
+      expect(externallyChanged.sourceVectorIdentity).not.toBe(before.sourceVectorIdentity);
+      expect(externallyChanged.policyIdentity).not.toBe(before.policyIdentity);
+
+      const noteState = JSON.parse(await fs.readFile(collectionPath, "utf8")) as Collection;
+      noteState.semanticRedundancy.settings.cachedOwnerNoteUse = true;
+      noteState.semanticRedundancy.consentEpoch++;
+      noteState.semanticRedundancy.ownerNoteConsentEpoch =
+        (noteState.semanticRedundancy.ownerNoteConsentEpoch ?? 0) + 1;
+      await fs.writeFile(collectionPath, JSON.stringify(noteState), "utf8");
+      const notePermissionChanged = await adapter.readCurrent();
+      expect(notePermissionChanged.sourceVectorIdentity).not.toBe(
+        externallyChanged.sourceVectorIdentity,
+      );
+      expect(notePermissionChanged.policyIdentity).not.toBe(externallyChanged.policyIdentity);
+      expect(notePermissionChanged.canTransmitNotes).toBe(true);
+
+      await fs.writeFile(collectionPath, "{invalid", "utf8");
+      await expectUnavailable(adapter.readCurrent());
+      await fs.unlink(collectionPath);
+      await expectUnavailable(adapter.readCurrent());
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("real storage snapshot adapter recovers on a later explicit read after transient failures", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "jev-source-recovery-"));
+    const dataDir = path.join(tempDir, "data");
+    const collectionPath = path.join(dataDir, "collection.json");
+    const realOps = createFileOps();
+    let failStat = false;
+    let failCollectionRead = false;
+    let failWrite = false;
+    const fileOps = {
+      ...realOps,
+      stat: async (filePath: string) => {
+        if (failStat && filePath === collectionPath) throw new Error("temporary stat failure");
+        if (!realOps.stat) throw new Error("stat unavailable");
+        return realOps.stat(filePath);
+      },
+      readFile: async (filePath: string) => {
+        if (failCollectionRead && filePath === collectionPath) {
+          failCollectionRead = false;
+          throw new Error("temporary read failure");
+        }
+        return realOps.readFile(filePath);
+      },
+      writeFileExclusive: async (filePath: string, content: string) => {
+        if (failWrite) {
+          failWrite = false;
+          throw new Error("temporary write failure");
+        }
+        return realOps.writeFileExclusive(filePath, content);
+      },
+    };
+    try {
+      const storage = createStorageService({
+        dataDir,
+        configPath: path.join(tempDir, "config.json"),
+        fileOps,
+      });
+      if (!storage.hydrateSourceVector) throw new Error("Storage source hydration unavailable");
+      await storage.hydrateSourceVector();
+      const adapter = createJevRunSourceAdapter({
+        storageService: storage,
+        predictionService: {
+          listGamesWithPredictionsFromSnapshot: (collection) =>
+            Promise.resolve(predictionRows(collection)),
+        },
+      });
+      await adapter.loadCapture();
+
+      failStat = true;
+      await expectUnavailable(adapter.readCurrent());
+      failStat = false;
+      expect((await adapter.readCurrent()).collection.id).toBeTruthy();
+
+      const changed = JSON.parse(await fs.readFile(collectionPath, "utf8")) as Collection;
+      changed.name = "external same-revision edit before transient read";
+      await fs.writeFile(collectionPath, JSON.stringify(changed), "utf8");
+      failCollectionRead = true;
+      await expectUnavailable(adapter.readCurrent());
+      expect((await adapter.loadCapture()).collection.name).toBe(changed.name);
+
+      const current = await storage.loadCollection();
+      current.name = "failed storage write leaves old durable source";
+      failWrite = true;
+      let saveError: unknown;
+      try {
+        await storage.saveCollection(current);
+      } catch (error) {
+        saveError = error;
+      }
+      expect(saveError).toBeDefined();
+      expect((await adapter.readCurrent()).collection.name).toBe(changed.name);
+
+      await fs.writeFile(collectionPath, "{invalid", "utf8");
+      await expectUnavailable(adapter.readCurrent());
+      await fs.unlink(collectionPath);
+      await expectUnavailable(adapter.readCurrent());
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   test("mutation coordinator remains available while prediction is pending and stale capture retries", async () => {
