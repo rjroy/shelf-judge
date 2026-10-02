@@ -33,7 +33,7 @@ describe("redundancy run controls", () => {
     expect(page).toContain("Use cached comparisons based on my notes");
     expect(page).toContain("Saving this never sends notes.");
     expect(page).toContain("eligible for a separately confirmed run");
-    expect(page).toContain("Turning it off deletes saved note-based comparisons");
+    expect(page).toMatch(/Turning it off deletes saved note-based\s+comparisons\./);
     expect(page).toContain("clearPreparedDisclosure();\n    setSemantic");
     expect(page).toContain("cached-result use");
     expect(page).toContain("Show separately");
