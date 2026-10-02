@@ -192,6 +192,130 @@ describe("Game Routes", () => {
     ]);
   });
 
+  test("GET game name returns only the stored ID and name without score assembly", async () => {
+    const game = (await ctx.gameService.addGame({ name: "Name-only fixture" })).game;
+    const privateNote = "PRIVATE_NAME_ROUTE_NOTE_SENTINEL";
+    const collection = await ctx.storageService.loadCollection();
+    const storedGame = collection.games.find((entry) => entry.id === game.id);
+    if (storedGame === undefined) throw new Error("Expected name-only fixture in collection");
+    storedGame.ownerNote = {
+      state: "present",
+      version: 1,
+      updatedAt: "2026-10-02T00:00:00.000Z",
+      text: privateNote,
+    };
+    await ctx.storageService.saveCollection(collection);
+
+    const logs: unknown[][] = [];
+    const logger: Logger = {
+      log: (...args) => logs.push(args),
+      warn: (...args) => logs.push(args),
+      error: (...args) => logs.push(args),
+    };
+    let collectionReads = 0;
+    let profileReads = 0;
+    let scoringCalls = 0;
+    const storageService = {
+      ...ctx.storageService,
+      loadCollection: () => {
+        collectionReads += 1;
+        return ctx.storageService.loadCollection();
+      },
+      loadTournament: () => {
+        profileReads += 1;
+        return Promise.reject(new Error("unexpected tournament load"));
+      },
+      loadPredictionSettings: () => {
+        profileReads += 1;
+        return Promise.reject(new Error("unexpected prediction settings load"));
+      },
+      loadRedundancySettings: () => {
+        profileReads += 1;
+        return Promise.reject(new Error("unexpected redundancy settings load"));
+      },
+      loadNicheSettings: () => {
+        profileReads += 1;
+        return Promise.reject(new Error("unexpected niche settings load"));
+      },
+    };
+    const routeModule = createGameRoutes({
+      gameService: {
+        ...ctx.gameService,
+        getGame: () => {
+          scoringCalls += 1;
+          return Promise.reject(new Error("unexpected game scoring read"));
+        },
+      },
+      storageService,
+      displayedFitnessService: {
+        listGames: () => {
+          scoringCalls += 1;
+          return Promise.reject(new Error("unexpected fitness list"));
+        },
+        listGamesFromSnapshot: () => {
+          scoringCalls += 1;
+          return Promise.reject(new Error("unexpected snapshot fitness"));
+        },
+      },
+      purchaseUtilizationService: createPurchaseUtilizationService({ storageService }),
+      logger,
+    });
+    const app = new Hono();
+    app.route("/api", routeModule.routes);
+
+    const response = await app.request(`/api/games/${game.id}/name`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ id: game.id, name: game.name });
+    expect(collectionReads).toBe(1);
+    expect(profileReads).toBe(0);
+    expect(scoringCalls).toBe(0);
+    expect(JSON.stringify(logs)).not.toContain(game.name);
+    expect(JSON.stringify(logs)).not.toContain(privateNote);
+    expect(logs.map((entry) => entry[1])).toEqual([
+      expect.objectContaining({ phase: "attempt", category: "request", gameId: game.id }),
+      expect.objectContaining({ phase: "outcome", category: "success", gameId: game.id }),
+    ]);
+
+    const missingResponse = await app.request("/api/games/missing-game-id/name");
+    expect(missingResponse.status).toBe(404);
+    expect(await missingResponse.json()).toEqual({
+      error: "Game not found: missing-game-id",
+      code: "game_not_found",
+    });
+  });
+
+  test("GET game name fails closed and logs safely when storage is unavailable", async () => {
+    const logs: unknown[][] = [];
+    const routeModule = createGameRoutes({
+      gameService: ctx.gameService,
+      purchaseUtilizationService: createPurchaseUtilizationService({
+        storageService: ctx.storageService,
+      }),
+      logger: {
+        log: (...args) => logs.push(args),
+        warn: (...args) => logs.push(args),
+        error: (...args) => logs.push(args),
+      },
+    });
+    const app = new Hono();
+    app.route("/api", routeModule.routes);
+
+    const response = await app.request("/api/games/private-id/name");
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: "Internal server error",
+      code: "internal_error",
+    });
+    expect(logs.map((entry) => entry[1])).toEqual([
+      expect.objectContaining({ phase: "attempt", category: "request", gameId: "private-id" }),
+      expect.objectContaining({
+        phase: "outcome",
+        category: "internal-error",
+        gameId: "private-id",
+      }),
+    ]);
+  });
+
   test("GET game detail uses factual fallback with sanitized semantic snapshots in both modes", async () => {
     const game = (await ctx.gameService.addGame({ name: "Snapshot fallback fixture" })).game;
     const collection = await ctx.storageService.loadCollection();

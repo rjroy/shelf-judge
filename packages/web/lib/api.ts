@@ -65,6 +65,37 @@ export async function getGame(
   return result;
 }
 
+export async function getGameName(
+  id: string,
+  load: () => Promise<unknown> = () => daemonJson(`/api/games/${encodeURIComponent(id)}/name`),
+): Promise<{ id: string; name: string }> {
+  const result: unknown = await load();
+  if (
+    typeof result !== "object" ||
+    result === null ||
+    Array.isArray(result) ||
+    Object.keys(result).length !== 2 ||
+    !Object.hasOwn(result, "id") ||
+    !Object.hasOwn(result, "name")
+  ) {
+    throw new Error("Daemon returned an invalid game name response.");
+  }
+
+  const { id: responseId, name } = result as { id: unknown; name: unknown };
+  if (responseId !== id) throw new Error("Daemon returned a name for a different game.");
+  if (
+    typeof name !== "string" ||
+    name.trim().length === 0 ||
+    [...name].some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 0x1f || code === 0x7f;
+    })
+  ) {
+    throw new Error("Daemon returned an invalid game name.");
+  }
+  return { id: responseId, name };
+}
+
 export async function getOwnerGameNote(
   id: string,
   load: () => Promise<unknown> = () => daemonJson(`/api/games/${id}/note`),

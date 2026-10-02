@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import {
   getGame,
+  getGameName,
   listAxes,
   getTournamentGameStats,
   getNicheSettings,
@@ -42,8 +43,8 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { id } = await params;
   try {
-    const { game } = await getGame(id);
-    return { title: game.name };
+    const { name } = await getGameName(id);
+    return { title: name };
   } catch {
     return { title: "Game" };
   }

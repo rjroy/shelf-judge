@@ -463,6 +463,44 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
   });
 
+  // GET /games/:id/name
+  routes.get("/games/:id/name", async (c) => {
+    const id = c.req.param("id");
+    logger.log("game name request", {
+      phase: "attempt",
+      gameId: id,
+      category: "request",
+    });
+    try {
+      if (deps.storageService === undefined) {
+        throw new Error("Game name storage is not configured");
+      }
+      const collection = await deps.storageService.loadCollection();
+      const game = collection.games.find((entry) => entry.id === id);
+      if (game === undefined) {
+        logger.warn("game name request", {
+          phase: "outcome",
+          gameId: id,
+          category: "not-found",
+        });
+        return c.json(gameNotFoundResponse(id), 404);
+      }
+      logger.log("game name request", {
+        phase: "outcome",
+        gameId: id,
+        category: "success",
+      });
+      return c.json({ id: game.id, name: game.name });
+    } catch {
+      logger.error("game name request", {
+        phase: "outcome",
+        gameId: id,
+        category: "internal-error",
+      });
+      return c.json(INTERNAL_ERROR_RESPONSE, 500);
+    }
+  });
+
   // GET /games/:id
   routes.get("/games/:id", async (c) => {
     const id = c.req.param("id");
