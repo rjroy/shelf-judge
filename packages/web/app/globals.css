@@ -7906,6 +7906,10 @@ body {
 .redundancy-run {
   display: grid;
   gap: 10px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
 }
 .redundancy-run-limits {
   min-width: 0;
@@ -7957,6 +7961,12 @@ body {
   gap: 10px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
+}
+.redundancy-refresh-status.is-running {
+  order: -1;
+  padding: 14px;
+  border: 1px solid var(--action-border);
+  background: var(--action-subtle);
 }
 
 .redundancy-setting-row {
@@ -8104,6 +8114,14 @@ body {
   .redundancy-steps {
     grid-template-columns: 1fr;
     gap: 8px;
+  }
+  .redundancy-run {
+    padding: 12px;
+  }
+  .redundancy-run .btn,
+  .redundancy-save-row .btn {
+    width: 100%;
+    justify-content: center;
   }
   .redundancy-save-row > .btn {
     min-height: 44px;

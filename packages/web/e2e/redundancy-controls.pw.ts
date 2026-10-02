@@ -220,7 +220,7 @@ test("partial coverage benefits current pairs during and after a run", async ({ 
   await expect(status).not.toContainText("factual-only");
 
   await page.getByRole("button", { name: "Preview one run" }).click();
-  await page.getByRole("button", { name: "Run one refresh" }).click();
+  await page.getByRole("button", { name: "Run once" }).click();
   await expect(status).toContainText(
     "Partial — available semantic results already affect relevant pairs",
   );
@@ -266,6 +266,24 @@ test("selected run limits bind the preview and changing them clears it", async (
   });
   await page.getByLabel("Maximum HTTP attempts").fill("1300");
   await expect(page.getByRole("region", { name: "Before you run" })).toHaveCount(0);
+});
+
+test("changing a similarity weight invalidates the saved-settings preview without a provider call", async ({
+  page,
+}) => {
+  await installDaemon(page);
+  await page.goto("/redundancy");
+  await page.getByRole("button", { name: "Preview one run" }).click();
+  await expect(page.getByRole("region", { name: "Before you run" })).toBeVisible();
+  await page.getByLabel("BoardGameGeek descriptions weight").focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("region", { name: "Before you run" })).toHaveCount(0);
+  const calls = await page.evaluate(
+    () =>
+      (window as typeof window & { __redundancyCalls: Array<{ url: string }> }).__redundancyCalls,
+  );
+  expect(calls.filter((call) => call.url.endsWith("/semantic/run"))).toHaveLength(0);
+  expect(calls.filter((call) => call.url.includes("/run-preview"))).toHaveLength(1);
 });
 
 test("an in-flight preview cannot restore limits after an edit", async ({ page }) => {
@@ -361,12 +379,11 @@ test("note consent is opt-in and declining still runs without note text", async 
   await installDaemon(page);
   await page.goto("/redundancy");
   await expect(page.getByText(/cached result for 1 game pair was discarded/)).toHaveCount(0);
-  await expect(page.getByLabel("Allow my game notes in JEV comparisons")).toBeVisible();
-  await expect(page.getByText(/Checking and saving this never sends your notes/i)).toBeVisible();
-  await expect(page.getByText(/eligible to send to JEV during a run/i)).toBeVisible();
-  await expect(page.getByText(/confirm separately in that run's preview/i)).toBeVisible();
+  await expect(page.getByLabel("Use cached comparisons based on my notes")).toBeVisible();
+  await expect(page.getByText(/Saving this never sends notes/i)).toBeVisible();
+  await expect(page.getByText(/eligible for a separately confirmed run/i)).toBeVisible();
   await expect(
-    page.getByText(/Turning this off deletes saved comparisons based on your notes/i),
+    page.getByText(/Turning it off deletes saved note-based comparisons/i),
   ).toBeVisible();
   await page.getByRole("button", { name: "Preview one run" }).click();
   const preview = page.getByRole("region", { name: "Before you run" });
@@ -382,11 +399,11 @@ test("note consent is opt-in and declining still runs without note text", async 
       ).__redundancyCalls.filter((call) => call.url.endsWith("/semantic/run")).length,
   );
   expect(callsBefore).toBe(0);
-  await expect(page.getByRole("button", { name: "Run one refresh" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Run once" })).toBeEnabled();
   await page.screenshot({
     path: testInfo.outputPath(`redundancy-run-${testInfo.project.name}.png`),
   });
-  await page.getByRole("button", { name: "Run one refresh" }).focus();
+  await page.getByRole("button", { name: "Run once" }).focus();
   await page.keyboard.press("Enter");
   await expect(
     page.getByText(/Run started\. Uncached comparisons may now be sent to the provider\./),
@@ -413,7 +430,7 @@ test("owner-note text is authorized only after the per-run opt-in", async ({ pag
   await page.getByRole("button", { name: "Preview one run" }).click();
   await expect(page.getByLabel(/For this run only, allow owner notes/)).not.toBeChecked();
   await page.getByLabel(/For this run only, allow owner notes/).check();
-  await page.getByRole("button", { name: "Run one refresh" }).click();
+  await page.getByRole("button", { name: "Run once" }).click();
   const call = await page.evaluate(() =>
     (
       window as typeof window & {
@@ -439,7 +456,7 @@ test("unsaved settings block preview and mobile run remains discoverable", async
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Save similarity preferences" })).toHaveCount(0);
   await page.getByRole("button", { name: "Preview one run" }).click();
-  await expect(page.getByRole("button", { name: "Run one refresh" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Run once" })).toBeEnabled();
   await expect(page.getByLabel(/For this run only, allow owner notes/)).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
   expect(overflow).toBe(false);
@@ -453,7 +470,7 @@ test("C-only preview runs without note consent or transmission", async ({ page }
   await page.goto("/redundancy?scope=C");
   await page.getByRole("button", { name: "Preview one run" }).click();
   await expect(page.getByLabel(/For this run only, allow owner notes/)).toHaveCount(0);
-  await page.getByRole("button", { name: "Run one refresh" }).click();
+  await page.getByRole("button", { name: "Run once" }).click();
   const call = await page.evaluate(() =>
     (
       window as typeof window & {
@@ -469,7 +486,7 @@ test("stale preview is closed and explained without starting a run", async ({ pa
   await page.goto("/redundancy?stale=1");
   await page.getByRole("button", { name: "Preview one run" }).click();
   await page.getByLabel(/For this run only, allow owner notes/).check();
-  await page.getByRole("button", { name: "Run one refresh" }).click();
+  await page.getByRole("button", { name: "Run once" }).click();
   await expect(page.locator(".error-banner")).toContainText(/changed after this preview/i);
   await expect(page.getByRole("region", { name: "Before you run" })).toHaveCount(0);
   const starts = await page.evaluate(
@@ -486,8 +503,8 @@ test("no provider key still allows a cache-only run", async ({ page }) => {
   await page.goto("/redundancy?no-key=1");
   await page.getByRole("button", { name: "Preview one run" }).click();
   await expect(page.getByText(/No provider key is configured/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Run one refresh" })).toBeEnabled();
-  await page.getByRole("button", { name: "Run one refresh" }).click();
+  await expect(page.getByRole("button", { name: "Run once" })).toBeEnabled();
+  await page.getByRole("button", { name: "Run once" }).click();
   await expect(
     page.getByText(/Run started\. Uncached comparisons may now be sent to the provider\./),
   ).toBeVisible();
@@ -497,7 +514,7 @@ test("accepted run stays cancellable when immediate status reads fail", async ({
   await installDaemon(page);
   await page.goto("/redundancy?status-fail=1");
   await page.getByRole("button", { name: "Preview one run" }).click();
-  await page.getByRole("button", { name: "Run one refresh" }).click();
+  await page.getByRole("button", { name: "Run once" }).click();
   await expect(
     page.getByText(/Run started\. Uncached comparisons may now be sent to the provider\./),
   ).toBeVisible();

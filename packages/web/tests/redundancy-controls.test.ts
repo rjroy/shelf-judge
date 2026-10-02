@@ -30,10 +30,13 @@ describe("redundancy run controls", () => {
     expect(page).toContain("window.clearInterval(timer)");
     expect(page).not.toContain("semanticMigrationCopy");
     expect(page).not.toContain("Semantic cache storage was upgraded");
-    expect(page).toContain("Allow my game notes in JEV comparisons");
-    expect(page).toContain("Checking and saving this never sends your notes.");
-    expect(page).toContain("makes them eligible to send to JEV during a run");
-    expect(page).toContain("separately in that run&apos;s preview");
-    expect(page).toContain("Turning this off deletes saved comparisons");
+    expect(page).toContain("Use cached comparisons based on my notes");
+    expect(page).toContain("Saving this never sends notes.");
+    expect(page).toContain("eligible for a separately confirmed run");
+    expect(page).toContain("Turning it off deletes saved note-based comparisons");
+    expect(page).toContain("clearPreparedDisclosure();\n    setSemantic");
+    expect(page).toContain("cached-result use");
+    expect(page).toContain("Show separately");
+    expect(page).toContain("Include in fitness");
   });
 });

@@ -202,6 +202,9 @@ export default function RedundancyPage() {
   const [error, setError] = useState<string>();
   const [message, setMessage] = useState<string>();
   const [statusError, setStatusError] = useState<string>();
+  const [factualError, setFactualError] = useState<string>();
+  const [semanticError, setSemanticError] = useState<string>();
+  const [runError, setRunError] = useState<string>();
   const runRef = useRef<HTMLDivElement>(null);
   const { limits: selectedRunLimits, error: runLimitsError } = validateRunLimits(
     maxProviderAttempts,
@@ -266,7 +269,7 @@ export default function RedundancyPage() {
     if (!settings) return;
     setBusy(true);
     setFactualSaving(true);
-    setError(undefined);
+    setFactualError(undefined);
     setMessage(undefined);
     try {
       const result = await request<RedundancySettings>("/api/daemon/redundancy/settings", {
@@ -286,7 +289,7 @@ export default function RedundancyPage() {
       setSaved(result);
       setMessage("Factual scoring settings saved.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save settings");
+      setFactualError(e instanceof Error ? e.message : "Could not save settings");
     } finally {
       setFactualSaving(false);
       setBusy(false);
@@ -296,7 +299,7 @@ export default function RedundancyPage() {
     if (!semantic) return;
     setBusy(true);
     setSemanticSaving(true);
-    setError(undefined);
+    setSemanticError(undefined);
     setMessage(undefined);
     try {
       const result = await request<{ settings: Semantic["settings"] }>(
@@ -323,7 +326,7 @@ export default function RedundancyPage() {
           : "Similarity scoring is off. Cached semantic results will not be used.",
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save preferences");
+      setSemanticError(e instanceof Error ? e.message : "Could not save preferences");
     } finally {
       setSemanticSaving(false);
       setBusy(false);
@@ -334,7 +337,7 @@ export default function RedundancyPage() {
     if (!limits) return;
     const revision = previewRevision.current;
     setBusy(true);
-    setError(undefined);
+    setRunError(undefined);
     setMessage(undefined);
     setPreview(null);
     try {
@@ -352,7 +355,7 @@ export default function RedundancyPage() {
       runRef.current?.scrollIntoView({ block: "nearest" });
     } catch (e) {
       if (revision !== previewRevision.current) return;
-      setError(e instanceof Error ? e.message : "Could not prepare run details");
+      setRunError(e instanceof Error ? e.message : "Could not prepare run details");
     } finally {
       setBusy(false);
     }
@@ -360,7 +363,7 @@ export default function RedundancyPage() {
   const start = async () => {
     if (!preview) return;
     setBusy(true);
-    setError(undefined);
+    setRunError(undefined);
     setMessage(undefined);
     try {
       const result = await request<{ state: string; runId: string }>(
@@ -395,17 +398,17 @@ export default function RedundancyPage() {
       const reason = e instanceof Error ? e.message : "Refresh was not started";
       if (reason.toLowerCase().includes("precondition")) {
         setPreview(null);
-        setError(
+        setRunError(
           "Collection or saved settings changed after this preview. Nothing was started; load a fresh preview before trying again.",
         );
-      } else setError(reason);
+      } else setRunError(reason);
     } finally {
       setBusy(false);
     }
   };
   const cancel = async (runId: string) => {
     setBusy(true);
-    setError(undefined);
+    setRunError(undefined);
     try {
       await request("/api/daemon/redundancy/semantic/cancel", json({ runId }));
       setMessage("Cancellation requested for this run.");
@@ -422,7 +425,7 @@ export default function RedundancyPage() {
         );
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not cancel refresh");
+      setRunError(e instanceof Error ? e.message : "Could not cancel refresh");
     } finally {
       setBusy(false);
     }
@@ -481,6 +484,8 @@ export default function RedundancyPage() {
     setNoteTransmissionAuthorized(false);
   };
   const updateWeight = (key: keyof Weights, value: number) => {
+    // A prepared preview reflects saved settings. Weight edits only tune cached-result use.
+    clearPreparedDisclosure();
     setSemantic({
       ...semantic,
       settings: { ...semantic.settings, weights: { ...semantic.settings.weights, [key]: value } },
@@ -560,7 +565,7 @@ export default function RedundancyPage() {
                     setSettings({ ...settings, stage: "annotation" });
                   }}
                 >
-                  Annotation
+                  Show separately
                 </button>
                 <button
                   className={`seg-btn${settings.stage === "integrated" ? " active" : ""}`}
@@ -571,14 +576,14 @@ export default function RedundancyPage() {
                     setSettings({ ...settings, stage: "integrated" });
                   }}
                 >
-                  Integrated
+                  Include in fitness
                 </button>
               </div>
             </div>
             <p className="redundancy-stage-desc">
               {settings.stage === "annotation"
-                ? "Shows a separate redundancy adjustment; the fitness score is unchanged."
-                : "Applies the adjustment to displayed fitness scores."}
+                ? "Show the adjustment beside fitness; do not change the fitness score."
+                : "Include the adjustment in displayed fitness scores."}
             </p>
             <label className="redundancy-setting-row">
               Similarity threshold: {settings.similarityThreshold.toFixed(2)}
@@ -677,14 +682,19 @@ export default function RedundancyPage() {
                 </span>
               )}
               {dirty && <span role="status">Unsaved factual changes</span>}
+              {factualError && (
+                <p className="error-banner" role="alert">
+                  Could not save factual settings: {factualError}
+                </p>
+              )}
             </div>
           </section>
 
           <section aria-labelledby="semantic-heading" className="redundancy-step">
             <h2 id="semantic-heading">Similarity preferences</h2>
             <p>
-              These preferences affect semantic comparisons. They are separate from what you approve
-              sending for one refresh.
+              Similarity preferences tune how cached JEV comparisons are used. A separate run
+              prepares any new comparisons; note text is sent only with permission in that run.
             </p>
             <label className="redundancy-setting-row">
               <span className="redundancy-setting-label">Use semantic comparisons in scoring</span>
@@ -699,10 +709,7 @@ export default function RedundancyPage() {
                 }}
               />
             </label>
-            <p className="loading-text">
-              Turn this on only after reviewing weights and privacy choices below. Saving
-              preferences does not contact a provider.
-            </p>
+            <p className="loading-text">Turning this off keeps semantic results out of scoring.</p>
             {(
               [
                 ["factual", "Game facts (mechanics, categories, weight, players)"],
@@ -725,11 +732,11 @@ export default function RedundancyPage() {
               </label>
             ))}
             <p className="loading-text">
-              Game facts are compared locally. BoardGameGeek descriptions come from cached source
-              text.
+              Game facts are compared locally. Description and note weights control how cached JEV
+              results are used; changing them does not request new comparisons.
             </p>
             <label className="redundancy-setting-row">
-              <span>Allow my game notes in JEV comparisons</span>
+              <span>Use cached comparisons based on my notes</span>
               <input
                 type="checkbox"
                 disabled={busy}
@@ -744,10 +751,9 @@ export default function RedundancyPage() {
               />
             </label>
             <p className="redundancy-help">
-              Checking and saving this never sends your notes. It allows saved comparisons based on
-              your notes and makes them eligible to send to JEV during a run; you must still confirm
-              separately in that run&apos;s preview. Turning this off deletes saved comparisons
-              based on your notes.
+              Saving this never sends notes. It permits note-based cached comparisons and makes
+              notes eligible for a separately confirmed run. Turning it off deletes saved note-based
+              comparisons.
             </p>
             <div className="redundancy-save-row">
               {semanticDirty || semanticSaving ? (
@@ -764,9 +770,14 @@ export default function RedundancyPage() {
                 </span>
               )}
               {semanticDirty && <span role="status">Unsaved similarity changes</span>}
+              {semanticError && (
+                <p className="error-banner" role="alert">
+                  Could not save similarity preferences: {semanticError}
+                </p>
+              )}
             </div>
             <div className="redundancy-run" ref={runRef}>
-              <h3>Run one semantic refresh</h3>
+              <h3>Preview, then run once</h3>
               <p>
                 Preferences must be saved before preparing this offline preview. Saving or reading
                 status never contacts the provider.
@@ -795,7 +806,7 @@ export default function RedundancyPage() {
                     />
                   </label>
                   <label>
-                    Reported-token stop threshold
+                    Stop after this many reported tokens
                     <input
                       aria-label="Reported-token stop threshold"
                       aria-invalid={Boolean(runLimitsError)}
@@ -935,11 +946,11 @@ export default function RedundancyPage() {
                     disabled={busy || !preview.withinPairLimit || preview.pairCount === 0}
                     onClick={() => void start()}
                   >
-                    Run one refresh
+                    Run once
                   </button>
                 </div>
               )}
-              <div className="redundancy-refresh-status">
+              <div className={`redundancy-refresh-status${activeRun ? " is-running" : ""}`}>
                 <h3>Refresh status</h3>
                 <button
                   className="btn btn-secondary"
@@ -979,6 +990,11 @@ export default function RedundancyPage() {
                   <p role="status">{stopReasonCopy[refresh.progress.stopReason]}</p>
                 )}
                 {statusError && <p role="alert">Status could not be loaded: {statusError}</p>}
+                {runError && (
+                  <p className="error-banner" role="alert">
+                    {runError}
+                  </p>
+                )}
               </div>
             </div>
           </section>
