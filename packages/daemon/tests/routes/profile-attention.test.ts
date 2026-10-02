@@ -4,7 +4,7 @@ import {
   createAttentionCandidateOracle,
   createAttentionCandidateProductionSourceLoader,
 } from "../../src/services/attention-candidate-service.js";
-import { createTestApp, jsonRequest } from "../helpers/test-app.js";
+import { createHydratedTestApp, jsonRequest } from "../helpers/test-app.js";
 import {
   canonicalUtilizationCases,
   UTILIZATION_OBSERVED_AT,
@@ -32,7 +32,7 @@ describe("profile attention routes", () => {
     "accepts %s through production-equivalent app wiring exactly once",
     async (operation, commandId) => {
       let now = "2026-01-01T00:00:00.000Z";
-      const context = createTestApp({ now: () => now });
+      const context = await createHydratedTestApp({ now: () => now });
       const fixture = canonicalUtilizationCases.find(
         (candidate) => candidate.id === "canonical-20",
       );

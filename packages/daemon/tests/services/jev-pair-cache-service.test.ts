@@ -93,6 +93,30 @@ describe("Jev pair cache", () => {
     reopened.close();
   });
 
+  test("observes other cache handles' WAL commits once while preserving local monotonic revisions", async () => {
+    const dir = await tempDir();
+    const first = await createJevPairCache(dir);
+    const second = await createJevPairCache(dir);
+    expect(first.mutationRevision()).toBe(0);
+    expect(first.mutationRevision()).toBe(0);
+
+    second.checkpointPair({ judgments: [record()], progress: progress() });
+    expect(first.mutationRevision()).toBe(1);
+    expect(first.mutationRevision()).toBe(1);
+
+    first.upsert({ ...record(), value: 0.8 });
+    expect(first.mutationRevision()).toBe(2);
+    second.purgePair("stable-a", "stable-b");
+    expect(first.mutationRevision()).toBe(3);
+    expect(first.mutationRevision()).toBe(3);
+
+    second.reset();
+    expect(first.mutationRevision()).toBe(4);
+    expect(first.mutationRevision()).toBe(4);
+    first.close();
+    second.close();
+  });
+
   test("persists a sanitized provider stop reason through SQLite reopen", async () => {
     const dir = await tempDir();
     const cache = await createJevPairCache(dir);
@@ -167,11 +191,13 @@ describe("Jev pair cache", () => {
     const db = new Database(join(dir, "jev-pair-cache.sqlite"));
     db.query("UPDATE judgments SET dependencies_json='not-json' WHERE game_a='stable-a'").run();
     db.close();
+    expect(cache.mutationRevision()).toBe((revision ?? 0) + 1);
+    const observedRevision = cache.mutationRevision();
 
     expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toBeNull();
-    expect(cache.mutationRevision()).toBe(revision);
+    expect(cache.mutationRevision()).toBe(observedRevision);
     expect(cache.lookup({ gameAId: "valid-a", gameBId: "valid-b", signal: "C" })).toEqual(valid);
-    expect(cache.mutationRevision()).toBe(revision);
+    expect(cache.mutationRevision()).toBe(observedRevision);
     cache.close();
   });
 
@@ -198,13 +224,15 @@ describe("Jev pair cache", () => {
       "CREATE TRIGGER reject_progress BEFORE INSERT ON run_progress BEGIN SELECT RAISE(ABORT, 'test failure'); END;",
     );
     db.close();
+    const observedRevision = cache.mutationRevision();
+    expect(observedRevision).toBe((revision ?? 0) + 1);
     expect(() =>
       cache.checkpointPair({ judgments: [record(), record("D_ONLY")], progress: progress() }),
     ).toThrow();
     expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toBeNull();
     expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "D" })).toBeNull();
     expect(cache.getRunProgress()).toBeNull();
-    expect(cache.mutationRevision()).toBe(revision);
+    expect(cache.mutationRevision()).toBe(observedRevision);
     cache.close();
   });
 
@@ -222,6 +250,8 @@ describe("Jev pair cache", () => {
       "CREATE TRIGGER reject_finish BEFORE INSERT ON run_progress BEGIN SELECT RAISE(ABORT, 'test failure'); END;",
     );
     db.close();
+    const observedRevision = cache.mutationRevision();
+    expect(observedRevision).toBe(2);
     expect(() =>
       cache.finishRun({
         activation: { identity: "new", activatedAt: "now" },
@@ -230,7 +260,7 @@ describe("Jev pair cache", () => {
     ).toThrow();
     expect(cache.getActivation()?.identity).toBe("still-valid");
     expect(cache.getRunProgress()?.state).toBe("failed");
-    expect(cache.mutationRevision()).toBe(1);
+    expect(cache.mutationRevision()).toBe(observedRevision);
     cache.close();
   });
   test("canonicalizes unordered pair keys and persists after reopen with an idempotent schema", async () => {
@@ -570,9 +600,11 @@ describe("Jev pair cache", () => {
       "CREATE TRIGGER reject_activation_delete BEFORE DELETE ON activation BEGIN SELECT RAISE(ABORT, 'test failure'); END;",
     );
     db.close();
+    const observedRevision = cache.mutationRevision();
+    expect(observedRevision).toBe((revision ?? 0) + 1);
 
     expect(() => cache.reset()).toThrow();
-    expect(cache.mutationRevision()).toBe(revision);
+    expect(cache.mutationRevision()).toBe(observedRevision);
     expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).not.toBeNull();
     expect(cache.getRunProgress()).toEqual(progress());
     expect(cache.getActivation()).toEqual({ identity: "ready", activatedAt: "now" });
@@ -581,7 +613,7 @@ describe("Jev pair cache", () => {
     cleanup.exec("DROP TRIGGER reject_activation_delete;");
     cleanup.close();
     cache.reset();
-    expect(cache.mutationRevision()).toBe((revision ?? 0) + 1);
+    expect(cache.mutationRevision()).toBe((observedRevision ?? 0) + 2);
     expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toBeNull();
     expect(cache.getRunProgress()).toBeNull();
     expect(cache.getActivation()).toBeNull();

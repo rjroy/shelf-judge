@@ -3,9 +3,13 @@ import {
   CollectionProfileResultSchema,
   CURRENT_PROFILE_ALGORITHM_VERSION,
   ProfileDataSchema,
-  type FitnessResult,
 } from "@shelf-judge/shared";
-import type { DisplayedFitnessService } from "../src/services/displayed-fitness-service.js";
+import type {
+  DisplayedFitnessService,
+  DisplayedFitnessOptions,
+  PrivateDisplayedFitnessService,
+  PrivateDisplayedFitnessSnapshot,
+} from "../src/services/displayed-fitness-service.js";
 import { createProfileService } from "../src/services/profile-service.js";
 import type { StorageService } from "../src/services/storage-service.js";
 import { ZodError } from "zod";
@@ -16,12 +20,27 @@ import {
   type ProfileSources,
 } from "../src/services/profile-source-coordinator.js";
 import { createMockFileOps } from "./helpers/mock-file-ops.js";
-import { createTestApp, jsonRequest } from "./helpers/test-app.js";
+import {
+  createTestApp,
+  jsonRequest,
+  type TestAppContext,
+  type TestAppOptions,
+} from "./helpers/test-app.js";
+import type { FileOps } from "../src/services/file-ops.js";
+import type { MockFileOps } from "./helpers/mock-file-ops.js";
 
 async function loadAttentionCandidates(storageService: StorageService) {
   if (storageService.loadAttentionCandidates === undefined)
     throw new Error("Attention candidate storage is unavailable");
   return storageService.loadAttentionCandidates();
+}
+
+async function createHydratedTestApp<TFileOps extends FileOps = MockFileOps>(
+  options?: TestAppOptions<TFileOps>,
+): Promise<TestAppContext<TFileOps>> {
+  const ctx = createTestApp(options);
+  await ctx.storageService.hydrateSourceVector?.();
+  return ctx;
 }
 
 describe("profile source identity", () => {
@@ -40,161 +59,41 @@ describe("profile source identity", () => {
 });
 
 describe("ProfileService", () => {
-  test("recomputes a source-matching cached profile containing quarantined semantic activation", async () => {
-    const ctx = createTestApp();
-    await ctx.gameService.addGame({ name: "Semantic cache game" });
-    const collection = await ctx.storageService.loadCollection();
-    const sourceGame = collection.games[0];
-    if (!sourceGame) throw new Error("Expected source game");
-    sourceGame.bggId = 101;
-    const metadata = {
-      state: "complete" as const,
-      entities: [] as { id: number; name: string }[],
-      observedAt: "2026-09-01T00:00:00.000Z",
-      refreshFailure: null,
-      correctionDestination: null,
-    };
-    sourceGame.entityMetadata.mechanic = {
-      ...metadata,
-      entities: [{ id: 101, name: "Dice" }],
-    };
-    sourceGame.entityMetadata.designer = structuredClone(metadata);
-    sourceGame.entityMetadata.artist = structuredClone(metadata);
-    collection.semanticRedundancy.settings.enabled = true;
-    await ctx.storageService.saveCollection(collection);
-
-    const makeDisplayedFitness = (
-      score: number,
-      semanticInfo: NonNullable<FitnessResult["redundancySimilarityInfo"]>,
-    ): DisplayedFitnessService => ({
-      listGames: () => Promise.resolve([]),
-      listGamesFromSnapshot: (snapshot) =>
-        Promise.resolve(
-          snapshot.collection.games.map((game) => ({
-            game,
-            score: {
-              score,
-              ratedAxisCount: 1,
-              totalAxisCount: 1,
-              breakdown: [{ contribution: 1 }] as FitnessResult["breakdown"],
-              vetoed: false,
-              vetoedBy: null,
-              hypotheticalScore: null,
-              predictionMeta: null,
-              redundancyAdjustment: null,
-              redundancySimilarityInfo: semanticInfo,
-            } satisfies FitnessResult,
-            bggDataStale: false,
-            nichePosition: null,
-            hasPredictedContribution: false,
-            hasScoringContribution: true,
-          })),
-        ),
-    });
-
-    const oldSemanticProfile = await createProfileService({
-      storageService: ctx.storageService,
-      attentionCandidates: ctx.attentionCandidateService,
-      displayedFitnessService: makeDisplayedFitness(9, {
-        status: "ready",
-        generationId: "legacy-generation",
-      }),
-    }).getProfile();
-    expect(oldSemanticProfile.status).toBe("available");
-    if (oldSemanticProfile.status !== "available")
-      throw new Error("Expected generated legacy semantic profile");
-    expect(oldSemanticProfile.identity.classes.mechanic.entities[0]?.games[0]).toMatchObject({
-      currentFitness: 9,
-      redundancySimilarityInfo: { status: "ready", generationId: "legacy-generation" },
-    });
-
-    let recomputations = 0;
-    const quarantinedProfile = await createProfileService({
-      storageService: ctx.storageService,
-      attentionCandidates: ctx.attentionCandidateService,
-      displayedFitnessService: {
-        ...makeDisplayedFitness(4, { status: "partial", generationId: "partial-generation" }),
-        async listGamesFromSnapshot(snapshot, options) {
-          recomputations += 1;
-          return makeDisplayedFitness(4, {
-            status: "partial",
-            generationId: "partial-generation",
-          }).listGamesFromSnapshot(snapshot, options);
-        },
-      },
-    }).getProfile();
-
-    expect(recomputations).toBe(1);
-    expect(quarantinedProfile.status).toBe("available");
-    if (quarantinedProfile.status !== "available")
-      throw new Error("Expected recomputed factual-only Profile");
-    expect(quarantinedProfile.identity.classes.mechanic.entities[0]?.games[0]).toMatchObject({
-      currentFitness: 4,
-      redundancySimilarityInfo: { status: "partial", generationId: "partial-generation" },
-    });
-  });
-
-  test("recomputes without reusing or saving Profile when collection semantic mode is enabled", async () => {
-    const ctx = createTestApp();
-    await ctx.gameService.addGame({ name: "SQLite activation cache game" });
-    const redundancySettings = await ctx.storageService.loadRedundancySettings();
-    await ctx.storageService.saveRedundancySettings({ ...redundancySettings, enabled: true });
+  test("persists and reuses factual-only Profile under an unchanged proof", async () => {
+    const ctx = await createHydratedTestApp();
+    await ctx.gameService.addGame({ name: "Proof-aware factual game" });
 
     let computations = 0;
-    let freshnessChecks = 0;
     const service = createProfileService({
       storageService: ctx.storageService,
-      attentionCandidates: {
-        ...ctx.attentionCandidateService,
-        async ensureFresh() {
-          freshnessChecks += 1;
-          return ctx.attentionCandidateService.ensureFresh();
-        },
-      },
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
-        async listGamesFromSnapshot(snapshot, options) {
+        async listGamesFromSnapshotWithProof(
+          snapshot: PrivateDisplayedFitnessSnapshot,
+          options: DisplayedFitnessOptions,
+        ) {
           computations += 1;
-          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+          return (
+            ctx.displayedFitnessService as PrivateDisplayedFitnessService
+          ).listGamesFromSnapshotWithProof(snapshot, options);
         },
-      },
+      } as unknown as DisplayedFitnessService,
+      attentionCandidates: ctx.attentionCandidateService,
     });
-    const factual = await service.getProfile();
-    expect(factual.status).toBe("available");
-    const cachedFactual = await ctx.storageService.loadProfile();
-    if (!cachedFactual) throw new Error("Expected factual Profile cache");
-    const unchangedRevision = (await ctx.storageService.loadCollection()).revision;
+    const first = await service.getProfile();
+    expect(first.status).toBe("available");
+    const persisted = await ctx.storageService.loadProfile();
+    if (!persisted) throw new Error("Expected proof-bearing Profile cache");
+    expect(
+      persisted.publicationIdentity.attentionCandidates.identity.semanticScoringInputProof.mode,
+    ).toBe("disabled");
+    const repeated = await service.getProfile();
+    expect(repeated).toEqual(first);
     expect(computations).toBe(1);
-    expect(freshnessChecks).toBe(2);
-
-    // SQLite semantic activation does not change the collection publication
-    // revision or the projected Profile source identity.
-    const collection = await ctx.storageService.loadCollection();
-    collection.semanticRedundancy.settings.enabled = true;
-    await ctx.storageService.saveCollection(collection);
-    expect((await ctx.storageService.loadCollection()).revision).toBe(unchangedRevision);
-
-    const activated = await service.getProfile();
-    expect(activated.status).toBe("available");
-    expect(computations).toBe(2);
-    expect(freshnessChecks).toBe(3);
-    expect(await ctx.storageService.loadProfile()).toEqual(cachedFactual);
-    if (activated.status !== "available") throw new Error("Expected activated Profile");
-    expect(activated.computedAt).not.toBe(
-      factual.status === "available" ? factual.computedAt : null,
-    );
-
-    // Disabling authoritative collection semantic mode restores exact cache reuse.
-    collection.semanticRedundancy.settings.enabled = false;
-    await ctx.storageService.saveCollection(collection);
-    const disabled = await service.getProfile();
-    expect(disabled).toEqual(factual);
-    expect(computations).toBe(2);
-    expect(freshnessChecks).toBe(4);
   });
 
   test("projects canonical game image URLs into public attention cards and rebuilds old caches", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     await ctx.gameService.addGame({
       name: "Image card",
       numPlays: 0,
@@ -226,11 +125,16 @@ describe("ProfileService", () => {
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
-        async listGamesFromSnapshot(snapshot, options) {
+        async listGamesFromSnapshotWithProof(
+          snapshot: PrivateDisplayedFitnessSnapshot,
+          options: DisplayedFitnessOptions,
+        ) {
           recomputations += 1;
-          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+          return (
+            ctx.displayedFitnessService as PrivateDisplayedFitnessService
+          ).listGamesFromSnapshotWithProof(snapshot, options);
         },
-      },
+      } as unknown as DisplayedFitnessService,
     }).getProfile();
 
     expect(recomputations).toBe(1);
@@ -248,7 +152,7 @@ describe("ProfileService", () => {
   });
 
   test("publishes disabled, ranked, and exact post-ranking cap prefixes", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     for (let index = 0; index < 8; index += 1)
       await ctx.gameService.addGame({
         name: `Unplayed ${String(index).padStart(2, "0")}`,
@@ -276,8 +180,8 @@ describe("ProfileService", () => {
     }
   });
 
-  test("omits note-only source differences from Profile output and profile.json", async () => {
-    const ctx = createTestApp();
+  test("fails closed for a private-note snapshot that contradicts its candidate proof", async () => {
+    const ctx = await createHydratedTestApp();
     await ctx.gameService.addGame({ name: "Note-isolated source" });
     const baseline = await ctx.profileService.getProfile();
     const loadCollection = ctx.storageService.loadCollection.bind(ctx.storageService);
@@ -305,21 +209,28 @@ describe("ProfileService", () => {
     }).getProfile();
     const persisted = ctx.fileOps.files.get("/test/data/profile.json");
 
-    expect(withNote).toEqual(baseline);
+    expect(withNote.status).toBe("unavailable");
+    expect(baseline.status).toBe("available");
     expect(persisted).toBeDefined();
     expect(persisted).not.toContain("ownerNote");
     expect(persisted).not.toContain(sentinel);
   });
 
   test("reuses only an exact current source identity and recomputes for all four sources", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     let clock = 0;
     let computations = 0;
-    const displayedFitnessService: DisplayedFitnessService = {
+    const displayedFitnessService: DisplayedFitnessService &
+      Pick<PrivateDisplayedFitnessService, "listGamesFromSnapshotWithProof"> = {
       ...ctx.displayedFitnessService,
-      async listGamesFromSnapshot(snapshot, options) {
+      async listGamesFromSnapshotWithProof(
+        snapshot: PrivateDisplayedFitnessSnapshot,
+        options: DisplayedFitnessOptions,
+      ) {
         computations += 1;
-        return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        return (
+          ctx.displayedFitnessService as PrivateDisplayedFitnessService
+        ).listGamesFromSnapshotWithProof(snapshot, options);
       },
     };
     const service = createProfileService({
@@ -362,7 +273,7 @@ describe("ProfileService", () => {
   });
 
   test("does not serve a persisted Profile after a note change on restart", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     const created = await ctx.gameService.addGame({ name: "Note-dependent source" });
     let computations = 0;
     let timestamp = 0;
@@ -371,11 +282,16 @@ describe("ProfileService", () => {
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
-        async listGamesFromSnapshot(snapshot, options) {
+        async listGamesFromSnapshotWithProof(
+          snapshot: PrivateDisplayedFitnessSnapshot,
+          options: DisplayedFitnessOptions,
+        ) {
           computations += 1;
-          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+          return (
+            ctx.displayedFitnessService as PrivateDisplayedFitnessService
+          ).listGamesFromSnapshotWithProof(snapshot, options);
         },
-      },
+      } as unknown as DisplayedFitnessService,
       now: () => `2026-08-28T00:00:0${timestamp++}.000Z`,
     });
 
@@ -398,11 +314,16 @@ describe("ProfileService", () => {
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
-        async listGamesFromSnapshot(snapshot, options) {
+        async listGamesFromSnapshotWithProof(
+          snapshot: PrivateDisplayedFitnessSnapshot,
+          options: DisplayedFitnessOptions,
+        ) {
           computations += 1;
-          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+          return (
+            ctx.displayedFitnessService as PrivateDisplayedFitnessService
+          ).listGamesFromSnapshotWithProof(snapshot, options);
         },
-      },
+      } as unknown as DisplayedFitnessService,
       now: () => `2026-08-28T00:00:0${timestamp++}.000Z`,
     });
     const afterNote = await restartedService.getProfile();
@@ -418,7 +339,7 @@ describe("ProfileService", () => {
   });
 
   test("serializes an in-flight Profile write before an accepted note change", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     const created = await ctx.gameService.addGame({ name: "Concurrent note source" });
     let releaseComputation!: () => void;
     let computationStarted!: () => void;
@@ -430,13 +351,18 @@ describe("ProfileService", () => {
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
-        async listGamesFromSnapshot(snapshot, options) {
+        async listGamesFromSnapshotWithProof(
+          snapshot: PrivateDisplayedFitnessSnapshot,
+          options: DisplayedFitnessOptions,
+        ) {
           computations += 1;
           computationStarted();
           await release;
-          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+          return (
+            ctx.displayedFitnessService as PrivateDisplayedFitnessService
+          ).listGamesFromSnapshotWithProof(snapshot, options);
         },
-      },
+      } as unknown as DisplayedFitnessService,
     });
 
     const pendingProfile = service.getProfile();
@@ -468,29 +394,39 @@ describe("ProfileService", () => {
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
-        async listGamesFromSnapshot(snapshot, options) {
+        async listGamesFromSnapshotWithProof(
+          snapshot: PrivateDisplayedFitnessSnapshot,
+          options: DisplayedFitnessOptions,
+        ) {
           computations += 1;
-          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+          return (
+            ctx.displayedFitnessService as PrivateDisplayedFitnessService
+          ).listGamesFromSnapshotWithProof(snapshot, options);
         },
-      },
+      } as unknown as DisplayedFitnessService,
     });
     expect((await restartedService.getProfile()).status).toBe("available");
     expect(computations).toBe(2);
   });
 
   test("recomputes a persisted Profile when semantic consent changes", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     let computations = 0;
     const service = createProfileService({
       storageService: ctx.storageService,
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
-        async listGamesFromSnapshot(snapshot, options) {
+        async listGamesFromSnapshotWithProof(
+          snapshot: PrivateDisplayedFitnessSnapshot,
+          options: DisplayedFitnessOptions,
+        ) {
           computations += 1;
-          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+          return (
+            ctx.displayedFitnessService as PrivateDisplayedFitnessService
+          ).listGamesFromSnapshotWithProof(snapshot, options);
         },
-      },
+      } as unknown as DisplayedFitnessService,
     });
 
     expect((await service.getProfile()).status).toBe("available");
@@ -507,11 +443,16 @@ describe("ProfileService", () => {
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
-        async listGamesFromSnapshot(snapshot, options) {
+        async listGamesFromSnapshotWithProof(
+          snapshot: PrivateDisplayedFitnessSnapshot,
+          options: DisplayedFitnessOptions,
+        ) {
           computations += 1;
-          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+          return (
+            ctx.displayedFitnessService as PrivateDisplayedFitnessService
+          ).listGamesFromSnapshotWithProof(snapshot, options);
         },
-      },
+      } as unknown as DisplayedFitnessService,
     });
     expect((await restartedService.getProfile()).status).toBe("available");
     expect(computations).toBe(2);
@@ -522,41 +463,29 @@ describe("ProfileService", () => {
     );
   });
 
-  test("uses the public fitness fallback when the captured source vector is unavailable", async () => {
-    const ctx = createTestApp();
+  test("fails closed when the private source vector is unavailable", async () => {
+    const ctx = await createHydratedTestApp();
     await ctx.gameService.addGame({ name: "Factual Profile source" });
-    const enabled = await jsonRequest(ctx.app, "PATCH", "/api/redundancy/settings", {
-      enabled: true,
+    const underlyingSourceVector = ctx.storageService.sourceVector?.bind(ctx.storageService);
+    if (!underlyingSourceVector) throw new Error("Expected source-vector support");
+    ctx.storageService.sourceVector = () => ({
+      ...underlyingSourceVector(),
+      available: false,
+      unavailableSources: ["test-unavailable"],
     });
-    expect(enabled.status).toBe(200);
-
-    let snapshotCollectionHadSemanticState = false;
-    let snapshotKind: string | undefined;
     const profileService = createProfileService({
       storageService: ctx.storageService,
       attentionCandidates: ctx.attentionCandidateService,
-      displayedFitnessService: {
-        ...ctx.displayedFitnessService,
-        async listGamesFromSnapshot(snapshot, options) {
-          snapshotKind = snapshot.kind;
-          snapshotCollectionHadSemanticState =
-            "semanticRedundancy" in snapshot.collection &&
-            snapshot.collection.semanticRedundancy !== undefined;
-          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
-        },
-      },
+      displayedFitnessService: ctx.displayedFitnessService,
     });
 
     const result = await profileService.getProfile();
-    expect(result.status).toBe("available");
-    expect(snapshotKind).toBe("public");
-    expect(snapshotCollectionHadSemanticState).toBe(false);
-    expect(JSON.stringify(result)).not.toContain("semanticRedundancy");
-    expect(ctx.fileOps.files.get("/test/data/profile.json")).not.toContain("semanticRedundancy");
+    expect(result.status).toBe("unavailable");
+    expect(await ctx.storageService.loadProfile()).toBeNull();
   });
 
   test("discards older and malformed attention Profile caches", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     const created = await ctx.gameService.addGame({ name: "Unplayed intention" });
     const collection = await ctx.storageService.loadCollection();
     const game = collection.games.find(({ id }) => id === created.game.id);
@@ -601,11 +530,16 @@ describe("ProfileService", () => {
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
-        async listGamesFromSnapshot(snapshot, options) {
+        async listGamesFromSnapshotWithProof(
+          snapshot: PrivateDisplayedFitnessSnapshot,
+          options: DisplayedFitnessOptions,
+        ) {
           computations += 1;
-          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+          return (
+            ctx.displayedFitnessService as PrivateDisplayedFitnessService
+          ).listGamesFromSnapshotWithProof(snapshot, options);
         },
-      },
+      } as unknown as DisplayedFitnessService,
     });
 
     const result = await service.getProfile();
@@ -620,7 +554,7 @@ describe("ProfileService", () => {
   });
 
   test("recomputes a current-identity cache that does not match the collection source", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     await jsonRequest(ctx.app, "POST", "/api/games", { name: "Source game" });
     const first = await ctx.profileService.getProfile();
     expect(first.status).toBe("available");
@@ -638,11 +572,16 @@ describe("ProfileService", () => {
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
-        async listGamesFromSnapshot(snapshot, options) {
+        async listGamesFromSnapshotWithProof(
+          snapshot: PrivateDisplayedFitnessSnapshot,
+          options: DisplayedFitnessOptions,
+        ) {
           computations += 1;
-          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+          return (
+            ctx.displayedFitnessService as PrivateDisplayedFitnessService
+          ).listGamesFromSnapshotWithProof(snapshot, options);
         },
-      },
+      } as unknown as DisplayedFitnessService,
     });
 
     const result = await service.getProfile();
@@ -653,7 +592,7 @@ describe("ProfileService", () => {
   });
 
   test("discards a source-invalid cache before a failed recomputation", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     await jsonRequest(ctx.app, "POST", "/api/games", { name: "Source game" });
     await ctx.profileService.getProfile();
     const cached = (await ctx.storageService.loadProfile())!;
@@ -668,9 +607,10 @@ describe("ProfileService", () => {
       storageService: ctx.storageService,
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
+        ...ctx.displayedFitnessService,
         listGames: () => Promise.resolve([]),
-        listGamesFromSnapshot: () => Promise.reject(new Error("fitness failed")),
-      },
+        listGamesFromSnapshotWithProof: () => Promise.reject(new Error("fitness failed")),
+      } as unknown as DisplayedFitnessService,
     }).getProfile();
 
     expect(result.status).toBe("unavailable");
@@ -688,7 +628,7 @@ describe("ProfileService", () => {
 
     for (const source of Object.keys(sourcePaths) as Array<keyof typeof sourcePaths>) {
       const fileOps = createMockFileOps();
-      const ctx = createTestApp({ fileOps });
+      const ctx = await createHydratedTestApp({ fileOps });
       const created = await ctx.gameService.addGame({ name: "Profile source candidate" });
       const baselineCollection = await ctx.storageService.loadCollection();
       const candidate = baselineCollection.games.find(({ id }) => id === created.game.id);
@@ -739,13 +679,19 @@ describe("ProfileService", () => {
         if (armed && to === sourcePaths[source]) sourcePersistenceStarted = true;
         await rename(from, to);
       };
-      const displayedFitnessService: DisplayedFitnessService = {
+      const displayedFitnessService: DisplayedFitnessService &
+        Pick<PrivateDisplayedFitnessService, "listGamesFromSnapshotWithProof"> = {
         ...ctx.displayedFitnessService,
-        async listGamesFromSnapshot(snapshot, options) {
+        async listGamesFromSnapshotWithProof(
+          snapshot: PrivateDisplayedFitnessSnapshot,
+          options: DisplayedFitnessOptions,
+        ) {
           capturedSources = structuredClone(snapshot);
           snapshotCaptured();
           await releaseComputationPromise;
-          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+          return (
+            ctx.displayedFitnessService as PrivateDisplayedFitnessService
+          ).listGamesFromSnapshotWithProof(snapshot, options);
         },
       };
       const service = createProfileService({
@@ -842,7 +788,7 @@ describe("ProfileService", () => {
   });
 
   test("does not read between linked collection and Tournament deletion writes", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     const created = await ctx.gameService.addGame({ name: "Deleted game" });
     let releaseTournamentSave!: () => void;
     let tournamentSaveStarted!: () => void;
@@ -864,11 +810,16 @@ describe("ProfileService", () => {
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
-        async listGamesFromSnapshot(snapshot, options) {
+        async listGamesFromSnapshotWithProof(
+          snapshot: PrivateDisplayedFitnessSnapshot,
+          options: DisplayedFitnessOptions,
+        ) {
           snapshotCaptured = true;
-          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+          return (
+            ctx.displayedFitnessService as PrivateDisplayedFitnessService
+          ).listGamesFromSnapshotWithProof(snapshot, options);
         },
-      },
+      } as unknown as DisplayedFitnessService,
     });
 
     const deletion = ctx.gameService.removeGame(created.game.id);
@@ -889,7 +840,7 @@ describe("ProfileService", () => {
   });
 
   test("holds source mutations after atomic cache save until the profile operation returns", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     let releaseSave!: () => void;
     let saveCompleted!: () => void;
     const releaseSavePromise = new Promise<void>((resolve) => {
@@ -928,15 +879,16 @@ describe("ProfileService", () => {
   });
 
   test("returns retryable unavailable on recomputation failure without mutating collection", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     const before = await ctx.storageService.loadCollection();
     const service = createProfileService({
       storageService: ctx.storageService,
       attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
+        ...ctx.displayedFitnessService,
         listGames: () => Promise.resolve([]),
-        listGamesFromSnapshot: () => Promise.reject(new Error("fitness failed")),
-      },
+        listGamesFromSnapshotWithProof: () => Promise.reject(new Error("fitness failed")),
+      } as unknown as DisplayedFitnessService,
     });
 
     const result = await service.getProfile();
@@ -951,7 +903,7 @@ describe("ProfileService", () => {
   });
 
   test("distinguishes source validation and cache transport failures", async () => {
-    const validationContext = createTestApp();
+    const validationContext = await createHydratedTestApp();
     const invalidStorage: StorageService = {
       ...validationContext.storageService,
       loadPredictionSettings: () => Promise.reject(new ZodError([])),
@@ -978,7 +930,7 @@ describe("ProfileService", () => {
     if (malformed.status !== "unavailable") throw new Error("Expected unavailable profile");
     expect(malformed.error.kind).toBe("validation");
 
-    const transportContext = createTestApp();
+    const transportContext = await createHydratedTestApp();
     const failingStorage: StorageService = {
       ...transportContext.storageService,
       saveProfile: () => Promise.reject(new Error("disk unavailable")),

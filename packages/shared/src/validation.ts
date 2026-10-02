@@ -34,6 +34,7 @@ import type {
 } from "./types";
 import { DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY } from "./collection-profile-entity-policy";
 import { OwnerGameNoteSchema } from "./owner-game-note";
+import { SemanticScoringInputProofSchema } from "./semantic-scoring-input-proof";
 
 import {
   CollectionProfileEntityClassSchema,
@@ -100,7 +101,7 @@ export {
 };
 
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 10 as const;
-export const CURRENT_PROFILE_CONTRACT_VERSION = 11 as const;
+export const CURRENT_PROFILE_CONTRACT_VERSION = 12 as const;
 export const CURRENT_PROFILE_ALGORITHM_VERSION = 14 as const;
 const AmountInputSchema = z.string().superRefine((value, context) => {
   try {
@@ -2805,7 +2806,7 @@ export const ProfileSourceIdentitySchema = z
 
 export const ProfileAttentionCandidatePublicationIdentitySchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     indexVersion: z.literal(1),
     evaluatedAt: z.string().datetime({ offset: true }),
     identity: z
@@ -2816,6 +2817,7 @@ export const ProfileAttentionCandidatePublicationIdentitySchema = z
         tournamentHash: Sha256Schema,
         predictionSettingsHash: Sha256Schema,
         redundancySettingsHash: Sha256Schema,
+        semanticScoringInputProof: SemanticScoringInputProofSchema,
         calculationVersion: z.number().int().safe().positive(),
         ruleCatalogVersion: z.number().int().safe().positive(),
         dependencyVersion: z.number().int().safe().positive(),
@@ -2852,6 +2854,7 @@ export const ProfilePublicationIdentitySchema = z
   .object({
     source: ProfileSourceIdentitySchema,
     profileAttentionCardLimit: z.number().int().safe().min(0).max(24),
+    entityPolicyFingerprint: Sha256Schema,
     attentionCandidates: ProfileAttentionCandidatePublicationIdentitySchema,
   })
   .strict()

@@ -637,6 +637,16 @@ export interface AttentionCandidateEvaluation {
   ruleCatalogVersion: number;
 }
 
+export type SemanticScoringInputProof =
+  | { version: 1; mode: "disabled" | "factual-only"; identity: string }
+  | {
+      version: 1;
+      mode: "semantic";
+      status: "ready" | "partial" | "factual" | "not-ready";
+      coverageVersion: number;
+      identity: string;
+    };
+
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
 export type FitnessBreakdownSource =
@@ -1540,7 +1550,7 @@ export interface ProfileSourceIdentity {
 }
 
 export interface ProfileAttentionCandidatePublicationIdentity {
-  schemaVersion: 1;
+  schemaVersion: 2;
   indexVersion: 1;
   evaluatedAt: string;
   identity: {
@@ -1550,6 +1560,7 @@ export interface ProfileAttentionCandidatePublicationIdentity {
     tournamentHash: string;
     predictionSettingsHash: string;
     redundancySettingsHash: string;
+    semanticScoringInputProof: SemanticScoringInputProof;
     calculationVersion: number;
     ruleCatalogVersion: number;
     dependencyVersion: number;
@@ -1565,11 +1576,12 @@ export interface ProfileAttentionCandidatePublicationIdentity {
 export interface ProfilePublicationIdentity {
   source: ProfileSourceIdentity;
   profileAttentionCardLimit: number;
+  entityPolicyFingerprint: string;
   attentionCandidates: ProfileAttentionCandidatePublicationIdentity;
 }
 
 export interface ProfileData {
-  contractVersion: 11;
+  contractVersion: 12;
   algorithmVersion: 14;
   publicationIdentity: ProfilePublicationIdentity;
   profile: CollectionProfile;

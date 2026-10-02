@@ -10,7 +10,7 @@ import {
   usefulProfileFixture,
 } from "../../../shared/tests/fixtures/useful-profile.js";
 import { createProfileRoutes } from "../../src/routes/profile.js";
-import { createTestApp, jsonRequest } from "../helpers/test-app.js";
+import { createHydratedTestApp, jsonRequest } from "../helpers/test-app.js";
 
 const malformedProfileCases: ReadonlyArray<
   readonly [string, (profile: CollectionProfile) => void]
@@ -80,7 +80,7 @@ describe("profile routes", () => {
   );
 
   test("GET /api/profile passes through the complete useful profile", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     const response = await jsonRequest(ctx.app, "GET", "/api/profile");
     const profile = CollectionProfileResultSchema.parse(await response.json());
 
@@ -114,7 +114,7 @@ describe("profile routes", () => {
   });
 
   test("returns an exact cached response on a second read", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     const first: unknown = await (await jsonRequest(ctx.app, "GET", "/api/profile")).json();
     const second: unknown = await (await jsonRequest(ctx.app, "GET", "/api/profile")).json();
     expect(second).toEqual(first);

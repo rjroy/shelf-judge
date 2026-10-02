@@ -1411,8 +1411,9 @@ describe("collection profile attention contract", () => {
           redundancySettingsHash: "c".repeat(64),
         },
         profileAttentionCardLimit: 6,
+        entityPolicyFingerprint: "d".repeat(64),
         attentionCandidates: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           indexVersion: 1,
           evaluatedAt: "2026-08-27T12:00:00.000Z",
           identity: {
@@ -1422,6 +1423,11 @@ describe("collection profile attention contract", () => {
             tournamentHash: "a".repeat(64),
             predictionSettingsHash: "b".repeat(64),
             redundancySettingsHash: "c".repeat(64),
+            semanticScoringInputProof: {
+              version: 1,
+              mode: "factual-only",
+              identity: "e".repeat(64),
+            },
             calculationVersion: 1,
             ruleCatalogVersion: 1,
             dependencyVersion: 1,
@@ -1439,6 +1445,41 @@ describe("collection profile attention contract", () => {
       computedAt: usefulProfileFixture.computedAt,
     };
     expect(ProfileDataSchema.safeParse(cache).success).toBe(true);
+    const candidateIdentity = cache.publicationIdentity.attentionCandidates.identity;
+    expect(
+      ProfileDataSchema.safeParse({
+        ...cache,
+        publicationIdentity: {
+          ...cache.publicationIdentity,
+          attentionCandidates: {
+            ...cache.publicationIdentity.attentionCandidates,
+            identity: { ...candidateIdentity, semanticScoringInputProof: undefined },
+          },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      ProfileDataSchema.safeParse({
+        ...cache,
+        publicationIdentity: {
+          ...cache.publicationIdentity,
+          attentionCandidates: {
+            ...cache.publicationIdentity.attentionCandidates,
+            identity: {
+              ...candidateIdentity,
+              semanticScoringInputProof: {
+                version: 1,
+                mode: "semantic",
+                status: "ready",
+                coverageVersion: 1,
+                identity: "e".repeat(64),
+                ownerNote: "private",
+              },
+            },
+          },
+        },
+      }).success,
+    ).toBe(false);
     expect(
       ProfileDataSchema.safeParse({
         ...cache,

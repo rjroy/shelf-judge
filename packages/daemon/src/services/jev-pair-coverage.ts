@@ -10,7 +10,9 @@ import { canonicalSha256 } from "./profile-source-coordinator.js";
 import type { JevPairJudgment, JevPairKey } from "./jev-pair-cache-service.js";
 import { validateJevCachedRow, type JevRowValidationGame } from "./jev-pair-read-proof.js";
 
-export const JEV_ACTIVATION_DIGEST_VERSION = "jev-activation-coverage-v5" as const;
+export const JEV_ACTIVATION_COVERAGE_VERSION = 5 as const;
+export const JEV_ACTIVATION_DIGEST_VERSION =
+  `jev-activation-coverage-v${JEV_ACTIVATION_COVERAGE_VERSION}` as const;
 
 /** Durable identities for the exact capture; volatile process-local tokens do not belong here. */
 export interface JevPredictionCaptureIdentity {

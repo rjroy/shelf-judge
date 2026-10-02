@@ -60,6 +60,7 @@ export type {
   AttentionRuleDefinition,
   AttentionCandidateWinner,
   AttentionCandidateEvaluation,
+  SemanticScoringInputProof,
   BggPlaySession,
   FitnessBreakdownSource,
   FitnessBreakdownEntry,
@@ -240,6 +241,8 @@ export type {
   AttentionCandidateArtifact,
   AttentionCandidateArtifactIdentity,
 } from "./attention-candidate-artifact";
+
+export { SemanticScoringInputProofSchema } from "./semantic-scoring-input-proof";
 
 export {
   DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,

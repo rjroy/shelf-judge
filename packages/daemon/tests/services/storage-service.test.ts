@@ -1368,12 +1368,18 @@ function makeEmptyProfileData(computedAt = "2026-01-01T00:00:00.000Z"): ProfileD
     publicationIdentity: {
       source,
       profileAttentionCardLimit: 0,
+      entityPolicyFingerprint: "a".repeat(64),
       attentionCandidates: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         indexVersion: 1,
         evaluatedAt: computedAt,
         identity: {
           ...source,
+          semanticScoringInputProof: {
+            version: 1,
+            mode: "factual-only",
+            identity: "b".repeat(64),
+          },
           calculationVersion: 1,
           ruleCatalogVersion: 1,
           dependencyVersion: 1,

@@ -683,6 +683,7 @@ describe("DisplayedFitnessService", () => {
         return scored(source.games, false);
       },
     } as unknown as GameService;
+    let snapshotPredictionCalls = 0;
     const predictionService = {
       listGamesWithPredictions: () => Promise.resolve(scored(games, true)),
       listGamesWithPredictionsFromSnapshot: (
@@ -690,28 +691,47 @@ describe("DisplayedFitnessService", () => {
         _tournament: TournamentData,
         _settings: PredictionSettings,
         targetIds?: readonly string[],
-      ) =>
-        Promise.resolve(
-          scored(
-            targetIds === undefined
-              ? source.games
-              : source.games.filter(({ id }) => targetIds.includes(id)),
-            true,
-          ),
-        ),
+      ) => {
+        snapshotPredictionCalls += 1;
+        const capture = scored(
+          targetIds === undefined
+            ? source.games
+            : source.games.filter(({ id }) => targetIds.includes(id)),
+          true,
+        );
+        const nullScore = capture.find((entry) => entry.game.id === "peer-two");
+        if (nullScore) nullScore.score = null;
+        return Promise.resolve(capture).then((result) => {
+          if (mutateDuringPrediction) {
+            mutateDuringPrediction = false;
+            vector.publish("prediction-settings", 10);
+          }
+          return result;
+        });
+      },
     } as unknown as PredictionService;
     const semanticCaptures: GameWithScore[][] = [];
     const semanticIdentities: unknown[] = [];
+    let mutateDuringPrediction = false;
+    let mutateAfterSemanticRead = false;
     const service = createDisplayedFitnessService({
       gameService,
       predictionService,
-      storageService: { sourceVector: () => vector.read() } as StorageService,
+      storageService: {
+        sourceVector: () => vector.read(),
+        loadNicheSettings: () => Promise.resolve({ ignoredTags: [] }),
+      } as unknown as StorageService,
       resolveSemanticRead: (input) => {
         semanticCaptures.push([...input.predictionCapture]);
         semanticIdentities.push(input.captureIdentity);
+        if (mutateAfterSemanticRead) {
+          mutateAfterSemanticRead = false;
+          vector.publish("tournament", 10);
+        }
         return {
           result: { status: "not-ready", summary: "Fixture miss" },
-          proof: { status: "not-ready", summary: "Fixture miss" },
+          proof: { status: "not-ready", identity: "a".repeat(64) },
+          reusable: true,
           isCurrent: () => true,
         };
       },
@@ -747,6 +767,65 @@ describe("DisplayedFitnessService", () => {
       games.map(({ id }) => id),
     );
     expect(semanticIdentities[0]).toEqual(semanticIdentities[1]);
+
+    const predictionsBeforeProof = snapshotPredictionCalls;
+    const readsBeforeProof = semanticCaptures.length;
+    const withProof = await service.listGamesFromSnapshotWithProof(snapshot, {
+      includePredicted: false,
+      targetGameIds: ["target"],
+    });
+    expect(snapshotPredictionCalls - predictionsBeforeProof).toBe(1);
+    expect(semanticCaptures.length - readsBeforeProof).toBe(1);
+    expect(semanticCaptures.at(-1)).toHaveLength(games.length);
+    expect(
+      semanticCaptures.at(-1)?.find((entry) => entry.game.id === "peer-two")?.score,
+    ).toBeNull();
+    expect(withProof.games).toHaveLength(1);
+    expect(withProof.games[0]?.score?.score).toBe(7);
+    expect(withProof.semanticScoringInputProof).toMatchObject({
+      mode: "semantic",
+      status: "not-ready",
+      identity: "a".repeat(64),
+    });
+    expect(withProof.games[0]?.score?.redundancySimilarityInfo?.status).toBe("not-ready");
+    expect(withProof.isCurrent()).toBe(true);
+    const repeatedProof = await service.listGamesFromSnapshotWithProof(snapshot, {
+      includePredicted: false,
+      targetGameIds: ["target"],
+    });
+    expect(repeatedProof.games[0]?.score?.score).toBe(7);
+    expect(snapshotPredictionCalls - predictionsBeforeProof).toBe(1);
+    expect(semanticCaptures.length - readsBeforeProof).toBe(1);
+
+    vector.publish("prediction-settings", 4);
+    snapshot.sourceVector = vector.read();
+    mutateDuringPrediction = true;
+    const predictionCaptureError = await service
+      .listGamesFromSnapshotWithProof(snapshot, { includePredicted: false })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    expect(predictionCaptureError).toBeInstanceOf(Error);
+    expect(predictionCaptureError).toHaveProperty(
+      "message",
+      "Displayed fitness scoring input changed during prediction capture",
+    );
+    expect(withProof.isCurrent()).toBe(false);
+
+    snapshot.sourceVector = vector.read();
+    mutateAfterSemanticRead = true;
+    const semanticReadError = await service
+      .listGamesFromSnapshotWithProof(snapshot, { includePredicted: false })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    expect(semanticReadError).toBeInstanceOf(Error);
+    expect(semanticReadError).toHaveProperty(
+      "message",
+      "Displayed fitness scoring input changed before snapshot calculation",
+    );
 
     const racedPredictionService = {
       listGamesWithPredictionsFromSnapshot: (

@@ -19,6 +19,7 @@ function data(): AttentionCandidateArtifact {
       tournamentHash: "a".repeat(64),
       predictionSettingsHash: "b".repeat(64),
       redundancySettingsHash: "c".repeat(64),
+      semanticScoringInputProof: { version: 1, mode: "factual-only", identity: "d".repeat(64) },
       calculationVersion: 1,
       ruleCatalogVersion: 1,
       dependencyVersion: 1,

@@ -333,6 +333,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     storageService,
     displayedFitnessService,
     attentionCandidates: attentionCandidateService,
+    now: options?.now,
   });
   const unavailableGroundedConfiguration: GroundedProviderStartupConfiguration = {
     status: "unavailable",
@@ -409,6 +410,15 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     reflectionRuntime,
     fileOps,
   };
+}
+
+/** Create a test app with persisted source-vector state loaded before proof-dependent reads. */
+export async function createHydratedTestApp<TFileOps extends FileOps = MockFileOps>(
+  options?: TestAppOptions<TFileOps>,
+): Promise<TestAppContext<TFileOps>> {
+  const context = createTestApp(options);
+  await context.storageService.hydrateSourceVector?.();
+  return context;
 }
 
 export function createMockBggClient(overrides?: Partial<BggClient>): BggClient {

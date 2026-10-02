@@ -17,6 +17,7 @@ export function createJevProductionSemanticRead(cache: JevPairCache | null) {
   const readService = createJevPairReadService(
     cache ?? {
       available: false,
+      mutationRevision: () => null,
       lookup: () => null,
     },
   );

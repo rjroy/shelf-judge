@@ -59,12 +59,18 @@ async function currentData(storage: ReturnType<typeof createStorageService>): Pr
     publicationIdentity: {
       source,
       profileAttentionCardLimit: 0,
+      entityPolicyFingerprint: "a".repeat(64),
       attentionCandidates: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         indexVersion: 1,
         evaluatedAt: computedAt,
         identity: {
           ...source,
+          semanticScoringInputProof: {
+            version: 1,
+            mode: "factual-only",
+            identity: "b".repeat(64),
+          },
           calculationVersion: 1,
           ruleCatalogVersion: 1,
           dependencyVersion: 1,
@@ -158,9 +164,9 @@ describe("useful profile persistence", () => {
       const serialized = JSON.stringify(current);
       const artifacts = [
         serialized
-          .replace('"contractVersion":11', '"contractVersion":9')
+          .replace('"contractVersion":12', '"contractVersion":9')
           .replace('"algorithmVersion":14', '"algorithmVersion":12'),
-        serialized.replace('"contractVersion":11', '"contractVersion":10'),
+        serialized.replace('"contractVersion":12', '"contractVersion":10'),
         serialized.replace('"algorithmVersion":14', '"algorithmVersion":13'),
         serialized
           .replaceAll('"bestFit":', '"rating":')

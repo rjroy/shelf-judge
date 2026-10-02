@@ -430,6 +430,19 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
 
   let closed = false;
   let revision: number | null = 0;
+  const readDataVersion = (): number => {
+    const row = db?.query<{ data_version: number }, []>("PRAGMA main.data_version").get();
+    if (!row || !Number.isSafeInteger(row.data_version) || row.data_version < 0)
+      throw new Error("Unable to read Jev cache data version");
+    return row.data_version;
+  };
+  let observedDataVersion: number;
+  try {
+    observedDataVersion = readDataVersion();
+  } catch {
+    db.close();
+    return noOpCache();
+  }
   const usable = (): boolean => !closed;
   const recordMutation = (): void => {
     revision = revision === null || revision >= Number.MAX_SAFE_INTEGER ? null : revision + 1;
@@ -477,7 +490,18 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
   return {
     available: true,
     mutationRevision() {
-      return usable() ? revision : null;
+      if (!usable() || revision === null) return null;
+      try {
+        const currentDataVersion = readDataVersion();
+        if (currentDataVersion !== observedDataVersion) {
+          observedDataVersion = currentDataVersion;
+          recordMutation();
+        }
+        return revision;
+      } catch {
+        invalidateRevision();
+        return null;
+      }
     },
     lookup(key) {
       if (!usable()) return null;

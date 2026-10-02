@@ -16,6 +16,7 @@ import {
   type JevPairJudgment,
 } from "../../src/services/jev-pair-cache-service.js";
 import { createJevPairReadService } from "../../src/services/jev-pair-read-service.js";
+import { createJevProductionSemanticRead } from "../../src/services/jev-production-read.js";
 import {
   computeRedundancyAnalysis,
   DEFAULT_REDUNDANCY_SETTINGS,
@@ -180,17 +181,35 @@ describe("Jev pair read adapter", () => {
         );
       }
     rows.forEach((item) => cache.upsert(item));
-    const reader = createJevPairReadService(cache);
+    const externalWriter = await createJevPairCache(dir);
+    let pairLookups = 0;
+    const reader = createJevPairReadService({
+      available: cache.available,
+      mutationRevision: () => cache.mutationRevision(),
+      lookup: (key) => {
+        pairLookups++;
+        return cache.lookup(key);
+      },
+    });
 
     const identity = computeJevPairCoverage({ ...f, cache }).identity;
     const ready = reader.resolveWithProof(f);
     expect(ready.result.status).toBe("ready");
+    expect(ready.reusable).toBe(true);
     expect(ready.proof).toEqual({ status: "ready", identity });
     expect(ready.isCurrent()).toBe(true);
+    const lookupCountAtProof = pairLookups;
+    expect(ready.isCurrent()).toBe(true);
+    expect(pairLookups).toBe(lookupCountAtProof);
     expect(JSON.stringify(ready.proof)).not.toContain("PRIVATE NOTE");
     expect(JSON.stringify(ready.proof)).not.toContain("Description");
     f.games[0].name = "mutated after capture";
     expect(ready.isCurrent()).toBe(true);
+
+    externalWriter.upsert({ ...rows[0], value: 0.8 });
+    expect(ready.isCurrent()).toBe(false);
+    expect(pairLookups).toBe(lookupCountAtProof);
+    externalWriter.close();
 
     cache.upsert({ ...rows[0], value: 0.8 });
     expect(ready.isCurrent()).toBe(false);
@@ -198,8 +217,74 @@ describe("Jev pair read adapter", () => {
     const missingDatabase = createJevPairReadService({ ...cache, available: false });
     const unavailable = missingDatabase.resolveWithProof(f);
     expect(unavailable.result.status).toBe("not-ready");
-    expect(unavailable.isCurrent()).toBe(true);
+    expect(unavailable.reusable).toBe(false);
+    expect(unavailable.isCurrent()).toBe(false);
     cache.close();
+  });
+
+  test("revision-backed fences reuse without pair lookups and invalidate on every cache generation change", () => {
+    const f = fixture();
+    let revision: number | null = 7;
+    let lookups = 0;
+    const cache = {
+      available: true,
+      mutationRevision: () => revision,
+      lookup: () => {
+        lookups++;
+        return null;
+      },
+    };
+    const reader = createJevPairReadService(cache);
+    const fence = reader.resolveWithProof(f);
+    expect(fence.reusable).toBe(true);
+    const readLookupCount = lookups;
+    expect(fence.isCurrent()).toBe(true);
+    expect(fence.isCurrent()).toBe(true);
+    expect(lookups).toBe(readLookupCount);
+
+    // Replacement, pair purge, reset, and close all advance or invalidate the same cache revision.
+    for (const nextRevision of [8, 9, 10, null]) {
+      revision = nextRevision;
+      expect(fence.isCurrent()).toBe(false);
+    }
+    const firstInstanceRevision = 7;
+    let secondInstanceRevision = 7;
+    const firstInstanceFence = createJevPairReadService({
+      available: true,
+      mutationRevision: () => firstInstanceRevision,
+      lookup: () => null,
+    }).resolveWithProof(f);
+    const secondInstanceFence = createJevPairReadService({
+      available: true,
+      mutationRevision: () => secondInstanceRevision,
+      lookup: () => null,
+    }).resolveWithProof(f);
+    expect(firstInstanceFence.reusable).toBe(true);
+    expect(secondInstanceFence.reusable).toBe(true);
+    secondInstanceRevision++;
+    expect(secondInstanceFence.isCurrent()).toBe(false);
+    expect(firstInstanceFence.isCurrent()).toBe(true);
+
+    const nullAtCapture = createJevPairReadService({
+      ...cache,
+      mutationRevision: () => null,
+    }).resolveWithProof(f);
+    expect(nullAtCapture.reusable).toBe(false);
+    expect(nullAtCapture.isCurrent()).toBe(false);
+  });
+
+  test("the unavailable production adapter exposes no reusable proof", () => {
+    const f = fixture();
+    const read = createJevProductionSemanticRead(null)({
+      predictionCapture: f.predictionCapture,
+      collection: f.collection,
+      redundancySettings: { enabled: true },
+      factualWeights: f.factualWeights,
+      captureIdentity: f.captureIdentity,
+    });
+    expect(read.result.status).toBe("not-ready");
+    expect(read.reusable).toBe(false);
+    expect(read.isCurrent()).toBe(false);
   });
 
   test("returns usable per-pair signals from real SQLite and fails closed for invalid reads", async () => {
@@ -274,7 +359,15 @@ describe("Jev pair read adapter", () => {
       }).resolve({ ...f, predictionCapture: [] }).status,
     ).toBe("not-ready");
     expect(JSON.stringify(reader.resolve(f))).not.toContain("PRIVATE NOTE");
+    const beforePurge = reader.resolveWithProof(f);
+    cache.purgePair("a", "b", "C");
+    expect(beforePurge.isCurrent()).toBe(false);
+    const beforeReset = reader.resolveWithProof(f);
+    cache.reset();
+    expect(beforeReset.isCurrent()).toBe(false);
+    const beforeClose = reader.resolveWithProof(f);
     cache.close();
+    expect(beforeClose.isCurrent()).toBe(false);
   });
 
   test("respects settings and note permission while exposing usable description signals", () => {

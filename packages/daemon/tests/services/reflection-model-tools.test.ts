@@ -5,7 +5,7 @@ import { createGroundedAnalysisProvider } from "../../src/services/grounded-anal
 import { createOllamaProviderExtension } from "../../src/services/grounded-analysis/ollama-provider-extension.js";
 import { createPiGroundedAnalysisSessionFactory } from "../../src/services/grounded-analysis/session-factory.js";
 import { GROUNDED_SUBMISSION_TOOL_NAME } from "../../src/services/grounded-analysis/structured-submission.js";
-import { createTestApp } from "../helpers/test-app.js";
+import { createHydratedTestApp } from "../helpers/test-app.js";
 
 const NOW = "2026-09-10T12:00:00.000Z";
 const CAPABILITY = "a".repeat(64);
@@ -102,7 +102,10 @@ describe("Reflection model collection tools", () => {
         return { output, usage };
       },
     };
-    const context = createTestApp({ now: () => NOW, groundedAnalysisProvider: provider });
+    const context = await createHydratedTestApp({
+      now: () => NOW,
+      groundedAnalysisProvider: provider,
+    });
     const originalGet = context.ownerGameNoteService.get.bind(context.ownerGameNoteService);
     const noteReads: string[] = [];
     context.ownerGameNoteService.get = async (gameId: unknown) => {
@@ -315,7 +318,10 @@ describe("Reflection model collection tools", () => {
             ],
           }),
         });
-        const context = createTestApp({ now: () => NOW, groundedAnalysisProvider: provider });
+        const context = await createHydratedTestApp({
+          now: () => NOW,
+          groundedAnalysisProvider: provider,
+        });
         await context.gameService.addGame({ name: "Reflection evidence game" });
         await context.reflectionRuntime.recover();
 

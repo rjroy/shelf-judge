@@ -811,6 +811,7 @@ describe("Integration: End-to-end scenarios", () => {
         ),
       ).toHaveLength(persistenceCountAfterRepair);
 
+      await ctx.storageService.hydrateSourceVector?.();
       const profileResponse = await jsonRequest(ctx.app, "GET", "/api/profile");
       expect(profileResponse.status).toBe(200);
       const currentProfile = await ctx.storageService.loadProfile();

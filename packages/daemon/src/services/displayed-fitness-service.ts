@@ -8,6 +8,7 @@ import type {
   RedundancySettings,
   NicheSettings,
   TournamentData,
+  SemanticScoringInputProof,
 } from "@shelf-judge/shared";
 import type { GameService } from "./game-service.js";
 import type { PredictionService } from "./prediction-service.js";
@@ -24,6 +25,7 @@ import { canonicalSha256 } from "./profile-source-coordinator.js";
 import { projectProfileCollectionSource } from "./game-projection.js";
 import { buildJevPredictionCaptureIdentity } from "./jev-prediction-capture-identity.js";
 import type { JevPairReadProofFence } from "./jev-pair-read-service.js";
+import { JEV_ACTIVATION_COVERAGE_VERSION } from "./jev-pair-coverage.js";
 
 export interface DisplayedGameFitness extends GameWithScore {
   hasPredictedContribution: boolean;
@@ -44,6 +46,30 @@ export interface DisplayedFitnessService {
   listGamesFromSnapshot(
     snapshot: DisplayedFitnessSnapshot,
     options: DisplayedFitnessOptions,
+  ): Promise<DisplayedGameFitness[]>;
+}
+
+/** Internal service surface for durable scoring-input consumers. */
+export interface PrivateDisplayedFitnessService extends DisplayedFitnessService {
+  /** Private persistence-authority API; never accepts a public/profile projection. */
+  getScoringInputFromSnapshot(snapshot: PrivateDisplayedFitnessSnapshot): Promise<{
+    semanticScoringInputProof: SemanticScoringInputProof;
+    isCurrent(): boolean;
+  }>;
+  /** Returns displayed output together with the exact scoring-input proof it consumed. */
+  listGamesFromSnapshotWithProof(
+    snapshot: PrivateDisplayedFitnessSnapshot,
+    options: DisplayedFitnessOptions,
+  ): Promise<{
+    games: DisplayedGameFitness[];
+    semanticScoringInputProof: SemanticScoringInputProof;
+    isCurrent(): boolean;
+  }>;
+  /** Internal implementation seam used to feed a previously captured private universe. */
+  listSnapshotGames(
+    snapshot: DisplayedFitnessSnapshot,
+    options: DisplayedFitnessOptions,
+    prepared?: PreparedScoringInput,
   ): Promise<DisplayedGameFitness[]>;
 }
 
@@ -108,6 +134,16 @@ function semanticConfigured(collection: Collection, settings: RedundancySettings
     settings.enabled &&
     semantic?.settings.enabled === true &&
     (semantic.settings.weights.description > 0 || semantic.settings.weights.ownerNote > 0)
+  );
+}
+
+function sameSource(left: SourceVector, right: SourceVector): boolean {
+  return (
+    left.collectionId === right.collectionId &&
+    left.collectionSchemaVersion === right.collectionSchemaVersion &&
+    left.collectionRevision === right.collectionRevision &&
+    left.processEpoch === right.processEpoch &&
+    left.changeToken === right.changeToken
   );
 }
 
@@ -342,9 +378,16 @@ function targetEntries(
   );
 }
 
+type PreparedScoringInput = {
+  capture: GameWithScore[];
+  table?: RedundancyPairTable;
+  proof: SemanticScoringInputProof;
+  fence?: JevPairReadProofFence;
+};
+
 export function createDisplayedFitnessService(
   deps: DisplayedFitnessServiceDeps,
-): DisplayedFitnessService {
+): PrivateDisplayedFitnessService {
   const {
     gameService,
     predictionService,
@@ -353,7 +396,218 @@ export function createDisplayedFitnessService(
     resolveSemanticRead,
   } = deps;
 
+  // This cache is deliberately private and singular. The token is part of the key (unlike the
+  // durable identity) so a staged same-revision collection cannot borrow a persisted capture.
+  let scoringMemo:
+    | {
+        key: string;
+        capture: GameWithScore[];
+        table?: RedundancyPairTable;
+        proof: SemanticScoringInputProof;
+        fence?: JevPairReadProofFence;
+        vector: SourceVector;
+        semanticConfigured: boolean;
+      }
+    | undefined;
+
+  async function captureScoringInput(snapshot: PrivateDisplayedFitnessSnapshot) {
+    const collection = structuredClone(snapshot.collection);
+    const vector = snapshot.sourceVector;
+    const current = storageService?.sourceVector?.();
+    if (
+      !vector.available ||
+      !current?.available ||
+      !sameSource(vector, current) ||
+      vector.collectionId !== collection.id ||
+      vector.collectionRevision !== collection.revision ||
+      vector.collectionSchemaVersion !== collection.schemaVersion
+    ) {
+      throw new Error("Displayed fitness scoring input is unavailable or stale");
+    }
+    const configured = semanticConfigured(collection, snapshot.redundancySettings);
+    const mode = configured
+      ? "semantic"
+      : snapshot.redundancySettings.enabled
+        ? "factual-only"
+        : "disabled";
+    const memoSource = {
+      collection,
+      tournament: snapshot.tournament,
+      predictionSettings: snapshot.predictionSettings,
+      redundancySettings: snapshot.redundancySettings,
+      mode,
+    };
+    const key = canonicalSha256({
+      ...memoSource,
+      ...(configured ? { processEpoch: vector.processEpoch, changeToken: vector.changeToken } : {}),
+    });
+    if (scoringMemo?.key === key) {
+      if (!configured) {
+        // The durable inactive identity is process-independent. Refresh only the current-source
+        // fence while reusing its already-complete local prediction capture.
+        scoringMemo = { ...scoringMemo, vector };
+        return scoringMemo;
+      }
+      if (scoringMemo.fence?.reusable === true && scoringMemo.fence.isCurrent()) return scoringMemo;
+    }
+    let proof: SemanticScoringInputProof;
+    if (!predictionService?.listGamesWithPredictionsFromSnapshot)
+      throw new Error("Complete scoring prediction capture is unavailable");
+    const capture = await predictionService.listGamesWithPredictionsFromSnapshot(
+      projectProfileCollectionSource(collection),
+      structuredClone(snapshot.tournament),
+      structuredClone(snapshot.predictionSettings),
+    );
+    const afterCapture = storageService?.sourceVector?.();
+    if (!afterCapture?.available || !sameSource(vector, afterCapture))
+      throw new Error("Displayed fitness scoring input changed during prediction capture");
+    let table: RedundancyPairTable | undefined;
+    let fence: JevPairReadProofFence | undefined;
+    if (!configured) {
+      const inactiveMode = snapshot.redundancySettings.enabled ? "factual-only" : "disabled";
+      proof = {
+        version: 1,
+        mode: inactiveMode,
+        identity: canonicalSha256({
+          domain: "semantic-scoring-input-v1",
+          mode: inactiveMode,
+          collection: {
+            id: collection.id,
+            schemaVersion: collection.schemaVersion,
+            axes: collection.axes,
+            games: collection.games.map((game) =>
+              Object.fromEntries(Object.entries(game).filter(([key]) => key !== "entityMetadata")),
+            ),
+          },
+          tournament: snapshot.tournament,
+          predictionSettings: snapshot.predictionSettings,
+          redundancy: {
+            enabled: snapshot.redundancySettings.enabled,
+            componentWeights: snapshot.redundancySettings.componentWeights,
+          },
+        }),
+      };
+    } else {
+      if (!resolveSemanticRead) throw new Error("Semantic scoring input proof is unavailable");
+      const identity = buildJevPredictionCaptureIdentity({
+        collection,
+        sourceVector: vector,
+        tournament: snapshot.tournament,
+        predictionSettings: snapshot.predictionSettings,
+        factualWeights: snapshot.redundancySettings.componentWeights,
+        predictionCapture: capture,
+      });
+      if (!identity.ok) throw new Error("Semantic scoring input capture is incoherent");
+      fence = resolveSemanticRead({
+        predictionCapture: capture,
+        collection,
+        tournament: snapshot.tournament,
+        predictionSettings: snapshot.predictionSettings,
+        redundancySettings: snapshot.redundancySettings,
+        factualWeights: snapshot.redundancySettings.componentWeights,
+        captureIdentity: identity.identity,
+        sourceVector: vector,
+      });
+      if (
+        !fence ||
+        fence.reusable !== true ||
+        !fence.proof ||
+        fence.proof.status !== fence.result.status ||
+        !fence.isCurrent()
+      )
+        throw new Error("Semantic scoring input proof is unavailable or stale");
+      const semanticStatus = fence.result.status;
+      const coverageIdentity =
+        "identity" in fence.proof
+          ? fence.proof.identity
+          : "table" in fence.result
+            ? fence.result.table?.identity.generationId
+            : undefined;
+      if (!coverageIdentity) throw new Error("Semantic scoring input identity is unavailable");
+      if (
+        !(
+          semanticStatus === "ready" ||
+          semanticStatus === "partial" ||
+          semanticStatus === "factual" ||
+          semanticStatus === "not-ready"
+        )
+      )
+        throw new Error("Semantic scoring input status is unavailable");
+      proof = {
+        version: 1,
+        mode: "semantic",
+        status: semanticStatus,
+        coverageVersion: JEV_ACTIVATION_COVERAGE_VERSION,
+        identity: coverageIdentity,
+      };
+      if ("table" in fence.result) table = fence.result.table;
+    }
+    const result = { key, capture, table, proof, fence, vector, semanticConfigured: configured };
+    scoringMemo = result;
+    return result;
+  }
+
+  function isCapturedCurrent(captured: Awaited<ReturnType<typeof captureScoringInput>>): boolean {
+    try {
+      const current = storageService?.sourceVector?.();
+      return (
+        current !== undefined &&
+        current.available &&
+        sameSource(captured.vector, current) &&
+        (!captured.semanticConfigured ||
+          (captured.fence?.reusable === true && captured.fence.isCurrent()))
+      );
+    } catch {
+      return false;
+    }
+  }
+
   return {
+    async getScoringInputFromSnapshot(snapshot): Promise<{
+      semanticScoringInputProof: SemanticScoringInputProof;
+      isCurrent(): boolean;
+    }> {
+      const captured = await captureScoringInput(snapshot);
+      return {
+        semanticScoringInputProof: structuredClone(captured.proof),
+        isCurrent: () => isCapturedCurrent(captured),
+      };
+    },
+
+    async listGamesFromSnapshotWithProof(snapshot, options) {
+      const captured = await captureScoringInput(snapshot);
+      const beforeScoring = storageService?.sourceVector?.();
+      if (
+        !beforeScoring?.available ||
+        !sameSource(captured.vector, beforeScoring) ||
+        (captured.semanticConfigured &&
+          (captured.fence?.reusable !== true || !captured.fence.isCurrent()))
+      )
+        throw new Error("Displayed fitness scoring input changed before snapshot calculation");
+      const games = await (
+        this as unknown as {
+          listSnapshotGames(
+            snapshot: PrivateDisplayedFitnessSnapshot,
+            options: DisplayedFitnessOptions,
+            prepared: PreparedScoringInput,
+          ): Promise<DisplayedGameFitness[]>;
+        }
+      ).listSnapshotGames(snapshot, options, captured);
+      const current = storageService?.sourceVector?.();
+      if (
+        !current?.available ||
+        !sameSource(captured.vector, current) ||
+        (captured.semanticConfigured &&
+          (captured.fence?.reusable !== true || !captured.fence.isCurrent()))
+      )
+        throw new Error("Displayed fitness scoring input changed during snapshot calculation");
+      return {
+        games,
+        semanticScoringInputProof: structuredClone(captured.proof),
+        isCurrent: () => isCapturedCurrent(captured),
+      };
+    },
+
     async listGames(options): Promise<DisplayedGameFitness[]> {
       const initialSourceVector = storageService?.sourceVector?.();
       const targets = targetIds(options);
@@ -505,6 +759,21 @@ export function createDisplayedFitnessService(
     },
 
     async listGamesFromSnapshot(snapshot, options): Promise<DisplayedGameFitness[]> {
+      return (
+        this as unknown as {
+          listSnapshotGames(
+            snapshot: DisplayedFitnessSnapshot,
+            options: DisplayedFitnessOptions,
+          ): Promise<DisplayedGameFitness[]>;
+        }
+      ).listSnapshotGames(snapshot, options);
+    },
+
+    async listSnapshotGames(
+      snapshot: DisplayedFitnessSnapshot,
+      options: DisplayedFitnessOptions,
+      prepared?: PreparedScoringInput,
+    ): Promise<DisplayedGameFitness[]> {
       const targets = targetIds(options);
       const privateCollection =
         snapshot.kind === "private-capture" ? structuredClone(snapshot.collection) : undefined;
@@ -513,60 +782,82 @@ export function createDisplayedFitnessService(
           ? structuredClone(snapshot.collection)
           : projectProfileCollectionSource(privateCollection);
       const tournament = structuredClone(snapshot.tournament);
-      const completeGames = options.includePredicted
-        ? await (() => {
-            if (!predictionService?.listGamesWithPredictionsFromSnapshot) {
-              throw new Error("Snapshot prediction requires prediction service");
-            }
-            return predictionService.listGamesWithPredictionsFromSnapshot(
-              collection,
-              tournament,
-              structuredClone(snapshot.predictionSettings),
-              targets,
-            );
-          })()
-        : (() => {
-            if (gameService.listGamesFromSnapshot === undefined) {
-              throw new Error("Snapshot fitness requires snapshot-capable game service");
-            }
-            return gameService.listGamesFromSnapshot(
-              targets === undefined
-                ? collection
-                : {
-                    ...collection,
-                    games: collection.games.filter((game) => targets.includes(game.id)),
-                  },
-              tournament,
-            );
-          })();
+      const completeGames =
+        prepared && options.includePredicted
+          ? structuredClone(prepared.capture)
+          : prepared || options.includePredicted
+            ? await (() => {
+                if (prepared) {
+                  if (!gameService.listGamesFromSnapshot)
+                    throw new Error("Snapshot fitness requires snapshot-capable game service");
+                  return gameService.listGamesFromSnapshot(
+                    targets === undefined
+                      ? collection
+                      : {
+                          ...collection,
+                          games: collection.games.filter((game) => targets.includes(game.id)),
+                        },
+                    tournament,
+                  );
+                }
+                if (!predictionService?.listGamesWithPredictionsFromSnapshot)
+                  throw new Error("Snapshot prediction requires prediction service");
+                return predictionService.listGamesWithPredictionsFromSnapshot(
+                  collection,
+                  tournament,
+                  structuredClone(snapshot.predictionSettings),
+                  targets,
+                );
+              })()
+            : (() => {
+                if (gameService.listGamesFromSnapshot === undefined) {
+                  throw new Error("Snapshot fitness requires snapshot-capable game service");
+                }
+                return gameService.listGamesFromSnapshot(
+                  targets === undefined
+                    ? collection
+                    : {
+                        ...collection,
+                        games: collection.games.filter((game) => targets.includes(game.id)),
+                      },
+                  tournament,
+                );
+              })();
       const allGames = targetEntries(completeGames, targets);
       const ownedGames = allGames.filter((entry) => entry.game.ownership !== "previously-owned");
       if (options.includeNiches && predictionService) {
         if (predictionService.listGamesWithPredictionsFromSnapshot === undefined) {
           throw new Error("Snapshot niches require snapshot-capable prediction service");
         }
-        const nicheUniverse = options.includePredicted
-          ? targets === undefined
-            ? ownedGames
+        const nicheUniverse = prepared
+          ? structuredClone(prepared.capture).filter(
+              (entry) => entry.game.ownership !== "previously-owned",
+            )
+          : options.includePredicted
+            ? targets === undefined
+              ? ownedGames
+              : (
+                  await predictionService.listGamesWithPredictionsFromSnapshot(
+                    collection,
+                    tournament,
+                    structuredClone(snapshot.predictionSettings),
+                  )
+                ).filter((entry) => entry.game.ownership !== "previously-owned")
             : (
                 await predictionService.listGamesWithPredictionsFromSnapshot(
                   collection,
                   tournament,
                   structuredClone(snapshot.predictionSettings),
                 )
-              ).filter((entry) => entry.game.ownership !== "previously-owned")
-          : (
-              await predictionService.listGamesWithPredictionsFromSnapshot(
-                collection,
-                tournament,
-                structuredClone(snapshot.predictionSettings),
-              )
-            ).filter((entry) => entry.game.ownership !== "previously-owned");
+              ).filter((entry) => entry.game.ownership !== "previously-owned");
         const nicheMap = computeNichePositions(nicheUniverse, snapshot.nicheSettings);
         for (const entry of allGames) entry.nichePosition = nicheMap.get(entry.game.id) ?? null;
       }
-      const redundancyUniverse =
-        targets === undefined
+      const redundancyUniverse = prepared
+        ? structuredClone(prepared.capture).filter(
+            (entry) => entry.game.ownership !== "previously-owned",
+          )
+        : targets === undefined
           ? undefined
           : options.includePredicted
             ? predictionService?.listGamesWithPredictionsFromSnapshot === undefined
@@ -585,8 +876,13 @@ export function createDisplayedFitnessService(
                   .listGamesFromSnapshot(collection, tournament)
                   .filter((entry) => entry.game.ownership !== "previously-owned");
               })();
-      const privateSemanticUniverse =
-        snapshot.kind === "private-capture" && snapshot.redundancySettings.enabled
+      const privateSemanticUniverse = prepared
+        ? Promise.resolve(
+            structuredClone(prepared.capture).filter(
+              (entry) => entry.game.ownership !== "previously-owned",
+            ),
+          )
+        : snapshot.kind === "private-capture" && snapshot.redundancySettings.enabled
           ? options.includePredicted && targets === undefined
             ? Promise.resolve(ownedGames)
             : options.includePredicted && redundancyUniverse !== undefined
@@ -612,8 +908,11 @@ export function createDisplayedFitnessService(
       const semanticConfiguredForSnapshot =
         privateCollection !== undefined &&
         semanticConfigured(privateCollection, snapshot.redundancySettings);
-      let semanticCapture: GameWithScore[] | undefined;
+      let semanticCapture: GameWithScore[] | undefined = prepared
+        ? structuredClone(prepared.capture)
+        : undefined;
       if (
+        !prepared &&
         semanticConfiguredForSnapshot &&
         predictionService?.listGamesWithPredictionsFromSnapshot
       ) {
@@ -645,7 +944,11 @@ export function createDisplayedFitnessService(
         snapshot.sourceVector.changeToken === currentSourceVector.changeToken;
       let semanticPairTable: RedundancyPairTable | undefined;
       let semanticStatus: Exclude<RedundancySimilarityStatus, "ready"> | undefined;
-      if (semanticConfiguredForSnapshot) {
+      if (prepared) {
+        semanticPairTable = prepared.table;
+        if (prepared.proof.mode === "semantic" && prepared.proof.status !== "ready")
+          semanticStatus = prepared.proof.status;
+      } else if (semanticConfiguredForSnapshot) {
         semanticStatus = "not-ready";
         if (semanticCapture && privateCollection && sourceVectorIsCurrent && resolveSemanticRead) {
           const identity = buildJevPredictionCaptureIdentity({
@@ -681,6 +984,7 @@ export function createDisplayedFitnessService(
         }
       }
       const legacyPairTable =
+        !prepared &&
         !semanticConfiguredForSnapshot &&
         snapshot.kind === "private-capture" &&
         privateCollection !== undefined &&

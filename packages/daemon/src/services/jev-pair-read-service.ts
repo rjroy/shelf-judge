@@ -27,10 +27,14 @@ export type JevPairReadProof =
 export interface JevPairReadProofFence {
   result: JevPairReadResult;
   proof: JevPairReadProof;
+  /** True only when a healthy read is fenced by a stable cache mutation revision. */
+  reusable?: boolean;
   isCurrent(): boolean;
 }
 
-type ReadCache = Pick<JevPairCache, "available" | "lookup">;
+type ReadCache = Pick<JevPairCache, "available" | "lookup"> & {
+  mutationRevision?: () => number | null;
+};
 
 const DISABLED: JevPairReadResult = {
   status: "disabled",
@@ -120,14 +124,46 @@ export function createJevPairReadService(cache: ReadCache) {
       // Retain an isolated complete snapshot: caller mutations after this call must not change the
       // inputs against which the fence is checked. The clone stays private in this closure.
       const captured = structuredClone(input);
+      const revisionReader = cache.mutationRevision;
+      let initialRevision: number | null = null;
+      if (revisionReader) {
+        try {
+          initialRevision = revisionReader.call(cache);
+        } catch {
+          initialRevision = null;
+        }
+      }
       const result = resolve(captured);
       const proof = proofFor(result);
       const encodedProof = JSON.stringify(proof);
+      let stableRevision: number | null = null;
+      if (revisionReader && initialRevision !== null) {
+        try {
+          const afterRevision = revisionReader.call(cache);
+          if (afterRevision === initialRevision) stableRevision = initialRevision;
+        } catch {
+          // A failed revision read cannot authorize reuse.
+        }
+      }
+      const healthyValidatedRead =
+        (result.status === "ready" || result.status === "partial" || result.status === "factual") &&
+        "table" in result &&
+        result.table !== undefined;
+      const reusable = healthyValidatedRead && stableRevision !== null;
       return {
         result,
         proof,
+        reusable,
         isCurrent(): boolean {
           try {
+            if (revisionReader) {
+              if (!healthyValidatedRead || stableRevision === null) return false;
+              const currentRevision = revisionReader.call(cache);
+              return currentRevision !== null && currentRevision === stableRevision;
+            }
+            // Compatibility for test/custom caches without revision support. Production caches
+            // use the revision path above and never rescan pair lookups here.
+            if (!("table" in result) || result.table === undefined) return false;
             return JSON.stringify(proofFor(resolve(captured))) === encodedProof;
           } catch {
             return false;

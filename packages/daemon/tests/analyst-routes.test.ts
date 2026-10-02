@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createTestApp, jsonRequest } from "./helpers/test-app.js";
+import { createHydratedTestApp, createTestApp, jsonRequest } from "./helpers/test-app.js";
 import type {
   GroundedAnalysisProvider,
   GroundedAnalysisRequest,
@@ -163,7 +163,7 @@ describe("Analyst daemon routes", () => {
   });
 
   test("returns non-secret configuration and rejects malformed configuration queries", async () => {
-    const context = createTestApp();
+    const context = await createHydratedTestApp();
     const response = await jsonRequest(context.app, "GET", "/api/analyst/configuration");
     const configuration: unknown = await response.json();
 
@@ -189,7 +189,7 @@ describe("Analyst daemon routes", () => {
   });
 
   test("strictly rejects malformed turns before any evidence or provider work", async () => {
-    const context = createTestApp();
+    const context = await createHydratedTestApp();
     const response = await jsonRequest(
       context.app,
       "POST",
@@ -207,7 +207,7 @@ describe("Analyst daemon routes", () => {
 
   test("requires the current manifest and disclosure versions before provider work", async () => {
     let calls = 0;
-    const context = createTestApp({
+    const context = await createHydratedTestApp({
       groundedAnalysisProvider: configuredProvider((request) => {
         calls += 1;
         return Promise.resolve(completedProviderOutput(request));
@@ -231,7 +231,7 @@ describe("Analyst daemon routes", () => {
   });
 
   test("keeps unavailable provider configuration separate from transcript validation", async () => {
-    const context = createTestApp();
+    const context = await createHydratedTestApp();
     const response = await jsonRequest(
       context.app,
       "POST",
@@ -248,7 +248,7 @@ describe("Analyst daemon routes", () => {
   });
 
   test("streams one configured turn as SSE and NDJSON with one committed terminal event", async () => {
-    const context = createTestApp({
+    const context = await createHydratedTestApp({
       groundedAnalysisProvider: configuredProvider((request) => {
         expect(request.systemPrompt).toBe(
           "You are Shelf Judge's Collection Analyst. Use the available read-only collection discovery tools as needed, then provide a conversational final answer.",
@@ -348,7 +348,7 @@ describe("Analyst daemon routes", () => {
 
   test("accepts an authorized cancellation during provider work and rejects reuse while active", async () => {
     const started = deferred<void>();
-    const context = createTestApp({
+    const context = await createHydratedTestApp({
       groundedAnalysisProvider: configuredProvider(async (request) => {
         started.resolve();
         await new Promise<void>((_resolve, reject) =>
@@ -395,7 +395,7 @@ describe("Analyst daemon routes", () => {
     const started = deferred<void>();
     const disconnected = deferred<void>();
     let calls = 0;
-    const context = createTestApp({
+    const context = await createHydratedTestApp({
       groundedAnalysisProvider: configuredProvider(async (request) => {
         calls += 1;
         if (calls > 1) return completedProviderOutput(request);
@@ -435,7 +435,7 @@ describe("Analyst daemon routes", () => {
   test("cancels a turn released by the provider before terminal finalization", async () => {
     const started = deferred<void>();
     const releaseProvider = deferred<void>();
-    const context = createTestApp({
+    const context = await createHydratedTestApp({
       groundedAnalysisProvider: configuredProvider(async (request) => {
         started.resolve();
         await releaseProvider.promise;
@@ -464,7 +464,7 @@ describe("Analyst daemon routes", () => {
     const started = deferred<void>();
     const providerCancelled = deferred<void>();
     const shutdown = deferred<void>();
-    const context = createTestApp({
+    const context = await createHydratedTestApp({
       onShutdown: () => shutdown.resolve(),
       groundedAnalysisProvider: configuredProvider(async (request) => {
         started.resolve();
@@ -496,7 +496,7 @@ describe("Analyst daemon routes", () => {
   });
 
   test("checks disclosure and transcripts against the configured provider before evidence work", async () => {
-    const context = createTestApp({ groundedAnalysisProvider: configuredProvider() });
+    const context = await createHydratedTestApp({ groundedAnalysisProvider: configuredProvider() });
     const mismatch = await jsonRequest(
       context.app,
       "POST",
@@ -561,7 +561,7 @@ describe("Analyst daemon routes", () => {
         });
       },
     };
-    const context = createTestApp({ groundedAnalysisProvider: provider });
+    const context = await createHydratedTestApp({ groundedAnalysisProvider: provider });
     const responsePromise = jsonRequest(
       context.app,
       "POST",
@@ -580,7 +580,7 @@ describe("Analyst daemon routes", () => {
   });
 
   test("passes validated turn context and emits receipts bound to finalized discovery IDs", async () => {
-    const context = createTestApp({ groundedAnalysisProvider: configuredProvider() });
+    const context = await createHydratedTestApp({ groundedAnalysisProvider: configuredProvider() });
     const attestationService = createAnalystAttestationService();
     const evidenceService = createAnalystEvidenceService({
       storageService: context.storageService,
@@ -766,7 +766,7 @@ describe("Analyst daemon routes", () => {
         identity: { providerId: "provider", modelId, extensionIds: [] },
       }),
     });
-    const context = createTestApp({ groundedAnalysisProvider: provider });
+    const context = await createHydratedTestApp({ groundedAnalysisProvider: provider });
     const first = await jsonRequest(
       context.app,
       "POST",
@@ -820,7 +820,7 @@ describe("Analyst daemon routes", () => {
 
   test("fails closed when identity tracking is full without forgetting prior bindings", async () => {
     const provider = configuredProvider();
-    const context = createTestApp({ groundedAnalysisProvider: provider });
+    const context = await createHydratedTestApp({ groundedAnalysisProvider: provider });
     const attestationService = createAnalystAttestationService();
     const evidenceService = createAnalystEvidenceService({
       storageService: context.storageService,
@@ -914,7 +914,7 @@ describe("Analyst daemon routes", () => {
 
   test("atomically admits only the remaining identity capacity after concurrent validation", async () => {
     const provider = configuredProvider();
-    const context = createTestApp({ groundedAnalysisProvider: provider });
+    const context = await createHydratedTestApp({ groundedAnalysisProvider: provider });
     const attestationService = createAnalystAttestationService();
     const evidenceService = createAnalystEvidenceService({
       storageService: context.storageService,
@@ -999,7 +999,7 @@ describe("Analyst daemon routes", () => {
   });
 
   test("does not expose arbitrary citation lookup or owner content", async () => {
-    const context = createTestApp();
+    const context = await createHydratedTestApp();
     const response = await jsonRequest(context.app, "POST", "/api/analyst/citations/inspect", {
       citation: {
         citationId: "forged",
@@ -1233,7 +1233,7 @@ describe("Analyst daemon routes", () => {
   });
 
   test("requires the exact active identity when cancelling an absent request", async () => {
-    const context = createTestApp();
+    const context = await createHydratedTestApp();
     const response = await jsonRequest(context.app, "POST", "/api/analyst/turns/cancel", {
       conversationId: "conversation-1",
       conversationCapability: capability,
