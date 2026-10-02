@@ -87,7 +87,10 @@ function sameIdentity(a: RedundancyPairIdentity, b: RedundancyPairIdentity): boo
   );
 }
 
-function validatePairTable(table: RedundancyPairTable, eligibleIds: string[]): Map<string, number> {
+function validatePairTable(
+  table: RedundancyPairTable,
+  eligibleIds: string[],
+): { factualPairs: Map<string, number>; composedPairs: Map<string, number> } {
   if (!sameIdentity(table.identity, table.expectedIdentity)) {
     throw new Error("Redundancy pair table identity does not match the expected generation");
   }
@@ -102,7 +105,8 @@ function validatePairTable(table: RedundancyPairTable, eligibleIds: string[]): M
       expected.add(redundancyPairKey(eligibleIds[i], eligibleIds[j]));
     }
   }
-  const composed = new Map<string, number>();
+  const factualPairs = new Map<string, number>();
+  const composedPairs = new Map<string, number>();
   const seen = new Set<string>();
   for (const pair of table.pairs) {
     if (!pair.gameAId || !pair.gameBId || pair.gameAId === pair.gameBId) {
@@ -115,6 +119,7 @@ function validatePairTable(table: RedundancyPairTable, eligibleIds: string[]): M
     if (!Number.isFinite(pair.factual) || pair.factual < 0 || pair.factual > 1) {
       throw new Error("Redundancy factual pair score must be finite and in [0, 1]");
     }
+    factualPairs.set(key, pair.factual);
     const available: [number, number][] = [];
     if (factual > 0) available.push([factual, pair.factual]);
     if (description > 0 && pair.description != null) {
@@ -131,14 +136,14 @@ function validatePairTable(table: RedundancyPairTable, eligibleIds: string[]): M
     }
     const total = available.reduce((sum, [weight]) => sum + weight, 0);
     if (total > 0 && Number.isFinite(total))
-      composed.set(
+      composedPairs.set(
         key,
         available.reduce((sum, [weight, score]) => sum + weight * score, 0) / total,
       );
   }
   if (seen.size !== expected.size || [...expected].some((key) => !seen.has(key)))
     throw new Error("Redundancy factual pair universe is incomplete");
-  return composed;
+  return { factualPairs, composedPairs };
 }
 
 /**
@@ -249,7 +254,7 @@ export function computeRedundancyAnalysis(
   if (pairTable) {
     // Compare the supplied factual layer to the current factual vectors before trusting
     // any semantic composition. This also catches pair-table/game identity drift.
-    const factualPairs = validatePairTable(
+    const { factualPairs, composedPairs } = validatePairTable(
       pairTable,
       eligible.map((gws) => gws.game.id),
     );
@@ -263,10 +268,11 @@ export function computeRedundancyAnalysis(
           vectors.get(b.game.id)!,
           settings.componentWeights,
         );
-        const supplied = pairTable.pairs.find(
-          (p) =>
-            redundancyPairKey(p.gameAId, p.gameBId) === redundancyPairKey(a.game.id, b.game.id),
-        )!.factual;
+        const key = redundancyPairKey(a.game.id, b.game.id);
+        const supplied = factualPairs.get(key);
+        if (supplied === undefined) {
+          throw new Error("Redundancy factual pair table is missing a validated pair");
+        }
         if (Math.abs(expected - supplied) > 1e-9) {
           throw new Error(
             "Redundancy pair table factual score does not match current feature vectors",
@@ -278,7 +284,7 @@ export function computeRedundancyAnalysis(
     scoreNeighbors(
       eligible,
       settings,
-      (a, b) => factualPairs.get(redundancyPairKey(a.game.id, b.game.id)) ?? Number.NaN,
+      (a, b) => composedPairs.get(redundancyPairKey(a.game.id, b.game.id)) ?? Number.NaN,
       result,
     );
     return { adjustments: result, similarityInfo, defaultSimilarityInfo };

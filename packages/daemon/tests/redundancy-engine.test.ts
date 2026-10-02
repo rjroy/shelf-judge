@@ -477,6 +477,90 @@ describe("computeRedundancyAdjustments", () => {
       ).toThrow();
   });
 
+  test("uses validated map lookups for a large factual pair universe", () => {
+    const count = 40;
+    const syntheticVectors = new Map<string, FeatureVector>();
+    const games = Array.from({ length: count }, (_, index) => {
+      const id = `synthetic-${index}`;
+      const group = index % 5;
+      const binary = Array.from({ length: 5 }, (_, axis) => Number(axis === group));
+      syntheticVectors.set(id, { binary, continuous: [], personalAxes: null });
+      return makeGws(makeGame(id, id), makeScore(count - index));
+    });
+    const localGetVector = (game: Game) => syntheticVectors.get(game.id)!;
+    const pairs: RedundancyPairTable["pairs"] = [];
+    for (let i = 0; i < games.length; i++) {
+      for (let j = i + 1; j < games.length; j++) {
+        pairs.push({
+          gameAId: games[i].game.id,
+          gameBId: games[j].game.id,
+          factual: Number(i % 5 === j % 5),
+        });
+      }
+    }
+    // Validation must still iterate the complete table, but analysis must not
+    // perform a fresh linear search for each pair in the quadratic game loop.
+    const guardedPairs = new Proxy(pairs, {
+      get(target, property, receiver) {
+        if (property === "find") throw new Error("pair table linear search is forbidden");
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    });
+    const table = pairTable(guardedPairs, {
+      weights: { factual: 1, description: 0, ownerNote: 0 },
+    });
+    const result = computeRedundancyAnalysis(
+      games,
+      enabledSettings({ similarityThreshold: 0.5 }),
+      localGetVector,
+      table,
+    );
+
+    expect(pairs).toHaveLength((count * (count - 1)) / 2);
+    for (const game of games) {
+      const adjustment = result.adjustments.get(game.game.id);
+      expect(adjustment).toBeDefined();
+      expect(adjustment!.nicheSize).toBe(7);
+      const gameGroup = Number(game.game.id.split("-")[1]) % 5;
+      expect(
+        adjustment!.nicheNeighbors.every(
+          (neighbor) => Number(neighbor.gameId.split("-")[1]) % 5 === gameGroup,
+        ),
+      ).toBe(true);
+    }
+  });
+
+  test("fails closed for malformed factual pairs", () => {
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9)),
+      makeGws(makeGame("b", "B"), makeScore(7)),
+      makeGws(makeGame("c", "C"), makeScore(5)),
+    ];
+    const factual = (a: string, b: string) =>
+      factualSimilarity(
+        getVector(makeGame(a, a)),
+        getVector(makeGame(b, b)),
+        DEFAULT_REDUNDANCY_SETTINGS.componentWeights,
+      );
+    const completePairs = [
+      { gameAId: "a", gameBId: "b", factual: factual("a", "b") },
+      { gameAId: "a", gameBId: "c", factual: factual("a", "c") },
+      { gameAId: "b", gameBId: "c", factual: factual("b", "c") },
+    ];
+    const malformedTables = [
+      pairTable(completePairs.slice(1)),
+      pairTable([{ ...completePairs[0], factual: Number.NaN }, ...completePairs.slice(1)]),
+      pairTable([{ ...completePairs[0], gameBId: "a" }, ...completePairs.slice(1)]),
+      pairTable(completePairs, {
+        identity: { generationId: "wrong", consentEpoch: "c1", settingsEpoch: "s1" },
+      }),
+    ];
+
+    for (const table of malformedTables) {
+      expect(() => computeRedundancyAnalysis(games, enabledSettings(), getVector, table)).toThrow();
+    }
+  });
+
   test("no-neighbor analysis still reports status and uses only positive non-vetoed score universe", () => {
     const games = [
       makeGws(makeGame("a", "A"), makeScore(9)),
