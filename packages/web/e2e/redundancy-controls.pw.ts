@@ -54,10 +54,13 @@ async function installDaemon(page: Page) {
               headers: { "content-type": "application/json" },
             });
           else {
-            const stopReason = new URL(location.href).searchParams.get("stop");
+            const stopReason =
+              window.localStorage.getItem("stop-reason") ??
+              new URL(location.href).searchParams.get("stop");
             const partial = new URL(location.href).searchParams.get("partial") === "1";
+            const runState = window.localStorage.getItem("run-state");
             response =
-              window.localStorage.getItem("run-state") === "complete"
+              runState === "cancelled"
                 ? {
                     status: partial ? "partial" : "ready",
                     measurement: "current",
@@ -65,41 +68,57 @@ async function installDaemon(page: Page) {
                     pairCount: 2,
                     coverage: null,
                     progress: {
-                      state: "completed",
+                      state: "interrupted",
                       pairCount: 2,
-                      completedPairs: 2,
-                      cacheHits: 0,
-                      cacheMisses: 2,
+                      completedPairs: 1,
+                      cacheHits: 1,
+                      cacheMisses: 0,
                       failedPairs: 0,
-                      ...(stopReason ? { stopReason } : {}),
                     },
                   }
-                : {
-                    status: partial ? "partial" : "ready",
-                    measurement: "current",
-                    eligibleGameCount: 3,
-                    pairCount: 2,
-                    coverage: null,
-                    progress: partial
-                      ? {
-                          state: "last-known-running",
-                          pairCount: 2,
-                          completedPairs: 1,
-                          cacheHits: 1,
-                          cacheMisses: 1,
-                          failedPairs: 0,
-                        }
-                      : null,
-                  };
+                : runState === "complete"
+                  ? {
+                      status: partial ? "partial" : "ready",
+                      measurement: "current",
+                      eligibleGameCount: 3,
+                      pairCount: 2,
+                      coverage: null,
+                      progress: {
+                        state: "completed",
+                        pairCount: 2,
+                        completedPairs: 2,
+                        cacheHits: 0,
+                        cacheMisses: 2,
+                        failedPairs: 0,
+                        ...(stopReason ? { stopReason } : {}),
+                      },
+                    }
+                  : {
+                      status: partial ? "partial" : "ready",
+                      measurement: "current",
+                      eligibleGameCount: 3,
+                      pairCount: 2,
+                      coverage: null,
+                      progress: partial
+                        ? {
+                            state: "last-known-running",
+                            pairCount: 2,
+                            completedPairs: 1,
+                            cacheHits: 1,
+                            cacheMisses: 1,
+                            failedPairs: 0,
+                          }
+                        : null,
+                    };
             if (stopReason) {
               const statusSnapshot = response as Record<string, unknown>;
               statusSnapshot.progress = {
-                state: "interrupted",
+                state: "failed",
                 pairCount: 2,
-                completedPairs: 1,
-                cacheHits: 0,
-                cacheMisses: 1,
-                failedPairs: 0,
+                completedPairs: Number(new URL(location.href).searchParams.get("completed") ?? 1),
+                cacheHits: Number(new URL(location.href).searchParams.get("cacheHits") ?? 1),
+                cacheMisses: 0,
+                failedPairs: Number(new URL(location.href).searchParams.get("failed") ?? 0),
                 stopReason,
               };
             }
@@ -170,7 +189,7 @@ async function installDaemon(page: Page) {
             "cancelled-run-id",
             typeof body?.runId === "string" ? body.runId : "",
           );
-          window.localStorage.setItem("run-state", "complete");
+          window.localStorage.setItem("run-state", "cancelled");
           response = { state: "cancellation-requested" };
         }
         return new Response(JSON.stringify(response), {
@@ -209,7 +228,8 @@ test("partial coverage benefits current pairs during and after a run", async ({ 
   await expect(status).not.toContainText("factual-only");
 
   await page.getByRole("button", { name: "Cancel live run" }).click();
-  await expect(status).toContainText("Run completed.");
+  await expect(status).toContainText("Run stopped before completion.");
+  await expect(status).not.toContainText("Run failed.");
   await expect(status).toContainText(
     "Partial — available semantic results already affect relevant pairs",
   );
@@ -276,18 +296,63 @@ test("invalid run limits are explained and stop reasons stay distinct", async ({
   );
   await expect(page.getByRole("button", { name: "Preview one run" })).toBeDisabled();
 
-  const reasonCopy: Record<string, string> = {
-    "application-attempt-limit": "application HTTP attempt limit selected for this run",
-    "application-token-threshold": "application's reported-token threshold for this run",
-    "application-deadline":
-      "application stopped the run when its selected maximum duration elapsed",
-    "provider-limit": "previous application attempt limit",
-    "provider-rate-limited": "provider rate-limited requests",
-  };
-  for (const [reason, copy] of Object.entries(reasonCopy)) {
-    await page.goto(`/redundancy?stop=${reason}`);
-    await expect(page.locator(".redundancy-refresh-status")).toContainText(copy);
+  const applicationStopCases = [
+    {
+      reason: "application-attempt-limit",
+      copy: "HTTP request limit reached.",
+      retry: "higher request limit",
+    },
+    {
+      reason: "application-token-threshold",
+      copy: "Reported-token stop limit reached.",
+      retry: "higher token limit",
+    },
+    {
+      reason: "application-deadline",
+      copy: "Run time limit reached.",
+      retry: "longer duration",
+    },
+  ];
+  for (const { reason, copy, retry } of applicationStopCases) {
+    for (const failed of [0, 1]) {
+      await page.goto(`/redundancy?stop=${reason}&failed=${failed}&completed=1&cacheHits=1`);
+      const status = page.locator(".redundancy-refresh-status");
+      await expect(status).toContainText(copy);
+      await expect(status).toContainText(
+        `1 of 2 pairs completed; ${failed} failed; 1 reused from cache.`,
+      );
+      await expect(status).toContainText(retry);
+      await expect(status).not.toContainText("Run failed.");
+      await expect(status.locator("p")).toHaveCount(1);
+      if (reason === "application-token-threshold")
+        await expect(status).toContainText("This is not a billing limit.");
+    }
   }
+
+  await page.goto("/redundancy?stop=provider-limit&failed=1");
+  const legacyLimit = page.locator(".redundancy-refresh-status");
+  await expect(legacyLimit).toContainText(
+    "Previous application request limit reached. 1 of 2 pairs completed; 1 failed; 1 reused from cache.",
+  );
+  await expect(legacyLimit).toContainText("higher request limit");
+  await expect(legacyLimit).not.toContainText("Run failed.");
+  await expect(legacyLimit.locator("p")).toHaveCount(1);
+
+  await page.goto("/redundancy?stop=provider-rate-limited&failed=1");
+  const providerFailure = page.locator(".redundancy-refresh-status");
+  await expect(providerFailure).toContainText(
+    "Run failed. 1 of 2 pairs completed; 1 failed; 1 reused from cache.",
+  );
+  await expect(providerFailure).toContainText("provider rate-limited requests");
+  await expect(providerFailure.locator("p")).toHaveCount(2);
+
+  await page.goto("/redundancy?stop=application-attempt-limit");
+  const reloadedStatus = page.locator(".redundancy-refresh-status");
+  await expect(reloadedStatus).toContainText("HTTP request limit reached.");
+  await page.evaluate(() => window.localStorage.setItem("stop-reason", "application-deadline"));
+  await page.getByRole("button", { name: "Reload status" }).click();
+  await expect(reloadedStatus).toContainText("Run time limit reached.");
+  await expect(reloadedStatus).not.toContainText("HTTP request limit reached.");
 });
 
 test("note consent is opt-in and declining still runs without note text", async ({

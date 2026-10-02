@@ -138,14 +138,35 @@ function semanticStatusValue(status: Semantic["status"]): string {
 function progressCopy(refresh: Refresh, activeRun: ActiveRun): string | null {
   const progress = refresh.progress;
   if (!progress) return null;
+  const summary = `${progress.completedPairs} of ${progress.pairCount} pairs completed; ${progress.failedPairs} failed; ${progress.cacheHits} reused from cache.`;
   const lead = activeRun ? "Refresh is running now." : "Last saved run status.";
   if (progress.state === "last-known-running")
     return `${lead} ${progress.completedPairs} of ${progress.pairCount} pairs completed; ${progress.cacheHits} reused from cache.`;
   if (progress.state === "completed")
     return `Run completed. ${progress.completedPairs} of ${progress.pairCount} pairs completed; ${progress.cacheHits} reused from cache.`;
-  if (progress.state === "interrupted")
-    return `Run interrupted. ${progress.completedPairs} of ${progress.pairCount} pairs completed; ${progress.failedPairs} failed.`;
-  return `Run failed. ${progress.completedPairs} of ${progress.pairCount} pairs completed; ${progress.failedPairs} failed.`;
+  if (progress.state === "interrupted") return `Run stopped before completion. ${summary}`;
+  if (progress.stopReason === "application-attempt-limit")
+    return `HTTP request limit reached. ${summary} Start another run with a higher request limit to continue.`;
+  if (progress.stopReason === "provider-limit")
+    return `Previous application request limit reached. ${summary} Start another run with a higher request limit to continue.`;
+  if (progress.stopReason === "application-token-threshold")
+    return `Reported-token stop limit reached. ${summary} This is not a billing limit. Start another run with a higher token limit to continue.`;
+  if (progress.stopReason === "application-deadline")
+    return `Run time limit reached. ${summary} Start another run with a longer duration to continue.`;
+  return `Run failed. ${summary}`;
+}
+
+function showStopReasonDetails(refresh: Refresh): boolean {
+  const reason = refresh.progress?.stopReason;
+  return Boolean(
+    reason &&
+    ![
+      "application-attempt-limit",
+      "application-token-threshold",
+      "application-deadline",
+      "provider-limit",
+    ].includes(reason),
+  );
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -954,7 +975,7 @@ export default function RedundancyPage() {
                     Cancel live run
                   </button>
                 )}
-                {refresh?.progress?.stopReason && (
+                {refresh?.progress?.stopReason && showStopReasonDetails(refresh) && (
                   <p role="status">{stopReasonCopy[refresh.progress.stopReason]}</p>
                 )}
                 {statusError && <p role="alert">Status could not be loaded: {statusError}</p>}
