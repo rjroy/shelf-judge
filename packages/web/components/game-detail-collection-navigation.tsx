@@ -80,7 +80,9 @@ function buildGameHref(gameId: string, contextKey: string, originId: string): st
 function buildCollectionHref(context: CollectionNavigationContextV1, originId: string): string {
   const params = new URLSearchParams();
   if (context.collectionScope.showPreviouslyOwned) params.set("ownership", "all");
-  if (context.collectionScope.missingDimensionsOnly) params.set("dimensions", "missing");
+  if (context.collectionScope.dimensionStatus !== "all") {
+    params.set("dimensions", context.collectionScope.dimensionStatus);
+  }
   params.set("collectionContext", context.key);
   params.set("collectionOrigin", originId);
   return `/collection?${params.toString()}#collection-game-${encodeURIComponent(originId)}`;

@@ -6,6 +6,7 @@ import {
   createCollectionNavigationContext,
   resolveCollectionNavigationContext,
   runCollectionNavigationExclusive,
+  parseDimensionStatusParameter,
   type CollectionNavigationContextDependencies,
   type CollectionNavigationContextV1,
   type CollectionNavigationExclusiveLockRunner,
@@ -71,7 +72,7 @@ function input(
 ): CreateCollectionNavigationContextInput {
   return {
     entries,
-    collectionScope: { showPreviouslyOwned: true, missingDimensionsOnly: false },
+    collectionScope: { showPreviouslyOwned: true, dimensionStatus: "all" },
     projection: {
       sort: { field: "fitness", direction: "desc" },
       filters: {
@@ -132,6 +133,14 @@ function storedContext(storage: MemoryStorage, key: string): CollectionNavigatio
 }
 
 describe("collection navigation context store", () => {
+  test("parses the dimensions URL scope and defaults absent or unknown values to all", () => {
+    expect(parseDimensionStatusParameter(undefined)).toBe("all");
+    expect(parseDimensionStatusParameter("with")).toBe("with");
+    expect(parseDimensionStatusParameter("missing")).toBe("missing");
+    expect(parseDimensionStatusParameter("unknown")).toBe("all");
+    expect(parseDimensionStatusParameter(["with", "missing"])).toBe("all");
+  });
+
   test("generates valid fallback UUIDs and retries collisions without randomUUID", async () => {
     const originalCryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
     const randomBytes = [new Uint8Array(16), new Uint8Array(16)];
@@ -249,6 +258,46 @@ describe("collection navigation context store", () => {
     ).toEqual(context(key ?? "", 12_000));
   });
 
+  test("migrates persisted legacy dimension booleans while writing the enum in v1 contexts", async () => {
+    for (const [legacyValue, expected] of [
+      [false, "all"],
+      [true, "missing"],
+    ] as const) {
+      const storage = new MemoryStorage();
+      const legacy = context(UUIDS[0], 1_000, {
+        collectionScope: { showPreviouslyOwned: true, dimensionStatus: "all" },
+      });
+      const storedLegacy = {
+        ...legacy,
+        collectionScope: { showPreviouslyOwned: true, missingDimensionsOnly: legacyValue },
+      };
+      seed(storage, storedLegacy);
+
+      const resolved = await resolveCollectionNavigationContext(UUIDS[0] ?? "", {
+        ...dependencies(storage, 2_000),
+        currentId: "game-1",
+      });
+      expect(resolved?.version).toBe(1);
+      expect(resolved?.collectionScope).toEqual({
+        showPreviouslyOwned: true,
+        dimensionStatus: expected,
+      });
+    }
+
+    const storage = new MemoryStorage();
+    const key = await createCollectionNavigationContext(
+      {
+        ...input(),
+        collectionScope: { showPreviouslyOwned: false, dimensionStatus: "with" },
+      },
+      dependencies(storage, 1_000),
+    );
+    expect(storedContext(storage, key ?? "").collectionScope).toEqual({
+      showPreviouslyOwned: false,
+      dimensionStatus: "with",
+    });
+  });
+
   test("resolves legacy contexts without ownerNoteStatus as all and round-trips new status", async () => {
     const storage = new MemoryStorage();
     const legacy = context();
@@ -324,7 +373,14 @@ describe("collection navigation context store", () => {
         label: "scope union",
         value: {
           ...valid,
-          collectionScope: { showPreviouslyOwned: "yes", missingDimensionsOnly: false },
+          collectionScope: { showPreviouslyOwned: "yes", dimensionStatus: "all" },
+        },
+      },
+      {
+        label: "dimension status union",
+        value: {
+          ...valid,
+          collectionScope: { showPreviouslyOwned: true, dimensionStatus: "sometimes" },
         },
       },
       { label: "projection shape", value: { ...valid, projection: { ...valid.projection, x: 1 } } },

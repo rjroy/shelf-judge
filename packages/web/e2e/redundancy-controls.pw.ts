@@ -47,6 +47,11 @@ async function installDaemon(page: Page) {
           };
         else if (url.pathname.endsWith("/refresh-progress")) {
           const runState = window.localStorage.getItem("run-state");
+          const locationUrl = new URL(location.href);
+          const stopReason =
+            window.localStorage.getItem("stop-reason") ?? locationUrl.searchParams.get("stop");
+          const progressCount = (key: string, fallback: number) =>
+            Number(locationUrl.searchParams.get(key) ?? fallback);
           if (
             new URL(location.href).searchParams.get("status-fail") === "1" &&
             runState === "running"
@@ -103,7 +108,21 @@ async function installDaemon(page: Page) {
                           failedPairs: 0,
                         },
                       }
-                    : { state: "none" },
+                    : stopReason
+                      ? {
+                          state: "saved",
+                          relation: "historical",
+                          value: {
+                            state: "failed",
+                            pairCount: 2,
+                            completedPairs: progressCount("completed", 1),
+                            cacheHits: progressCount("cacheHits", 1),
+                            cacheMisses: 0,
+                            failedPairs: progressCount("failed", 0),
+                            stopReason,
+                          },
+                        }
+                      : { state: "none" },
             };
         } else if (url.pathname.endsWith("/refresh-status")) {
           if (window.localStorage.getItem("coverage-fail") === "1")
@@ -287,10 +306,10 @@ test("partial coverage benefits current pairs during and after a run", async ({ 
 
   await page.getByRole("button", { name: "Preview one run" }).click();
   await page.getByRole("button", { name: "Run once" }).click();
-  await expect(status).toContainText(
-    "Partial — available semantic results already affect relevant pairs",
-  );
   await expect(status).toContainText("Refresh is running.");
+  await expect(status).toContainText("1 of 2 pairs completed; 0 reused from cache.");
+  await expect(status).not.toContainText("Partial —");
+  await expect(status).not.toContainText("Coverage measured across");
   await expect(status).not.toContainText("factual-only");
 
   await page.getByRole("button", { name: "Cancel live run" }).click();
@@ -299,6 +318,7 @@ test("partial coverage benefits current pairs during and after a run", async ({ 
   await expect(status).toContainText(
     "Partial — available semantic results already affect relevant pairs",
   );
+  await expect(status).toContainText("Coverage measured across 2 eligible pairs.");
   await expect(status).not.toContainText("factual-only");
 });
 
@@ -401,41 +421,57 @@ test("invalid run limits are explained and stop reasons stay distinct", async ({
     for (const failed of [0, 1]) {
       await page.goto(`/redundancy?stop=${reason}&failed=${failed}&completed=1&cacheHits=1`);
       const status = page.locator(".redundancy-refresh-status");
-      await expect(status).toContainText(copy);
-      await expect(status).toContainText(
+      await expect(status.locator("p").nth(0)).toContainText("Ready.");
+      await expect(status.locator("p").nth(0)).toContainText(
+        "Coverage measured across 2 eligible pairs.",
+      );
+      await expect(status.locator("p").nth(1)).toContainText(`Last saved run: ${copy}`);
+      await expect(status.locator("p").nth(1)).toContainText(
         `1 of 2 pairs completed; ${failed} failed; 1 reused from cache.`,
       );
-      await expect(status).toContainText(retry);
+      await expect(status.locator("p").nth(1)).toContainText(retry);
       await expect(status).not.toContainText("Run failed.");
-      await expect(status.locator("p")).toHaveCount(1);
+      await expect(status.locator("p")).toHaveCount(2);
       if (reason === "application-token-threshold")
-        await expect(status).toContainText("This is not a billing limit.");
+        await expect(status.locator("p").nth(1)).toContainText("This is not a billing limit.");
     }
   }
 
   await page.goto("/redundancy?stop=provider-limit&failed=1");
   const legacyLimit = page.locator(".redundancy-refresh-status");
-  await expect(legacyLimit).toContainText(
-    "Previous application request limit reached. 1 of 2 pairs completed; 1 failed; 1 reused from cache.",
+  await expect(legacyLimit.locator("p").nth(0)).toContainText("Ready.");
+  await expect(legacyLimit.locator("p").nth(0)).toContainText(
+    "Coverage measured across 2 eligible pairs.",
   );
-  await expect(legacyLimit).toContainText("higher request limit");
+  await expect(legacyLimit.locator("p").nth(1)).toContainText(
+    "Last saved run: Previous application request limit reached.",
+  );
+  await expect(legacyLimit.locator("p").nth(1)).toContainText(
+    "1 of 2 pairs completed; 1 failed; 1 reused from cache.",
+  );
+  await expect(legacyLimit.locator("p").nth(1)).toContainText("higher request limit");
   await expect(legacyLimit).not.toContainText("Run failed.");
-  await expect(legacyLimit.locator("p")).toHaveCount(1);
+  await expect(legacyLimit.locator("p")).toHaveCount(2);
 
   await page.goto("/redundancy?stop=provider-rate-limited&failed=1");
   const providerFailure = page.locator(".redundancy-refresh-status");
+  await expect(providerFailure).toContainText("Last saved run: Run failed.");
   await expect(providerFailure).toContainText(
-    "Run failed. 1 of 2 pairs completed; 1 failed; 1 reused from cache.",
+    "1 of 2 pairs completed; 1 failed; 1 reused from cache.",
   );
-  await expect(providerFailure).toContainText("provider rate-limited requests");
-  await expect(providerFailure.locator("p")).toHaveCount(2);
+  await expect(providerFailure.locator("p").nth(0)).toContainText("Ready.");
+  await expect(providerFailure).toContainText("Coverage measured across 2 eligible pairs.");
+  await expect(providerFailure).toContainText(
+    "The provider rate-limited requests. Results may be partial.",
+  );
+  await expect(providerFailure.locator("p")).toHaveCount(3);
 
   await page.goto("/redundancy?stop=application-attempt-limit");
   const reloadedStatus = page.locator(".redundancy-refresh-status");
   await expect(reloadedStatus).toContainText("HTTP request limit reached.");
   await page.evaluate(() => window.localStorage.setItem("stop-reason", "application-deadline"));
   await page.getByRole("button", { name: "Refresh progress" }).click();
-  await expect(reloadedStatus).toContainText("Run time limit reached.");
+  await expect(reloadedStatus).toContainText("Last saved run: Run time limit reached.");
   await expect(reloadedStatus).not.toContainText("HTTP request limit reached.");
 });
 

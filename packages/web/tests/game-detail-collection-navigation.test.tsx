@@ -24,7 +24,7 @@ function context(
     version: 1,
     key: KEY,
     entries,
-    collectionScope: { showPreviouslyOwned: true, missingDimensionsOnly: true },
+    collectionScope: { showPreviouslyOwned: true, dimensionStatus: "missing" },
     projection: {
       sort: { field: "name", direction: "asc" },
       filters: {
@@ -32,6 +32,7 @@ function context(
         ratedStatus: "all",
         playedStatus: "all",
         playerCount: null,
+        ownerNoteStatus: "all",
       },
       predictionsOn: false,
       effectivePredictionsOn: false,
@@ -151,6 +152,24 @@ describe("game detail Collection navigation model", () => {
     expect(html).toContain(`/collection?ownership=all&amp;dimensions=missing`);
     expect(html).toContain(`collectionContext=${KEY}`);
     expect(html).not.toContain("detail-collection-navigation");
+  });
+
+  test("serializes the with dimensions scope and omits the all scope", () => {
+    const withDimensions = {
+      ...context(),
+      collectionScope: { showPreviouslyOwned: false, dimensionStatus: "with" as const },
+    };
+    expect(
+      buildDetailCollectionContextModel(withDimensions, "first", "first")?.collectionHref,
+    ).toContain("/collection?dimensions=with&collectionContext=");
+
+    const allDimensions = {
+      ...withDimensions,
+      collectionScope: { showPreviouslyOwned: false, dimensionStatus: "all" as const },
+    };
+    expect(
+      buildDetailCollectionContextModel(allDimensions, "first", "first")?.collectionHref,
+    ).not.toContain("dimensions=");
   });
 
   test("renders a plain breadcrumb and no strip without a valid model", () => {

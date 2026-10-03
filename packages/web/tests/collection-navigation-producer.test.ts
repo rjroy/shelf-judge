@@ -19,7 +19,7 @@ function input(): CollectionNavigationFingerprintInput {
       { id: "game-1", name: "First" },
       { id: "game-2", name: "Second" },
     ],
-    collectionScope: { showPreviouslyOwned: false, missingDimensionsOnly: false },
+    collectionScope: { showPreviouslyOwned: false, dimensionStatus: "all" },
     projection: {
       sort: { field: "fitness", direction: "desc" },
       filters: {
@@ -27,6 +27,7 @@ function input(): CollectionNavigationFingerprintInput {
         ratedStatus: "all",
         playedStatus: "all",
         playerCount: null,
+        ownerNoteStatus: "all",
       },
       predictionsOn: false,
       effectivePredictionsOn: false,
@@ -95,7 +96,7 @@ function deferred<Result>(): {
 describe("collection navigation projection fingerprint", () => {
   test("has a canonical exact representation for structurally equal inputs", () => {
     const expected =
-      '{"entries":[[0,"game-1","First"],[1,"game-2","Second"]],"sort":["fitness","desc"],"filters":["","all","all",null],"scope":[false,false],"predictions":[false,false],"nichesOn":false,"viewMode":"flat"}';
+      '{"entries":[[0,"game-1","First"],[1,"game-2","Second"]],"sort":["fitness","desc"],"filters":["","all","all",null,"all"],"scope":[false,"all"],"predictions":[false,false],"nichesOn":false,"viewMode":"flat"}';
 
     expect(collectionNavigationFingerprint(input())).toBe(expected);
     expect(collectionNavigationFingerprint(input())).toBe(collectionNavigationFingerprint(input()));
@@ -185,6 +186,17 @@ describe("collection navigation projection fingerprint", () => {
       eligible: true,
     },
     {
+      label: "owner note status",
+      change: (base) => ({
+        ...base,
+        projection: {
+          ...base.projection,
+          filters: { ...base.projection.filters, ownerNoteStatus: "with" },
+        },
+      }),
+      eligible: true,
+    },
+    {
       label: "ownership scope",
       change: (base) => ({
         ...base,
@@ -196,7 +208,7 @@ describe("collection navigation projection fingerprint", () => {
       label: "dimensions scope",
       change: (base) => ({
         ...base,
-        collectionScope: { ...base.collectionScope, missingDimensionsOnly: true },
+        collectionScope: { ...base.collectionScope, dimensionStatus: "with" },
       }),
       eligible: true,
     },

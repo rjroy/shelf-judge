@@ -16,9 +16,18 @@ export interface CollectionNavigationEntry {
   readonly name: string;
 }
 
+export type DimensionStatus = "all" | "with" | "missing";
+
 export interface CollectionNavigationScope {
   readonly showPreviouslyOwned: boolean;
-  readonly missingDimensionsOnly: boolean;
+  readonly dimensionStatus: DimensionStatus;
+}
+
+export function parseDimensionStatusParameter(
+  value: string | string[] | undefined,
+): DimensionStatus {
+  if (value === "with" || value === "missing") return value;
+  return "all";
 }
 
 export interface CollectionNavigationProjection {
@@ -121,13 +130,27 @@ function parseEntries(value: unknown): readonly CollectionNavigationEntry[] | nu
 }
 
 function parseScope(value: unknown): CollectionNavigationScope | null {
-  if (!isExactObject(value, ["showPreviouslyOwned", "missingDimensionsOnly"])) return null;
-  const showPreviouslyOwned = property(value, "showPreviouslyOwned");
-  const missingDimensionsOnly = property(value, "missingDimensionsOnly");
-  if (typeof showPreviouslyOwned !== "boolean" || typeof missingDimensionsOnly !== "boolean") {
+  if (
+    !isExactObject(value, ["showPreviouslyOwned", "dimensionStatus"]) &&
+    !isExactObject(value, ["showPreviouslyOwned", "missingDimensionsOnly"])
+  ) {
     return null;
   }
-  return { showPreviouslyOwned, missingDimensionsOnly };
+  const showPreviouslyOwned = property(value, "showPreviouslyOwned");
+  const dimensionStatus = Object.hasOwn(value, "missingDimensionsOnly")
+    ? property(value, "missingDimensionsOnly") === true
+      ? "missing"
+      : property(value, "missingDimensionsOnly") === false
+        ? "all"
+        : null
+    : property(value, "dimensionStatus");
+  if (
+    typeof showPreviouslyOwned !== "boolean" ||
+    (dimensionStatus !== "all" && dimensionStatus !== "with" && dimensionStatus !== "missing")
+  ) {
+    return null;
+  }
+  return { showPreviouslyOwned, dimensionStatus };
 }
 
 function parseSort(value: unknown): Readonly<SortState> | null {

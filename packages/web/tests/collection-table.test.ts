@@ -1130,7 +1130,7 @@ describe("Collection contextual return helpers", () => {
       version: 1,
       key: "00000000-0000-4000-8000-000000000001",
       entries: [{ id: "game-1", name: "Game One" }],
-      collectionScope: { showPreviouslyOwned: false, missingDimensionsOnly: false },
+      collectionScope: { showPreviouslyOwned: false, dimensionStatus: "all" },
       projection: {
         sort: { field: "fitness", direction: "desc" },
         filters: DEFAULT_FILTERS,
@@ -1147,7 +1147,7 @@ describe("Collection contextual return helpers", () => {
     overrides: Partial<Parameters<typeof canRestoreCollectionProjection>[1]> = {},
   ): Parameters<typeof canRestoreCollectionProjection>[1] {
     return {
-      scope: { showPreviouslyOwned: false, missingDimensionsOnly: false },
+      scope: { showPreviouslyOwned: false, dimensionStatus: "all" },
       availableSortFields: new Set(["fitness", "tournament", "bggRating", "axis:fun"]),
       predictionSourceAvailable: true,
       nicheSourceAvailable: true,
@@ -1164,8 +1164,20 @@ describe("Collection contextual return helpers", () => {
       canRestoreCollectionProjection(
         context,
         capabilities({
-          scope: { showPreviouslyOwned: true, missingDimensionsOnly: false },
+          scope: { showPreviouslyOwned: true, dimensionStatus: "all" },
         }),
+      ),
+    ).toBe(false);
+    expect(
+      canRestoreCollectionProjection(
+        { ...context, collectionScope: { showPreviouslyOwned: false, dimensionStatus: "with" } },
+        capabilities({ scope: { showPreviouslyOwned: false, dimensionStatus: "with" } }),
+      ),
+    ).toBe(true);
+    expect(
+      canRestoreCollectionProjection(
+        { ...context, collectionScope: { showPreviouslyOwned: false, dimensionStatus: "with" } },
+        capabilities({ scope: { showPreviouslyOwned: false, dimensionStatus: "missing" } }),
       ),
     ).toBe(false);
 
@@ -1230,7 +1242,7 @@ describe("Collection contextual return helpers", () => {
       canRestoreCollectionProjection(
         context,
         capabilities({
-          scope: { showPreviouslyOwned: true, missingDimensionsOnly: false },
+          scope: { showPreviouslyOwned: true, dimensionStatus: "all" },
           collectionEmpty: true,
         }),
       ),

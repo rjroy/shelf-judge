@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { CollectionSnapshotBoundary } from "@/components/collection-snapshot-boundary";
+import { parseDimensionStatusParameter } from "@/lib/collection-navigation-context";
 
 export const metadata: Metadata = { title: "Collection" };
 export const dynamic = "force-dynamic";
@@ -21,7 +22,7 @@ export default async function CollectionPage({
     <>
       <CollectionSnapshotBoundary
         showPreviouslyOwned={params.ownership === "all"}
-        missingDimensionsOnly={params.dimensions === "missing"}
+        dimensionStatus={parseDimensionStatusParameter(params.dimensions)}
         collectionContext={collectionContext}
         collectionOrigin={collectionOrigin}
         collectionReturnAttempt={
