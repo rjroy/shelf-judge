@@ -157,6 +157,30 @@ describe("help command", () => {
     expect(result).toContain("<enabled|factual|description|ownerNote|cachedOwnerNoteUse>");
   });
 
+  test("Run help documents wishlist scope and repeated candidate selectors", async () => {
+    const redundancyTree = {
+      name: "redundancy",
+      children: {
+        "run-preview": {
+          operationId: "shelf.redundancy.get-semantic-run-preview",
+          name: "get-semantic-run-preview",
+          invocation: { method: "GET", path: "/api/redundancy/semantic/run-preview" },
+        },
+      },
+    };
+    const client = createMockClient({
+      routes: {
+        "GET /api/help/redundancy": {
+          response: { ok: true, status: 200, data: redundancyTree },
+        },
+      },
+    });
+    const result = await helpCommand(client, ["redundancy"], { json: false });
+    expect(result).toContain("--scope collection|wishlist");
+    expect(result).toContain("--bgg-id ID ...");
+    expect(result).toContain("description-only");
+  });
+
   test("displays operation tree", async () => {
     const client = createMockClient({
       routes: {

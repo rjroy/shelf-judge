@@ -1,5 +1,9 @@
 // Wishlist commands: list, add, remove, clear, refresh
-import type { RedundancyAdjustment, WishlistEntry } from "@shelf-judge/shared";
+import type {
+  RedundancyAdjustment,
+  WishlistEntry,
+  WishlistEntryReadResult,
+} from "@shelf-judge/shared";
 import type { DaemonClient } from "../client.js";
 import type { OutputOptions } from "../output.js";
 import { formatTable, formatScore, printOutput } from "../output.js";
@@ -14,32 +18,28 @@ export async function wishlistList(
   _args: string[],
   opts: OutputOptions,
 ): Promise<string> {
-  const { ok, data } = await client.get<WishlistEntryWithPreview[]>("/api/wishlist");
+  const { ok, data } = await client.get<WishlistEntryReadResult[]>("/api/wishlist/redundancy");
 
   if (!ok) {
     const err = data as unknown as { error: string };
-    throw new Error(err.error ?? "Failed to load wishlist");
+    throw new Error(err.error ?? "Failed to load wishlist redundancy projection");
   }
 
-  if (opts.json)
-    return printOutput(
-      data.map((entry) => ({ ...entry, redundancyPreviewMode: "factual-only" })),
-      opts,
-    );
+  if (opts.json) return printOutput(data, opts);
 
   if (data.length === 0) {
     return "Wishlist is empty.";
   }
 
   return formatTable(
-    ["Name", "Year", "Score", "Confidence", "Factual-only redundancy", "Added"],
-    data.map((e) => [
-      e.name,
-      e.yearPublished != null ? String(e.yearPublished) : "---",
-      formatScore(e.predictedScore),
-      e.predictionConfidence ?? "---",
-      formatWishlistRedundancy(e.redundancyPreview),
-      new Date(e.addedAt).toLocaleDateString(),
+    ["Name", "Year", "Score", "Confidence", "Redundancy", "Added"],
+    data.map(({ entry, redundancy }) => [
+      entry.name,
+      entry.yearPublished != null ? String(entry.yearPublished) : "---",
+      formatScore(entry.predictedScore),
+      entry.predictionConfidence ?? "---",
+      formatWishlistRedundancyProjection(redundancy),
+      new Date(entry.addedAt).toLocaleDateString(),
     ]),
   );
 }
@@ -184,12 +184,17 @@ export async function wishlistRefresh(
   return msg;
 }
 
-function formatWishlistRedundancy(adj: RedundancyAdjustment | null | undefined): string {
-  if (!adj) return "---";
-  const neighbors = adj.nicheNeighbors.slice(0, 3).map((neighbor) => neighbor.gameName);
+function formatWishlistRedundancyProjection(
+  redundancy: WishlistEntryReadResult["redundancy"],
+): string {
+  const score = formatScore(redundancy.orderingScore);
+  const adjustment = redundancy.adjustment;
+  if (!adjustment)
+    return redundancy.orderingScore == null ? "---" : `${score} (${redundancy.source})`;
+  const neighbors = adjustment.nicheNeighbors.slice(0, 3).map((neighbor) => neighbor.gameName);
   const similar =
     neighbors.length > 0 ? `; similar: ${neighbors.join(", ")}` : "; no similar games";
-  return `${formatScore(adj.adjustedScore)} (-${adj.penalty.toFixed(1)})${similar}`;
+  return `${score} (${redundancy.source}; -${adjustment.penalty.toFixed(1)})${similar}`;
 }
 
 function formatWishlistRedundancyDetail(adj: RedundancyAdjustment | null | undefined): string {

@@ -34,12 +34,23 @@ describe("wishlist redundancy preview", () => {
   test("list shows adjusted score, penalty, and at most three similar games", async () => {
     const client = createMockClient({
       routes: {
-        "GET /api/wishlist": { response: { ok: true, status: 200, data: [entry] } },
+        "GET /api/wishlist/redundancy": {
+          response: {
+            ok: true,
+            status: 200,
+            data: [
+              {
+                entry,
+                redundancy: { source: "current", adjustment: preview, orderingScore: 6.8 },
+              },
+            ],
+          },
+        },
       },
     });
 
     const output = await wishlistList(client, [], { json: false });
-    expect(output).toContain("6.8 (-1.2)");
+    expect(output).toContain("6.8 (current; -1.2)");
     expect(output).toContain("Game One, Game Two, Game Three");
     expect(output).not.toContain("Game Four");
   });
@@ -67,15 +78,67 @@ describe("wishlist redundancy preview", () => {
     const noPreview = { ...entry, redundancyPreview: null };
     const client = createMockClient({
       routes: {
-        "GET /api/wishlist": { response: { ok: true, status: 200, data: [noPreview] } },
+        "GET /api/wishlist/redundancy": {
+          response: {
+            ok: true,
+            status: 200,
+            data: [
+              {
+                entry: noPreview,
+                redundancy: { source: "base-prediction", adjustment: null, orderingScore: 8 },
+              },
+            ],
+          },
+        },
         "POST /api/wishlist": { response: { ok: true, status: 200, data: { entry: noPreview } } },
       },
     });
 
     const listed = await wishlistList(client, [], { json: false });
     const addedJson = await wishlistAdd(client, ["123"], { json: true });
-    expect(listed).toContain("---");
+    expect(listed).toContain("8.0 (base-prediction)");
     expect(listed).not.toContain("penalty");
     expect(JSON.parse(addedJson)).toEqual({ ...noPreview, redundancyPreviewMode: "factual-only" });
+  });
+
+  test("list renders current, saved-factual, then base fallback without recalculating penalties", async () => {
+    const results = [
+      {
+        entry: { ...entry, name: "Current" },
+        redundancy: { source: "current", adjustment: preview, orderingScore: 6.8 },
+      },
+      {
+        entry: { ...entry, name: "Saved" },
+        redundancy: { source: "saved-factual", adjustment: preview, orderingScore: 6.8 },
+      },
+      {
+        entry: { ...entry, name: "Base" },
+        redundancy: { source: "base-prediction", adjustment: null, orderingScore: 8 },
+      },
+    ];
+    const client = createMockClient({
+      routes: {
+        "GET /api/wishlist/redundancy": {
+          response: { ok: true, status: 200, data: results },
+        },
+      },
+    });
+
+    const human = await wishlistList(client, [], { json: false });
+    expect(human).toContain("6.8 (current; -1.2)");
+    expect(human).toContain("6.8 (saved-factual; -1.2)");
+    expect(human).toContain("8.0 (base-prediction)");
+    const json = JSON.parse(await wishlistList(client, [], { json: true })) as Array<{
+      entry: { bggSource?: unknown };
+      redundancy: { source: string; orderingScore: number | null };
+    }>;
+    expect(json.map((result) => result.redundancy.source)).toEqual([
+      "current",
+      "saved-factual",
+      "base-prediction",
+    ]);
+    expect(json[2]?.redundancy.orderingScore).toBe(8);
+    expect(json[2]?.entry.bggSource).toBeUndefined();
+    expect(JSON.stringify(json)).not.toContain("bggSource");
   });
 });

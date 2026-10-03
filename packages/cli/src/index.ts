@@ -217,6 +217,7 @@ interface ParsedArgs {
 export function parseArgs(argv: string[]): ParsedArgs {
   const raw = argv.slice(2); // skip bun and script path
   const commandTokens = raw.filter((arg) => arg !== "--json");
+  const isRedundancyRun = commandTokens[0] === "redundancy" && commandTokens[1] === "run";
   const exactPositionalCommand = [...EXACT_POSITIONAL_COMMANDS].some(
     (command) => commandTokens.slice(0, command.split(" ").length).join(" ") === command,
   );
@@ -264,6 +265,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     } else if (exactPositionalCommand) {
       tokens.push(arg);
       expectingNoteTextValue = arg === "--text";
+    } else if (arg === "--bgg-id" && isRedundancyRun) {
+      tokens.push(arg);
+      const value = raw[++i];
+      if (value !== undefined) tokens.push(value);
     } else if (arg === "--bgg-id") {
       bggId = Number(raw[++i]);
     } else if (arg === "--name") {

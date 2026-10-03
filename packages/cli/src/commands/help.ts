@@ -39,9 +39,9 @@ const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
     {
       name: "run",
       usage:
-        "shelf-judge redundancy run [--max-attempts N] [--reported-token-stop N] [--max-duration-minutes N] [--authorize-notes] [--json]",
+        "shelf-judge redundancy run [--scope collection|wishlist] [--bgg-id ID ...] [--max-attempts N] [--reported-token-stop N] [--max-duration-minutes N] [--authorize-notes] [--json]",
       description:
-        "Preview aggregate scope, then explicitly start one bounded Run; note transmission is opt-in",
+        "Preview aggregate scope, then explicitly start one bounded Run; wishlist scope is description-only and accepts repeated --bgg-id selectors",
     },
   ],
   "shelf.redundancy.get-semantic-refresh-status": [

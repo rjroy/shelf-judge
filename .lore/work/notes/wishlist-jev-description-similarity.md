@@ -463,3 +463,22 @@ The accepted 14-path source/test manifest was checked after review and immediate
 | `packages/web/tests/daemon-transport.test.ts` | `a583efe5c0fe2d88a5703cf626dee147cd257f1f` | `2c3f8cff3cdb25264b5d2e0171d41c4d2c385ace9b341942ed1a5b48a48d7f11` |
 
 The 6a handoff contract is recorded above: clients use `GET /api/wishlist/redundancy` for explicit current/saved/base projection; preview uses the existing Run path with omitted/collection scope or `scope=wishlist` and repeated `bggId` for exact selection; start sends only `{ requestId, precondition, noteTransmissionAuthorized: false }` for wishlist runs. Progress fields and paths are documented there. The web lane owns UI/page and browser workflow; the CLI lane owns CLI selectors/workflow. Those lanes should coordinate on the shared types and existing route contract, not edit this note concurrently. `.beads` changes are administrative tracking state included in the checkpoint; no push is authorized.
+
+## Phase 6c acceptance and checkpoint evidence
+
+The parent accepted `shelf-judge-xi83.8` after the independent CLI test and review gates. The accepted CLI diff is `/tmp/opencode/wishlist-jev-phase6bc-review.diff`, against baseline `e2406c3c`; the CLI source/test paths below were unchanged after that accepted review. Independent CLI evidence: 487 tests / 1,278 expectations. On the combined worktree, root typecheck, browser typecheck, lint, formatting and build also passed. The focused web results (10 tests / 30 expectations and browser E2E 16 / 16) are not Phase 6b acceptance: the web reviewer identified two findings, and the designer lane remains in progress. No web files are included in this checkpoint.
+
+The accepted eight-path CLI manifest was rehashed immediately before this note update. Index blobs and worktree SHA-256 values:
+
+| Path | Index blob | Worktree SHA-256 |
+| --- | --- | --- |
+| `packages/cli/src/commands/help.ts` | `ec4c60a5c79e669897faf7ff34f3b46ea0a70ecd` | `50dca0298419841142f0751aa9eb1f791903254ceca86721fe1e54ed235caa77` |
+| `packages/cli/src/commands/redundancy.ts` | `0466b343ba977bc3df420b6b3a7ed62d58938562` | `a75c837adbc8faba44423855bfed04a0f137c0764a944fb3885f31845e92e2c7` |
+| `packages/cli/src/commands/wishlist.ts` | `799ab89cb8b7cf387a495bd9f682cf2571cc0a6b` | `86de4372da7cace4ff7832daa74cf27dcccc63f4501a60b7efd6087945d907e2` |
+| `packages/cli/src/index.ts` | `ed7d216cb0513353b780fa3a33e4845c5ae9daf8` | `7b4d164dec7fab458b051d435de0ed2e1ac1f8472fe20ecddf9a055770645d65` |
+| `packages/cli/tests/commands/help.test.ts` | `e91ffc87d02ac6d5fa39c57ee8e2eccc20402498` | `359c8f19598f5f902fc7d4f3ed769e2959655959a95a27e8b5a2e67b037b0d83` |
+| `packages/cli/tests/commands/redundancy.test.ts` | `c5069c1bfd2a63292d51ff5fa740ef74d3569751` | `71a91b31df7bf4d66ab7225701d9197b35ff8b306e797bf5f8d440a315d0da14` |
+| `packages/cli/tests/commands/wishlist.test.ts` | `98d8f6ab30e332230eddf3e5af0bdeed7d911501` | `8705d77a2d6e05cae17bac51c6d2706ca8a0ffb772528a25e80fab82a7cb1fa0` |
+| `packages/cli/tests/index.test.ts` | `652c208086748b11e415d814430a70ba339fc87a` | `416c69778e220aa0b4f767c859e4e1a89586784ebf0c15a49807bad9991845ed` |
+
+The CLI checks recorded at implementation were `bun test packages/cli/tests` (487/1,278), `bunx tsc --noEmit -p packages/cli`, scoped ESLint and Prettier, and `git diff --check`; these were not rerun for this administrative checkpoint. Provider transport was fake, with no real provider calls or owner data. The CLI bead is closed; `.7` remains in progress and `.9` remains open. This closes the CLI lane only, not Phase 6 overall or the full feature. Current web-lane changes remain uncheckpointed and excluded; no push was made or authorized.
