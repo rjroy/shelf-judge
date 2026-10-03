@@ -61,7 +61,7 @@ function countState(counts: JevSignalCoverageCounts, coverage: JevPairSignalCove
   ]++;
 }
 
-function projectedProgress(progress: JevRunProgress | null): JevStatusProgress {
+export function projectJevRunProgress(progress: JevRunProgress | null): JevStatusProgress {
   if (!progress) return null;
   const counters = [
     progress.pairCount,
@@ -134,7 +134,7 @@ export function projectJevPairStatus(input: {
     eligibleGameCount: input.coverage.eligibleGameIds.length,
     pairCount: input.coverage.pairs.length,
     coverage: { C, D },
-    progress: projectedProgress(input.progress),
+    progress: projectJevRunProgress(input.progress),
   };
 }
 
@@ -149,6 +149,6 @@ export function unavailableJevPairStatus(
     eligibleGameCount: null,
     pairCount: null,
     coverage: null,
-    progress: projectedProgress(progress),
+    progress: projectJevRunProgress(progress),
   };
 }

@@ -392,24 +392,25 @@ describe("semantic redundancy CLI consent boundary", () => {
     let cancelBody: unknown;
     const client = createMockClient({
       routes: {
-        "GET /api/redundancy/semantic/refresh-status": {
+        "GET /api/redundancy/semantic/refresh-progress": {
           response: {
             ok: true,
             status: 200,
             data: {
-              status: "not-ready",
-              measurement: "current",
-              eligibleGameCount: 3,
-              pairCount: 3,
-              coverage: null,
+              coverageMeasurement: "not-measured",
+              activity: { state: "idle" },
               progress: {
-                state: "failed",
-                pairCount: 3,
-                completedPairs: 1,
-                cacheHits: 0,
-                cacheMisses: 1,
-                failedPairs: 0,
-                stopReason: "provider-limit",
+                state: "saved",
+                relation: "historical",
+                value: {
+                  state: "failed",
+                  pairCount: 3,
+                  completedPairs: 1,
+                  cacheHits: 0,
+                  cacheMisses: 1,
+                  failedPairs: 0,
+                  stopReason: "provider-limit",
+                },
               },
             },
           },
@@ -426,6 +427,9 @@ describe("semantic redundancy CLI consent boundary", () => {
       },
     });
     const progress = await redundancySemanticProgress(client, [], { json: false });
+    expect(progress).toContain("Coverage counts: not measured");
+    expect(progress).toContain("Live activity: idle");
+    expect(progress).toContain("Historical saved progress");
     expect(progress).toContain("legacy local budget limit");
     expect(progress).toContain("does not establish that TypeSafe rate-limited");
     expect(progress).not.toContain("game/");
@@ -456,24 +460,25 @@ describe("semantic redundancy CLI consent boundary", () => {
     async ({ stopReason, message, excludes }) => {
       const client = createMockClient({
         routes: {
-          "GET /api/redundancy/semantic/refresh-status": {
+          "GET /api/redundancy/semantic/refresh-progress": {
             response: {
               ok: true,
               status: 200,
               data: {
-                status: "not-ready",
-                measurement: "current",
-                eligibleGameCount: 2,
-                pairCount: 1,
-                coverage: null,
+                coverageMeasurement: "not-measured",
+                activity: { state: "active", runId: "live-run" },
                 progress: {
-                  state: "interrupted",
-                  pairCount: 1,
-                  completedPairs: 0,
-                  cacheHits: 0,
-                  cacheMisses: 1,
-                  failedPairs: 0,
-                  stopReason,
+                  state: "saved",
+                  relation: "active-run",
+                  value: {
+                    state: "interrupted",
+                    pairCount: 1,
+                    completedPairs: 0,
+                    cacheHits: 0,
+                    cacheMisses: 1,
+                    failedPairs: 0,
+                    stopReason,
+                  },
                 },
               },
             },
@@ -481,11 +486,56 @@ describe("semantic redundancy CLI consent boundary", () => {
         },
       });
       const progress = await redundancySemanticProgress(client, [], { json: false });
+      expect(progress).toContain("Live associated progress");
+      expect(progress).toContain("Live activity: active (Run live-run)");
+      expect(progress).toContain("Coverage counts: not measured");
       expect(progress).toContain(message);
       if (excludes) expect(progress).not.toContain(excludes);
       expect(progress).toContain("Prior checkpoints are retained");
     },
   );
+
+  test("refresh progress reports unavailable and empty states without claiming coverage", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/redundancy/semantic/refresh-progress": {
+          response: {
+            ok: true,
+            status: 200,
+            data: {
+              coverageMeasurement: "not-measured",
+              activity: { state: "unavailable" },
+              progress: { state: "unavailable" },
+            },
+          },
+        },
+      },
+    });
+    const unavailable = await redundancySemanticProgress(client, [], { json: false });
+    expect(unavailable).toContain("Live activity: unavailable");
+    expect(unavailable).toContain("Saved progress: unavailable");
+    expect(unavailable).toContain("Coverage counts: not measured");
+    expect(unavailable).not.toContain("coverage measured");
+
+    const noneClient = createMockClient({
+      routes: {
+        "GET /api/redundancy/semantic/refresh-progress": {
+          response: {
+            ok: true,
+            status: 200,
+            data: {
+              coverageMeasurement: "not-measured",
+              activity: { state: "idle" },
+              progress: { state: "none" },
+            },
+          },
+        },
+      },
+    });
+    const none = await redundancySemanticProgress(noneClient, [], { json: false });
+    expect(none).toContain("Live activity: idle");
+    expect(none).toContain("Saved progress: none");
+  });
 
   test("semantic settings and status are reads/settings only", async () => {
     const client = createMockClient({

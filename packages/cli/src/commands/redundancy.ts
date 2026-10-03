@@ -197,26 +197,30 @@ interface SemanticRunPreview {
   expiresAt: string;
 }
 
-interface SemanticRunStatus {
-  status: string;
-  measurement: string;
-  eligibleGameCount: number | null;
-  pairCount: number | null;
-  coverage: unknown;
-  progress: null | {
-    state: string;
-    pairCount: number;
-    completedPairs: number;
-    cacheHits: number;
-    cacheMisses: number;
-    failedPairs: number;
-    stopReason?:
-      | "provider-limit"
-      | "provider-unconfigured"
-      | "application-attempt-limit"
-      | "application-token-threshold"
-      | "application-deadline";
-  };
+interface SemanticRefreshProgress {
+  coverageMeasurement: "not-measured";
+  activity: { state: "active"; runId: string } | { state: "idle" } | { state: "unavailable" };
+  progress:
+    | {
+        state: "saved";
+        relation: "active-run" | "historical" | "unknown";
+        value: {
+          state: string;
+          pairCount: number;
+          completedPairs: number;
+          cacheHits: number;
+          cacheMisses: number;
+          failedPairs: number;
+          stopReason?:
+            | "provider-limit"
+            | "provider-unconfigured"
+            | "application-attempt-limit"
+            | "application-token-threshold"
+            | "application-deadline";
+        };
+      }
+    | { state: "none" }
+    | { state: "unavailable" };
 }
 
 function fail(data: unknown, fallback: string): never {
@@ -272,9 +276,9 @@ export async function redundancySemanticProgress(
   _args: string[],
   opts: OutputOptions,
 ): Promise<string> {
-  const { ok, data } = await client.get<SemanticRunStatus>(`${SEMANTIC}/refresh-status`);
+  const { ok, data } = await client.get<SemanticRefreshProgress>(`${SEMANTIC}/refresh-progress`);
   if (!ok) fail(data, "Failed to load semantic refresh progress");
-  return opts.json ? printOutput(data, opts) : formatRunStatus(data);
+  return opts.json ? printOutput(data, opts) : formatRunProgress(data);
 }
 
 function formatRunPreview(preview: SemanticRunPreview): string {
@@ -298,17 +302,33 @@ function formatRunPreview(preview: SemanticRunPreview): string {
   ].join("\n");
 }
 
-function formatRunStatus(status: SemanticRunStatus): string {
-  const lines = [`Semantic status: ${status.status} (${status.measurement})`];
-  if (status.eligibleGameCount !== null && status.pairCount !== null) {
-    lines.push(`Eligible games: ${status.eligibleGameCount}; pairs: ${status.pairCount}`);
-  } else {
+function formatRunProgress(status: SemanticRefreshProgress): string {
+  const lines = ["Semantic refresh progress"];
+  if (status.coverageMeasurement === "not-measured") {
     lines.push("Coverage counts: not measured");
   }
-  if (status.progress) {
-    const progress = status.progress;
+  if (status.activity.state === "active") {
+    lines.push(`Live activity: active (Run ${status.activity.runId})`);
+  } else if (status.activity.state === "idle") {
+    lines.push("Live activity: idle");
+  } else {
+    lines.push("Live activity: unavailable");
+  }
+
+  if (status.progress.state === "unavailable") {
+    lines.push("Saved progress: unavailable");
+  } else if (status.progress.state === "none") {
+    lines.push("Saved progress: none");
+  } else {
+    const progress = status.progress.value;
+    const label =
+      status.progress.relation === "active-run"
+        ? "Live associated progress"
+        : status.progress.relation === "historical"
+          ? "Historical saved progress"
+          : "Saved progress (run association unknown)";
     lines.push(
-      `Last run: ${progress.state}; ${progress.completedPairs}/${progress.pairCount} completed; ${progress.cacheHits} cache hits; ${progress.cacheMisses} misses; ${progress.failedPairs} failed`,
+      `${label}: ${progress.state}; ${progress.completedPairs}/${progress.pairCount} completed; ${progress.cacheHits} cache hits; ${progress.cacheMisses} misses; ${progress.failedPairs} failed`,
     );
     if (progress.stopReason === "provider-limit") {
       lines.push(

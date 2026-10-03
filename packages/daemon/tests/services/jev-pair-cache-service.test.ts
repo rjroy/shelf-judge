@@ -352,6 +352,7 @@ describe("Jev pair cache", () => {
   test("purges only the requested signal from shared rows and invalidates both on source change", async () => {
     const cache = await createJevPairCache(await tempDir());
     expect(cache.mutationRevision()).toBe(0);
+    expect(cache.getRunProgressRead()).toEqual({ status: "none" });
     cache.upsert(record("SHARED_CD"));
     expect(cache.mutationRevision()).toBe(1);
     cache.upsert({ ...record("SHARED_CD"), signal: "D", value: 0.8 });
@@ -578,10 +579,15 @@ describe("Jev pair cache", () => {
     cache.setActivation({ identity: "scope-hash", activatedAt: "now" });
     expect(cache.mutationRevision()).toBe(2);
     expect(cache.getRunProgress()?.completedPairs).toBe(2);
+    expect(cache.getRunProgressRead()).toMatchObject({
+      status: "available",
+      progress: { runId: "run-1", completedPairs: 2 },
+    });
     expect(cache.getActivation()?.identity).toBe("scope-hash");
     cache.reset();
     expect(cache.mutationRevision()).toBe(3);
     expect(cache.getRunProgress()).toBeNull();
+    expect(cache.getRunProgressRead()).toEqual({ status: "none" });
     expect(cache.getActivation()).toBeNull();
     expect(cache.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toBeNull();
     cache.close();

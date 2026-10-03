@@ -5,6 +5,7 @@ async function installDaemon(page: Page) {
     const target = window as typeof window & {
       __redundancyCalls: Array<{ url: string; method: string; body?: unknown }>;
       __releasePreview?: () => void;
+      __releaseCoverage?: () => void;
     };
     target.__redundancyCalls = [];
     const original = window.fetch.bind(window);
@@ -44,7 +45,76 @@ async function installDaemon(page: Page) {
               migrationNotice: { kind: "jev-cache-v9-to-v10", discardedPairCount: 1 },
             },
           };
-        else if (url.pathname.endsWith("/refresh-status")) {
+        else if (url.pathname.endsWith("/refresh-progress")) {
+          const runState = window.localStorage.getItem("run-state");
+          if (
+            new URL(location.href).searchParams.get("status-fail") === "1" &&
+            runState === "running"
+          )
+            return new Response(JSON.stringify({ error: "Status temporarily unavailable" }), {
+              status: 503,
+              headers: { "content-type": "application/json" },
+            });
+          if (window.localStorage.getItem("activity-state") === "unavailable")
+            response = {
+              coverageMeasurement: "not-measured",
+              activity: { state: "unavailable" },
+              progress: { state: "unavailable" },
+            };
+          else
+            response = {
+              coverageMeasurement: "not-measured",
+              activity:
+                runState === "running"
+                  ? {
+                      state: "active",
+                      runId:
+                        window.localStorage.getItem("replace-active") === "1"
+                          ? "replacement-run"
+                          : new URL(location.href).searchParams.get("race") === "1"
+                            ? "shown-run"
+                            : "run-1",
+                    }
+                  : { state: "idle" },
+              progress:
+                runState === "running"
+                  ? {
+                      state: "saved",
+                      relation: "active-run",
+                      value: {
+                        state: "last-known-running",
+                        pairCount: 2,
+                        completedPairs: 1,
+                        cacheHits: 0,
+                        cacheMisses: 1,
+                        failedPairs: 0,
+                      },
+                    }
+                  : runState === "complete" || runState === "cancelled"
+                    ? {
+                        state: "saved",
+                        relation: "historical",
+                        value: {
+                          state: runState === "complete" ? "completed" : "interrupted",
+                          pairCount: 2,
+                          completedPairs: runState === "complete" ? 2 : 1,
+                          cacheHits: 0,
+                          cacheMisses: 2,
+                          failedPairs: 0,
+                        },
+                      }
+                    : { state: "none" },
+            };
+        } else if (url.pathname.endsWith("/refresh-status")) {
+          if (window.localStorage.getItem("coverage-fail") === "1")
+            return new Response(JSON.stringify({ error: "Coverage temporarily unavailable" }), {
+              status: 503,
+              headers: { "content-type": "application/json" },
+            });
+          if (new URL(location.href).searchParams.get("hold-coverage") === "1")
+            await new Promise<void>((resolve) => {
+              target.__releaseCoverage = resolve;
+            });
           if (
             new URL(location.href).searchParams.get("status-fail") === "1" &&
             window.localStorage.getItem("run-state") === "running"
@@ -158,23 +228,6 @@ async function installDaemon(page: Page) {
             expiresAt: new Date(Date.now() + 3600000).toISOString(),
           };
           target.__releasePreview = undefined;
-        } else if (url.pathname.endsWith("/active-run")) {
-          if (
-            new URL(location.href).searchParams.get("status-fail") === "1" &&
-            window.localStorage.getItem("run-state") === "running"
-          )
-            return new Response(JSON.stringify({ error: "Status temporarily unavailable" }), {
-              status: 503,
-              headers: { "content-type": "application/json" },
-            });
-          const query = new URL(location.href).searchParams;
-          const runId =
-            window.localStorage.getItem("replace-active") === "1"
-              ? "replacement-run"
-              : query.get("race") === "1"
-                ? "shown-run"
-                : "run-1";
-          response = window.localStorage.getItem("run-state") === "running" ? { runId } : null;
         } else if (url.pathname.endsWith("/semantic/run")) {
           if (new URL(location.href).searchParams.get("stale") === "1")
             return new Response(JSON.stringify({ error: "Run precondition failed" }), {
@@ -210,6 +263,19 @@ test("aggregate Ready status does not conflict with stale settings status", asyn
   await expect(page.getByText(/Not ready — factual-only results are shown/)).toHaveCount(0);
 });
 
+test("initial idle page renders before comprehensive coverage finishes", async ({ page }) => {
+  await installDaemon(page);
+  await page.goto("/redundancy?hold-coverage=1");
+  await expect(page.getByRole("heading", { name: "Similarity preferences" })).toBeVisible();
+  await expect(page.locator(".redundancy-refresh-status")).toContainText("No saved run progress");
+  await expect(page.locator(".redundancy-refresh-status")).not.toContainText("Ready");
+  await page.evaluate(() => {
+    const target = window as typeof window & { __releaseCoverage?: () => void };
+    target.__releaseCoverage?.();
+  });
+  await expect(page.locator(".redundancy-refresh-status")).toContainText("Ready");
+});
+
 test("partial coverage benefits current pairs during and after a run", async ({ page }) => {
   await installDaemon(page);
   await page.goto("/redundancy?partial=1");
@@ -224,7 +290,7 @@ test("partial coverage benefits current pairs during and after a run", async ({ 
   await expect(status).toContainText(
     "Partial — available semantic results already affect relevant pairs",
   );
-  await expect(status).toContainText("Refresh is running now.");
+  await expect(status).toContainText("Refresh is running.");
   await expect(status).not.toContainText("factual-only");
 
   await page.getByRole("button", { name: "Cancel live run" }).click();
@@ -368,7 +434,7 @@ test("invalid run limits are explained and stop reasons stay distinct", async ({
   const reloadedStatus = page.locator(".redundancy-refresh-status");
   await expect(reloadedStatus).toContainText("HTTP request limit reached.");
   await page.evaluate(() => window.localStorage.setItem("stop-reason", "application-deadline"));
-  await page.getByRole("button", { name: "Reload status" }).click();
+  await page.getByRole("button", { name: "Refresh progress" }).click();
   await expect(reloadedStatus).toContainText("Run time limit reached.");
   await expect(reloadedStatus).not.toContainText("HTTP request limit reached.");
 });
@@ -522,6 +588,54 @@ test("accepted run stays cancellable when immediate status reads fail", async ({
     /(?:The run started, but status could not be refreshed: )?Status temporarily unavailable/i,
   );
   await expect(page.getByRole("button", { name: "Cancel live run" })).toBeEnabled();
+  await expect(page.locator(".redundancy-refresh-status")).not.toContainText("Ready");
+});
+
+test("idle to unavailable to idle activity invalidates then measures coverage again", async ({
+  page,
+}) => {
+  await installDaemon(page);
+  await page.goto("/redundancy");
+  await expect(page.locator(".redundancy-refresh-status")).toContainText("Ready");
+  const coverageReads = () =>
+    page.evaluate(
+      () =>
+        (
+          window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+        ).__redundancyCalls.filter((entry) => entry.url.endsWith("/refresh-status")).length,
+    );
+  const initialCoverageReads = await coverageReads();
+  await page.evaluate(() => localStorage.setItem("activity-state", "unavailable"));
+  await page.getByRole("button", { name: "Refresh progress" }).click();
+  await expect(page.locator(".redundancy-refresh-status")).toContainText(
+    "Live activity status is unavailable",
+  );
+  await expect(page.locator(".redundancy-refresh-status")).not.toContainText("Ready");
+  await page.evaluate(() => localStorage.removeItem("activity-state"));
+  await page.getByRole("button", { name: "Refresh progress" }).click();
+  await expect.poll(coverageReads).toBe(initialCoverageReads + 1);
+  await expect(page.locator(".redundancy-refresh-status")).toContainText("Ready");
+});
+
+test("failed terminal coverage measurement stays visible until manual retry succeeds", async ({
+  page,
+}) => {
+  await installDaemon(page);
+  await page.goto("/redundancy");
+  await page.getByRole("button", { name: "Preview one run" }).click();
+  await page.getByRole("button", { name: "Run once" }).click();
+  await expect(page.getByRole("button", { name: "Cancel live run" })).toBeVisible();
+  await page.evaluate(() => localStorage.setItem("coverage-fail", "1"));
+  await page.getByRole("button", { name: "Cancel live run" }).click();
+  await expect(page.locator(".redundancy-refresh-status")).toContainText(
+    "Coverage temporarily unavailable",
+  );
+  await page.evaluate(() => localStorage.removeItem("coverage-fail"));
+  await page.getByRole("button", { name: "Refresh coverage" }).click();
+  await expect(page.locator(".redundancy-refresh-status")).toContainText("Ready");
+  await expect(page.locator(".redundancy-refresh-status")).not.toContainText(
+    "Coverage temporarily unavailable",
+  );
 });
 
 test("cancel submits the run id shown when the user clicked", async ({ page }) => {
@@ -529,14 +643,14 @@ test("cancel submits the run id shown when the user clicked", async ({ page }) =
   await page.addInitScript(() => window.localStorage.setItem("run-state", "running"));
   await page.goto("/redundancy?race=1");
   await expect(page.getByRole("button", { name: "Cancel live run" })).toBeVisible();
-  await page.getByRole("button", { name: "Reload status" }).click();
+  await page.getByRole("button", { name: "Refresh progress" }).click();
   await expect
     .poll(() =>
       page.evaluate(
         () =>
           (
             window as typeof window & { __redundancyCalls: Array<{ url: string }> }
-          ).__redundancyCalls.filter((entry) => entry.url.endsWith("/active-run")).length,
+          ).__redundancyCalls.filter((entry) => entry.url.endsWith("/refresh-progress")).length,
       ),
     )
     .toBeGreaterThanOrEqual(2);
@@ -552,7 +666,7 @@ test("cancel submits the run id shown when the user clicked", async ({ page }) =
   expect(cancellation?.body).toEqual({ runId: "shown-run" });
 });
 
-test("active-run polling waits one minute, while manual reload is immediate and polling stops on completion", async ({
+test("progress polling waits one minute and keeps polling only cheap status after completion", async ({
   page,
 }) => {
   await page.clock.pauseAt(new Date("2025-01-01T00:00:00Z"));
@@ -592,23 +706,23 @@ test("active-run polling waits one minute, while manual reload is immediate and 
   await page.goto("/redundancy");
   await expect(page.getByRole("button", { name: "Cancel live run" })).toBeVisible();
 
-  const activeRunCalls = () =>
+  const progressCalls = () =>
     page.evaluate(
       () =>
         (
           window as typeof window & { __redundancyCalls: Array<{ url: string }> }
-        ).__redundancyCalls.filter((entry) => entry.url.endsWith("/active-run")).length,
+        ).__redundancyCalls.filter((entry) => entry.url.endsWith("/refresh-progress")).length,
     );
-  const initialCount = await activeRunCalls();
+  const initialCount = await progressCalls();
   const activeIntervals = await page.evaluate(
     () =>
       (window as typeof window & { __pollIntervals: Array<{ id: number; startedAt: number }> })
         .__pollIntervals,
   );
   expect(activeIntervals.length).toBe(1);
-  await page.getByRole("button", { name: "Reload status" }).click();
-  await expect.poll(activeRunCalls).toBeGreaterThan(initialCount);
-  const afterManualReload = await activeRunCalls();
+  await page.getByRole("button", { name: "Refresh progress" }).click();
+  await expect.poll(progressCalls).toBeGreaterThan(initialCount);
+  const afterManualReload = await progressCalls();
   await page.clock.fastForward(59_999);
   expect(
     await page.evaluate(
@@ -623,38 +737,53 @@ test("active-run polling waits one minute, while manual reload is immediate and 
       ),
     )
     .toBe(1);
-  await expect.poll(activeRunCalls).toBeGreaterThan(afterManualReload);
+  await expect.poll(progressCalls).toBeGreaterThan(afterManualReload);
 
   await page.evaluate(() => window.localStorage.setItem("run-state", "complete"));
-  await page.getByRole("button", { name: "Reload status" }).click();
+  await page.getByRole("button", { name: "Refresh progress" }).click();
   await expect(page.getByRole("button", { name: "Cancel live run" })).toHaveCount(0);
-  const completedCount = await activeRunCalls();
+  const completedCount = await progressCalls();
   await page.clock.fastForward(120_000);
-  expect(await activeRunCalls()).toBe(completedCount);
+  await expect.poll(progressCalls).toBeGreaterThan(completedCount);
+  const coverageCalls = await page.evaluate(
+    () =>
+      (
+        window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+      ).__redundancyCalls.filter((entry) => entry.url.endsWith("/refresh-status")).length,
+  );
+  await page.clock.fastForward(120_000);
+  expect(
+    await page.evaluate(
+      () =>
+        (
+          window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+        ).__redundancyCalls.filter((entry) => entry.url.endsWith("/refresh-status")).length,
+    ),
+  ).toBe(coverageCalls);
 });
 
-test("active-run polling stops when the page unmounts", async ({ page }) => {
+test("progress polling stops when the page unmounts", async ({ page }) => {
   await page.clock.pauseAt(new Date("2025-01-01T00:00:00Z"));
   await installDaemon(page);
   await page.addInitScript(() => window.localStorage.setItem("run-state", "running"));
   await page.goto("/redundancy");
   await expect(page.getByRole("button", { name: "Cancel live run" })).toBeVisible();
   await page.setViewportSize({ width: 1280, height: 900 });
-  const activeRunCalls = () =>
+  const progressCalls = () =>
     page.evaluate(
       () =>
         (
           window as typeof window & { __redundancyCalls: Array<{ url: string }> }
-        ).__redundancyCalls.filter((entry) => entry.url.endsWith("/active-run")).length,
+        ).__redundancyCalls.filter((entry) => entry.url.endsWith("/refresh-progress")).length,
     );
   await page.clock.fastForward(100);
-  const loadedCount = await activeRunCalls();
+  const loadedCount = await progressCalls();
   await page.clock.fastForward(100);
-  expect(await activeRunCalls()).toBe(loadedCount);
-  const beforeUnmount = await activeRunCalls();
+  expect(await progressCalls()).toBe(loadedCount);
+  const beforeUnmount = await progressCalls();
   await page.getByRole("link", { name: "Wishlist" }).click();
   await expect(page).toHaveURL(/\/wishlist/);
   await expect(page.getByRole("button", { name: "Cancel live run" })).toHaveCount(0);
   await page.clock.fastForward(120_000);
-  expect(await activeRunCalls()).toBe(beforeUnmount);
+  expect(await progressCalls()).toBe(beforeUnmount);
 });

@@ -46,6 +46,7 @@ import type { JevGatewayOptions } from "./services/jev/jev-gateway.js";
 import { JevRunService } from "./services/jev-run-service.js";
 import { createJevRunSourceAdapter } from "./services/jev-run-source-adapter.js";
 import { createJevStatusService } from "./services/jev-status-service.js";
+import { createJevRefreshProgressService } from "./services/jev-refresh-progress-service.js";
 import { JevRunController } from "./services/jev-run-controller.js";
 import type { JevPairCache } from "./services/jev-pair-cache-service.js";
 import type { StorageService } from "./services/storage-service.js";
@@ -522,6 +523,10 @@ export async function main() {
       collectionSnapshotService,
       semanticRedundancyStateService: semanticStateService,
       jevStatusService: jevStatusService ?? undefined,
+      jevRefreshProgressService: createJevRefreshProgressService({
+        cache: jevPairCache,
+        ...(jevRunController ? { activeRun: () => jevRunController?.activeRun() ?? null } : {}),
+      }),
       jevRunController: jevRunController ?? undefined,
       ownerGameNoteService,
       groundedAnalysisProvider,

@@ -63,6 +63,7 @@ import type { AttentionDispositionService } from "./services/attention-dispositi
 import type { CollectionSnapshotCacheService } from "./services/collection-snapshot-cache-service.js";
 import type { SemanticRedundancyStateService } from "./services/semantic-redundancy-state-service.js";
 import type { createJevStatusService } from "./services/jev-status-service.js";
+import type { createJevRefreshProgressService } from "./services/jev-refresh-progress-service.js";
 import type { JevRunController } from "./services/jev-run-controller.js";
 import { createCollectionSnapshotRoutes } from "./routes/collection-snapshot.js";
 
@@ -80,6 +81,7 @@ export interface AppDeps {
   collectionSnapshotService?: CollectionSnapshotCacheService;
   semanticRedundancyStateService?: SemanticRedundancyStateService;
   jevStatusService?: Pick<ReturnType<typeof createJevStatusService>, "read">;
+  jevRefreshProgressService?: Pick<ReturnType<typeof createJevRefreshProgressService>, "read">;
   jevRunController?: Pick<JevRunController, "preview" | "start" | "cancel" | "activeRun">;
   ownerGameNoteService: OwnerGameNoteService;
   groundedAnalysisProvider: GroundedAnalysisProvider;
@@ -105,6 +107,7 @@ export function createApp(deps: AppDeps): AppResult {
   const {
     storageService,
     jevStatusService,
+    jevRefreshProgressService,
     jevRunController,
     collectionMutationService,
     axisService,
@@ -160,6 +163,7 @@ export function createApp(deps: AppDeps): AppResult {
   const redundancyRouteModule = createRedundancyRoutes({
     storageService,
     jevStatusService,
+    jevRefreshProgressService,
     jevRunController,
     semanticStateService: deps.semanticRedundancyStateService,
     afterSourceSave: deps.afterCandidateSourceSave,

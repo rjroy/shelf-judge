@@ -2,7 +2,7 @@ import type { Collection, RedundancySettings } from "@shelf-judge/shared";
 import type { JevRunSourceAdapter } from "./jev-run-source-adapter.js";
 import type { JevPairCache, JevRunProgress } from "./jev-pair-cache-service.js";
 import { computeJevPairCoverage } from "./jev-pair-coverage.js";
-import { createJevPairReadService } from "./jev-pair-read-service.js";
+import { classifyJevPairCoverage } from "./jev-pair-read-service.js";
 import { projectJevPairStatus, unavailableJevPairStatus } from "./jev-pair-status.js";
 import type { JevStatusResponse } from "./jev-pair-status.js";
 import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
@@ -13,6 +13,11 @@ export interface JevStatusStorage {
 }
 
 const MAX_COHERENCE_ATTEMPTS = 2;
+
+function semanticWeightEnabled(collection: Collection): boolean {
+  const weights = collection.semanticRedundancy.settings.weights;
+  return weights.description > 0 || weights.ownerNote > 0;
+}
 
 /** Aggregate-only, inference-free status reader. */
 export function createJevStatusService(options: {
@@ -45,10 +50,7 @@ export function createJevStatusService(options: {
         return unavailableJevPairStatus("not-applicable", persistedProgress(), "disabled");
       if (initial.collection.semanticRedundancy.settings.enabled !== true)
         return unavailableJevPairStatus("not-applicable", persistedProgress(), "factual");
-      if (
-        initial.collection.semanticRedundancy.settings.weights.description <= 0 &&
-        initial.collection.semanticRedundancy.settings.weights.ownerNote <= 0
-      )
+      if (!semanticWeightEnabled(initial.collection))
         return unavailableJevPairStatus("not-applicable", persistedProgress(), "factual");
       if (!cache?.available)
         return unavailableJevPairStatus("cache-unavailable", null, "not-ready");
@@ -74,12 +76,11 @@ export function createJevStatusService(options: {
             factualWeights: capture.factualWeights,
             cache,
           });
-          readResult = createJevPairReadService(cache).resolve({
+          readResult = classifyJevPairCoverage({
             collection: capture.collection,
-            predictionCapture: capture.predictionCapture,
-            factualWeights: capture.factualWeights,
-            captureIdentity: capture.captureIdentity,
+            coverage,
             factualEnabled: true,
+            cacheAvailable: cache.available,
           });
         } catch {
           return unavailableJevPairStatus("source-unavailable", persistedProgress());
@@ -108,6 +109,8 @@ export function createJevStatusService(options: {
         if (!current.factualEnabled)
           return unavailableJevPairStatus("not-applicable", persistedProgress(), "disabled");
         if (current.source.collection.semanticRedundancy.settings.enabled !== true)
+          return unavailableJevPairStatus("not-applicable", persistedProgress(), "factual");
+        if (!semanticWeightEnabled(current.source.collection))
           return unavailableJevPairStatus("not-applicable", persistedProgress(), "factual");
         if (
           current.source.sourceVectorIdentity !== capture.sourceVectorIdentity ||

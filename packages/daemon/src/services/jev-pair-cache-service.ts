@@ -50,6 +50,10 @@ export interface JevRunProgress {
   updatedAt: string;
 }
 
+export type JevRunProgressRead =
+  | { status: "available"; progress: JevRunProgress }
+  | { status: "none" | "invalid" | "unavailable" };
+
 export type JevRunStopReason =
   | "provider-limit"
   | "provider-unconfigured"
@@ -86,6 +90,7 @@ export interface JevPairCache {
   checkpointPair(checkpoint: JevPairCheckpoint): void;
   finishRun(finish: JevRunFinish): void;
   getRunProgress(): JevRunProgress | null;
+  getRunProgressRead(): JevRunProgressRead;
   setActivation(activation: JevAdvisoryActivation | null): void;
   getActivation(): JevAdvisoryActivation | null;
   compact(): void;
@@ -158,6 +163,7 @@ function validateProgress(progress: JevRunProgress): void {
     progress.failedPairs,
   ])
     if (!Number.isSafeInteger(n) || n < 0) throw new Error("Invalid progress counter");
+  if (progress.completedPairs > progress.pairCount) throw new Error("Invalid completed pair count");
   requireText(progress.runId, "run ID");
   requireText(progress.updatedAt, "updatedAt");
 }
@@ -355,6 +361,7 @@ function noOpCache(): JevPairCache {
       throw new Error("Jev pair cache unavailable");
     },
     getRunProgress: () => null,
+    getRunProgressRead: () => ({ status: "unavailable" }),
     setActivation: () => {
       throw new Error("Jev pair cache unavailable");
     },
@@ -486,6 +493,28 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       progress.stopReason ?? null,
       progress.updatedAt,
     );
+  };
+  const readProgress = (): JevRunProgressRead => {
+    if (!usable()) return { status: "unavailable" };
+    try {
+      const row = statements.getRunProgress.get();
+      if (!row) return { status: "none" };
+      const progress: JevRunProgress = {
+        runId: row.runId,
+        state: row.state,
+        pairCount: row.pairCount,
+        completedPairs: row.completedPairs,
+        cacheHits: row.cacheHits,
+        cacheMisses: row.cacheMisses,
+        failedPairs: row.failedPairs,
+        ...(row.stopReason === null ? {} : { stopReason: row.stopReason as JevRunStopReason }),
+        updatedAt: row.updatedAt,
+      };
+      validateProgress(progress);
+      return { status: "available", progress };
+    } catch {
+      return { status: "invalid" };
+    }
   };
   return {
     available: true,
@@ -673,26 +702,11 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       if (activation !== null) recordMutation();
     },
     getRunProgress() {
-      if (!usable()) return null;
-      try {
-        const row = statements.getRunProgress.get();
-        if (!row) return null;
-        const progress: JevRunProgress = {
-          runId: row.runId,
-          state: row.state,
-          pairCount: row.pairCount,
-          completedPairs: row.completedPairs,
-          cacheHits: row.cacheHits,
-          cacheMisses: row.cacheMisses,
-          failedPairs: row.failedPairs,
-          ...(row.stopReason === null ? {} : { stopReason: row.stopReason as JevRunStopReason }),
-          updatedAt: row.updatedAt,
-        };
-        validateProgress(progress);
-        return progress;
-      } catch {
-        return null;
-      }
+      const result = readProgress();
+      return result.status === "available" ? result.progress : null;
+    },
+    getRunProgressRead() {
+      return readProgress();
     },
     setActivation(activation) {
       assertUsable();

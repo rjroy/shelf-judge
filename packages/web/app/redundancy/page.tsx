@@ -59,14 +59,21 @@ type Refresh = {
   };
 };
 type ActiveRun = { runId: string } | null;
+type CheapStatus = {
+  activity: { state: "active"; runId: string } | { state: "idle" } | { state: "unavailable" };
+  progress:
+    | {
+        state: "saved";
+        relation: "active-run" | "historical" | "unknown";
+        value: Refresh["progress"];
+      }
+    | { state: "none" }
+    | { state: "unavailable" };
+};
 
-async function readRunSnapshot() {
-  const [refresh, activeRun] = await Promise.all([
-    request<Refresh>("/api/daemon/redundancy/semantic/refresh-status"),
-    request<ActiveRun>("/api/daemon/redundancy/semantic/active-run"),
-  ]);
-  return { refresh, activeRun };
-}
+const readCheapStatus = () =>
+  request<CheapStatus>("/api/daemon/redundancy/semantic/refresh-progress");
+const readFullStatus = () => request<Refresh>("/api/daemon/redundancy/semantic/refresh-status");
 
 const statusCopy: Record<string, string> = {
   ready: "Ready",
@@ -135,13 +142,10 @@ function semanticStatusValue(status: Semantic["status"]): string {
   return typeof value === "string" ? value : "unavailable";
 }
 
-function progressCopy(refresh: Refresh, activeRun: ActiveRun): string | null {
-  const progress = refresh.progress;
-  if (!progress) return null;
+function progressCopy(progress: NonNullable<Refresh["progress"]>): string {
   const summary = `${progress.completedPairs} of ${progress.pairCount} pairs completed; ${progress.failedPairs} failed; ${progress.cacheHits} reused from cache.`;
-  const lead = activeRun ? "Refresh is running now." : "Last saved run status.";
   if (progress.state === "last-known-running")
-    return `${lead} ${progress.completedPairs} of ${progress.pairCount} pairs completed; ${progress.cacheHits} reused from cache.`;
+    return `${progress.completedPairs} of ${progress.pairCount} pairs completed; ${progress.cacheHits} reused from cache.`;
   if (progress.state === "completed")
     return `Run completed. ${progress.completedPairs} of ${progress.pairCount} pairs completed; ${progress.cacheHits} reused from cache.`;
   if (progress.state === "interrupted") return `Run stopped before completion. ${summary}`;
@@ -190,6 +194,66 @@ export default function RedundancyPage() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [refresh, setRefresh] = useState<Refresh | null>(null);
   const [activeRun, setActiveRun] = useState<ActiveRun>(null);
+  const [cheap, setCheap] = useState<CheapStatus | null>(null);
+  const statusGeneration = useRef(0);
+  const wasActive = useRef(false);
+  const activityUnavailable = useRef(false);
+  const coverageError = useRef(false);
+  const measuring = useRef(false);
+  const measurePending = useRef(false);
+  const measureCoverage = async () => {
+    if (measuring.current) {
+      measurePending.current = true;
+      return;
+    }
+    measuring.current = true;
+    measurePending.current = false;
+    const generation = ++statusGeneration.current;
+    setRefresh(null);
+    try {
+      const full = await readFullStatus();
+      if (generation === statusGeneration.current) {
+        coverageError.current = false;
+        setRefresh(full);
+        if (!coverageError.current) setStatusError(undefined);
+      }
+    } catch (cause) {
+      if (generation === statusGeneration.current) {
+        coverageError.current = true;
+        setStatusError(cause instanceof Error ? cause.message : "Could not measure coverage.");
+      }
+    } finally {
+      measuring.current = false;
+      if (measurePending.current) void measureCoverage();
+    }
+  };
+  const invalidateCoverage = () => {
+    statusGeneration.current += 1;
+    setRefresh(null);
+  };
+  const applyCheapStatus = async (latest: CheapStatus) => {
+    setCheap(latest);
+    if (latest.activity.state === "active") {
+      activityUnavailable.current = false;
+      wasActive.current = true;
+      setActiveRun({ runId: latest.activity.runId });
+      invalidateCoverage();
+      return;
+    }
+    if (latest.activity.state === "unavailable") {
+      activityUnavailable.current = true;
+      wasActive.current = false;
+      invalidateCoverage();
+      return;
+    }
+    const shouldMeasure = wasActive.current || activityUnavailable.current;
+    activityUnavailable.current = false;
+    setActiveRun(null);
+    if (shouldMeasure) {
+      wasActive.current = false;
+      await measureCoverage();
+    }
+  };
   const [noteTransmissionAuthorized, setNoteTransmissionAuthorized] = useState(false);
   const [maxProviderAttempts, setMaxProviderAttempts] = useState("100");
   const [reportedTokenStopThreshold, setReportedTokenStopThreshold] = useState("200000");
@@ -215,7 +279,7 @@ export default function RedundancyPage() {
   const reload = useCallback(async () => {
     const [data, status] = await Promise.all([
       request<SettingsResponse>("/api/daemon/redundancy/settings"),
-      readRunSnapshot().catch((cause: unknown) => {
+      readCheapStatus().catch((cause: unknown) => {
         setStatusError(cause instanceof Error ? cause.message : "Could not load refresh status.");
         return null;
       }),
@@ -226,8 +290,15 @@ export default function RedundancyPage() {
     setSavedSemantic(data.semantic.settings);
     setMigrationNotice(data.migrationNotice);
     if (status) {
-      setRefresh(status.refresh);
-      setActiveRun(status.activeRun);
+      if (status.activity.state === "active") await applyCheapStatus(status);
+      else if (status.activity.state === "unavailable") await applyCheapStatus(status);
+      else {
+        setCheap(status);
+        setActiveRun(null);
+        wasActive.current = false;
+        activityUnavailable.current = false;
+        void measureCoverage();
+      }
     }
   }, []);
   useEffect(() => {
@@ -236,24 +307,26 @@ export default function RedundancyPage() {
       .finally(() => setLoading(false));
   }, [reload]);
   useEffect(() => {
-    const activeRunId = activeRun?.runId;
-    if (!activeRunId) return;
     let alive = true;
     let inFlight = false;
     const poll = async () => {
       if (inFlight) return;
       inFlight = true;
       try {
-        const latest = await readRunSnapshot();
+        const latest = await readCheapStatus();
         if (!alive) return;
-        setRefresh(latest.refresh);
-        setActiveRun(latest.activeRun);
-        setStatusError(undefined);
+        await applyCheapStatus(latest);
+        if (!alive) return;
+        if (!coverageError.current) setStatusError(undefined);
       } catch (e) {
-        if (alive)
+        if (alive) {
+          activityUnavailable.current = true;
+          wasActive.current = false;
+          invalidateCoverage();
           setStatusError(
             e instanceof Error ? e.message : "Refresh status could not be loaded; retrying.",
           );
+        }
       } finally {
         inFlight = false;
       }
@@ -263,7 +336,7 @@ export default function RedundancyPage() {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [activeRun?.runId]);
+  }, []);
 
   const saveFactual = async () => {
     if (!settings) return;
@@ -271,6 +344,7 @@ export default function RedundancyPage() {
     setFactualSaving(true);
     setFactualError(undefined);
     setMessage(undefined);
+    invalidateCoverage();
     try {
       const result = await request<RedundancySettings>("/api/daemon/redundancy/settings", {
         method: "PATCH",
@@ -301,6 +375,7 @@ export default function RedundancyPage() {
     setSemanticSaving(true);
     setSemanticError(undefined);
     setMessage(undefined);
+    invalidateCoverage();
     try {
       const result = await request<{ settings: Semantic["settings"] }>(
         "/api/daemon/redundancy/semantic-settings",
@@ -380,13 +455,20 @@ export default function RedundancyPage() {
         }),
       );
       setActiveRun({ runId: result.runId });
+      wasActive.current = true;
+      activityUnavailable.current = false;
+      invalidateCoverage();
       setMessage("Run started. Uncached comparisons may now be sent to the provider.");
       setPreview(null);
       try {
-        const status = await readRunSnapshot();
-        setRefresh(status.refresh);
-        setActiveRun(status.activeRun ?? { runId: result.runId });
-        setStatusError(undefined);
+        const status = await readCheapStatus();
+        if (status.activity.state === "unavailable") {
+          wasActive.current = true;
+          setActiveRun({ runId: result.runId });
+          invalidateCoverage();
+          setCheap(status);
+        } else await applyCheapStatus(status);
+        if (!coverageError.current) setStatusError(undefined);
       } catch (cause) {
         setStatusError(
           cause instanceof Error
@@ -413,10 +495,9 @@ export default function RedundancyPage() {
       await request("/api/daemon/redundancy/semantic/cancel", json({ runId }));
       setMessage("Cancellation requested for this run.");
       try {
-        const afterCancel = await readRunSnapshot();
-        setRefresh(afterCancel.refresh);
-        setActiveRun(afterCancel.activeRun);
-        setStatusError(undefined);
+        const afterCancel = await readCheapStatus();
+        await applyCheapStatus(afterCancel);
+        if (!coverageError.current) setStatusError(undefined);
       } catch (cause) {
         setStatusError(
           cause instanceof Error
@@ -482,6 +563,7 @@ export default function RedundancyPage() {
     previewRevision.current += 1;
     setPreview(null);
     setNoteTransmissionAuthorized(false);
+    invalidateCoverage();
   };
   const updateWeight = (key: keyof Weights, value: number) => {
     // A prepared preview reflects saved settings. Weight edits only tune cached-result use.
@@ -956,26 +1038,92 @@ export default function RedundancyPage() {
                   className="btn btn-secondary"
                   disabled={busy}
                   onClick={() =>
-                    void readRunSnapshot()
+                    void readCheapStatus()
                       .then((latest) => {
-                        setRefresh(latest.refresh);
-                        setActiveRun(latest.activeRun);
+                        return applyCheapStatus(latest);
                       })
                       .catch((e: unknown) =>
-                        setStatusError(e instanceof Error ? e.message : "Could not reload status."),
+                        (() => {
+                          activityUnavailable.current = true;
+                          wasActive.current = false;
+                          invalidateCoverage();
+                          setStatusError(
+                            e instanceof Error ? e.message : "Could not reload progress.",
+                          );
+                        })(),
                       )
                   }
                 >
-                  Reload status
+                  Refresh progress
                 </button>
-                {refresh && (
+                <button
+                  className="btn btn-secondary"
+                  disabled={busy || Boolean(activeRun) || cheap?.activity.state !== "idle"}
+                  onClick={() => {
+                    const generation = ++statusGeneration.current;
+                    setStatusError(undefined);
+                    void readFullStatus()
+                      .then((full) => {
+                        if (generation === statusGeneration.current) {
+                          coverageError.current = false;
+                          setRefresh(full);
+                          setStatusError(undefined);
+                        }
+                      })
+                      .catch((e: unknown) =>
+                        (() => {
+                          if (generation !== statusGeneration.current) return;
+                          coverageError.current = true;
+                          setStatusError(
+                            e instanceof Error ? e.message : "Could not refresh coverage.",
+                          );
+                        })(),
+                      );
+                  }}
+                >
+                  Refresh coverage
+                </button>
+                {refresh && cheap?.activity.state === "idle" && (
                   <p role="status">
                     {statusCopy[refresh.status] ?? refresh.status}.{" "}
                     {refresh.pairCount === null
-                      ? "Pair count unavailable."
-                      : `${refresh.pairCount} eligible pairs.`}{" "}
-                    {progressCopy(refresh, activeRun)}
+                      ? "Eligible pair count unavailable."
+                      : `Coverage measured across ${refresh.pairCount} eligible pairs.`}{" "}
                   </p>
+                )}
+                {activeRun && (
+                  <p role="status">
+                    {cheap?.progress.state === "saved" &&
+                    cheap.progress.relation === "active-run" &&
+                    cheap.progress.value
+                      ? `Refresh is running. ${progressCopy(cheap.progress.value)}`
+                      : "Run progress is not available yet."}
+                  </p>
+                )}
+                {!activeRun &&
+                  cheap?.progress.state === "saved" &&
+                  cheap.progress.relation === "historical" &&
+                  cheap.progress.value && (
+                    <p role="status">
+                      {cheap.activity.state === "unavailable"
+                        ? "Activity status unavailable; saved run:"
+                        : "Last saved run:"}{" "}
+                      {progressCopy(cheap.progress.value)}
+                    </p>
+                  )}
+                {cheap?.activity.state === "unavailable" && (
+                  <p role="status">
+                    Live activity status is unavailable. Coverage is not being presented as current.
+                  </p>
+                )}
+                {cheap?.progress.state === "unavailable" && (
+                  <p role="status">Run progress is unavailable.</p>
+                )}
+                {cheap?.progress.state === "saved" && cheap.progress.relation === "unknown" && (
+                  <p role="status">Saved progress is available, but its run scope is unknown.</p>
+                )}
+                {cheap?.progress.state === "none" && cheap.activity.state === "idle" && (
+                  <p role="status">No saved run progress.</p>
                 )}
                 {activeRun && (
                   <button

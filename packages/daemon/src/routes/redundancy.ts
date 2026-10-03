@@ -13,6 +13,7 @@ import { collectionMutationServiceFor } from "../services/collection-mutation-se
 import { createSemanticRedundancyStateService } from "../services/semantic-redundancy-state-service.js";
 import type { createJevStatusService } from "../services/jev-status-service.js";
 import type { JevRunController } from "../services/jev-run-controller.js";
+import type { createJevRefreshProgressService } from "../services/jev-refresh-progress-service.js";
 import { parseJevRunBudgetQuery } from "../services/jev-run-budget.js";
 
 type JevRunRouteController = Pick<JevRunController, "preview" | "start" | "cancel" | "activeRun">;
@@ -22,6 +23,7 @@ export interface RedundancyRoutesDeps {
   semanticStateService?: SemanticRedundancyStateService;
   jevStatusService?: Pick<ReturnType<typeof createJevStatusService>, "read">;
   jevRunController?: JevRunRouteController;
+  jevRefreshProgressService?: Pick<ReturnType<typeof createJevRefreshProgressService>, "read">;
   afterSourceSave?: (impact: AttentionMutationImpact) => Promise<void>;
 }
 
@@ -239,6 +241,17 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
       return c.json(await deps.jevStatusService.read());
     } catch {
       return c.json({ error: "Semantic status is unavailable" }, 503);
+    }
+  });
+
+  routes.get("/redundancy/semantic/refresh-progress", (c) => {
+    c.header("Cache-Control", "no-store");
+    if (!deps.jevRefreshProgressService)
+      return c.json({ error: "Semantic progress is unavailable" }, 503);
+    try {
+      return c.json(deps.jevRefreshProgressService.read(), 200);
+    } catch {
+      return c.json({ error: "Semantic progress is unavailable" }, 503);
     }
   });
 
@@ -527,6 +540,91 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
             "coverage",
             "progress",
           ],
+          additionalProperties: false,
+        },
+      },
+      hierarchy: { root: "shelf", feature: "redundancy" },
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.redundancy.get-semantic-refresh-progress",
+      name: "get-semantic-refresh-progress",
+      description:
+        "Get process activity and saved semantic Run progress without measuring coverage",
+      invocation: { method: "GET", path: "/api/redundancy/semantic/refresh-progress" },
+      response: {
+        body: {
+          type: "object",
+          properties: {
+            coverageMeasurement: { const: "not-measured" },
+            activity: {
+              oneOf: [
+                {
+                  type: "object",
+                  properties: { state: { const: "active" }, runId: { type: "string" } },
+                  required: ["state", "runId"],
+                  additionalProperties: false,
+                },
+                {
+                  type: "object",
+                  properties: { state: { enum: ["idle", "unavailable"] } },
+                  required: ["state"],
+                  additionalProperties: false,
+                },
+              ],
+            },
+            progress: {
+              oneOf: [
+                {
+                  type: "object",
+                  properties: { state: { enum: ["none", "unavailable"] } },
+                  required: ["state"],
+                  additionalProperties: false,
+                },
+                {
+                  type: "object",
+                  properties: {
+                    state: { const: "saved" },
+                    relation: { enum: ["active-run", "historical", "unknown"] },
+                    value: {
+                      type: "object",
+                      properties: {
+                        state: {
+                          enum: ["last-known-running", "completed", "interrupted", "failed"],
+                        },
+                        pairCount: { type: "integer" },
+                        completedPairs: { type: "integer" },
+                        cacheHits: { type: "integer" },
+                        cacheMisses: { type: "integer" },
+                        failedPairs: { type: "integer" },
+                        stopReason: {
+                          enum: [
+                            "provider-limit",
+                            "provider-unconfigured",
+                            "application-attempt-limit",
+                            "application-token-threshold",
+                            "application-deadline",
+                          ],
+                        },
+                      },
+                      required: [
+                        "state",
+                        "pairCount",
+                        "completedPairs",
+                        "cacheHits",
+                        "cacheMisses",
+                        "failedPairs",
+                      ],
+                      additionalProperties: false,
+                    },
+                  },
+                  required: ["state", "relation", "value"],
+                  additionalProperties: false,
+                },
+              ],
+            },
+          },
+          required: ["coverageMeasurement", "activity", "progress"],
           additionalProperties: false,
         },
       },

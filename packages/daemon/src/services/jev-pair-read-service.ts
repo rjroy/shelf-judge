@@ -1,5 +1,9 @@
 import type { Collection, GameWithScore, RedundancyComponentWeights } from "@shelf-judge/shared";
-import { computeJevPairCoverage, type JevPredictionCaptureIdentity } from "./jev-pair-coverage.js";
+import {
+  computeJevPairCoverage,
+  type JevPairCoverageDigest,
+  type JevPredictionCaptureIdentity,
+} from "./jev-pair-coverage.js";
 import type { JevPairCache } from "./jev-pair-cache-service.js";
 import type { RedundancyPairTable } from "./redundancy-engine.js";
 
@@ -46,6 +50,59 @@ const NOT_READY: JevPairReadResult = {
   summary: "Semantic redundancy is not ready.",
 };
 
+/** Purely classifies one already-computed coverage digest; callers can share this pass. */
+export function classifyJevPairCoverage(input: {
+  collection: Collection;
+  coverage: JevPairCoverageDigest;
+  factualEnabled?: boolean;
+  cacheAvailable?: boolean;
+}): JevPairReadResult {
+  if (input.factualEnabled === false) return DISABLED;
+  if (input.collection?.semanticRedundancy?.settings?.enabled !== true) return FACTUAL;
+  if (input.cacheAvailable === false) return NOT_READY;
+  const hasSemanticSignal = input.coverage.pairs.some(
+    (pair) => pair.C.state === "covered" || pair.D.state === "covered",
+  );
+  const factualWeight = input.collection.semanticRedundancy.settings.weights.factual;
+  const status = !hasSemanticSignal
+    ? factualWeight > 0
+      ? "factual"
+      : "not-ready"
+    : input.coverage.complete
+      ? "ready"
+      : "partial";
+  const current = input.collection.semanticRedundancy;
+  const identity = {
+    generationId: input.coverage.identity,
+    consentEpoch: String(current.consentEpoch),
+    settingsEpoch: `${current.evidenceEpoch}:${current.factualWeightsEpoch}`,
+  };
+  return {
+    status,
+    summary:
+      status === "ready"
+        ? "Semantic redundancy is ready."
+        : status === "partial"
+          ? "Some semantic redundancy signals are not available."
+          : status === "factual"
+            ? "Using factual redundancy only."
+            : "No enabled redundancy component is available.",
+    table: {
+      status,
+      identity,
+      expectedIdentity: { ...identity },
+      weights: { ...current.settings.weights },
+      pairs: input.coverage.pairs.map((pair) => ({
+        gameAId: pair.gameAId,
+        gameBId: pair.gameBId,
+        factual: pair.factualScore,
+        description: pair.C.state === "covered" ? pair.C.score : null,
+        ownerNote: pair.D.state === "covered" ? pair.D.score : null,
+      })),
+    },
+  };
+}
+
 /** Read-only adapter. It proves the whole capture and cache before exposing any semantic score. */
 export function createJevPairReadService(cache: ReadCache) {
   function resolve(input: JevPairReadInput): JevPairReadResult {
@@ -61,49 +118,11 @@ export function createJevPairReadService(cache: ReadCache) {
         factualWeights: input.factualWeights,
         cache,
       });
-      const hasSemanticSignal = coverage.pairs.some(
-        (pair) => pair.C.state === "covered" || pair.D.state === "covered",
-      );
-      const factualWeight = input.collection.semanticRedundancy.settings.weights.factual;
-      const status = !hasSemanticSignal
-        ? factualWeight > 0
-          ? "factual"
-          : "not-ready"
-        : coverage.complete
-          ? "ready"
-          : "partial";
-      const current = input.collection.semanticRedundancy;
-      const identity = {
-        // These are adapter labels, not writer-issued generations. The digest is the complete
-        // deterministic capture identity; epochs below label the relevant current authority.
-        generationId: coverage.identity,
-        consentEpoch: String(current.consentEpoch),
-        settingsEpoch: `${current.evidenceEpoch}:${current.factualWeightsEpoch}`,
-      };
-      return {
-        status,
-        summary:
-          status === "ready"
-            ? "Semantic redundancy is ready."
-            : status === "partial"
-              ? "Some semantic redundancy signals are not available."
-              : status === "factual"
-                ? "Using factual redundancy only."
-                : "No enabled redundancy component is available.",
-        table: {
-          status,
-          identity,
-          expectedIdentity: { ...identity },
-          weights: { ...current.settings.weights },
-          pairs: coverage.pairs.map((pair) => ({
-            gameAId: pair.gameAId,
-            gameBId: pair.gameBId,
-            factual: pair.factualScore,
-            description: pair.C.state === "covered" ? pair.C.score : null,
-            ownerNote: pair.D.state === "covered" ? pair.D.score : null,
-          })),
-        },
-      };
+      return classifyJevPairCoverage({
+        collection: input.collection,
+        coverage,
+        factualEnabled: true,
+      });
     } catch {
       // No cache/parse/capture failure may allow an earlier successful semantic table to linger.
       return NOT_READY;

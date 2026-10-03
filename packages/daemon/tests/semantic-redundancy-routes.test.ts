@@ -4,6 +4,7 @@ import { createInitialSemanticRedundancyStateV10, type Collection } from "@shelf
 import type { StorageService } from "../src/services/storage-service";
 import type { JevStatusResponse } from "../src/services/jev-pair-status";
 import type { createJevStatusService } from "../src/services/jev-status-service";
+import type { createJevRefreshProgressService } from "../src/services/jev-refresh-progress-service";
 import type { RedundancyRoutesDeps } from "../src/routes/redundancy";
 import { createRedundancyRoutes } from "../src/routes/redundancy";
 import { createSettingsRouteStorageStub } from "./helpers/settings-route-storage";
@@ -11,6 +12,7 @@ import { createSettingsRouteStorageStub } from "./helpers/settings-route-storage
 function harness(
   jevStatusService?: Pick<ReturnType<typeof createJevStatusService>, "read">,
   jevRunController?: RedundancyRoutesDeps["jevRunController"],
+  jevRefreshProgressService?: Pick<ReturnType<typeof createJevRefreshProgressService>, "read">,
 ) {
   const collection: Collection = {
     schemaVersion: 10,
@@ -50,6 +52,7 @@ function harness(
     storageService: storage,
     jevStatusService,
     jevRunController,
+    jevRefreshProgressService,
   });
   const app = new Hono();
   app.route("/api", route.routes);
@@ -174,6 +177,36 @@ describe("semantic redundancy routes", () => {
     const body = (await status.json()) as { error: string };
     expect(body).toEqual({ error: "Semantic status is unavailable" });
     expect(JSON.stringify(body)).not.toContain("private sentinel");
+  });
+
+  test("refresh-progress is a distinct no-store, coverage-not-measured contract", async () => {
+    const progress = {
+      coverageMeasurement: "not-measured" as const,
+      activity: { state: "active" as const, runId: "run-visible" },
+      progress: {
+        state: "saved" as const,
+        relation: "active-run" as const,
+        value: {
+          state: "last-known-running" as const,
+          pairCount: 3,
+          completedPairs: 1,
+          cacheHits: 0,
+          cacheMisses: 1,
+          failedPairs: 0,
+        },
+      },
+    };
+    const { app, operations } = harness(undefined, undefined, { read: () => progress });
+    const response = await app.request("/api/redundancy/semantic/refresh-progress");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toEqual(progress);
+    expect(
+      operations.find((operation) => operation.invocation.path.endsWith("refresh-progress")),
+    ).toMatchObject({ idempotent: true, invocation: { method: "GET" } });
+    const unavailable = await harness().app.request("/api/redundancy/semantic/refresh-progress");
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.headers.get("Cache-Control")).toBe("no-store");
   });
 
   test("Run endpoints are strict, sanitized, aggregate-only, and no-store", async () => {

@@ -9,7 +9,16 @@ describe("redundancy run controls", () => {
     expect(page).toContain('/api/daemon/redundancy/semantic/run"');
     expect(page).toContain("requestId: preview.requestId");
     expect(page).toContain("precondition: preview.precondition");
-    expect(page).toContain("/api/daemon/redundancy/semantic/active-run");
+    expect(page).toContain("/api/daemon/redundancy/semantic/refresh-progress");
+    expect(page).toContain("/api/daemon/redundancy/semantic/refresh-status");
+    expect(page).toContain("Refresh coverage");
+    expect(page).toContain("Refresh progress");
+    expect(page).toContain(
+      "const shouldMeasure = wasActive.current || activityUnavailable.current",
+    );
+    expect(page).toContain("measurePending.current = true");
+    expect(page).toContain("setRefresh(null)");
+    expect(page).toContain("Coverage is not being presented as current");
     expect(page).toContain("/api/daemon/redundancy/semantic/cancel");
     expect(page).toContain("noteTransmissionAuthorized");
     expect(page).toContain("maxProviderAttempts");
