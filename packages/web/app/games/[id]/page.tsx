@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import {
   getGame,
+  getGameName,
   listAxes,
   getTournamentGameStats,
   getNicheSettings,
@@ -18,6 +19,7 @@ import type {
   RedundancyAdjustment,
 } from "@shelf-judge/shared";
 import { ScoreBreakdown } from "@/components/score-breakdown";
+import { RedundancyStatus } from "@/components/redundancy-status";
 import { RatingForm } from "@/components/rating-form";
 import { GameActions, OwnershipActions } from "@/components/game-actions";
 import { NicheIgnoreButton, NicheRestoreButton } from "@/components/niche-ignore-button";
@@ -41,8 +43,8 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { id } = await params;
   try {
-    const { game } = await getGame(id);
-    return { title: game.name };
+    const { name } = await getGameName(id);
+    return { title: name };
   } catch {
     return { title: "Game" };
   }
@@ -184,10 +186,11 @@ export default async function GameDetailPage({
     collectionInsights:
       !isPreviouslyOwned &&
       (score?.redundancyAdjustment ||
+        score?.redundancySimilarityInfo ||
         score?.vetoed ||
         (nichePosition && (nichePosition.niches.length > 0 || ignoredTags.length > 0))) ? (
         <>
-          {score?.redundancyAdjustment && (
+          {(score?.redundancyAdjustment || score?.redundancySimilarityInfo) && (
             <section className="game-detail-chapter game-detail-redundancy">
               <RedundancyPanel score={score} adjustment={score.redundancyAdjustment} />
             </section>
@@ -639,9 +642,22 @@ function RedundancyPanel({
   adjustment,
 }: {
   score: FitnessResult;
-  adjustment: RedundancyAdjustment;
+  adjustment: RedundancyAdjustment | null;
 }) {
-  const isIntegrated = score.score !== adjustment.originalScore;
+  const info = score.redundancySimilarityInfo;
+  const isIntegrated = adjustment !== null && score.score !== adjustment.originalScore;
+  if (!adjustment) {
+    return (
+      <div className="redundancy-panel">
+        <div className="panel-section-title">Redundancy</div>
+        {info ? (
+          <RedundancyStatus info={info} noNeighbor />
+        ) : (
+          <div className="redundancy-summary">Redundancy scoring is off.</div>
+        )}
+      </div>
+    );
+  }
   const zeroPenalty = adjustment.penalty === 0;
 
   return (
@@ -671,6 +687,7 @@ function RedundancyPanel({
         {ordinalSuffix(adjustment.nicheRank)} of {adjustment.nicheSize} similar game
         {adjustment.nicheSize !== 1 ? "s" : ""}
       </div>
+      {info && <RedundancyStatus info={info} />}
 
       {adjustment.nicheNeighbors.length > 0 && (
         <div className="redundancy-neighbors">

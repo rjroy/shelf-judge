@@ -7,7 +7,12 @@ import type { Readable } from "node:stream";
 import { createFileOps } from "../../src/services/file-ops.js";
 import { GameHistoryConflictError } from "../../src/services/game-service.js";
 import type { GroundedAnalysisProvider } from "../../src/services/grounded-analysis/provider.js";
-import { createMockBggClient, createTestApp, jsonRequest } from "../helpers/test-app.js";
+import {
+  createHydratedTestApp,
+  createMockBggClient,
+  createTestApp,
+  jsonRequest,
+} from "../helpers/test-app.js";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
 
 const fixturePath = path.join(import.meta.dir, "../fixtures/collection-schema-v5-owner-notes.json");
@@ -107,10 +112,10 @@ describe("owner-note persisted flow", () => {
     try {
       await fileOps.mkdir(dataDir);
       await writeFile(collectionPath, await readFile(fixturePath, "utf8"), "utf8");
-      const first = createTestApp({ bggClient, configPath, dataDir, fileOps, now });
+      const first = await createHydratedTestApp({ bggClient, configPath, dataDir, fileOps, now });
       const migrated = await first.storageService.loadCollection();
       const migratedBgg = migrated.games.find(({ id }) => id === bggGameId);
-      expect(migrated.schemaVersion).toBe(8);
+      expect(migrated.schemaVersion).toBe(10);
       expect(migratedBgg?.ownerNote).toEqual({ state: "missing", version: 0, updatedAt: null });
       expect(JSON.stringify(migratedBgg?.ownerNote)).not.toContain("description");
       if (migratedBgg?.bggData === null || migratedBgg === undefined)
@@ -189,7 +194,13 @@ describe("owner-note persisted flow", () => {
       };
       const lostAcceptance = accepted(await first.ownerGameNoteService.set(bggGameId, lostRequest));
       const durableAfterLostAcceptance = await first.storageService.loadCollection();
-      const restarted = createTestApp({ bggClient, configPath, dataDir, fileOps, now });
+      const restarted = await createHydratedTestApp({
+        bggClient,
+        configPath,
+        dataDir,
+        fileOps,
+        now,
+      });
       expect(
         accepted(await restarted.ownerGameNoteService.set(bggGameId, lostRequest)).accepted,
       ).toEqual({ ...lostAcceptance.accepted, replayed: true });
@@ -364,7 +375,7 @@ describe("owner-note persisted flow", () => {
         await readFile(fixturePath, "utf8"),
         "utf8",
       );
-      const context = createTestApp({
+      const context = await createHydratedTestApp({
         bggClient,
         configPath,
         dataDir,

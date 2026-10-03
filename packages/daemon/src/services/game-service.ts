@@ -870,7 +870,11 @@ export function createGameService(deps: GameServiceDeps): GameService {
               changed: true,
               value: undefined,
               beforePersistence: deps.deletionLifecycle
-                ? () => deps.deletionLifecycle?.beforePersistence(lifecycleContext)
+                ? (acceptedCollection) => {
+                    lifecycleContext.targetSourceIdentity =
+                      collectionDurableIdentity(acceptedCollection);
+                    return deps.deletionLifecycle?.beforePersistence(lifecycleContext);
+                  }
                 : undefined,
               onPersistenceFailure: deps.deletionLifecycle
                 ? (error: unknown) =>

@@ -47,6 +47,10 @@ function profileFitnessEvidence(
     gameName: game.name,
     currentFitness: fitness.score,
     vetoed: fitness.vetoed,
+    redundancySimilarityInfo: fitness.redundancySimilarityInfo ?? {
+      status: "disabled",
+      generationId: null,
+    },
   };
 }
 

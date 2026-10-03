@@ -423,8 +423,11 @@ export function createOwnerGameNoteService(deps: OwnerGameNoteServiceDeps): Owne
               accepted: { ...structuredClone(accepted), replayed: false },
             } satisfies OwnerGameNoteMutationResult,
             beforePersistence: lifecycle
-              ? () => {
+              ? (acceptedCollection) => {
                   invalidationAttempted = true;
+                  lifecycleContext.resultingCollectionRevision = acceptedCollection.revision;
+                  lifecycleContext.targetSourceIdentity =
+                    collectionDurableIdentity(acceptedCollection);
                   return lifecycle.beforePersistence(lifecycleContext);
                 }
               : undefined,

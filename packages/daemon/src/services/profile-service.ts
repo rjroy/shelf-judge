@@ -1,4 +1,5 @@
 import type {
+  Collection,
   AttentionCandidateArtifact,
   CollectionProfile,
   CollectionProfileAttentionActionId,
@@ -12,12 +13,16 @@ import {
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
   CollectionProfileResultSchema,
+  createProfileDataSchema,
   ExactRational,
   createCollectionProfileSnapshotSchema,
 } from "@shelf-judge/shared";
 import { ZodError } from "zod";
 import type { StorageService } from "./storage-service.js";
-import type { DisplayedFitnessService } from "./displayed-fitness-service.js";
+import {
+  semanticFallbackStatus,
+  type DisplayedFitnessService,
+} from "./displayed-fitness-service.js";
 import { computeCollectionProfile } from "./collection-profile-engine.js";
 import { projectProfileCollectionSource } from "./game-projection.js";
 import {
@@ -25,9 +30,12 @@ import {
   profileSourceIdentity,
   sameProfileSourceIdentity,
   canonicalJson,
+  canonicalSha256,
   type ProfileSources,
 } from "./profile-source-coordinator.js";
 import type { AttentionCandidateReadFreshness } from "./attention-disposition-maintenance.js";
+import type { SourceVector } from "./source-vector.js";
+import type { PrivateDisplayedFitnessService } from "./displayed-fitness-service.js";
 
 export interface ProfileService {
   getProfile(): Promise<CollectionProfileResult>;
@@ -283,12 +291,18 @@ function publicationIdentityMatches(
   source: ReturnType<typeof profileSourceIdentity>,
   cardLimit: number,
   artifact: AttentionCandidateArtifact,
+  entityPolicyFingerprint: string,
+  scoringProof: unknown,
 ): boolean {
   return (
     sameProfileSourceIdentity(stored.publicationIdentity.source, source) &&
     stored.publicationIdentity.profileAttentionCardLimit === cardLimit &&
+    stored.publicationIdentity.entityPolicyFingerprint === entityPolicyFingerprint &&
     canonicalJson(stored.publicationIdentity.attentionCandidates) ===
-      canonicalJson(candidatePublicationIdentity(artifact))
+      canonicalJson(candidatePublicationIdentity(artifact)) &&
+    canonicalJson(
+      stored.publicationIdentity.attentionCandidates.identity.semanticScoringInputProof,
+    ) === canonicalJson(scoringProof)
   );
 }
 
@@ -306,6 +320,10 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         let artifact: AttentionCandidateArtifact;
         let cardLimit: number;
         let entityPolicy: CollectionProfile["entityPolicy"];
+        let fitnessCollection: Collection;
+        let fitnessSourceVector: SourceVector | undefined;
+        let redundancySimilarityStatus: "disabled" | "factual" | "not-ready" | "stale" | "partial" =
+          "disabled";
         try {
           const [collection, config, tournament, predictionSettings, redundancySettings] =
             await Promise.all([
@@ -315,6 +333,17 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
               storageService.loadPredictionSettings(),
               storageService.loadRedundancySettings(),
             ]);
+          redundancySimilarityStatus = semanticFallbackStatus(
+            collection,
+            redundancySettings.enabled,
+          );
+          // Keep the private captured collection for snapshot-backed fitness and
+          // semantic resolution. The Profile source itself remains projected.
+          fitnessCollection = structuredClone(collection);
+          // The coordinator holds source writers while the collection/settings and
+          // vector are captured, so semantic publications can be checked against
+          // one coherent private snapshot by displayed fitness.
+          fitnessSourceVector = storageService.sourceVector?.();
           sources = structuredClone({
             collection: projectProfileCollectionSource(collection),
             tournament,
@@ -343,24 +372,126 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         }
 
         const sourceIdentity = profileSourceIdentity(sources);
+        const privateFitness = displayedFitnessService as PrivateDisplayedFitnessService;
+        const snapshot =
+          fitnessSourceVector?.available === true
+            ? {
+                kind: "private-capture" as const,
+                collection: fitnessCollection,
+                sourceVector: fitnessSourceVector,
+                tournament: sources.tournament,
+                predictionSettings: sources.predictionSettings,
+                redundancySettings: sources.redundancySettings,
+              }
+            : null;
+        if (
+          snapshot === null ||
+          typeof privateFitness.getScoringInputFromSnapshot !== "function" ||
+          typeof privateFitness.listGamesFromSnapshotWithProof !== "function"
+        )
+          return unavailable(
+            "recomputation",
+            new Error("Proof-bearing snapshot fitness is unavailable"),
+          );
+        const entityPolicyFingerprint = canonicalSha256(entityPolicy);
+        let scoringCapture: Awaited<
+          ReturnType<PrivateDisplayedFitnessService["getScoringInputFromSnapshot"]>
+        >;
+        try {
+          scoringCapture = await privateFitness.getScoringInputFromSnapshot(snapshot);
+          if (!scoringCapture.isCurrent()) throw new Error("Scoring input changed during capture");
+          if (
+            canonicalJson(artifact.identity.semanticScoringInputProof) !==
+            canonicalJson(scoringCapture.semanticScoringInputProof)
+          )
+            throw new Error(
+              "Attention candidate scoring proof does not match current scoring input",
+            );
+        } catch (error) {
+          return unavailable(failureKind(error), error);
+        }
+
+        const checkFence = async (expectedArtifact: AttentionCandidateArtifact): Promise<void> => {
+          const freshness = await deps.attentionCandidates!.ensureFresh();
+          if (freshness.state === "unavailable")
+            throw new Error("Attention candidates are unavailable");
+          if (
+            canonicalJson(candidatePublicationIdentity(freshness.artifact)) !==
+            canonicalJson(candidatePublicationIdentity(expectedArtifact))
+          )
+            throw new Error("Attention candidate publication changed during Profile operation");
+          const [collection, config, tournament, predictionSettings, redundancySettings] =
+            await Promise.all([
+              storageService.loadCollection(),
+              storageService.loadConfig(),
+              storageService.loadTournament(),
+              storageService.loadPredictionSettings(),
+              storageService.loadRedundancySettings(),
+            ]);
+          const latestSources = {
+            collection: projectProfileCollectionSource(collection),
+            tournament,
+            predictionSettings,
+            redundancySettings,
+          } satisfies ProfileSources;
+          if (!sameProfileSourceIdentity(sourceIdentity, profileSourceIdentity(latestSources)))
+            throw new Error("Profile source snapshot changed during operation");
+          if (
+            config.profileAttentionCardLimit !== cardLimit ||
+            canonicalJson(config.profileEntityPolicy) !== canonicalJson(entityPolicy)
+          )
+            throw new Error("Profile configuration changed during operation");
+          if (canonicalSha256(config.profileEntityPolicy) !== entityPolicyFingerprint)
+            throw new Error("Profile entity policy changed during operation");
+          if (
+            canonicalJson(expectedArtifact.identity.semanticScoringInputProof) !==
+            canonicalJson(scoringCapture.semanticScoringInputProof)
+          )
+            throw new Error("Attention candidate scoring proof changed during operation");
+          if (!sameCandidateSource(freshness.artifact.identity, sourceIdentity))
+            throw new Error("Attention candidate source changed during operation");
+          if (
+            freshness.artifact.earliestBoundary !== null &&
+            Date.parse(freshness.artifact.earliestBoundary) <= Date.parse(now())
+          )
+            throw new Error("Attention candidate publication became due during Profile operation");
+          // This must remain the final fence operation: all awaits and all other
+          // potentially stale reads above are complete before validating the
+          // private SQLite/source-vector capture at the return boundary.
+          if (!scoringCapture.isCurrent())
+            throw new Error("Scoring input changed during Profile operation");
+        };
+
         let stored: ProfileData | null;
         try {
           stored = await storageService.loadProfile();
         } catch (error) {
           return unavailable(failureKind(error), error);
         }
-        if (stored && publicationIdentityMatches(stored, sourceIdentity, cardLimit, artifact)) {
-          const cachedSnapshot = createCollectionProfileSnapshotSchema(entityPolicy).safeParse({
-            source: sources.collection,
-            profile: stored.profile,
-          });
-          if (cachedSnapshot.success) return cachedSnapshot.data.profile;
-          try {
-            await storageService.discardProfile?.();
-          } catch (error) {
-            return unavailable(failureKind(error), error);
+        if (stored) {
+          const validated = createProfileDataSchema(entityPolicy).safeParse(stored);
+          if (
+            validated.success &&
+            publicationIdentityMatches(
+              validated.data,
+              sourceIdentity,
+              cardLimit,
+              artifact,
+              entityPolicyFingerprint,
+              scoringCapture.semanticScoringInputProof,
+            )
+          ) {
+            try {
+              await checkFence(artifact);
+              const cachedSnapshot = createCollectionProfileSnapshotSchema(entityPolicy).safeParse({
+                source: sources.collection,
+                profile: validated.data.profile,
+              });
+              if (cachedSnapshot.success) return cachedSnapshot.data.profile;
+            } catch (error) {
+              return unavailable(failureKind(error), error);
+            }
           }
-        } else if (stored) {
           try {
             await storageService.discardProfile?.();
           } catch (error) {
@@ -370,13 +501,20 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
 
         let profile: CollectionProfile;
         try {
-          if (!displayedFitnessService.listGamesFromSnapshot)
-            throw new Error("Snapshot-backed displayed fitness is not configured");
-          const games = await displayedFitnessService.listGamesFromSnapshot(sources, {
+          const result = await privateFitness.listGamesFromSnapshotWithProof(snapshot, {
             includePredicted: true,
+            redundancySimilarityStatus,
           });
+          if (
+            !result.isCurrent() ||
+            canonicalJson(result.semanticScoringInputProof) !==
+              canonicalJson(scoringCapture.semanticScoringInputProof) ||
+            canonicalJson(result.semanticScoringInputProof) !==
+              canonicalJson(artifact.identity.semanticScoringInputProof)
+          )
+            throw new Error("Displayed fitness consumed a different scoring input");
           const fitnessResults = new Map<string, FitnessResult>();
-          for (const entry of games) {
+          for (const entry of result.games) {
             if (entry.score !== null && entry.hasScoringContribution)
               fitnessResults.set(entry.game.id, entry.score);
           }
@@ -399,57 +537,25 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         }
 
         try {
-          // Re-read every identity-bearing input immediately before persistence.
-          // Candidate freshness is intentionally bounded here; it can publish a
-          // due artifact, but cap changes never enter candidate maintenance.
-          const finalFreshness = await deps.attentionCandidates.ensureFresh();
-          if (finalFreshness.state === "unavailable")
-            throw new Error("Attention candidates are unavailable");
-          const [
-            finalCollection,
-            finalConfig,
-            finalTournament,
-            finalPredictionSettings,
-            finalRedundancySettings,
-          ] = await Promise.all([
-            storageService.loadCollection(),
-            storageService.loadConfig(),
-            storageService.loadTournament(),
-            storageService.loadPredictionSettings(),
-            storageService.loadRedundancySettings(),
-          ]);
-          const finalSources = {
-            collection: projectProfileCollectionSource(finalCollection),
-            tournament: finalTournament,
-            predictionSettings: finalPredictionSettings,
-            redundancySettings: finalRedundancySettings,
-          } satisfies ProfileSources;
-          const finalIdentity = profileSourceIdentity(finalSources);
-          if (!sameProfileSourceIdentity(sourceIdentity, finalIdentity))
-            throw new Error("Profile source snapshot changed during computation");
-          if (finalConfig.profileAttentionCardLimit !== cardLimit)
-            throw new Error("Profile configuration changed during computation");
-          if (canonicalJson(finalConfig.profileEntityPolicy) !== canonicalJson(entityPolicy))
-            throw new Error("Profile entity policy changed during computation");
-          if (!sameCandidateSource(finalFreshness.artifact.identity, finalIdentity))
-            throw new Error("Attention candidate source changed during computation");
-          if (
-            canonicalJson(candidatePublicationIdentity(finalFreshness.artifact)) !==
-            canonicalJson(candidatePublicationIdentity(artifact))
-          )
-            throw new Error("Attention candidate publication changed during computation");
+          await checkFence(artifact);
           const cache: ProfileData = {
             contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
             algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
             publicationIdentity: {
               source: sourceIdentity,
               profileAttentionCardLimit: cardLimit,
+              entityPolicyFingerprint,
               attentionCandidates: candidatePublicationIdentity(artifact),
             },
             profile,
             computedAt: profile.computedAt,
           };
+          createProfileDataSchema(entityPolicy).parse(cache);
           await storageService.saveProfile(cache);
+          // Do not attempt an unconditional delete after a race: another writer
+          // may have replaced this staged value while the fence was awaited.
+          // A stale cache is rejected by its captured proof on the next read.
+          await checkFence(artifact);
           return cache.profile;
         } catch (error) {
           return unavailable(error instanceof ZodError ? "validation" : failureKind(error), error);

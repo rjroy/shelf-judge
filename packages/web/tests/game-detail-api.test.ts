@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   calculatePurchaseUtilization,
   type DurableGame,
   type GameDetailWithPurchaseUtilization,
 } from "@shelf-judge/shared";
-import { getGame, getOwnerGameNote } from "@/lib/api";
+import { getGame, getGameName, getOwnerGameNote } from "@/lib/api";
 
 const observedAt = "2026-08-28T10:00:00.000Z";
 const createdAt = "2026-08-28T10:01:00.000Z";
@@ -73,6 +74,7 @@ function validDetail(): GameDetailWithPurchaseUtilization {
       hypotheticalScore: null,
       predictionMeta: null,
       redundancyAdjustment: null,
+      redundancySimilarityInfo: { status: "disabled", generationId: null },
     },
     bggDataStale: false,
     nichePosition: null,
@@ -117,6 +119,35 @@ function rejects(response: unknown): void {
 }
 
 describe("web game-detail API boundary", () => {
+  test("game metadata uses the name-only API rather than scored detail", () => {
+    const page = readFileSync(new URL("../app/games/[id]/page.tsx", import.meta.url), "utf8");
+    const metadata = page.match(/export async function generateMetadata\([\s\S]*?\n}\n/);
+    expect(metadata).not.toBeNull();
+    expect(metadata?.[0]).toContain("getGameName(id)");
+    expect(metadata?.[0]).not.toContain("getGame(");
+    expect(metadata?.[0]).toContain('title: "Game"');
+    expect(page).toContain("[data, axes] = await Promise.all([getGame(id), listAxes()])");
+  });
+
+  test("validates name-only reads and exact response shape", async () => {
+    const response = { id: "game-1", name: "Validated Game" };
+    expect(await getGameName("game-1", () => Promise.resolve(response))).toEqual(response);
+    expect(
+      getGameName("game-1", () => Promise.resolve({ ...response, id: "game-2" })),
+    ).rejects.toThrow("different game");
+    for (const malformed of [
+      { id: "game-1", name: "  " },
+      { id: "game-1", name: "bad\nname" },
+      { id: "game-1", name: 42 },
+      { id: "game-1", name: "Valid", score: { score: 10 } },
+      { id: "game-1", name: "Valid", private: true },
+      { id: "game-1" },
+      null,
+    ]) {
+      expect(getGameName("game-1", () => Promise.resolve(malformed))).rejects.toBeInstanceOf(Error);
+    }
+  });
+
   test("accepts a complete valid detail response", async () => {
     const response = validDetail();
     expect(await getGame("game-1", () => Promise.resolve(response))).toEqual(response);

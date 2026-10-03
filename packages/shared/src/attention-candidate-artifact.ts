@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { AttentionCandidateEvaluationSchema } from "./validation";
+import { SemanticScoringInputProofSchema } from "./semantic-scoring-input-proof";
 
-export const ATTENTION_CANDIDATE_ARTIFACT_SCHEMA_VERSION = 1;
+export const ATTENTION_CANDIDATE_ARTIFACT_SCHEMA_VERSION = 2;
 export const ATTENTION_CANDIDATE_ARTIFACT_INDEX_VERSION = 1;
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const StrictInstantSchema = z.string().datetime({ offset: true });
@@ -22,6 +23,7 @@ export const AttentionCandidateArtifactIdentitySchema = z
     tournamentHash: Sha256Schema,
     predictionSettingsHash: Sha256Schema,
     redundancySettingsHash: Sha256Schema,
+    semanticScoringInputProof: SemanticScoringInputProofSchema,
     calculationVersion: PositiveSafeInteger,
     ruleCatalogVersion: PositiveSafeInteger,
     dependencyVersion: PositiveSafeInteger,

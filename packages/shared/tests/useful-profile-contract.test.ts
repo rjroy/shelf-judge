@@ -93,7 +93,7 @@ function futureSourceCollection(
   commandReceipts: unknown[] = [],
 ) {
   return {
-    schemaVersion: 8,
+    schemaVersion: 10,
     id: "collection",
     name: "Collection",
     axes: [],
@@ -1009,6 +1009,7 @@ describe("collection profile identity contract", () => {
       gameName: "Gamma",
       currentFitness: 0,
       vetoed: true,
+      redundancySimilarityInfo: { status: "disabled", generationId: null },
     });
   });
 
@@ -1403,24 +1404,30 @@ describe("collection profile attention contract", () => {
       publicationIdentity: {
         source: {
           collectionId: "collection",
-          collectionSchemaVersion: 8,
+          collectionSchemaVersion: 10,
           collectionRevision: 1,
           tournamentHash: "a".repeat(64),
           predictionSettingsHash: "b".repeat(64),
           redundancySettingsHash: "c".repeat(64),
         },
         profileAttentionCardLimit: 6,
+        entityPolicyFingerprint: "d".repeat(64),
         attentionCandidates: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           indexVersion: 1,
           evaluatedAt: "2026-08-27T12:00:00.000Z",
           identity: {
             collectionId: "collection",
-            collectionSchemaVersion: 8,
+            collectionSchemaVersion: 10,
             collectionRevision: 1,
             tournamentHash: "a".repeat(64),
             predictionSettingsHash: "b".repeat(64),
             redundancySettingsHash: "c".repeat(64),
+            semanticScoringInputProof: {
+              version: 1,
+              mode: "factual-only",
+              identity: "e".repeat(64),
+            },
             calculationVersion: 1,
             ruleCatalogVersion: 1,
             dependencyVersion: 1,
@@ -1438,6 +1445,41 @@ describe("collection profile attention contract", () => {
       computedAt: usefulProfileFixture.computedAt,
     };
     expect(ProfileDataSchema.safeParse(cache).success).toBe(true);
+    const candidateIdentity = cache.publicationIdentity.attentionCandidates.identity;
+    expect(
+      ProfileDataSchema.safeParse({
+        ...cache,
+        publicationIdentity: {
+          ...cache.publicationIdentity,
+          attentionCandidates: {
+            ...cache.publicationIdentity.attentionCandidates,
+            identity: { ...candidateIdentity, semanticScoringInputProof: undefined },
+          },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      ProfileDataSchema.safeParse({
+        ...cache,
+        publicationIdentity: {
+          ...cache.publicationIdentity,
+          attentionCandidates: {
+            ...cache.publicationIdentity.attentionCandidates,
+            identity: {
+              ...candidateIdentity,
+              semanticScoringInputProof: {
+                version: 1,
+                mode: "semantic",
+                status: "ready",
+                coverageVersion: 1,
+                identity: "e".repeat(64),
+                ownerNote: "private",
+              },
+            },
+          },
+        },
+      }).success,
+    ).toBe(false);
     expect(
       ProfileDataSchema.safeParse({
         ...cache,

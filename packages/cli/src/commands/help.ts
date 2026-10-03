@@ -20,6 +20,51 @@ interface LocalCommandHelp {
 // One API operation can intentionally back multiple CLI commands. Keep those
 // CLI-only aliases here instead of advertising duplicate daemon operations.
 const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
+  "shelf.redundancy.update-semantic-settings": [
+    {
+      name: "semantic-settings",
+      usage:
+        "shelf-judge redundancy semantic-settings <enabled|factual|description|ownerNote|cachedOwnerNoteUse> <value>",
+      description: "Update opt-in semantic settings without transmitting source text",
+    },
+  ],
+  "shelf.redundancy.get-semantic-summary": [
+    {
+      name: "status",
+      usage: "shelf-judge redundancy status [--json]",
+      description: "Show semantic mode, generation, refresh, and publication status",
+    },
+  ],
+  "shelf.redundancy.get-semantic-run-preview": [
+    {
+      name: "run",
+      usage:
+        "shelf-judge redundancy run [--max-attempts N] [--reported-token-stop N] [--max-duration-minutes N] [--authorize-notes] [--json]",
+      description:
+        "Preview aggregate scope, then explicitly start one bounded Run; note transmission is opt-in",
+    },
+  ],
+  "shelf.redundancy.get-semantic-refresh-status": [
+    {
+      name: "progress",
+      usage: "shelf-judge redundancy progress [--json]",
+      description: "Show current aggregate coverage and historical Run progress",
+    },
+  ],
+  "shelf.redundancy.cancel-semantic-run": [
+    {
+      name: "cancel",
+      usage: "shelf-judge redundancy cancel <run-id> [--json]",
+      description: "Cancel the identified active Run",
+    },
+  ],
+  "shelf.redundancy.get-active-semantic-run": [
+    {
+      name: "active",
+      usage: "shelf-judge redundancy active [--json]",
+      description: "Show process-live active Run identity, if any",
+    },
+  ],
   "shelf.analyst.turn.stream": [
     {
       name: "ask",

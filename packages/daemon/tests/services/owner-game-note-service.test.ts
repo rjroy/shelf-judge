@@ -4,12 +4,16 @@ import {
   CollectionSchema,
   canonicalizeOwnerGameNoteRequest,
   createInitialEntityMetadata,
+  createInitialSemanticRedundancyStateV10,
   type Collection,
   type DurableGame,
   type OwnerGameNote,
   type OwnerGameNoteMutationResult,
 } from "@shelf-judge/shared";
-import { createCollectionMutationService } from "../../src/services/collection-mutation-service.js";
+import {
+  collectionDurableIdentity,
+  createCollectionMutationService,
+} from "../../src/services/collection-mutation-service.js";
 import { createGameDetailSnapshotService } from "../../src/services/game-projection.js";
 import type { Logger } from "../../src/services/logger.js";
 import {
@@ -85,7 +89,7 @@ function game(overrides: Partial<DurableGame> = {}): DurableGame {
 
 function collection(sourceGame = game()): Collection {
   return {
-    schemaVersion: 8,
+    schemaVersion: 10,
     revision: 0,
     id: "collection-1",
     name: "Private collection name",
@@ -95,6 +99,7 @@ function collection(sourceGame = game()): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: initialTime,
     updatedAt: initialTime,
   };
@@ -110,7 +115,7 @@ function harness(
     hashExactString?: (value: string) => string;
   } = {},
 ) {
-  let current = CollectionSchema.parse(options.source ?? collection());
+  let current: Collection = CollectionSchema.parse(options.source ?? collection());
   let saves = 0;
   let loads = 0;
   let failSaves = options.failSaves ?? 0;
@@ -612,6 +617,31 @@ describe("OwnerGameNoteService", () => {
       }),
     );
     expect(noLifecycle.saves()).toBe(1);
+  });
+
+  test("passes the epoch-transitioned collection identity to note invalidation", async () => {
+    const targetIdentity: { value: ReturnType<typeof collectionDurableIdentity> | null } = {
+      value: null,
+    };
+    const state = harness({
+      lifecycle: {
+        beforePersistence(context) {
+          targetIdentity.value = context.targetSourceIdentity;
+        },
+        onPersistenceFailure() {},
+      },
+    });
+
+    acceptedNote(
+      await state.makeService().set("game-1", {
+        commandId: commandIds[0],
+        expectedVersion: 0,
+        text: "epoch-aware invalidation",
+      }),
+    );
+
+    expect(targetIdentity.value).toEqual(collectionDurableIdentity(state.snapshot()));
+    expect(state.snapshot().semanticRedundancy.evidenceEpoch).toBe(1);
   });
 
   test("keeps note content, canonical requests, and fingerprints out of lifecycle metadata and failures", async () => {

@@ -4,6 +4,7 @@ import type {
   Collection,
   CollectionSnapshot,
   DurableGame,
+  FitnessResult,
   Game,
   GameWithScore,
   NicheSettings,
@@ -13,8 +14,16 @@ import type {
   TournamentData,
 } from "@shelf-judge/shared";
 import { createSourceVectorService } from "../../src/services/source-vector.js";
-import { createInitialEntityMetadata } from "@shelf-judge/shared";
+import { buildJevPredictionCaptureIdentity } from "../../src/services/jev-prediction-capture-identity.js";
+import { canonicalSha256 } from "../../src/services/profile-source-coordinator.js";
+import {
+  createInitialEntityMetadata,
+  createInitialSemanticRedundancyStateV10,
+} from "@shelf-judge/shared";
 import { createCollectionSnapshotService } from "../../src/services/collection-snapshot-service.js";
+import type { CollectionSnapshotSemanticReadInput } from "../../src/services/collection-snapshot-service.js";
+import type { JevPairReadProofFence } from "../../src/services/jev-pair-read-service.js";
+import type { RedundancyPairTable } from "../../src/services/redundancy-engine.js";
 import { createCollectionSnapshotCacheService } from "../../src/services/collection-snapshot-cache-service.js";
 import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
 import { enrichGameWithPurchaseUtilization } from "../../src/services/purchase-utilization-projection.js";
@@ -33,8 +42,28 @@ import type { CollectionMutationService } from "../../src/services/collection-mu
 import { createCollectionSnapshotRoutes } from "../../src/routes/collection-snapshot.js";
 import { createStorageService } from "../../src/services/storage-service.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
+import {
+  projectGameWithScore,
+  projectProfileCollectionSource,
+} from "../../src/services/game-projection.js";
 
 type GameWithNote = Game & { ownerNote: { state: "missing"; version: 0; updatedAt: null } };
+
+function scoreWithSimilarityDefault(score: FitnessResult | null):
+  | (FitnessResult & {
+      redundancySimilarityInfo: NonNullable<FitnessResult["redundancySimilarityInfo"]>;
+    })
+  | null {
+  return score === null
+    ? null
+    : {
+        ...score,
+        redundancySimilarityInfo: score.redundancySimilarityInfo ?? {
+          status: "disabled",
+          generationId: null,
+        },
+      };
+}
 
 function setup(
   options: {
@@ -49,7 +78,7 @@ function setup(
 ) {
   const vector = createSourceVectorService();
   vector.hydrate(
-    { id: "collection-id", schemaVersion: 8, revision: 1 },
+    { id: "collection-id", schemaVersion: 10, revision: 1 },
     {
       tournament: 1,
       predictionSettings: 1,
@@ -59,7 +88,7 @@ function setup(
     },
   );
   const collection: Collection = {
-    schemaVersion: 8,
+    schemaVersion: 10,
     revision: 1,
     id: "collection-id",
     name: "Collection",
@@ -69,6 +98,7 @@ function setup(
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   };
@@ -108,7 +138,7 @@ function setup(
         stage: "annotation" as const,
         similarityThreshold: 0.6,
         maxPenalty: 2,
-        componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
+        componentWeights: { binary: 0.4, continuous: 0.3 },
         minNeighbors: 1,
         expectedNeighbors: 5,
       }),
@@ -173,7 +203,12 @@ function setup(
   };
 }
 
-function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
+function parityFixture(
+  stage: RedundancySettings["stage"],
+  enabled = true,
+  resolveSemanticRead?: (input: CollectionSnapshotSemanticReadInput) => JevPairReadProofFence,
+  resolveRedundancyPairTable?: () => RedundancyPairTable | undefined,
+) {
   const now = "2026-02-01T00:00:00.000Z";
   const personalAxis = (id: string, name: string, veto = false): Axis => ({
     id,
@@ -263,7 +298,7 @@ function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
   games.find((game) => game.id === "prediction-only")!.ratings["unconfigured-null"] =
     null as unknown as number;
   const collection: Collection = {
-    schemaVersion: 8,
+    schemaVersion: 10,
     revision: 1,
     id: "parity-collection",
     name: "Parity collection",
@@ -276,6 +311,7 @@ function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
       state: "configured",
       amount: { hundredths: 500, source: "manual", confirmedAt: now },
     },
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: now,
     updatedAt: now,
   };
@@ -302,7 +338,7 @@ function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
     stage,
     similarityThreshold: 0.05,
     maxPenalty: 2,
-    componentWeights: { binary: 1, continuous: 0, personalAxes: 0 },
+    componentWeights: { binary: 1, continuous: 0 },
     minNeighbors: 1,
     expectedNeighbors: 2,
   };
@@ -331,7 +367,15 @@ function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
   };
   const vector = createSourceVectorService();
   vector.hydrate(
-    { id: collection.id, schemaVersion: 8, revision: 1 },
+    {
+      id: collection.id,
+      schemaVersion: 10,
+      revision: 1,
+      semanticEvidenceEpoch: collection.semanticRedundancy.evidenceEpoch,
+      semanticConsentEpoch: collection.semanticRedundancy.consentEpoch,
+      factualWeightsEpoch: collection.semanticRedundancy.factualWeightsEpoch,
+      factualWeightsFingerprint: collection.semanticRedundancy.factualWeightsFingerprint,
+    },
     {
       tournament: 1,
       predictionSettings: 1,
@@ -340,6 +384,7 @@ function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
       shelfConfig: 1,
     },
   );
+  vector.publishRedundancyWeightsFingerprint(canonicalSha256(redundancySettings.componentWeights));
   const storage = {
     sourceVector: () => vector.read(),
     loadCollection: () => Promise.resolve(structuredClone(collection)),
@@ -391,6 +436,8 @@ function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
     gameService,
     predictionService,
     purchaseUtilizationService,
+    ...(resolveSemanticRead ? { resolveSemanticRead } : {}),
+    ...(resolveRedundancyPairTable ? { resolveRedundancyPairTable } : {}),
   });
   const snapshotCache = createCollectionSnapshotCacheService({
     builder: snapshotService,
@@ -407,6 +454,8 @@ function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
   return {
     collection,
     tournament,
+    predictionSettings,
+    redundancySettings,
     shelfConfig,
     snapshotService,
     snapshotRoute,
@@ -424,6 +473,217 @@ function parityFixture(stage: RedundancySettings["stage"], enabled = true) {
 }
 
 describe("CollectionSnapshotService", () => {
+  test("semantic snapshot scoring uses one fenced read over the complete prediction capture", async () => {
+    let readInput: CollectionSnapshotSemanticReadInput | undefined;
+    const fixture = parityFixture("integrated", true, (input) => {
+      readInput = input;
+      const identity = {
+        generationId: "semantic-generation",
+        consentEpoch: "1",
+        settingsEpoch: "1:1",
+      };
+      const result = {
+        status: "ready" as const,
+        summary: "Semantic redundancy is ready.",
+        table: {
+          status: "ready" as const,
+          identity,
+          expectedIdentity: identity,
+          weights: { factual: 0.4, description: 0.4, ownerNote: 0.2 },
+          pairs: [],
+        },
+      };
+      return {
+        result,
+        proof: { status: "ready", identity: "semantic-generation" },
+        isCurrent: () => true,
+      };
+    });
+    fixture.collection.semanticRedundancy.settings.enabled = true;
+    fixture.collection.semanticRedundancy.settings.weights.description = 1;
+    const built = await fixture.snapshotService.buildSnapshot();
+    expect(readInput?.predictionCapture).toHaveLength(fixture.collection.games.length);
+    expect(readInput?.predictionCapture.some(({ game }) => game.id === "retired")).toBe(true);
+    expect(readInput?.captureIdentity.sourceVectorIdentity).toMatch(/^[a-f0-9]{64}$/);
+    if (!readInput) throw new Error("Expected the complete semantic read input");
+    const identityInput = {
+      collection: readInput.collection,
+      sourceVector: readInput.sourceVector,
+      tournament: readInput.tournament,
+      predictionSettings: readInput.predictionSettings,
+      factualWeights: readInput.factualWeights,
+      predictionCapture: readInput.predictionCapture,
+    };
+    const baselineIdentity = buildJevPredictionCaptureIdentity(identityInput);
+    if (!baselineIdentity.ok) throw new Error(baselineIdentity.reason);
+    expect(baselineIdentity.identity).toEqual(readInput.captureIdentity);
+    expect(
+      buildJevPredictionCaptureIdentity({
+        ...identityInput,
+        sourceVector: {
+          ...identityInput.sourceVector,
+          processEpoch: "another-process",
+          changeToken: identityInput.sourceVector.changeToken + 100,
+        },
+      }),
+    ).toEqual(baselineIdentity);
+    const revisedCollection = { ...identityInput.collection, revision: 2 };
+    expect(
+      buildJevPredictionCaptureIdentity({
+        ...identityInput,
+        collection: revisedCollection,
+        sourceVector: { ...identityInput.sourceVector, collectionRevision: 2 },
+      }),
+    ).toEqual(baselineIdentity);
+    const reorderedCapture = identityInput.predictionCapture.map((entry) => ({
+      score: entry.score,
+      game: Object.fromEntries(
+        Object.entries({
+          ...entry.game,
+          name: `Presentation only: ${entry.game.name}`,
+        }).reverse(),
+      ) as unknown as typeof entry.game,
+    }));
+    expect(
+      buildJevPredictionCaptureIdentity({ ...identityInput, predictionCapture: reorderedCapture }),
+    ).toEqual(baselineIdentity);
+    expect(built.semanticRead?.status).toBe("verified");
+    expect(
+      built.semanticRead?.status === "verified" &&
+        built.semanticRead.result.status === "ready" &&
+        built.semanticRead.result.table.identity.generationId,
+    ).toBe("semantic-generation");
+    expect(JSON.stringify(built.snapshot)).not.toMatch(
+      /semantic-generation|semanticRedundancy|ownerNote/,
+    );
+    expect(built.semanticRead?.status === "verified" && built.semanticRead.isCurrent()).toBe(true);
+  });
+
+  test("incoherent capture identity fails closed to factual not-ready without a semantic read", async () => {
+    let semanticReadCalls = 0;
+    const fixture = parityFixture("integrated", true, () => {
+      semanticReadCalls += 1;
+      throw new Error("incoherent capture must not reach semantic read");
+    });
+    fixture.collection.semanticRedundancy.settings.enabled = true;
+    fixture.collection.semanticRedundancy.settings.weights.description = 1;
+    // The collection has advanced without its authoritative source vector advancing.
+    fixture.collection.revision += 1;
+
+    const built = await fixture.snapshotService.buildSnapshot();
+
+    expect(semanticReadCalls).toBe(0);
+    expect(built.semanticRead).toEqual({ status: "not-used" });
+    expect(built.snapshot.redundancyMode).toBe("integrated");
+    expect(
+      built.snapshot.games.every(
+        (row) =>
+          row.game.ownership === "previously-owned" ||
+          row.ordinary.score === null ||
+          row.ordinary.score.redundancySimilarityInfo?.status === "not-ready",
+      ),
+    ).toBe(true);
+    expect(
+      built.snapshot.games.every((row) => row.redundancySimilarityInfo.generationId === null),
+    ).toBe(true);
+  });
+
+  test("not-ready semantic fallback retains its read fence", async () => {
+    const fixture = parityFixture("integrated", true, () => ({
+      result: { status: "not-ready", summary: "Semantic redundancy is not ready." },
+      proof: { status: "not-ready", summary: "Semantic redundancy is not ready." },
+      isCurrent: () => true,
+    }));
+    fixture.collection.semanticRedundancy.settings.enabled = true;
+    fixture.collection.semanticRedundancy.settings.weights.description = 1;
+    const built = await fixture.snapshotService.buildSnapshot();
+    expect(built.semanticRead?.status).toBe("verified");
+    expect(built.semanticRead?.status === "verified" && built.semanticRead.result.status).toBe(
+      "not-ready",
+    );
+    expect(built.semanticRead?.status === "verified" && built.semanticRead.isCurrent()).toBe(true);
+  });
+
+  test("legacy ready pair tables cannot bypass semantic read proof when semantic settings are disabled", async () => {
+    let legacyResolverCalls = 0;
+    let semanticProviderCalls = 0;
+    const fixture = parityFixture(
+      "integrated",
+      true,
+      () => {
+        semanticProviderCalls += 1;
+        throw new Error(
+          "Semantic provider should not be called when semantic settings are disabled",
+        );
+      },
+      () => {
+        legacyResolverCalls += 1;
+        const identity = {
+          generationId: "unfenced-generation",
+          consentEpoch: "1",
+          settingsEpoch: "1:1",
+        };
+        return {
+          status: "ready",
+          identity,
+          expectedIdentity: identity,
+          weights: { factual: 1, description: 0, ownerNote: 0 },
+          pairs: [],
+        };
+      },
+    );
+
+    const built = await fixture.snapshotService.buildSnapshot();
+
+    expect(fixture.collection.semanticRedundancy.settings.enabled).toBe(false);
+    expect(legacyResolverCalls).toBe(1);
+    expect(semanticProviderCalls).toBe(0);
+    expect(built.semanticRead).toEqual({ status: "not-used" });
+    expect(built.snapshot.redundancyMode).toBe("off");
+    expect(built.snapshot.unavailableFeatures).toContainEqual({
+      feature: "redundancy",
+      reason: "Semantic redundancy read proof is unavailable",
+    });
+    for (const row of built.snapshot.games) {
+      expect(row.redundancySimilarityInfo.status).not.toBe("ready");
+      expect(row.redundancySimilarityInfo.generationId).toBeNull();
+      expect(row.ordinary.score?.redundancySimilarityInfo?.status).not.toBe("ready");
+      expect(row.ordinary.score?.redundancySimilarityInfo?.generationId ?? null).toBeNull();
+      if (row.predicted.availability === "available") {
+        expect(row.predicted.score?.redundancySimilarityInfo?.status).not.toBe("ready");
+        expect(row.predicted.score?.redundancySimilarityInfo?.generationId ?? null).toBeNull();
+      }
+    }
+    expect(JSON.stringify(built.snapshot)).not.toContain("unfenced-generation");
+  });
+
+  test("semantic publication remains not-ready while factual scoring is shared by list and snapshot", async () => {
+    const fixture = parityFixture("integrated", true);
+    fixture.redundancySettings.similarityThreshold = 1.01;
+    fixture.collection.semanticRedundancy.settings.enabled = true;
+    const snapshot = (await fixture.snapshotService.buildSnapshot()).snapshot;
+    const listed = await fixture.displayedService.listGames({ includePredicted: true });
+    const detail = await fixture.displayedService.listGames({
+      includePredicted: true,
+      targetGameIds: ["ref-1"],
+    });
+    const row = snapshot.games.find(({ game }) => game.id === "ref-1")!;
+    const entry = listed.find(({ game }) => game.id === "ref-1")!;
+    expect(snapshot.status).toBe("complete");
+    expect(JSON.stringify(snapshot)).not.toMatch(/semanticRedundancy|pairOutcomes|ownerNote/);
+    expect(row.ordinary.score?.redundancySimilarityInfo).toEqual({
+      status: "not-ready",
+      generationId: null,
+    });
+    expect(entry.score?.redundancySimilarityInfo).toEqual({
+      status: "not-ready",
+      generationId: null,
+    });
+    expect(detail.find(({ game }) => game.id === "ref-1")?.score?.score).toBe(entry.score?.score);
+    expect(row.ordinary.score?.score).toBe(entry.score?.score);
+    expect(row.ordinary.score?.redundancyAdjustment).toBeNull();
+  });
+
   test("real scoring engines preserve legacy variants, niches, utilization, and raw capacity", async () => {
     for (const mode of [
       { stage: "annotation" as const, enabled: false },
@@ -491,7 +751,7 @@ describe("CollectionSnapshotService", () => {
       ).toBeGreaterThan(0);
       for (const legacy of ordinaryLegacy) {
         const row = byId.get(legacy.game.id);
-        expect(row?.ordinary.score).toEqual(legacy.score);
+        expect(row?.ordinary.score).toEqual(scoreWithSimilarityDefault(legacy.score));
         expect(row?.ordinary.displayScore).toEqual(legacy.displayScore);
         expect(row?.ordinary.purchaseUtilization).toEqual(legacy.purchaseUtilization);
       }
@@ -499,7 +759,7 @@ describe("CollectionSnapshotService", () => {
         const row = byId.get(legacy.game.id);
         expect(row?.predicted.availability).toBe("available");
         if (row?.predicted.availability !== "available") continue;
-        expect(row.predicted.score).toEqual(legacy.score);
+        expect(row.predicted.score).toEqual(scoreWithSimilarityDefault(legacy.score));
         expect(row.predicted.displayScore).toEqual(legacy.displayScore);
         expect(row.predicted.purchaseUtilization).toEqual(legacy.purchaseUtilization);
       }
@@ -847,6 +1107,76 @@ describe("CollectionSnapshotService", () => {
     expect(snapshot.capacity.availability).toBe("unavailable");
     expect(snapshot.games).toHaveLength(fixture.collection.games.length);
     expect(snapshot.games[0]?.ordinary.score).not.toBeNull();
+    const firstRow = snapshot.games[0];
+    expect(firstRow?.ordinary.score).not.toBeNull();
+    if (!firstRow || firstRow.ordinary.score === null) {
+      throw new Error("Expected a scored snapshot row");
+    }
+    expect(firstRow.redundancySimilarityInfo).toEqual(
+      firstRow.ordinary.score.redundancySimilarityInfo,
+    );
+  });
+
+  test("list, targeted detail, and snapshot preserve note-free similarity status with no neighbor", async () => {
+    const fixture = parityFixture("annotation", true);
+    fixture.redundancySettings.similarityThreshold = 1.01;
+    const publicCollection = projectProfileCollectionSource({
+      ...fixture.collection,
+      games: fixture.collection.games.map((game) => ({
+        ...game,
+        ratings: Object.fromEntries(
+          Object.entries(game.ratings).filter(
+            (entry): entry is [string, number] => typeof entry[1] === "number",
+          ),
+        ),
+      })),
+    });
+    const source = {
+      kind: "public" as const,
+      collection: publicCollection,
+      tournament: fixture.tournament,
+      predictionSettings: fixture.predictionSettings,
+      redundancySettings: fixture.redundancySettings,
+    };
+    const list = await fixture.displayedService.listGames({ includePredicted: false });
+    const snapshot = await fixture.snapshotService.getSnapshot();
+    const snapshotRows = new Map(snapshot.games.map((row) => [row.game.id, row]));
+    const target = list.find((entry) => {
+      const row = snapshotRows.get(entry.game.id);
+      return (
+        entry.game.ownership === "owned" &&
+        entry.score !== null &&
+        !entry.score.vetoed &&
+        entry.score.score > 0 &&
+        entry.score.redundancyAdjustment === null &&
+        row !== undefined &&
+        row.ordinary.score !== null
+      );
+    });
+    if (!target?.score)
+      throw new Error("Expected an eligible scored game with no redundancy neighbor");
+    const targetInfo = target.score.redundancySimilarityInfo;
+    if (!targetInfo) throw new Error("Expected similarity status on the scored list entry");
+    const detail = await fixture.displayedService.listGamesFromSnapshot(source, {
+      includePredicted: false,
+      targetGameIds: [target.game.id],
+    });
+    const detailEntry = detail.find(({ game }) => game.id === target.game.id);
+    const row = snapshotRows.get(target.game.id);
+    if (!detailEntry?.score || !row?.ordinary.score) {
+      throw new Error("Expected matching scored detail and snapshot entries");
+    }
+    expect(target.score.redundancyAdjustment).toBeNull();
+    expect(detailEntry.score.redundancyAdjustment).toBeNull();
+    expect(row.ordinary.score.redundancyAdjustment).toBeNull();
+    expect(detailEntry.score.redundancySimilarityInfo).toEqual(targetInfo);
+    expect(row.redundancySimilarityInfo).toEqual(targetInfo);
+    // The fixture intentionally gives a different, scoreless game a null rating to
+    // exercise snapshot projection. Collection/Game validation rejects that shape;
+    // project only the valid shared scored game for this public note-leak assertion.
+    expect(
+      JSON.stringify([projectGameWithScore(target), projectGameWithScore(detailEntry), snapshot]),
+    ).not.toContain("ownerNote");
   });
 
   test("redundancy is reported off when prediction fails and returns after prediction recovery", async () => {

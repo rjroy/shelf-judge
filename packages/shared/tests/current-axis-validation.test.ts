@@ -6,6 +6,7 @@ import {
   CollectionProfileCollectionSourceSchema,
   CreateAxisSchema,
   CollectionSchema,
+  createInitialSemanticRedundancyStateV10,
   CURRENT_COLLECTION_SCHEMA_VERSION,
   UpdateAxisSchema,
   LegacyAxisRepairSchema,
@@ -603,6 +604,7 @@ describe("current persisted collection validation", () => {
     commandReceipts: [],
     bggPlaySessions: [],
     entertainmentBenchmark: null,
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -748,9 +750,13 @@ describe("current persisted collection validation", () => {
     };
   };
 
-  function asProfileSource<T extends { games: Array<{ ownerNote: unknown }> }>(source: T) {
+  function asProfileSource<
+    T extends { games: Array<{ ownerNote: unknown }>; semanticRedundancy?: unknown },
+  >(source: T) {
+    const { semanticRedundancy, ...publicSource } = source;
+    void semanticRedundancy;
     return {
-      ...source,
+      ...publicSource,
       games: source.games.map((game) => {
         const profileGame = { ...game };
         Reflect.deleteProperty(profileGame, "ownerNote");
@@ -899,7 +905,56 @@ describe("current persisted collection validation", () => {
   });
 
   test("accepts the strict current schema", () => {
-    expect(CollectionSchema.parse(currentCollection)).toEqual(currentCollection);
+    const parsed: unknown = CollectionSchema.parse(currentCollection);
+    expect(parsed).toEqual(currentCollection);
+  });
+
+  test("keeps semantic collection state strict and numeric-only", () => {
+    expect(
+      CollectionSchema.safeParse({
+        ...currentCollection,
+        semanticRedundancy: {
+          ...createInitialSemanticRedundancyStateV10(),
+          unexpectedProviderPayload: { text: "not allowed" },
+        },
+      }).success,
+    ).toBe(false);
+    for (const invalidEpoch of [-1, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(
+        CollectionSchema.safeParse({
+          ...currentCollection,
+          semanticRedundancy: {
+            ...createInitialSemanticRedundancyStateV10(),
+            evidenceEpoch: invalidEpoch,
+          },
+        }).success,
+      ).toBe(false);
+      expect(
+        CollectionSchema.safeParse({
+          ...currentCollection,
+          semanticRedundancy: {
+            ...createInitialSemanticRedundancyStateV10(),
+            consentEpoch: invalidEpoch,
+          },
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      CollectionSchema.safeParse({
+        ...currentCollection,
+        semanticRedundancy: {
+          ...createInitialSemanticRedundancyStateV10(),
+          pairJudgments: [
+            {
+              gameA: "game-z",
+              gameB: "game-a",
+              description: { status: "unavailable", reason: "missing-source" },
+              ownerNote: null,
+            },
+          ],
+        },
+      }).success,
+    ).toBe(false);
   });
 
   test("rejects historical game shapes outside migration", () => {
@@ -1103,7 +1158,7 @@ describe("current persisted collection validation", () => {
   });
 
   test("rejects future versions and extra persisted fields", () => {
-    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 9 }).success).toBe(
+    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 11 }).success).toBe(
       false,
     );
     expect(CollectionSchema.safeParse({ ...currentCollection, unexpected: true }).success).toBe(

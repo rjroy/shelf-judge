@@ -28,6 +28,55 @@ import {
   attentionRuleCatalog,
 } from "./attention-rule-catalog.js";
 import { ATTENTION_CANDIDATE_CALCULATION_VERSION } from "./attention-candidate-engine.js";
+import type { SourceVector } from "./source-vector.js";
+import type { SemanticScoringInputProof } from "@shelf-judge/shared";
+
+function unavailableSourceVector(): SourceVector {
+  return {
+    available: false,
+    unavailableSources: ["startup"],
+    processEpoch: "unavailable",
+    changeToken: 0,
+    collectionId: null,
+    collectionSchemaVersion: null,
+    collectionRevision: null,
+    semanticEvidenceEpoch: null,
+    semanticConsentEpoch: null,
+    factualWeightsEpoch: null,
+    factualWeightsFingerprint: null,
+    redundancyWeightsFingerprint: null,
+    tournamentRevision: null,
+    predictionSettingsRevision: null,
+    nicheSettingsRevision: null,
+    redundancySettingsRevision: null,
+    shelfConfigRevision: null,
+    representationVersion: 1,
+    algorithmVersion: 1,
+  };
+}
+
+/**
+ * Mutation disposition reconciliation runs before the collection revision is
+ * advanced. A newly staged owner-note receipt therefore points at the next
+ * revision, while every scoring input (including the note itself) is already
+ * final. Receipts are not scoring inputs; omit only that pending receipt from
+ * the transient fitness capture so ordinary Collection validation remains
+ * strict and the captured collection/vector still identify the current source.
+ */
+function collectionForStoredRuleScoring(collection: Collection): Collection {
+  const futureNoteReceipts = collection.commandReceipts.filter(
+    (receipt) =>
+      "receiptType" in receipt &&
+      receipt.receiptType === "owner-game-note" &&
+      receipt.accepted.collectionRevision === collection.revision + 1,
+  );
+  if (futureNoteReceipts.length === 0) return collection;
+  const pending = new Set(futureNoteReceipts);
+  return {
+    ...collection,
+    commandReceipts: collection.commandReceipts.filter((receipt) => !pending.has(receipt)),
+  };
+}
 
 export type AttentionMutationImpact =
   | { readonly kind: "games"; readonly gameIds: readonly string[] }
@@ -73,10 +122,13 @@ export function attentionCandidateStorageFor(storage: {
 }
 export interface AttentionCandidateSource {
   readonly collection: Collection;
-  readonly identity: AttentionCandidateArtifactIdentity;
+  /** Raw authority identity deliberately excludes semantic coverage. */
+  readonly identity: Omit<AttentionCandidateArtifactIdentity, "semanticScoringInputProof">;
 }
 export interface AttentionCandidateOracleResult {
   readonly evaluations: readonly AttentionCandidateEvaluation[];
+  readonly semanticScoringInputProof: SemanticScoringInputProof;
+  readonly isCurrent: () => boolean;
   readonly presentations: ReadonlyMap<
     string,
     {
@@ -95,6 +147,10 @@ export interface AttentionCandidateOracle<
     evaluatedAt: string,
     targetGameIds?: readonly string[],
   ): Promise<AttentionCandidateOracleResult>;
+  getScoringInput(source: Source): Promise<{
+    readonly semanticScoringInputProof: SemanticScoringInputProof;
+    isCurrent(): boolean;
+  }>;
 }
 
 export interface AttentionDispositionCompatibilityOracle<
@@ -107,10 +163,14 @@ export interface AttentionDispositionCompatibilityOracle<
   ): Promise<readonly AttentionStoredRuleMatch[]>;
 }
 export interface AttentionCandidateProductionSource extends AttentionCandidateSource {
+  readonly kind: "private-capture";
+  readonly sourceVector: SourceVector;
   readonly tournament: TournamentData;
   readonly predictionSettings: PredictionSettings;
   readonly redundancySettings: RedundancySettings;
 }
+
+export type AttentionCandidateCachePolicy = "persistent";
 
 /**
  * Derives persisted reverse-index entries from the same catalog consumed by the
@@ -157,6 +217,7 @@ export function createAttentionCandidateProductionSourceLoader(storage: {
   loadTournament(): Promise<TournamentData>;
   loadPredictionSettings(): Promise<PredictionSettings>;
   loadRedundancySettings(): Promise<RedundancySettings>;
+  sourceVector?(): SourceVector;
 }): () => Promise<AttentionCandidateProductionSource> {
   return async () => {
     const [collection, tournament, predictionSettings, redundancySettings] = await Promise.all([
@@ -165,6 +226,7 @@ export function createAttentionCandidateProductionSourceLoader(storage: {
       storage.loadPredictionSettings(),
       storage.loadRedundancySettings(),
     ]);
+    const vectorAfter = storage.sourceVector?.();
     const identity = profileSourceIdentity({
       collection,
       tournament,
@@ -172,13 +234,17 @@ export function createAttentionCandidateProductionSourceLoader(storage: {
       redundancySettings,
     } satisfies ProfileSources);
     return {
+      kind: "private-capture",
       collection,
       tournament,
       predictionSettings,
       redundancySettings,
+      sourceVector: vectorAfter ?? unavailableSourceVector(),
       identity: {
         ...identity,
-        calculationVersion: ATTENTION_CANDIDATE_CALCULATION_VERSION,
+        // The snapshot's semantic input changed from public projection to a private
+        // source-vector capture; invalidate artifacts calculated under the old path.
+        calculationVersion: ATTENTION_CANDIDATE_CALCULATION_VERSION + 2,
         ruleCatalogVersion: ATTENTION_RULE_CATALOG_VERSION,
         dependencyVersion: ATTENTION_RULE_DEPENDENCY_VERSION,
         projectionVersion: PURCHASE_UTILIZATION_PROJECTION_VERSION,
@@ -205,6 +271,7 @@ export function createAttentionCandidateService(
       loadTournament(): Promise<TournamentData>;
       loadPredictionSettings(): Promise<PredictionSettings>;
       loadRedundancySettings(): Promise<RedundancySettings>;
+      sourceVector?(): SourceVector;
     } & Partial<AttentionCandidateSourceGeneration>;
   },
 ): AttentionCandidateService<AttentionCandidateProductionSource> {
@@ -241,11 +308,52 @@ export function createAttentionCandidateOracle(
   const fitnessService = () =>
     typeof displayedFitness === "function" ? displayedFitness() : displayedFitness;
   return {
-    async evaluate(source, evaluatedAt, targetGameIds) {
-      const fitness = await fitnessService().listGamesFromSnapshot(source, {
-        includePredicted: true,
-        targetGameIds,
+    async getScoringInput(source) {
+      const service = fitnessService() as DisplayedFitnessService & {
+        getScoringInputFromSnapshot: (snapshot: unknown) => Promise<{
+          semanticScoringInputProof: SemanticScoringInputProof;
+          isCurrent(): boolean;
+        }>;
+      };
+      if (typeof service.getScoringInputFromSnapshot !== "function")
+        throw new Error("Scoring proof API is unavailable");
+      const capture = await service.getScoringInputFromSnapshot({
+        kind: "private-capture",
+        collection: source.collection,
+        sourceVector: source.sourceVector,
+        tournament: source.tournament,
+        predictionSettings: source.predictionSettings,
+        redundancySettings: source.redundancySettings,
       });
+      return {
+        semanticScoringInputProof: capture.semanticScoringInputProof,
+        isCurrent: () => capture.isCurrent(),
+      };
+    },
+    async evaluate(source, evaluatedAt, targetGameIds) {
+      const service = fitnessService() as DisplayedFitnessService & {
+        listGamesFromSnapshotWithProof: (
+          snapshot: unknown,
+          options: { includePredicted: true; targetGameIds?: readonly string[] },
+        ) => Promise<{
+          games: Awaited<ReturnType<DisplayedFitnessService["listGamesFromSnapshot"]>>;
+          semanticScoringInputProof: SemanticScoringInputProof;
+          isCurrent(): boolean;
+        }>;
+      };
+      const snapshot = {
+        kind: "private-capture" as const,
+        collection: source.collection,
+        sourceVector: source.sourceVector,
+        tournament: source.tournament,
+        predictionSettings: source.predictionSettings,
+        redundancySettings: source.redundancySettings,
+      };
+      const options = { includePredicted: true as const, targetGameIds };
+      if (typeof service.listGamesFromSnapshotWithProof !== "function")
+        throw new Error("Proof-bearing displayed fitness API is unavailable");
+      const output = await service.listGamesFromSnapshotWithProof(snapshot, options);
+      const fitness = output.games;
       const projections = new Map(
         fitness.map((entry) => [
           entry.game.id,
@@ -262,6 +370,8 @@ export function createAttentionCandidateOracle(
       });
       return {
         evaluations: result.evaluations,
+        semanticScoringInputProof: output.semanticScoringInputProof,
+        isCurrent: () => output.isCurrent(),
         presentations: new Map(
           result.winners.map(({ gameId, presentation }) => [gameId, presentation]),
         ),
@@ -269,10 +379,20 @@ export function createAttentionCandidateOracle(
     },
     async evaluateStoredRules(source, evaluatedAt, storedRules) {
       const targetGameIds = [...new Set(storedRules.map((stored) => stored.gameId))];
-      const fitness = await fitnessService().listGamesFromSnapshot(source, {
-        includePredicted: true,
-        targetGameIds,
-      });
+      const fitness = await fitnessService().listGamesFromSnapshot(
+        {
+          kind: "private-capture",
+          collection: collectionForStoredRuleScoring(source.collection),
+          sourceVector: source.sourceVector,
+          tournament: source.tournament,
+          predictionSettings: source.predictionSettings,
+          redundancySettings: source.redundancySettings,
+        },
+        {
+          includePredicted: true,
+          targetGameIds,
+        },
+      );
       const projections = new Map(
         fitness.map((entry) => [
           entry.game.id,
@@ -339,6 +459,33 @@ function sameIdentity(
     left.tournamentHash === right.tournamentHash &&
     left.predictionSettingsHash === right.predictionSettingsHash &&
     left.redundancySettingsHash === right.redundancySettingsHash &&
+    JSON.stringify(left.semanticScoringInputProof) ===
+      JSON.stringify(right.semanticScoringInputProof) &&
+    left.calculationVersion === right.calculationVersion &&
+    left.ruleCatalogVersion === right.ruleCatalogVersion &&
+    left.dependencyVersion === right.dependencyVersion &&
+    left.projectionVersion === right.projectionVersion &&
+    left.catalogRuleVersions.length === right.catalogRuleVersions.length &&
+    left.catalogRuleVersions.every(
+      (rule, index) =>
+        rule.ruleId === right.catalogRuleVersions[index]?.ruleId &&
+        rule.ruleVersion === right.catalogRuleVersions[index]?.ruleVersion &&
+        rule.scoringVersion === right.catalogRuleVersions[index]?.scoringVersion,
+    )
+  );
+}
+
+function sameRawIdentity(
+  left: AttentionCandidateSource["identity"],
+  right: AttentionCandidateSource["identity"],
+): boolean {
+  return (
+    left.collectionId === right.collectionId &&
+    left.collectionSchemaVersion === right.collectionSchemaVersion &&
+    left.collectionRevision === right.collectionRevision &&
+    left.tournamentHash === right.tournamentHash &&
+    left.predictionSettingsHash === right.predictionSettingsHash &&
+    left.redundancySettingsHash === right.redundancySettingsHash &&
     left.calculationVersion === right.calculationVersion &&
     left.ruleCatalogVersion === right.ruleCatalogVersion &&
     left.dependencyVersion === right.dependencyVersion &&
@@ -356,6 +503,7 @@ function sameIdentity(
 function canRebaseCollectionRevision(
   artifact: AttentionCandidateArtifact,
   source: AttentionCandidateSource,
+  proof: SemanticScoringInputProof,
 ): boolean {
   const left = artifact.identity;
   const right = source.identity;
@@ -365,6 +513,7 @@ function canRebaseCollectionRevision(
     left.tournamentHash === right.tournamentHash &&
     left.predictionSettingsHash === right.predictionSettingsHash &&
     left.redundancySettingsHash === right.redundancySettingsHash &&
+    JSON.stringify(left.semanticScoringInputProof) === JSON.stringify(proof) &&
     left.calculationVersion === right.calculationVersion &&
     left.ruleCatalogVersion === right.ruleCatalogVersion &&
     left.dependencyVersion === right.dependencyVersion &&
@@ -399,21 +548,29 @@ export class AttentionCandidateService<
   private cached: {
     readonly artifact: AttentionCandidateArtifact;
     readonly generation: number;
+    readonly scoringFence: () => boolean;
   } | null = null;
 
   constructor(private readonly dependencies: AttentionCandidateServiceDependencies<Source>) {}
+
+  private async scoringInput(source: Source) {
+    const captured = await this.dependencies.oracle.getScoringInput(source);
+    if (!captured.isCurrent()) throw new Error("Scoring input is already stale");
+    return { proof: captured.semanticScoringInputProof, isCurrent: () => captured.isCurrent() };
+  }
 
   async ensureFresh(): Promise<AttentionCandidateAvailability> {
     if (this.dependencies.recoveryRequired?.()) return { state: "unavailable", retryable: true };
     const cached = this.cached;
     const generation = this.dependencies.sourceGeneration?.();
-    const now = this.dependencies.clock.now();
+    const nowDate = this.dependencies.clock.now();
     if (
       cached !== null &&
       generation !== undefined &&
       cached.generation === generation &&
+      cached.scoringFence() &&
       (cached.artifact.earliestBoundary === null ||
-        Date.parse(cached.artifact.earliestBoundary) > now.getTime())
+        Date.parse(cached.artifact.earliestBoundary) > nowDate.getTime())
     )
       return { state: "available", artifact: cached.artifact };
     return this.dependencies.coordinator.runExclusive(async () => {
@@ -421,25 +578,40 @@ export class AttentionCandidateService<
         if (this.dependencies.recoveryRequired?.())
           return { state: "unavailable", retryable: true };
         const source = await this.dependencies.loadSource();
+        const scoring = await this.scoringInput(source);
         const loaded = await this.dependencies.storage.loadAttentionCandidates();
         const artifact = loaded === null ? null : AttentionCandidateArtifactSchema.parse(loaded);
         const now = instant(this.dependencies.clock.now());
         if (
           artifact !== null &&
-          sameIdentity(artifact.identity, source.identity) &&
+          sameIdentity(artifact.identity, {
+            ...source.identity,
+            semanticScoringInputProof: scoring.proof,
+          }) &&
+          scoring.isCurrent() &&
+          (generation === undefined || generation === this.dependencies.sourceGeneration?.()) &&
           isCompleteForSource(artifact, source) &&
           (artifact.earliestBoundary === null ||
             Date.parse(artifact.earliestBoundary) > Date.parse(now))
         ) {
-          this.publishCache(artifact);
+          this.publishCache(artifact, generation, scoring.isCurrent);
+          if (
+            !scoring.isCurrent() ||
+            (generation !== undefined && generation !== this.dependencies.sourceGeneration?.()) ||
+            this.isDue(artifact)
+          ) {
+            this.cached = null;
+            return { state: "unavailable", retryable: true };
+          }
           return { state: "available", artifact };
         }
         return {
           state: "available",
-          artifact: await this.maintainLocked(source, artifact, now, null, false),
+          artifact: await this.maintainLocked(source, artifact, now, null, false, true, generation),
         };
-      } catch {
+      } catch (error) {
         this.cached = null;
+        this.dependencies.onMaintenanceError?.(error);
         return { state: "unavailable", retryable: true };
       }
     });
@@ -448,6 +620,7 @@ export class AttentionCandidateService<
   async maintain(impact: AttentionMutationImpact): Promise<AttentionCandidateAvailability> {
     return this.dependencies.coordinator.runExclusive(async () => {
       try {
+        const generation = this.dependencies.sourceGeneration?.();
         const source = await this.dependencies.loadSource();
         const existing = await this.dependencies.storage.loadAttentionCandidates();
         const now = instant(this.dependencies.clock.now());
@@ -460,9 +633,13 @@ export class AttentionCandidateService<
             now,
             targets,
             impact.kind === "global",
+            true,
+            generation,
           ),
         };
-      } catch {
+      } catch (error) {
+        this.cached = null;
+        this.dependencies.onMaintenanceError?.(error);
         return { state: "unavailable", retryable: true };
       }
     });
@@ -484,12 +661,17 @@ export class AttentionCandidateService<
   ): Promise<AttentionCandidateAvailability> {
     return this.dependencies.coordinator.runExclusive(async () => {
       try {
+        const sourceGeneration = this.dependencies.sourceGeneration?.();
         const source = await this.dependencies.loadSource();
+        const scoring = await this.scoringInput(source);
         const existing = await this.dependencies.storage.loadAttentionCandidates();
         const now = instant(this.dependencies.clock.now());
         const reusable =
           existing !== null &&
-          canRebaseCollectionRevision(existing, source) &&
+          canRebaseCollectionRevision(existing, source, scoring.proof) &&
+          JSON.stringify(existing.identity.semanticScoringInputProof) ===
+            JSON.stringify(scoring.proof) &&
+          scoring.isCurrent() &&
           isCompleteForSource(existing, source);
         const full = impact.kind === "global" || !reusable;
         const due = reusable
@@ -499,31 +681,66 @@ export class AttentionCandidateService<
           : [];
         const targets =
           impact.kind === "games" ? this.expandTargets(existing, [...impact.gameIds, ...due]) : [];
-        const evaluation =
+        const evaluation: AttentionCandidateOracleResult =
           !full && targets.length === 0
-            ? { evaluations: [], presentations: new Map() }
+            ? {
+                evaluations: [],
+                presentations: new Map(),
+                semanticScoringInputProof: scoring.proof,
+                isCurrent: scoring.isCurrent,
+              }
             : await this.dependencies.oracle.evaluate(source, now, full ? undefined : targets);
+        if (
+          JSON.stringify(evaluation.semanticScoringInputProof) !== JSON.stringify(scoring.proof) ||
+          !scoring.isCurrent() ||
+          !evaluation.isCurrent()
+        )
+          throw new Error("Semantic scoring input changed during post-commit maintenance");
         const staged = this.buildArtifact(
           source,
           now,
           reusable && !full ? existing : null,
           evaluation,
           full ? undefined : targets,
+          scoring.proof,
         );
         const reread = await this.dependencies.loadSource();
-        if (!sameIdentity(source.identity, reread.identity))
+        if (
+          !sameRawIdentity(source.identity, reread.identity) ||
+          !scoring.isCurrent() ||
+          !evaluation.isCurrent() ||
+          (sourceGeneration !== undefined &&
+            sourceGeneration !== this.dependencies.sourceGeneration?.()) ||
+          this.isDue(staged)
+        )
           throw new Error("Attention candidate source changed after collection commit");
         await this.dependencies.storage.saveAttentionCandidates(staged);
-        this.publishCache(staged);
+        if (
+          !sameRawIdentity(source.identity, (await this.dependencies.loadSource()).identity) ||
+          !scoring.isCurrent() ||
+          !evaluation.isCurrent() ||
+          (sourceGeneration !== undefined &&
+            sourceGeneration !== this.dependencies.sourceGeneration?.()) ||
+          this.isDue(staged)
+        ) {
+          await this.discardStagedIfStillCurrent(staged);
+          throw new Error("Attention candidate source changed while saving");
+        }
+        this.publishCache(staged, sourceGeneration, scoring.isCurrent);
+        if (
+          !scoring.isCurrent() ||
+          !evaluation.isCurrent() ||
+          (sourceGeneration !== undefined &&
+            sourceGeneration !== this.dependencies.sourceGeneration?.()) ||
+          this.isDue(staged)
+        ) {
+          this.cached = null;
+          throw new Error("Attention candidate source changed before publication");
+        }
         return { state: "available", artifact: staged };
       } catch (error) {
         this.cached = null;
         this.dependencies.onMaintenanceError?.(error);
-        try {
-          await this.dependencies.storage.discardAttentionCandidates();
-        } catch {
-          // The disposable artifact is already gated by Profile freshness.
-        }
         return { state: "unavailable", retryable: true };
       }
     });
@@ -535,11 +752,16 @@ export class AttentionCandidateService<
     now: string,
     requestedTargets: readonly string[] | null,
     forceFull: boolean,
-    retries = 1,
+    persist = true,
+    sourceGeneration: number | undefined,
   ): Promise<AttentionCandidateArtifact> {
+    const scoring = await this.scoringInput(source);
     const validExisting =
       existing !== null &&
-      sameIdentity(existing.identity, source.identity) &&
+      sameIdentity(existing.identity, {
+        ...source.identity,
+        semanticScoringInputProof: scoring.proof,
+      }) &&
       isCompleteForSource(existing, source);
     const dueTargets = validExisting
       ? existing.dueBuckets
@@ -556,27 +778,81 @@ export class AttentionCandidateService<
       now,
       full ? undefined : targets,
     );
+    if (JSON.stringify(evaluation.semanticScoringInputProof) !== JSON.stringify(scoring.proof))
+      throw new Error("Candidate evaluation used a different semantic scoring proof");
+    if (!scoring.isCurrent() || !evaluation.isCurrent())
+      throw new Error("Semantic scoring input changed during candidate evaluation");
     const staged = this.buildArtifact(
       source,
       now,
       validExisting && !full ? existing : null,
       evaluation,
       full ? undefined : targets,
+      scoring.proof,
     );
     const reread = await this.dependencies.loadSource();
-    if (!sameIdentity(source.identity, reread.identity)) {
-      if (retries === 0)
-        throw new Error("Attention candidate source identity changed during maintenance");
-      return this.maintainLocked(reread, null, now, null, true, retries - 1);
+    if (
+      !sameRawIdentity(source.identity, reread.identity) ||
+      !scoring.isCurrent() ||
+      !evaluation.isCurrent() ||
+      (sourceGeneration !== undefined &&
+        sourceGeneration !== this.dependencies.sourceGeneration?.()) ||
+      this.isDue(staged)
+    )
+      throw new Error("Attention candidate source identity changed during maintenance");
+    if (persist) {
+      await this.dependencies.storage.saveAttentionCandidates(staged);
+      if (
+        !scoring.isCurrent() ||
+        !evaluation.isCurrent() ||
+        !sameRawIdentity(source.identity, (await this.dependencies.loadSource()).identity) ||
+        (sourceGeneration !== undefined &&
+          sourceGeneration !== this.dependencies.sourceGeneration?.()) ||
+        this.isDue(staged)
+      ) {
+        await this.discardStagedIfStillCurrent(staged);
+        throw new Error("Attention candidate source changed while saving");
+      }
+      this.publishCache(staged, sourceGeneration, scoring.isCurrent);
+    } else {
+      this.cached = null;
     }
-    await this.dependencies.storage.saveAttentionCandidates(staged);
-    this.publishCache(staged);
+    if (
+      !scoring.isCurrent() ||
+      !evaluation.isCurrent() ||
+      (sourceGeneration !== undefined &&
+        sourceGeneration !== this.dependencies.sourceGeneration?.()) ||
+      this.isDue(staged)
+    ) {
+      this.cached = null;
+      throw new Error("Attention candidate source changed before publication");
+    }
     return staged;
   }
 
-  private publishCache(artifact: AttentionCandidateArtifact): void {
-    const generation = this.dependencies.sourceGeneration?.();
-    this.cached = generation === undefined ? null : { artifact, generation };
+  private isDue(artifact: AttentionCandidateArtifact): boolean {
+    return (
+      artifact.earliestBoundary !== null &&
+      Date.parse(artifact.earliestBoundary) <= this.dependencies.clock.now().getTime()
+    );
+  }
+
+  private async discardStagedIfStillCurrent(staged: AttentionCandidateArtifact): Promise<void> {
+    try {
+      const stored = await this.dependencies.storage.loadAttentionCandidates();
+      if (stored !== null && JSON.stringify(stored) === JSON.stringify(staged))
+        await this.dependencies.storage.discardAttentionCandidates();
+    } catch {
+      // Uncertain storage state is preserved; identity/proof validation gates reuse.
+    }
+  }
+
+  private publishCache(
+    artifact: AttentionCandidateArtifact,
+    generation: number | undefined,
+    scoringFence: () => boolean,
+  ): void {
+    this.cached = generation === undefined ? null : { artifact, generation, scoringFence };
   }
 
   private expandTargets(
@@ -595,7 +871,8 @@ export class AttentionCandidateService<
     evaluatedAt: string,
     base: AttentionCandidateArtifact | null,
     result: AttentionCandidateOracleResult,
-    targetGameIds?: readonly string[],
+    targetGameIds: readonly string[] | undefined,
+    semanticScoringInputProof: SemanticScoringInputProof,
   ): AttentionCandidateArtifact {
     const ownedGameIds = new Set(
       source.collection.games.filter((game) => game.ownership === "owned").map((game) => game.id),
@@ -683,7 +960,7 @@ export class AttentionCandidateService<
     return AttentionCandidateArtifactSchema.parse({
       schemaVersion: ATTENTION_CANDIDATE_ARTIFACT_SCHEMA_VERSION,
       indexVersion: ATTENTION_CANDIDATE_ARTIFACT_INDEX_VERSION,
-      identity: source.identity,
+      identity: { ...source.identity, semanticScoringInputProof },
       evaluatedAt,
       rows: completeRows,
       dueBuckets,

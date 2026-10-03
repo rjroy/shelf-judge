@@ -10,7 +10,10 @@ import type {
   Collection,
   DurableGame,
 } from "@shelf-judge/shared";
-import { createInitialEntityMetadata } from "@shelf-judge/shared";
+import {
+  createInitialEntityMetadata,
+  createInitialSemanticRedundancyStateV10,
+} from "@shelf-judge/shared";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
 import type { GameService } from "../src/services/game-service";
 import type { PredictionService } from "../src/services/prediction-service";
@@ -126,13 +129,14 @@ const allGamesWithScores: GameWithScore[] = [
 // --- Mock factories ---
 
 const defaultCollection: Collection = {
-  schemaVersion: 8,
+  schemaVersion: 10,
   revision: 0,
   id: "collection-1",
   name: "Test",
   axes: [],
   games: [gameA, gameB, gameC],
   entertainmentBenchmark: null,
+  semanticRedundancy: createInitialSemanticRedundancyStateV10(),
   intentions: [],
   attentionDispositions: [],
   commandReceipts: [],

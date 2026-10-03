@@ -7,6 +7,8 @@ playwright-report/
 test-results/
 .shelf-judge/
 
+*.local.json
+
 # Editor
 .idea/
 .vscode/

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CollectionSchema,
   createInitialEntityMetadata,
+  createInitialSemanticRedundancyStateV10,
   type Collection,
   type DurableGame,
 } from "@shelf-judge/shared";
@@ -64,7 +65,7 @@ function game(overrides: Partial<DurableGame> = {}): DurableGame {
 
 function collection(sourceGame = game()): Collection {
   return {
-    schemaVersion: 8,
+    schemaVersion: 10,
     revision: 0,
     id: "collection",
     name: "Collection",
@@ -74,6 +75,7 @@ function collection(sourceGame = game()): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: now,
     updatedAt: now,
   };
@@ -105,7 +107,7 @@ function harness(
     maintenance?: "available" | "unavailable" | "throw";
   } = {},
 ) {
-  let stored = CollectionSchema.parse(options.source ?? collection());
+  let stored: Collection = CollectionSchema.parse(options.source ?? collection());
   let saves = 0;
   let selections = 0;
   let maintenanceCalls = 0;
@@ -155,7 +157,7 @@ function harness(
 }
 
 function compatibilityHarness(source: Collection, winnerFingerprint = fingerprint) {
-  let stored = CollectionSchema.parse(source);
+  let stored: Collection = CollectionSchema.parse(source);
   let saves = 0;
   let maintenance = 0;
   const storage: CollectionReader & CollectionPersistence = {
@@ -614,7 +616,7 @@ describe("AttentionDisposition global maintenance boundary", () => {
     source: Collection,
     options: { readonly publication?: "available" | "unavailable" } = {},
   ) {
-    let stored = CollectionSchema.parse(source);
+    let stored: Collection = CollectionSchema.parse(source);
     let saves = 0;
     let publications = 0;
     let availability: "available" | "unavailable" = "available";

@@ -39,6 +39,7 @@ describe("wishlist redundancy preview", () => {
   test("shows adjusted score, penalty, and only the top three similar games", () => {
     const html = markup(preview).replaceAll("<!-- -->", "");
     expect(html).toContain("With redundancy:");
+    expect(html).toContain("Saved wishlist preview uses factual data only.");
     expect(html).toContain(">7.1</strong>");
     expect(html).toContain("-1.3");
     expect(html).toContain("Similar One");
@@ -55,9 +56,9 @@ describe("wishlist redundancy preview", () => {
     expect(html).toContain("With redundancy:");
   });
 
-  test("renders nothing when the preview is null or unavailable", () => {
-    expect(markup(null)).toBe("");
-    expect(markup(undefined)).toBe("");
+  test("keeps factual-only provenance when an adjustment is absent and hides unrated previews", () => {
+    expect(markup(null)).toContain("Saved wishlist previews use factual data only");
+    expect(markup(undefined)).toContain("Saved wishlist previews use factual data only");
     expect(markup(preview, false)).toBe("");
   });
 });

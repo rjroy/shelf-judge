@@ -6,11 +6,16 @@ import {
   CollectionSchemaV5,
   CollectionSchemaV6,
   CollectionSchemaV7,
+  CollectionSchemaV8,
+  CollectionSchemaV9,
+  CollectionSchemaV10,
+  createInitialSemanticRedundancyState,
   createInitialEntityMetadata,
   isUsableSuggestedPlayerPoll,
   type Axis,
   type AxisBase,
   type Collection,
+  type CollectionV10,
   type DisabledLegacyAxis,
   type InvalidEvidence,
   type JsonValue,
@@ -23,6 +28,14 @@ export interface CollectionMigrationResult {
   sourceVersion: number;
   convertedAxisCount: number;
   disabledAxisCount: number;
+  discardedLegacyPairCount?: number;
+  notice?: string | null;
+}
+
+export interface CollectionV9ToV10MigrationResult {
+  data: CollectionV10;
+  discardedLegacyPairCount: number;
+  notice: string | null;
 }
 
 export interface CollectionMigrationDependencies {
@@ -34,6 +47,8 @@ export interface CollectionMigrationStepResult {
   data: unknown;
   convertedAxisCount: number;
   disabledAxisCount: number;
+  discardedLegacyPairCount?: number;
+  notice?: string | null;
 }
 
 export interface CollectionMigrationStep {
@@ -727,6 +742,19 @@ function migrateVersionSevenToEight(raw: unknown): CollectionMigrationStepResult
   };
 }
 
+function migrateVersionEightToNine(raw: unknown): CollectionMigrationStepResult {
+  const historical = CollectionSchemaV8.parse(raw);
+  return {
+    data: {
+      ...historical,
+      schemaVersion: 9,
+      semanticRedundancy: createInitialSemanticRedundancyState(),
+    },
+    convertedAxisCount: 0,
+    disabledAxisCount: 0,
+  };
+}
+
 export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
   {
     fromVersion: 0,
@@ -768,6 +796,25 @@ export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
     toVersion: 8,
     migrate: migrateVersionSevenToEight,
   },
+  {
+    fromVersion: 8,
+    toVersion: 9,
+    migrate: migrateVersionEightToNine,
+  },
+  {
+    fromVersion: 9,
+    toVersion: 10,
+    migrate(raw): CollectionMigrationStepResult {
+      const result = migrateCollectionV9ToV10(raw);
+      return {
+        data: result.data,
+        convertedAxisCount: 0,
+        disabledAxisCount: 0,
+        discardedLegacyPairCount: result.discardedLegacyPairCount,
+        notice: result.notice,
+      };
+    },
+  },
 ];
 
 function readSchemaVersion(raw: unknown): number {
@@ -794,6 +841,9 @@ export function migrateCollection(
   let working: unknown = raw;
   let convertedAxisCount = 0;
   let disabledAxisCount = 0;
+  let discardedLegacyPairCount = 0;
+  let notice: string | null = null;
+  let semanticStateMigrated = false;
   while (version < CURRENT_COLLECTION_SCHEMA_VERSION) {
     const step = COLLECTION_MIGRATION_STEPS.find(({ fromVersion }) => fromVersion === version);
     if (step === undefined || step.toVersion <= version) {
@@ -805,6 +855,9 @@ export function migrateCollection(
     working = result.data;
     convertedAxisCount += result.convertedAxisCount;
     disabledAxisCount += result.disabledAxisCount;
+    semanticStateMigrated ||= result.discardedLegacyPairCount !== undefined;
+    discardedLegacyPairCount += result.discardedLegacyPairCount ?? 0;
+    notice ??= result.notice ?? null;
     version = step.toVersion;
   }
 
@@ -815,5 +868,78 @@ export function migrateCollection(
     sourceVersion,
     convertedAxisCount,
     disabledAxisCount,
+    ...(semanticStateMigrated ? { discardedLegacyPairCount, notice } : {}),
   };
+}
+
+/**
+ * Pure, inactive v9→v10 migration. Legacy judgments are always discarded because v9
+ * records do not prove every current name/model/question/schema/mapping dependency.
+ * This is intentionally not registered in the current migration chain before cutover.
+ */
+export function migrateCollectionV9ToV10(raw: unknown): CollectionV9ToV10MigrationResult {
+  if (
+    typeof raw === "object" &&
+    raw !== null &&
+    "schemaVersion" in raw &&
+    raw.schemaVersion === 10
+  ) {
+    return {
+      data: CollectionSchemaV10.parse(raw),
+      discardedLegacyPairCount: 0,
+      notice: null,
+    };
+  }
+  const source = CollectionSchemaV9.parse(raw);
+  const pairKey = (gameA: string, gameB: string) =>
+    JSON.stringify(gameA < gameB ? [gameA, gameB] : [gameB, gameA]);
+  const discardedPairs = new Set<string>();
+  for (const pair of source.semanticRedundancy.pairJudgments) {
+    if (hasSuccessfulNumericSemanticResult(pair.description, pair.ownerNote))
+      discardedPairs.add(pairKey(pair.gameA, pair.gameB));
+  }
+  for (const pair of source.semanticRedundancy.publishedGeneration?.pairOutcomes ?? []) {
+    if (hasSuccessfulNumericSemanticResult(pair.description, pair.ownerNote))
+      discardedPairs.add(pairKey(pair.gameA, pair.gameB));
+  }
+  const discardedLegacyPairCount = discardedPairs.size;
+  const { semanticRedundancy: legacyState, ...collection } = source;
+  const data = CollectionSchemaV10.parse({
+    ...collection,
+    schemaVersion: 10,
+    semanticRedundancy: {
+      settings: legacyState.settings,
+      evidenceEpoch: legacyState.evidenceEpoch,
+      consentEpoch: legacyState.consentEpoch,
+      ownerNoteConsentEpoch: legacyState.consentEpoch,
+      factualWeightsEpoch: legacyState.factualWeightsEpoch,
+      factualWeightsFingerprint: legacyState.factualWeightsFingerprint,
+      firstOptInInitialized: legacyState.firstOptInInitialized,
+      legacyCacheMigration: {
+        kind: "jev-cache-v9-to-v10",
+        discardedPairCount: discardedLegacyPairCount,
+      },
+    },
+  });
+  return {
+    data,
+    discardedLegacyPairCount,
+    notice:
+      discardedLegacyPairCount > 0
+        ? "Legacy semantic judgments were discarded during collection migration."
+        : null,
+  };
+}
+
+function hasSuccessfulNumericSemanticResult(
+  description: { status: string; score?: number } | null,
+  ownerNote: { status: string; score?: number } | null,
+): boolean {
+  return [description, ownerNote].some(
+    (result) =>
+      result !== null &&
+      result.status === "scored" &&
+      typeof result.score === "number" &&
+      Number.isFinite(result.score),
+  );
 }

@@ -11,6 +11,7 @@ import type {
 import {
   createCompleteEntityMetadata,
   createInitialEntityMetadata,
+  createInitialSemanticRedundancyStateV10,
   SuggestedPlayerPollSchema,
 } from "@shelf-judge/shared";
 import { createPredictionService } from "../../src/services/prediction-service.js";
@@ -142,7 +143,7 @@ function makeGame(
 
 function makeCollection(games: DurableGame[], axes: Axis[]): Collection {
   return {
-    schemaVersion: 8,
+    schemaVersion: 10,
     revision: 0,
     id: "test-col",
     name: "Test Collection",
@@ -152,6 +153,7 @@ function makeCollection(games: DurableGame[], axes: Axis[]): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: now,
     updatedAt: now,
   };
@@ -189,7 +191,7 @@ function createStubStorage(
         stage: "annotation" as const,
         similarityThreshold: 0.6,
         maxPenalty: 2.0,
-        componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
+        componentWeights: { binary: 0.4, continuous: 0.3 },
         minNeighbors: 1,
         expectedNeighbors: 5,
       }),

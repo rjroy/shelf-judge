@@ -145,10 +145,23 @@ export function WishlistRedundancyPreview({
   preview: RedundancyAdjustment | null | undefined;
   predictionAvailable: boolean;
 }) {
-  if (!preview || !predictionAvailable) return null;
+  if (!predictionAvailable) return null;
+  if (!preview) {
+    return (
+      <div className="preview-redundancy" aria-label="Stored wishlist redundancy preview">
+        <div className="preview-redundancy-title">Redundancy</div>
+        <p className="preview-redundancy-provenance">
+          Saved wishlist previews use factual data only; no adjustment is available.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="preview-redundancy" aria-label="Redundancy adjustment">
       <div className="preview-redundancy-title">Redundancy</div>
+      <p className="preview-redundancy-provenance">
+        Saved wishlist preview uses factual data only.
+      </p>
       <div className="preview-redundancy-score">
         With redundancy: <strong>{preview.adjustedScore.toFixed(1)}</strong>
         {preview.penalty > 0 && (

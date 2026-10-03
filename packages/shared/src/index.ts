@@ -45,6 +45,10 @@ export type {
   CollectionV6,
   CollectionV7,
   CollectionV8,
+  CollectionV9,
+  CollectionV10,
+  SemanticRedundancyStateV10,
+  SemanticRedundancySettings,
   AttentionDisposition,
   AttentionCommandReceipt,
   AttentionDispositionCommandBase,
@@ -56,6 +60,7 @@ export type {
   AttentionRuleDefinition,
   AttentionCandidateWinner,
   AttentionCandidateEvaluation,
+  SemanticScoringInputProof,
   BggPlaySession,
   FitnessBreakdownSource,
   FitnessBreakdownEntry,
@@ -194,8 +199,10 @@ export type {
   NicheSettings,
   ComponentWeights,
   ComponentDistances,
+  RedundancyComponentWeights,
   RedundancyNeighbor,
   RedundancyAdjustment,
+  RedundancySimilarityInfo,
   RedundancySettings,
   WishlistBreakdownEntry,
   WishlistEntry,
@@ -234,6 +241,8 @@ export type {
   AttentionCandidateArtifact,
   AttentionCandidateArtifactIdentity,
 } from "./attention-candidate-artifact";
+
+export { SemanticScoringInputProofSchema } from "./semantic-scoring-input-proof";
 
 export {
   DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
@@ -279,6 +288,11 @@ export {
   CollectionSchemaV6,
   CollectionSchemaV7,
   CollectionSchemaV8,
+  CollectionSchemaV9,
+  CollectionSchemaV10,
+  SemanticRedundancySettingsSchema,
+  createInitialSemanticRedundancyState,
+  createInitialSemanticRedundancyStateV10,
   AttentionDispositionSchema,
   AttentionCommandReceiptSchema,
   attentionDispositionRequestFingerprint,

@@ -1,12 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import {
   computeRedundancyAdjustments,
+  computeRedundancyAnalysis,
+  factualSimilarity,
   flattenWeighted,
   DEFAULT_REDUNDANCY_SETTINGS,
 } from "../src/services/redundancy-engine";
 import type { FitnessResult, GameWithScore, Game, RedundancySettings } from "@shelf-judge/shared";
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import type { FeatureVector } from "../src/services/feature-vector";
+import { cosineSimilarity } from "../src/services/feature-vector";
+import {
+  buildVocabulary,
+  computeContinuousRanges,
+  encodeGame,
+} from "../src/services/feature-vector";
+import { createRedundancyFactualContext } from "../src/services/redundancy-factual";
+import type { RedundancyPairTable } from "../src/services/redundancy-engine";
 
 // --- Fixture helpers ---
 
@@ -107,33 +117,474 @@ function enabledSettings(overrides: Partial<RedundancySettings> = {}): Redundanc
 }
 
 describe("flattenWeighted", () => {
-  test("includes personalAxes when flag is true and axes present", () => {
+  test("uses factual components only even when the vector has personal axes", () => {
     const vec: FeatureVector = { binary: [1, 0], continuous: [0.5], personalAxes: [0.8] };
-    const weights = { binary: 0.4, continuous: 0.3, personalAxes: 0.3 };
-    const flat = flattenWeighted(vec, weights, true);
-    expect(flat).toHaveLength(4); // 2 binary + 1 continuous + 1 personalAxes
-  });
-
-  test("excludes personalAxes when flag is false", () => {
-    const vec: FeatureVector = { binary: [1, 0], continuous: [0.5], personalAxes: [0.8] };
-    const weights = { binary: 0.4, continuous: 0.3, personalAxes: 0.3 };
-    const flat = flattenWeighted(vec, weights, false);
+    const weights = { binary: 0.4, continuous: 0.3 };
+    const flat = flattenWeighted(vec, weights);
     expect(flat).toHaveLength(3); // 2 binary + 1 continuous, no personalAxes
   });
 
-  test("null personalAxes with includePersonalAxes=true falls back to binary+continuous weights", () => {
+  test("personal axes do not change factual weights", () => {
     const vec: FeatureVector = { binary: [1, 0], continuous: [0.5], personalAxes: null };
-    const weights = { binary: 0.4, continuous: 0.3, personalAxes: 0.3 };
-    const flat = flattenWeighted(vec, weights, true);
-    // personalAxes is null so treated as includePersonalAxes=false
-    expect(flat).toHaveLength(3);
-    // Weights should be redistributed over binary+continuous only (same as includePersonalAxes=false)
-    const flatExplicitFalse = flattenWeighted(vec, weights, false);
-    expect(flat).toEqual(flatExplicitFalse);
+    const weights = { binary: 4, continuous: 3 };
+    expect(flattenWeighted(vec, weights)).toEqual(
+      flattenWeighted({ ...vec, personalAxes: [0, 1] }, weights),
+    );
+  });
+});
+
+describe("createRedundancyFactualContext", () => {
+  test("matches the existing factual-vector calculation exactly, across the full collection", () => {
+    const first: Game = {
+      ...makeGame("factual-a", "A"),
+      minPlayers: 2,
+      maxPlayers: 4,
+      playingTime: 30,
+      bggData: {
+        communityRating: 7.3,
+        bayesAverage: 7.1,
+        weight: 2.4,
+        numWeightVotes: 10,
+        description: null,
+        mechanics: [{ id: 1, name: "Drafting" }],
+        categories: [{ id: 1, name: "Cards" }],
+        families: [],
+        subdomains: [],
+        bestPlayerCount: null,
+        fetchedAt: "2026-01-01T00:00:00Z",
+      },
+      ratings: { personal: 1 },
+    };
+    const second: Game = {
+      ...makeGame("factual-b", "B"),
+      minPlayers: 4,
+      maxPlayers: 6,
+      playingTime: 90,
+      bggData: {
+        communityRating: 8.1,
+        bayesAverage: 7.9,
+        weight: 3.8,
+        numWeightVotes: 10,
+        description: null,
+        mechanics: [{ id: 2, name: "Set Collection" }],
+        categories: [{ id: 2, name: "Strategy" }],
+        families: [],
+        subdomains: [],
+        bestPlayerCount: null,
+        fetchedAt: "2026-01-01T00:00:00Z",
+      },
+      ratings: { personal: 10 },
+    };
+    // This previously-owned, noneligible entry changes range normalization and
+    // vocabulary even though it is not one of the compared pair.
+    const rangeChanger: Game = {
+      ...makeGame("range-changer", "Previously owned"),
+      ownership: "previously-owned",
+      // This BGG outlier expands the max-player range beyond both pair members.
+      minPlayers: 1,
+      maxPlayers: 12,
+      playingTime: 300,
+      bggData: {
+        communityRating: 5,
+        bayesAverage: 5,
+        weight: 1,
+        numWeightVotes: 10,
+        description: null,
+        mechanics: [{ id: 3, name: "Worker Placement" }],
+        categories: [{ id: 3, name: "Previously Owned" }],
+        families: [],
+        subdomains: [],
+        bestPlayerCount: null,
+        fetchedAt: "2026-01-01T00:00:00Z",
+      },
+    };
+    const collection = [first, second, rangeChanger];
+    const weights = { binary: 4 / 7, continuous: 3 / 7 };
+    const context = createRedundancyFactualContext(collection, weights);
+    const vocabulary = buildVocabulary(collection);
+    const ranges = computeContinuousRanges(collection);
+    const oldCallback = (game: Game) => encodeGame(game, vocabulary, [], {}, ranges);
+    const expected = cosineSimilarity(
+      flattenWeighted(oldCallback(first), weights),
+      flattenWeighted(oldCallback(second), weights),
+    );
+
+    expect(context.getFeatureVector(first)).toEqual(oldCallback(first));
+    expect(context.similarity(first, second)).toBe(expected);
+    expect(context.similarity(second, first)).toBe(expected);
+    expect(context.getFeatureVector(first)).toBe(context.getFeatureVector(first));
+    expect(context.getFeatureVector(first).personalAxes).toBeNull();
+
+    const pairOnly = createRedundancyFactualContext([first, second], weights);
+    // Continuous dimensions are weight, rating, min players, max players, ... .
+    // The outlier changes the second game's max-player normalization from 1 to 0.25.
+    expect(context.getFeatureVector(second).continuous[3]).toBe(0.25);
+    expect(pairOnly.getFeatureVector(second).continuous[3]).toBe(1);
+    expect(context.similarity(first, second)).not.toBe(pairOnly.similarity(first, second));
+  });
+
+  test("returns exact, unrounded similarity and zero similarity for zero vectors", () => {
+    const a: FeatureVector = { binary: [1, 1], continuous: [1], personalAxes: [0] };
+    const b: FeatureVector = { binary: [1, 0], continuous: [0], personalAxes: [1] };
+    const weights = { binary: 1, continuous: 1 };
+    expect(factualSimilarity(a, b, weights)).toBeCloseTo(1 / Math.sqrt(3), 14);
+    expect(factualSimilarity(b, a, weights)).toBe(factualSimilarity(a, b, weights));
+    expect(
+      factualSimilarity(
+        { binary: [0], continuous: [0], personalAxes: [1] },
+        { binary: [0], continuous: [0], personalAxes: [0] },
+        weights,
+      ),
+    ).toBe(0);
   });
 });
 
 describe("computeRedundancyAdjustments", () => {
+  const pairTable = (
+    pairs: RedundancyPairTable["pairs"],
+    overrides: Partial<RedundancyPairTable> = {},
+  ): RedundancyPairTable => ({
+    status: "ready",
+    identity: { generationId: "g1", consentEpoch: "c1", settingsEpoch: "s1" },
+    expectedIdentity: { generationId: "g1", consentEpoch: "c1", settingsEpoch: "s1" },
+    weights: { factual: 0.5, description: 0.5, ownerNote: 0 },
+    pairs,
+    ...overrides,
+  });
+
+  test("ready complete table composes symmetrically; unavailable descriptions fall back to factual", () => {
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9)),
+      makeGws(makeGame("b", "B"), makeScore(7)),
+    ];
+    const factual = cosineSimilarity(
+      flattenWeighted(getVector(games[0].game), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+      flattenWeighted(getVector(games[1].game), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+    );
+    const table = pairTable([{ gameAId: "b", gameBId: "a", factual, description: 0 }]);
+    const result = computeRedundancyAnalysis(games, enabledSettings(), getVector, table);
+    expect(result.adjustments.get("a")?.nicheNeighbors[0]?.similarity).toBe(
+      result.adjustments.get("b")?.nicheNeighbors[0]?.similarity,
+    );
+    expect(result.similarityInfo.get("a")).toEqual({ status: "ready", generationId: "g1" });
+
+    const missingDescription = pairTable([
+      { gameAId: "a", gameBId: "b", factual, description: null },
+    ]);
+    expect(
+      computeRedundancyAdjustments(games, enabledSettings(), getVector, missingDescription).get("b")
+        ?.nicheNeighbors[0]?.similarity,
+    ).toBe(Math.round(factual * 1000) / 1000);
+  });
+
+  test("semantic scores can cross threshold, while not-ready tables fall back to factual", () => {
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9)),
+      makeGws(makeGame("c", "C"), makeScore(7)),
+    ];
+    const factual = cosineSimilarity(
+      flattenWeighted(getVector(games[0].game), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+      flattenWeighted(getVector(games[1].game), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+    );
+    const table = pairTable([{ gameAId: "a", gameBId: "c", factual, description: 1 }]);
+    const settings = enabledSettings({ similarityThreshold: 0.7 });
+    expect(computeRedundancyAdjustments(games, settings, getVector, table).size).toBe(2);
+    expect(computeRedundancyAdjustments(games, settings, getVector).size).toBe(0);
+    const partial = pairTable([{ gameAId: "a", gameBId: "c", factual, description: null }], {
+      status: "not-ready",
+    });
+    const fallback = computeRedundancyAnalysis(games, settings, getVector, partial);
+    expect(fallback.adjustments.size).toBe(0);
+    expect(fallback.similarityInfo.get("a")?.status).toBe("not-ready");
+  });
+
+  test("normalizes F7/C5/D10 over available signals for C-only, D-only, and both", () => {
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9)),
+      makeGws(makeGame("c", "C"), makeScore(7)),
+    ];
+    const factual = cosineSimilarity(
+      flattenWeighted(getVector(games[0].game), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+      flattenWeighted(getVector(games[1].game), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+    );
+    const weights = { factual: 7, description: 5, ownerNote: 10 };
+    const expected = (description?: number | null, ownerNote?: number | null) => {
+      const parts: [number, number][] = [[7, factual]];
+      if (description != null) parts.push([5, description]);
+      if (ownerNote != null) parts.push([10, ownerNote]);
+      return (
+        parts.reduce((sum, [weight, score]) => sum + weight * score, 0) /
+        parts.reduce((sum, [weight]) => sum + weight, 0)
+      );
+    };
+    const actual = (
+      description?: number | null,
+      ownerNote?: number | null,
+      pairWeights = weights,
+    ) => {
+      const table = pairTable([{ gameAId: "a", gameBId: "c", factual, description, ownerNote }], {
+        weights: pairWeights,
+      });
+      return computeRedundancyAdjustments(
+        games,
+        enabledSettings({ similarityThreshold: 0 }),
+        getVector,
+        table,
+      ).get("a")!.nicheNeighbors[0].similarity;
+    };
+
+    expect(actual(0.2, null)).toBe(Math.round(expected(0.2) * 1000) / 1000); // C only; D omitted
+    expect(actual(null, 0.8)).toBe(Math.round(expected(null, 0.8) * 1000) / 1000); // D only; C omitted
+    expect(actual(0.2, 0.8)).toBe(Math.round(expected(0.2, 0.8) * 1000) / 1000); // C + D
+    expect(actual(Number.NaN, Number.NaN, { factual: 7, description: 0, ownerNote: 0 })).toBe(
+      Math.round(factual * 1000) / 1000,
+    ); // zero-weight scores are ignored
+    expect(actual(null, null, { factual: 7, description: 0, ownerNote: 0 })).toBe(
+      Math.round(expected(undefined, undefined) * 1000) / 1000,
+    ); // factual-only ready generation
+  });
+
+  test("rejects nonfinite semantic scores, finite factual mismatches, bad keys, and missing identity", () => {
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9)),
+      makeGws(makeGame("b", "B"), makeScore(7)),
+    ];
+    const factual = cosineSimilarity(
+      flattenWeighted(getVector(games[0].game), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+      flattenWeighted(getVector(games[1].game), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+    );
+    for (const bad of [
+      pairTable([{ gameAId: "a", gameBId: "b", factual, description: Number.NaN }]),
+      pairTable([{ gameAId: "a", gameBId: "b", factual, ownerNote: Number.POSITIVE_INFINITY }], {
+        weights: { factual: 7, description: 0, ownerNote: 10 },
+      }),
+      pairTable([{ gameAId: "a", gameBId: "b", factual: factual / 2 }]),
+      pairTable([{ gameAId: "a", gameBId: "missing", factual }]),
+      pairTable([{ gameAId: "a", gameBId: "b", factual }], {
+        identity: { generationId: "", consentEpoch: "c1", settingsEpoch: "s1" },
+      }),
+    ]) {
+      expect(() =>
+        computeRedundancyAdjustments(games, enabledSettings(), getVector, bad),
+      ).toThrow();
+    }
+    const noSignals = pairTable([{ gameAId: "a", gameBId: "b", factual }], {
+      status: "partial",
+      weights: { factual: 0, description: 5, ownerNote: 10 },
+    });
+    expect(
+      computeRedundancyAdjustments(
+        games,
+        enabledSettings({ similarityThreshold: 0 }),
+        getVector,
+        noSignals,
+      ),
+    ).toEqual(new Map());
+  });
+
+  test("zero factual weight never restores factual neighbors at threshold zero", () => {
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9)),
+      makeGws(makeGame("b", "B"), makeScore(7)),
+    ];
+    const factual = factualSimilarity(
+      getVector(games[0].game),
+      getVector(games[1].game),
+      DEFAULT_REDUNDANCY_SETTINGS.componentWeights,
+    );
+    const noSignals = pairTable(
+      [{ gameAId: "a", gameBId: "b", factual, description: null, ownerNote: null }],
+      {
+        status: "not-ready",
+        weights: { factual: 0, description: 1, ownerNote: 1 },
+      },
+    );
+    expect(
+      computeRedundancyAdjustments(
+        games,
+        enabledSettings({ similarityThreshold: 0 }),
+        getVector,
+        noSignals,
+      ),
+    ).toEqual(new Map());
+    expect(
+      computeRedundancyAdjustments(
+        games,
+        enabledSettings({ similarityThreshold: 0 }),
+        getVector,
+        undefined,
+        false,
+      ),
+    ).toEqual(new Map());
+  });
+
+  test("predicted positive-score games remain in the complete pair universe", () => {
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9)),
+      makeGws(makeGame("b", "B"), makeScore(7, { predictedOnly: true })),
+    ];
+    const factual = cosineSimilarity(
+      flattenWeighted(getVector(games[0].game), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+      flattenWeighted(getVector(games[1].game), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+    );
+    const table = pairTable([{ gameAId: "a", gameBId: "b", factual, description: null }]);
+    const result = computeRedundancyAnalysis(games, enabledSettings(), getVector, table);
+    expect(result.similarityInfo.has("b")).toBe(true);
+    expect(result.adjustments.get("b")?.nicheNeighbors[0]?.gameId).toBe("a");
+  });
+
+  test("rejects incomplete, duplicate, extra, nonfinite, and identity-mismatched ready tables", () => {
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9)),
+      makeGws(makeGame("b", "B"), makeScore(7)),
+      makeGws(makeGame("c", "C"), makeScore(5)),
+    ];
+    const score = (a: string, b: string) =>
+      cosineSimilarity(
+        flattenWeighted(getVector(makeGame(a, a)), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+        flattenWeighted(getVector(makeGame(b, b)), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+      );
+    const validPair = { gameAId: "a", gameBId: "b", factual: score("a", "b") };
+    for (const bad of [
+      pairTable([validPair]),
+      pairTable([
+        validPair,
+        validPair,
+        { gameAId: "a", gameBId: "c", factual: score("a", "c") },
+        { gameAId: "b", gameBId: "c", factual: score("b", "c") },
+      ]),
+      pairTable([
+        { ...validPair, factual: Number.NaN },
+        { gameAId: "a", gameBId: "c", factual: score("a", "c") },
+        { gameAId: "b", gameBId: "c", factual: score("b", "c") },
+      ]),
+      pairTable([
+        { ...validPair, gameAId: "x" },
+        { gameAId: "a", gameBId: "c", factual: score("a", "c") },
+        { gameAId: "b", gameBId: "c", factual: score("b", "c") },
+      ]),
+      pairTable(
+        [
+          { ...validPair, factual: score("a", "b") },
+          { gameAId: "a", gameBId: "c", factual: score("a", "c") },
+          { gameAId: "b", gameBId: "c", factual: score("b", "c") },
+        ],
+        { expectedIdentity: { generationId: "other", consentEpoch: "c1", settingsEpoch: "s1" } },
+      ),
+    ])
+      expect(() =>
+        computeRedundancyAdjustments(games, enabledSettings(), getVector, bad),
+      ).toThrow();
+  });
+
+  test("uses validated map lookups for a large factual pair universe", () => {
+    const count = 40;
+    const syntheticVectors = new Map<string, FeatureVector>();
+    const games = Array.from({ length: count }, (_, index) => {
+      const id = `synthetic-${index}`;
+      const group = index % 5;
+      const binary = Array.from({ length: 5 }, (_, axis) => Number(axis === group));
+      syntheticVectors.set(id, { binary, continuous: [], personalAxes: null });
+      return makeGws(makeGame(id, id), makeScore(count - index));
+    });
+    const localGetVector = (game: Game) => syntheticVectors.get(game.id)!;
+    const pairs: RedundancyPairTable["pairs"] = [];
+    for (let i = 0; i < games.length; i++) {
+      for (let j = i + 1; j < games.length; j++) {
+        pairs.push({
+          gameAId: games[i].game.id,
+          gameBId: games[j].game.id,
+          factual: Number(i % 5 === j % 5),
+        });
+      }
+    }
+    // Validation must still iterate the complete table, but analysis must not
+    // perform a fresh linear search for each pair in the quadratic game loop.
+    const guardedPairs = new Proxy(pairs, {
+      get(target, property, receiver) {
+        if (property === "find") throw new Error("pair table linear search is forbidden");
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    });
+    const table = pairTable(guardedPairs, {
+      weights: { factual: 1, description: 0, ownerNote: 0 },
+    });
+    const result = computeRedundancyAnalysis(
+      games,
+      enabledSettings({ similarityThreshold: 0.5 }),
+      localGetVector,
+      table,
+    );
+
+    expect(pairs).toHaveLength((count * (count - 1)) / 2);
+    for (const game of games) {
+      const adjustment = result.adjustments.get(game.game.id);
+      expect(adjustment).toBeDefined();
+      expect(adjustment!.nicheSize).toBe(7);
+      const gameGroup = Number(game.game.id.split("-")[1]) % 5;
+      expect(
+        adjustment!.nicheNeighbors.every(
+          (neighbor) => Number(neighbor.gameId.split("-")[1]) % 5 === gameGroup,
+        ),
+      ).toBe(true);
+    }
+  });
+
+  test("fails closed for malformed factual pairs", () => {
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9)),
+      makeGws(makeGame("b", "B"), makeScore(7)),
+      makeGws(makeGame("c", "C"), makeScore(5)),
+    ];
+    const factual = (a: string, b: string) =>
+      factualSimilarity(
+        getVector(makeGame(a, a)),
+        getVector(makeGame(b, b)),
+        DEFAULT_REDUNDANCY_SETTINGS.componentWeights,
+      );
+    const completePairs = [
+      { gameAId: "a", gameBId: "b", factual: factual("a", "b") },
+      { gameAId: "a", gameBId: "c", factual: factual("a", "c") },
+      { gameAId: "b", gameBId: "c", factual: factual("b", "c") },
+    ];
+    const malformedTables = [
+      pairTable(completePairs.slice(1)),
+      pairTable([{ ...completePairs[0], factual: Number.NaN }, ...completePairs.slice(1)]),
+      pairTable([{ ...completePairs[0], gameBId: "a" }, ...completePairs.slice(1)]),
+      pairTable(completePairs, {
+        identity: { generationId: "wrong", consentEpoch: "c1", settingsEpoch: "s1" },
+      }),
+    ];
+
+    for (const table of malformedTables) {
+      expect(() => computeRedundancyAnalysis(games, enabledSettings(), getVector, table)).toThrow();
+    }
+  });
+
+  test("no-neighbor analysis still reports status and uses only positive non-vetoed score universe", () => {
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9)),
+      makeGws(makeGame("b", "B"), makeScore(7)),
+      makeGws(makeGame("f", "F"), makeScore(6, { vetoed: true })),
+      makeGws(makeGame("zero", "Zero"), makeScore(0)),
+    ];
+    const factual = cosineSimilarity(
+      flattenWeighted(getVector(games[0].game), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+      flattenWeighted(getVector(games[1].game), DEFAULT_REDUNDANCY_SETTINGS.componentWeights),
+    );
+    const table = pairTable([{ gameAId: "a", gameBId: "b", factual }]);
+    const result = computeRedundancyAnalysis(
+      games,
+      enabledSettings({ similarityThreshold: 1.01 }),
+      getVector,
+      table,
+    );
+    expect(result.adjustments.size).toBe(0);
+    expect(result.similarityInfo.get("a")).toEqual({ status: "ready", generationId: "g1" });
+    expect(result.similarityInfo.has("f")).toBe(false);
+    expect(result.similarityInfo.has("zero")).toBe(false);
+  });
+
   test("returns empty map when settings.enabled is false", () => {
     const games = [
       makeGws(makeGame("a", "A"), makeScore(8.0)),
@@ -297,7 +748,6 @@ describe("computeRedundancyAdjustments", () => {
 
   test("componentWeights influence similarity", () => {
     // With all weight on binary, A and E are very similar (same binary vector)
-    // With all weight on personalAxes, A and E have no axes overlap (E has null)
     const games = [
       makeGws(makeGame("a", "A"), makeScore(9.0)),
       makeGws(makeGame("e", "E"), makeScore(7.0)),
@@ -306,10 +756,33 @@ describe("computeRedundancyAdjustments", () => {
     // High binary weight: should find neighbors
     const binaryResult = computeRedundancyAdjustments(
       games,
-      enabledSettings({ componentWeights: { binary: 1.0, continuous: 0, personalAxes: 0 } }),
+      enabledSettings({ componentWeights: { binary: 1.0, continuous: 0 } }),
       getVector,
     );
     expect(binaryResult.size).toBeGreaterThan(0);
+  });
+
+  test("personal-axis values cannot change redundancy neighbors", () => {
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9)),
+      makeGws(makeGame("b", "B"), makeScore(7)),
+    ];
+    const radicallyDifferentAxes: Record<string, FeatureVector> = {
+      a: { binary: [1, 0], continuous: [0.5], personalAxes: [0, 0] },
+      b: { binary: [1, 0], continuous: [0.5], personalAxes: [1, 1] },
+    };
+    const identicalAxes: Record<string, FeatureVector> = {
+      a: { ...radicallyDifferentAxes.a, personalAxes: [0.4, 0.6] },
+      b: { ...radicallyDifferentAxes.b, personalAxes: [0.4, 0.6] },
+    };
+    const settings = enabledSettings({ similarityThreshold: 0.99 });
+    const first = computeRedundancyAdjustments(
+      games,
+      settings,
+      (game) => radicallyDifferentAxes[game.id],
+    );
+    const second = computeRedundancyAdjustments(games, settings, (game) => identicalAxes[game.id]);
+    expect(first).toEqual(second);
   });
 
   test("similarityThreshold changes neighbor set", () => {
@@ -414,7 +887,7 @@ describe("computeRedundancyAdjustments", () => {
       makeGws(makeGame("b", "B"), makeScore(7.0)),
     ];
     const settings = enabledSettings({
-      componentWeights: { binary: 0, continuous: 0, personalAxes: 0 },
+      componentWeights: { binary: 0, continuous: 0 },
     });
     const result = computeRedundancyAdjustments(games, settings, getVector);
     expect(result.size).toBe(0);
@@ -424,25 +897,41 @@ describe("computeRedundancyAdjustments", () => {
     const zeroVectors: Record<string, FeatureVector> = {
       z1: { binary: [0, 0, 0, 0], continuous: [0, 0], personalAxes: null },
       z2: { binary: [0, 0, 0, 0], continuous: [0, 0], personalAxes: null },
+      e1: { binary: [], continuous: [], personalAxes: null },
+      e2: { binary: [], continuous: [], personalAxes: null },
     };
     const localGetVector = (game: Game): FeatureVector => zeroVectors[game.id];
-    const games = [
+    const zeroGames = [
       makeGws(makeGame("z1", "Z1"), makeScore(8.0)),
       makeGws(makeGame("z2", "Z2"), makeScore(7.0)),
     ];
+    const emptyGames = [
+      makeGws(makeGame("e1", "E1"), makeScore(6.0)),
+      makeGws(makeGame("e2", "E2"), makeScore(5.0)),
+    ];
     // Threshold 0 so zero similarity would still need to meet >= 0 to be a neighbor
-    const result = computeRedundancyAdjustments(
-      games,
-      enabledSettings({ similarityThreshold: 0 }),
-      localGetVector,
-    );
-    // Zero-magnitude vectors produce similarity=0, which meets threshold=0
-    // No NaN should appear anywhere
-    for (const [, adj] of result) {
-      expect(isNaN(adj.penalty)).toBe(false);
-      expect(isNaN(adj.adjustedScore)).toBe(false);
-      for (const n of adj.nicheNeighbors) {
-        expect(isNaN(n.similarity)).toBe(false);
+    const settings = enabledSettings({ similarityThreshold: 0 });
+    const zeroResult = computeRedundancyAdjustments(zeroGames, settings, localGetVector);
+    const emptyResult = computeRedundancyAdjustments(emptyGames, settings, localGetVector);
+    // Zero/empty vectors produce similarity=0, which meets threshold=0.
+    const weightedZero = flattenWeighted(zeroVectors.z1, { binary: 0.4, continuous: 0.3 });
+    const weightedEmpty = flattenWeighted(zeroVectors.e1, { binary: 0.4, continuous: 0.3 });
+    const zeroSimilarity = cosineSimilarity(weightedZero, weightedZero);
+    const emptySimilarity = cosineSimilarity(weightedEmpty, weightedEmpty);
+    expect(Number.isFinite(zeroSimilarity)).toBe(true);
+    expect(Number.isFinite(1 - zeroSimilarity)).toBe(true);
+    expect(Number.isFinite(emptySimilarity)).toBe(true);
+    expect(Number.isFinite(1 - emptySimilarity)).toBe(true);
+    for (const result of [zeroResult, emptyResult]) {
+      expect(result.size).toBe(2);
+      for (const [, adj] of result) {
+        expect(Number.isFinite(adj.penalty)).toBe(true);
+        expect(Number.isFinite(adj.originalScore)).toBe(true);
+        expect(Number.isFinite(adj.adjustedScore)).toBe(true);
+        for (const n of adj.nicheNeighbors) {
+          expect(Number.isFinite(n.similarity)).toBe(true);
+          expect(Number.isFinite(n.fitnessScore)).toBe(true);
+        }
       }
     }
   });

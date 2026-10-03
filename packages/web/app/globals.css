@@ -7843,6 +7843,132 @@ body {
   gap: 12px;
 }
 
+.redundancy-intro {
+  max-width: 68ch;
+  margin: 0;
+  color: var(--text-secondary);
+}
+.redundancy-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  list-style-position: inside;
+}
+.redundancy-steps li {
+  min-width: 0;
+  color: var(--action);
+  font-weight: 600;
+}
+.redundancy-steps span {
+  display: block;
+  padding-left: 1.25rem;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+.redundancy-settings-body .redundancy-step {
+  scroll-margin-top: 16px;
+}
+.redundancy-step > p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.redundancy-save-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.redundancy-save-row > span {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.redundancy-save-status {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.redundancy-help {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.redundancy-inline-guidance {
+  margin: 0;
+  padding: 10px 12px;
+  border-inline-start: 3px solid var(--warning-border);
+  background: var(--warning-subtle);
+  color: var(--warning-text);
+  font-size: var(--text-sm);
+}
+.redundancy-run {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+}
+.redundancy-run-limits {
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+.redundancy-run-limits legend {
+  padding-inline: 4px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.redundancy-run-limits > p:first-of-type {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.redundancy-run-limit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.redundancy-run-limit-grid label {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.redundancy-run-limit-grid input {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.redundancy-run .btn-primary {
+  min-height: 44px;
+  justify-content: center;
+}
+.redundancy-refresh-status {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.redundancy-refresh-status.is-running {
+  order: -1;
+  padding: 14px;
+  border: 1px solid var(--action-border);
+  background: var(--action-subtle);
+}
+
 .redundancy-setting-row {
   display: flex;
   align-items: center;
@@ -7907,6 +8033,99 @@ body {
 .redundancy-reset-btn {
   align-self: flex-start;
   margin-top: 4px;
+}
+
+.redundancy-settings-body > section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+}
+.redundancy-settings-body h1,
+.redundancy-settings-body h2,
+.redundancy-settings-body h3 {
+  margin: 0;
+}
+.redundancy-settings-body h1 {
+  font-size: 24px;
+}
+.redundancy-settings-body h2 {
+  font-size: var(--text-lg);
+}
+.redundancy-settings-body h3 {
+  font-size: 15px;
+}
+.redundancy-disclosure {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+}
+.redundancy-settings-body :focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.redundancy-status,
+.preview-redundancy-provenance {
+  margin: 4px 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.redundancy-settings-body input[type="range"] {
+  accent-color: var(--action);
+  min-width: 140px;
+}
+.redundancy-settings-body input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--action);
+  flex: 0 0 auto;
+}
+.redundancy-settings-body select {
+  max-width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+}
+@media (max-width: 600px) {
+  .redundancy-settings-body {
+    padding-inline: 16px;
+  }
+  .redundancy-setting-row,
+  .redundancy-weight-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .redundancy-run-limit-grid {
+    grid-template-columns: 1fr;
+  }
+  .redundancy-setting-row > input[type="range"],
+  .redundancy-weight-row > input[type="range"] {
+    max-width: none;
+    width: 100%;
+  }
+  .redundancy-steps {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .redundancy-run {
+    padding: 12px;
+  }
+  .redundancy-run .btn,
+  .redundancy-save-row .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .redundancy-save-row > .btn {
+    min-height: 44px;
+  }
 }
 
 /* ===== Wishlist Button (search page) ===== */

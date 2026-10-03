@@ -15,6 +15,27 @@ test.beforeEach(async ({ page }) => {
   expect(response.ok()).toBe(true);
 });
 
+test("collection rows keep scores and penalty without similarity readiness labels on desktop and mobile", async ({
+  page,
+}) => {
+  for (const viewport of [
+    { width: 1280, height: 900 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/collection");
+    await expect(page.locator(".game-row").first()).toBeVisible();
+    await expect(
+      page.getByText(/semantic similarity|factual-only comparison|similarity data stale/i),
+    ).toHaveCount(0);
+    await expect(page.locator(".score-cell").first()).toBeVisible();
+    await expect(page.locator(".redundancy-badge").first()).toBeVisible();
+    expect(
+      await page.locator("body").evaluate((element) => element.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  }
+});
+
 test("niche groups collapse independently and retain their state while filtering", async ({
   page,
 }) => {

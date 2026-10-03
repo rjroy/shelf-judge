@@ -463,6 +463,44 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
   });
 
+  // GET /games/:id/name
+  routes.get("/games/:id/name", async (c) => {
+    const id = c.req.param("id");
+    logger.log("game name request", {
+      phase: "attempt",
+      gameId: id,
+      category: "request",
+    });
+    try {
+      if (deps.storageService === undefined) {
+        throw new Error("Game name storage is not configured");
+      }
+      const collection = await deps.storageService.loadCollection();
+      const game = collection.games.find((entry) => entry.id === id);
+      if (game === undefined) {
+        logger.warn("game name request", {
+          phase: "outcome",
+          gameId: id,
+          category: "not-found",
+        });
+        return c.json(gameNotFoundResponse(id), 404);
+      }
+      logger.log("game name request", {
+        phase: "outcome",
+        gameId: id,
+        category: "success",
+      });
+      return c.json({ id: game.id, name: game.name });
+    } catch {
+      logger.error("game name request", {
+        phase: "outcome",
+        gameId: id,
+        category: "internal-error",
+      });
+      return c.json(INTERNAL_ERROR_RESPONSE, 500);
+    }
+  });
+
   // GET /games/:id
   routes.get("/games/:id", async (c) => {
     const id = c.req.param("id");
@@ -481,29 +519,28 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
         400,
       );
     }
+    const includePredicted = includePredictedQuery === "true";
+    logger.log("game detail request", {
+      phase: "attempt",
+      gameId: id,
+      includePredicted,
+      category: "request",
+    });
     try {
-      const includePredicted = includePredictedQuery === "true";
       if (detailSnapshotService === undefined || deps.storageService === undefined) {
         throw new Error("Game detail snapshot storage is not configured");
       }
       const detailSnapshot = await detailSnapshotService.capture(id);
-      const [tournament, predictionSettings, redundancySettings, nicheSettings] = await Promise.all(
-        [
-          deps.storageService.loadTournament(),
-          deps.storageService.loadPredictionSettings(),
-          deps.storageService.loadRedundancySettings(),
-          deps.storageService.loadNicheSettings(),
-        ],
-      );
+      if (detailSnapshot.fitnessSnapshot === undefined) {
+        throw new Error("Game detail fitness snapshot is not configured");
+      }
       const assembled = await displayedFitnessService.listGamesFromSnapshot(
+        detailSnapshot.fitnessSnapshot,
         {
-          collection: detailSnapshot.collection,
-          tournament,
-          predictionSettings,
-          redundancySettings,
-          nicheSettings,
+          includePredicted,
+          includeNiches: true,
+          redundancySimilarityStatus: detailSnapshot.redundancySimilarityStatus ?? undefined,
         },
-        { includePredicted, includeNiches: true },
       );
       const assembledResult = assembled.find((entry) => entry.game.id === id);
       if (!assembledResult) throw new NotFoundError(`Game not found: ${id}`);
@@ -523,6 +560,12 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
                 enriched.game.name,
               )
             : await intentionService.getGameDetail(enriched.game.id, enriched.game.name);
+      logger.log("game detail request", {
+        phase: "outcome",
+        gameId: id,
+        includePredicted,
+        category: "success",
+      });
       return c.json(
         projectGameDetailResponse({
           ...enriched,
@@ -532,12 +575,30 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       );
     } catch (err) {
       if (err instanceof NotFoundError) {
+        logger.warn("game detail request", {
+          phase: "outcome",
+          gameId: id,
+          includePredicted,
+          category: "not-found",
+        });
         return c.json(gameNotFoundResponse(id), 404);
       }
       const message = toErrorMessage(err);
       if (message.includes("not found")) {
+        logger.warn("game detail request", {
+          phase: "outcome",
+          gameId: id,
+          includePredicted,
+          category: "not-found",
+        });
         return c.json(gameNotFoundResponse(id), 404);
       }
+      logger.error("game detail request", {
+        phase: "outcome",
+        gameId: id,
+        includePredicted,
+        category: "internal-error",
+      });
       return c.json(INTERNAL_ERROR_RESPONSE, 500);
     }
   });

@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ProfileData } from "@shelf-judge/shared";
 import {
+  CollectionProfileResultSchema,
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
 } from "@shelf-judge/shared";
@@ -58,12 +59,18 @@ async function currentData(storage: ReturnType<typeof createStorageService>): Pr
     publicationIdentity: {
       source,
       profileAttentionCardLimit: 0,
+      entityPolicyFingerprint: "a".repeat(64),
       attentionCandidates: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         indexVersion: 1,
         evaluatedAt: computedAt,
         identity: {
           ...source,
+          semanticScoringInputProof: {
+            version: 1,
+            mode: "factual-only",
+            identity: "b".repeat(64),
+          },
           calculationVersion: 1,
           ruleCatalogVersion: 1,
           dependencyVersion: 1,
@@ -81,7 +88,9 @@ async function currentEntityData(
   storage: ReturnType<typeof createStorageService>,
 ): Promise<ProfileData> {
   const data = await currentData(storage);
-  const profile = structuredClone(usefulProfileFixture);
+  const parsedProfile = CollectionProfileResultSchema.parse(structuredClone(usefulProfileFixture));
+  if (parsedProfile.status !== "available") throw new Error("Expected useful profile fixture");
+  const profile = parsedProfile;
   profile.computedAt = data.computedAt;
   return {
     ...data,
@@ -103,6 +112,21 @@ describe("useful profile persistence", () => {
         logger: { log() {}, warn() {}, error() {} },
       });
       expect(await restarted.loadProfile()).toEqual(data);
+    });
+  });
+
+  test("rejects Profile algorithm v13 caches and accepts v14 caches", async () => {
+    await withStorage(async ({ profilePath, storage }) => {
+      const current = await currentEntityData(storage);
+      expect(current.algorithmVersion).toBe(14);
+
+      await fs.writeFile(profilePath, JSON.stringify({ ...current, algorithmVersion: 13 }), "utf8");
+      expect(await storage.loadProfile()).toBeNull();
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects is thenable
+      await expect(fs.stat(profilePath)).rejects.toThrow();
+
+      await storage.saveProfile(current);
+      expect(await storage.loadProfile()).toEqual(current);
     });
   });
 
@@ -140,10 +164,10 @@ describe("useful profile persistence", () => {
       const serialized = JSON.stringify(current);
       const artifacts = [
         serialized
-          .replace('"contractVersion":11', '"contractVersion":9')
-          .replace('"algorithmVersion":13', '"algorithmVersion":12'),
-        serialized.replace('"contractVersion":11', '"contractVersion":10'),
-        serialized.replace('"algorithmVersion":13', '"algorithmVersion":12'),
+          .replace('"contractVersion":12', '"contractVersion":9')
+          .replace('"algorithmVersion":14', '"algorithmVersion":12'),
+        serialized.replace('"contractVersion":12', '"contractVersion":10'),
+        serialized.replace('"algorithmVersion":14', '"algorithmVersion":13'),
         serialized
           .replaceAll('"bestFit":', '"rating":')
           .replace(/"adjustedMeanCurrentFitness":[^,]+,/g, ""),
@@ -172,7 +196,7 @@ describe("useful profile persistence", () => {
       await expect(
         storage.saveRedundancySettings({
           ...(await storage.loadRedundancySettings()),
-          componentWeights: { binary: 0, continuous: 0, personalAxes: 0 },
+          componentWeights: { binary: 0, continuous: 0 },
         }),
       ).rejects.toThrow();
 

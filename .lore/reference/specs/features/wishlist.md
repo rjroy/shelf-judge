@@ -11,11 +11,15 @@ related:
   - .lore/work/specs/mvp.md
   - .lore/reference/specs/fitness/prediction-engine.md
   - .lore/reference/specs/fitness/niche-champion-display.md
+  - .lore/reference/specs/fitness/redundancy-scoring.md
+  - .lore/work/design/jev-redundancy-similarity.md
   - .lore/reference/designs/mvp-data-model.md
   - .lore/reference/designs/mvp-api-surface.md
 ---
 
 # Spec: Wishlist
+
+> **Authority and delivery status:** This reference defines the target wishlist contract, including factual-only persisted redundancy previews when collection semantic scoring is available. Its `implemented` status applies to the original wishlist feature, not any transient semantic candidate comparison or Jev integration. Do not imply those capabilities are delivered without separately verifying implementation. The [approved Jev similarity design](.lore/work/design/jev-redundancy-similarity.md) informs this clarification; it does not change prediction or collection contracts.
 
 ## Overview
 
@@ -49,7 +53,7 @@ interface WishlistEntry {
   predictionConfidence: PredictionConfidence | null; // confidence at time of save
   predictedBreakdown: WishlistBreakdownEntry[] | null; // per-axis snapshot, null if unavailable
   nicheImpact: NicheImpact | null; // niche impact at time of save
-  redundancyPreview: RedundancyAdjustment | null; // candidate-only preview at time of save, null if disabled or unavailable
+  redundancyPreview: RedundancyAdjustment | null; // factual-only candidate snapshot at save, null if disabled or unavailable
   addedAt: string; // ISO 8601
 }
 
@@ -64,7 +68,7 @@ interface WishlistBreakdownEntry {
 
 - REQ-WISH-3: A wishlist entry is identified by BGG ID. Only BGG games can be wishlisted. Manual games (no BGG ID) cannot be wishlisted because they have no BGG data to preview, and the wishlist's purpose is fitness evaluation, not bookmarking. Attempting to wishlist a game already in the wishlist (same `bggId`) is rejected with a clear message.
 
-- REQ-WISH-4: A wishlist entry stores a snapshot, not a live reference. The `predictedScore`, `predictionConfidence`, `predictedBreakdown`, `nicheImpact`, and `redundancyPreview` fields reflect the state at time of wishlisting. They are not automatically refreshed when axes, ratings, redundancy settings, or collection composition change. `redundancyPreview` is the candidate game's `RedundancyAdjustment` computed against the current collection's pre-redundancy scores; it does not preview changes to existing games' penalties. It is null when redundancy is disabled or the preview is unavailable (including when there are no qualifying niche neighbors). Rationale: the snapshot records the user's decision context. A "Refresh" action (REQ-WISH-11) lets the user explicitly recompute the snapshot using current data.
+- REQ-WISH-4: A wishlist entry stores a snapshot, not a live reference. The `predictedScore`, `predictionConfidence`, `predictedBreakdown`, `nicheImpact`, and `redundancyPreview` fields reflect the state at time of wishlisting. They are not automatically refreshed when axes, ratings, redundancy settings, or collection composition change. `redundancyPreview` is always a **factual-only** candidate `RedundancyAdjustment` computed against current pre-redundancy collection scores, even when an active collection semantic generation exists. It contains no D-derived value, Jev text, owner note, prompt, or semantic cache/generation identity, and does not preview changes to existing games' penalties. It is null when redundancy is disabled or the factual preview is unavailable (including when there are no qualifying niche neighbors). A transient, explicitly requested candidate comparison may use C where both descriptions exist, but is labeled C-only and is never written to the wishlist. Rationale: this snapshot records the user's decision context using a stable factual-only mode. A "Refresh" action (REQ-WISH-11) recomputes the stored factual-only snapshot using current data.
 
 ### Adding to Wishlist
 
@@ -86,7 +90,7 @@ interface WishlistBreakdownEntry {
 
 ### Refreshing Predictions
 
-- REQ-WISH-11: Users can refresh the predicted fitness for a single wishlist entry or for all entries. A refresh re-runs the prediction engine against the current collection state (current axes, ratings, and games) and recomputes the candidate-only `redundancyPreview` against the current collection's pre-redundancy scores, updating `predictedScore`, `predictionConfidence`, `predictedBreakdown`, `nicheImpact`, and `redundancyPreview` in place. `redundancyPreview` is null when redundancy is disabled or unavailable; it reports only the candidate's prospective adjustment, not changes to existing games' penalties. Refresh does not write to the collection or change existing games' scores or adjustments. The `addedAt` timestamp does not change. This lets the user see how a wishlisted game's fitness and redundancy preview have changed as their collection evolves.
+- REQ-WISH-11: Users can refresh the predicted fitness for a single wishlist entry or for all entries. A refresh re-runs the prediction engine against the current collection state (current axes, ratings, and games) and recomputes the candidate-only **factual** `redundancyPreview` against current pre-redundancy scores, updating `predictedScore`, `predictionConfidence`, `predictedBreakdown`, `nicheImpact`, and `redundancyPreview` in place. `redundancyPreview` is null when redundancy is disabled or unavailable; it reports only the candidate's prospective factual adjustment, not changes to existing games' penalties. Wishlist refresh is inference-free and does not copy active collection C/D judgments. It does not write to the collection or change existing games' scores or adjustments. The `addedAt` timestamp does not change. This lets the user see how a wishlisted game's fitness and factual redundancy preview have changed as their collection evolves.
 
 - REQ-WISH-12: A bulk refresh ("Refresh All") re-fetches BGG data and re-runs predictions for every entry. This is potentially expensive (one BGG API call per entry if data is stale). The daemon processes entries sequentially with rate limiting, same as collection refresh. The response reports how many entries were refreshed and any errors.
 
@@ -237,7 +241,7 @@ WishlistEntry[]
 
 - REQ-WISH-28: The wishlist has no effect on fitness scoring, collection profiling, niche computation, tournament ranking, or prediction engine behavior. Wishlisted games are not part of the collection. They do not appear in collection lists, do not contribute to the profile, and do not participate in niche or redundancy calculations.
 
-- REQ-WISH-29: The prediction engine is called during wishlist add and refresh, but this is a read-only operation. The prediction does not modify any collection state. It uses the same `predictBggGame` codepath as the search preview (`GET /predictions/bgg/:bggId`).
+- REQ-WISH-29: The prediction engine is called during wishlist add and refresh, but this is a read-only operation. The prediction does not modify any collection state. It uses the same `predictBggGame` prediction codepath as search preview (`GET /predictions/bgg/:bggId`); persisted wishlist redundancy snapshots are factual-only and do not inherit any transient semantic search comparison or collection semantic generation. Ordinary search prediction and wishlist add/refresh never trigger Jev inference. An explicitly requested search/candidate semantic comparison may use C only if the candidate and owned-game descriptions are usable, must be visibly labeled transient C-only, and is never written to `wishlist.json`. Wishlist entries are candidates, not collection games, and have no owner notes eligible for D.
 
 ## Scope Exclusions
 
@@ -268,6 +272,9 @@ WishlistEntry[]
 - [ ] Clearing the wishlist removes all entries
 - [ ] When a wishlisted game is added to the collection, the wishlist entry is auto-removed
 - [ ] Refreshing an entry updates `predictedScore`, `predictionConfidence`, `predictedBreakdown`, and `nicheImpact` without changing `addedAt`
+- [ ] Stored redundancyPreview remains factual-only on add/refresh even with an active collection semantic generation; it includes no D result, note, Jev text, or generation identity
+- [ ] Ordinary search prediction and wishlist add/refresh do not trigger inference; any explicit transient candidate comparison is C-only, labeled, and never persisted
+- [ ] Note edits/clear or cached-D revocation leave factual-only wishlist decision snapshots intact; existing invalidation for their defined non-note source changes is preserved
 - [ ] When prediction is unavailable (Stage 0), entry is created with null prediction fields
 - [ ] Wishlist storage follows atomic write pattern (temp file + rename)
 - [ ] Wishlist entries do not appear in `GET /games` (collection list)
@@ -315,7 +322,7 @@ WishlistEntry[]
 
 - [Issue: Wishlist](.lore/work/issues/wishlist.md): The original request. "Add Game should allow adding to a wishlist... preview information like on the Add Game screen... help a user understand fitness."
 - [Vision](.lore/reference/vision.md): Principle 4 ("Data serves judgment, not replaces it") supports showing fitness predictions as information. Anti-goal ("Automated purchase decisions") means the wishlist presents data, not recommendations.
-- [Search page](../../../../packages/web/app/search/page.tsx): The "Add Game" screen referenced in the issue. Shows BGG search results with thumbnail, name, year, and (on preview) predicted fitness score, per-axis breakdown, niche impact. The wishlist captures the same data.
+- [Search page](../../../../packages/web/app/search/page.tsx): The "Add Game" screen referenced in the issue. Shows BGG search results with thumbnail, name, year, and (on preview) predicted fitness score, per-axis breakdown, niche impact. Wishlist captures the prediction and a factual-only redundancy snapshot; it does not persist a transient semantic candidate comparison.
 - [Prediction route](../../../../packages/daemon/src/routes/prediction.ts): `GET /predictions/bgg/:bggId` is the existing endpoint that computes predictions for unowned games. The wishlist add flow reuses this codepath.
 - [Spec: Niche Champion Display](.lore/reference/specs/fitness/niche-champion-display.md): Defines `NicheImpact` type used in wishlist entries.
 - [Spec: Prediction Engine](.lore/reference/specs/fitness/prediction-engine.md): Defines prediction stages, confidence levels, and the `PredictedGameResponse` shape.

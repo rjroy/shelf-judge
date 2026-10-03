@@ -17,13 +17,22 @@ import {
   createAttentionCandidateProductionSourceLoader,
 } from "../src/services/attention-candidate-service.js";
 import type { DisplayedFitnessService } from "../src/services/displayed-fitness-service.js";
-import type { Collection, DurableGame } from "@shelf-judge/shared";
+import {
+  createInitialSemanticRedundancyStateV10,
+  type Collection,
+  type DurableGame,
+} from "@shelf-judge/shared";
 import { createCompleteEntityMetadata, createInitialEntityMetadata } from "@shelf-judge/shared";
 import {
   canonicalUtilizationCases,
   UTILIZATION_OBSERVED_AT,
 } from "../../../test-fixtures/purchase-utilization-responses.js";
-import { createMockBggClient, createTestApp, jsonRequest } from "./helpers/test-app.js";
+import {
+  createHydratedTestApp,
+  createMockBggClient,
+  createTestApp,
+  jsonRequest,
+} from "./helpers/test-app.js";
 
 describe("Phase 3 direct integration evidence", () => {
   const now = "2026-01-01T00:00:00.000Z";
@@ -89,7 +98,7 @@ describe("Phase 3 direct integration evidence", () => {
 
   async function createWriterSnoozeFixture() {
     let observedAt = now;
-    const context = createTestApp({
+    const context = await createHydratedTestApp({
       bggClient: createMockBggClient({ getGame: () => Promise.resolve(refreshedBggResult()) }),
       now: () => observedAt,
     });
@@ -144,7 +153,7 @@ describe("Phase 3 direct integration evidence", () => {
   }
 
   async function createUnderusedPurchaseFixture() {
-    const context = createTestApp({
+    const context = await createHydratedTestApp({
       now: () => now,
       bggClient: createMockBggClient({ getGame: () => Promise.resolve(refreshedBggResult()) }),
     });
@@ -186,7 +195,7 @@ describe("Phase 3 direct integration evidence", () => {
       updatedAt: UTILIZATION_OBSERVED_AT,
     };
     await context.storageService.saveCollection({
-      schemaVersion: 8,
+      schemaVersion: 10,
       revision: 0,
       id: "underused-fixture",
       name: "Underused fixture",
@@ -205,6 +214,7 @@ describe("Phase 3 direct integration evidence", () => {
       ],
       games: [game],
       entertainmentBenchmark: fixture.input.entertainmentBenchmark,
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
       intentions: [],
       attentionDispositions: [],
       commandReceipts: [],
@@ -347,7 +357,7 @@ describe("Phase 3 direct integration evidence", () => {
         },
       },
     });
-    const context = createTestApp({
+    const context = await createHydratedTestApp({
       bggClient: createMockBggClient({
         getGame: () => Promise.resolve(refreshedBggResult()),
         getPlayCount: () =>
@@ -502,7 +512,7 @@ describe("Phase 3 direct integration evidence", () => {
   }
 
   test("keeps a stored underused disposition through an explicit intention and clears it with its declared play dependency", async () => {
-    const context = createTestApp();
+    const context = await createHydratedTestApp();
     const fixture = canonicalUtilizationCases.find((candidate) => candidate.id === "canonical-20");
     if (fixture === undefined) throw new Error("Missing canonical-20 fixture");
     const games: DurableGame[] = [
@@ -544,7 +554,7 @@ describe("Phase 3 direct integration evidence", () => {
       },
     ];
     const collection: Collection = {
-      schemaVersion: 8,
+      schemaVersion: 10,
       revision: 0,
       id: "gb-1-collection",
       name: "GB-1",
@@ -563,6 +573,7 @@ describe("Phase 3 direct integration evidence", () => {
       ],
       games,
       entertainmentBenchmark: fixture.input.entertainmentBenchmark,
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
       intentions: [],
       attentionDispositions: [],
       commandReceipts: [],
@@ -702,7 +713,7 @@ describe("Phase 3 direct integration evidence", () => {
 
   for (const transition of ["complete", "retire"] as const) {
     test(`GB-V1 intention ${transition} atomically clears only its real explicit-intention disposition`, async () => {
-      const context = createTestApp({
+      const context = await createHydratedTestApp({
         now: () => now,
         bggClient: createMockBggClient({ getGame: () => Promise.resolve(refreshedBggResult()) }),
       });
@@ -785,7 +796,7 @@ describe("Phase 3 direct integration evidence", () => {
     });
 
     test(`GB-V1 intention ${transition} preserves a real snooze receipt`, async () => {
-      const context = createTestApp({
+      const context = await createHydratedTestApp({
         now: () => now,
         bggClient: createMockBggClient({ getGame: () => Promise.resolve(refreshedBggResult()) }),
       });
@@ -990,7 +1001,7 @@ describe("Phase 3 direct integration evidence", () => {
   });
 
   test("global writers save before maintenance and a shared Profile read cannot interleave", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     const events: string[] = [];
     let releaseMaintenance!: () => void;
     let maintenanceStarted!: () => void;
@@ -1164,7 +1175,7 @@ describe("Phase 3 direct integration evidence", () => {
 
   test("Profile reads fail closed without mutating pending durable recovery, then daemon recovery publishes", async () => {
     let attempts = 0;
-    const ctx = createTestApp({
+    const ctx = await createHydratedTestApp({
       storedRuleMatches: () => {
         attempts += 1;
         if (attempts === 1) return Promise.reject(new Error("oracle unavailable"));
@@ -1200,7 +1211,7 @@ describe("Phase 3 direct integration evidence", () => {
   });
 
   test("config-only writes preserve candidate bytes, invalidate Profile, and do no candidate work", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     const candidatePath = "/test/data/attention-candidates.json";
     const exactBytes = '{\n  "candidate": "unchanged"\n}';
     await ctx.profileService.getProfile();
@@ -1227,7 +1238,7 @@ describe("Phase 3 direct integration evidence", () => {
   });
 
   test("candidate failure after committed collection source is recoverable without replay", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     let candidateSaveFailures = 0;
     const rename = ctx.fileOps.rename.bind(ctx.fileOps);
     ctx.fileOps.rename = async (from, to) => {
@@ -1248,7 +1259,7 @@ describe("Phase 3 direct integration evidence", () => {
   });
 
   test("candidate unavailability gates an otherwise valid Profile cache", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     const baseline = await ctx.profileService.getProfile();
     expect(baseline.status).toBe("available");
     let computations = 0;
@@ -1288,7 +1299,7 @@ describe("Phase 3 direct integration evidence", () => {
   });
 
   test("analyst projections use the injected Profile service rather than constructing an ungated one", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     let profileReads = 0;
     const projection = createAnalystProjectionSnapshotService({
       storageService: ctx.storageService,

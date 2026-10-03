@@ -641,7 +641,7 @@ describe("Integration: End-to-end scenarios", () => {
       const migrated = await ctx.storageService.loadCollection();
       const persisted = JSON.parse(ctx.fileOps.files.get(collectionPath) ?? "null") as Collection;
       expect(persisted).toEqual(migrated);
-      expect(persisted.schemaVersion).toBe(8);
+      expect(persisted.schemaVersion).toBe(10);
       expect(persisted.axes).toHaveLength(5);
       expect(persisted.axes.find(({ id }) => id === "community-axis")).toMatchObject({
         id: "community-axis",
@@ -811,6 +811,7 @@ describe("Integration: End-to-end scenarios", () => {
         ),
       ).toHaveLength(persistenceCountAfterRepair);
 
+      await ctx.storageService.hydrateSourceVector?.();
       const profileResponse = await jsonRequest(ctx.app, "GET", "/api/profile");
       expect(profileResponse.status).toBe(200);
       const currentProfile = await ctx.storageService.loadProfile();

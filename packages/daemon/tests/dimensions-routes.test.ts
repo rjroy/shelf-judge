@@ -8,7 +8,10 @@ import type {
   Collection,
   DurableGame,
 } from "@shelf-judge/shared";
-import { createInitialEntityMetadata } from "@shelf-judge/shared";
+import {
+  createInitialEntityMetadata,
+  createInitialSemanticRedundancyStateV10,
+} from "@shelf-judge/shared";
 import { createGameRoutes } from "../src/routes/games";
 import type { GameService } from "../src/services/game-service";
 import type { StorageService } from "../src/services/storage-service";
@@ -113,7 +116,7 @@ function createTestApp() {
   const storageService = {
     loadCollection: () =>
       Promise.resolve<Collection>({
-        schemaVersion: 8,
+        schemaVersion: 10,
         revision: 0,
         id: "collection-1",
         name: "Test",
@@ -123,6 +126,7 @@ function createTestApp() {
         attentionDispositions: [],
         commandReceipts: [],
         entertainmentBenchmark: null,
+        semanticRedundancy: createInitialSemanticRedundancyStateV10(),
         createdAt: now,
         updatedAt: now,
       }),

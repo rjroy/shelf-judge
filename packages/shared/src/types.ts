@@ -389,7 +389,228 @@ export interface CollectionV8 extends Omit<CollectionV7, "schemaVersion" | "comm
   )[];
 }
 
-export type Collection = CollectionV8;
+export interface SemanticRedundancySettings {
+  enabled: boolean;
+  weights: { factual: number; description: number; ownerNote: number };
+  cachedOwnerNoteUse: boolean;
+}
+
+export type SemanticSignalRequestContext =
+  | { kind: "description-only"; descriptionRepresentationVersion: 1 }
+  | {
+      kind: "description-and-owner-notes";
+      descriptionRepresentationVersion: 1;
+      ownerNoteRepresentationVersion: 1;
+      descriptionFingerprintA: string;
+      descriptionFingerprintB: string;
+    }
+  | { kind: "owner-notes-only"; ownerNoteRepresentationVersion: 1 };
+
+export type SemanticSignalJudgment =
+  | {
+      status: "scored";
+      score: number;
+      confidence: number | null;
+      modelId: string;
+      rubricVersion: number;
+      sourceFingerprintA: string;
+      sourceFingerprintB: string;
+      noteVersionA: number | null;
+      noteVersionB: number | null;
+      requestContext: SemanticSignalRequestContext;
+    }
+  | {
+      status: "unavailable";
+      reason: "missing-source" | "insufficient-evidence";
+      modelId: string;
+      rubricVersion: number;
+      sourceFingerprintA: string;
+      sourceFingerprintB: string;
+      requestContext: SemanticSignalRequestContext;
+    }
+  | { status: "pending" }
+  | { status: "failed"; reason: "provider" | "invalid-response" | "budget" };
+
+export interface SemanticPairJudgment {
+  gameA: string;
+  gameB: string;
+  description: SemanticSignalJudgment | null;
+  ownerNote: SemanticSignalJudgment | null;
+}
+
+export interface SemanticRedundancyDisclosure {
+  id: string;
+  manifestDigest: string;
+  evidenceEpoch: number;
+  consentEpoch: number;
+  pairCount: number;
+  notePairCount: number;
+  expiresAt: string;
+}
+
+export interface SemanticRedundancyAuthorization extends SemanticRedundancyDisclosure {
+  state: "active" | "consumed" | "revoked";
+}
+
+export interface SemanticRedundancyGeneration {
+  id: string;
+  evidenceEpoch: number;
+  consentEpoch: number;
+  manifestDigest: string;
+  modelId: string;
+  /** Aggregate version for question IDs, instructions, criteria, relevance threshold, and state contract. */
+  rubricVersion: number;
+  scoringVersion: number;
+  sourceIdentity: SemanticSourceIdentity;
+  signalScope: SemanticSignalScope;
+  weights: { factual: number; description: number; ownerNote: number };
+  /** Immutable eligible set copied at publication, independent of mutable disclosure state. */
+  eligibleGameIds: readonly string[];
+  /** Immutable copied numeric outcomes; never reconstructed from the mutable working cache. */
+  pairOutcomes: readonly SemanticPublishedPairOutcome[];
+  publishedAt: string;
+}
+
+export type SemanticSignalScope =
+  | "description-only"
+  | "owner-notes-only"
+  | "description-and-owner-notes";
+
+export interface SemanticSourceIdentity {
+  collectionId: string;
+  collectionSchemaVersion: 9;
+  collectionRevision: number;
+  evidenceEpoch: number;
+  consentEpoch: number;
+  factualWeightsEpoch: number;
+  factualWeightsFingerprint: string | null;
+  tournamentHash: string;
+  predictionSettingsHash: string;
+  redundancySettingsHash: string;
+}
+
+/** Frozen disclosure identity; pair rows contain flags/fingerprints only, never source text. */
+export interface SemanticDisclosureManifest {
+  id: string;
+  digest: string;
+  sourceIdentity: SemanticSourceIdentity;
+  scoringVersion: number;
+  signalScope: SemanticSignalScope;
+  providerId: string;
+  modelId: string;
+  /** Aggregate version for question IDs, instructions, criteria, relevance threshold, and state contract. */
+  rubricVersion: number;
+  budget: { maxRequests: number; maxTokens: number; maxDurationMs: number };
+  expiresAt: string;
+  eligibleGameIds: string[];
+  pairs: Array<{
+    gameA: string;
+    gameB: string;
+    hasDescriptionA: boolean;
+    hasDescriptionB: boolean;
+    hasOwnerNoteA: boolean;
+    hasOwnerNoteB: boolean;
+    descriptionFingerprintA: string | null;
+    descriptionFingerprintB: string | null;
+    noteVersionA: number | null;
+    noteVersionB: number | null;
+  }>;
+}
+
+/** Mutable read-progress receipts are deliberately separate from immutable manifest identity. */
+export interface SemanticManifestDelivery {
+  manifestDigest: string;
+  pageSize: number;
+  deliveredPageIndexes: number[];
+  complete: boolean;
+}
+
+export type SemanticExecutionStatus =
+  | "disclosed"
+  | "running"
+  | "completed"
+  | "cached-only"
+  | "cancelled"
+  | "stale"
+  | "failed"
+  | "interrupted";
+
+export interface SemanticExecution {
+  commandId: string;
+  manifestDigest: string;
+  sourceIdentity: SemanticSourceIdentity;
+  signalScope: SemanticSignalScope;
+  noteTransmissionAuthorized: boolean;
+  cachedOwnerNoteUseAuthorized: boolean;
+  status: SemanticExecutionStatus;
+  attemptCount: number;
+  completedPairCount: number;
+  failedPairCount: number;
+  deadlineAt: string;
+  startedAt: string | null;
+  endedAt: string | null;
+}
+
+export type SemanticPublishedSignalJudgment = Exclude<
+  SemanticSignalJudgment,
+  { status: "pending" | "failed" }
+>;
+
+export interface SemanticPublishedPairOutcome {
+  readonly gameA: string;
+  readonly gameB: string;
+  readonly description: SemanticPublishedSignalJudgment | null;
+  readonly ownerNote: SemanticPublishedSignalJudgment | null;
+}
+
+export interface SemanticRedundancyState {
+  settings: SemanticRedundancySettings;
+  evidenceEpoch: number;
+  consentEpoch: number;
+  /** Monotonic invalidation fence for factual redundancy weight changes. */
+  factualWeightsEpoch: number;
+  /** Fingerprint of the factual weights most recently fenced in this collection. */
+  factualWeightsFingerprint: string | null;
+  firstOptInInitialized: boolean;
+  disclosure: SemanticRedundancyDisclosure | null;
+  disclosureManifest: SemanticDisclosureManifest | null;
+  manifestDelivery: SemanticManifestDelivery | null;
+  authorization: SemanticRedundancyAuthorization | null;
+  execution: SemanticExecution | null;
+  pairJudgments: SemanticPairJudgment[];
+  publishedGeneration: SemanticRedundancyGeneration | null;
+}
+
+export interface CollectionV9 extends Omit<CollectionV8, "schemaVersion"> {
+  schemaVersion: 9;
+  semanticRedundancy: SemanticRedundancyState;
+}
+
+/** V10 keeps canonical semantic settings and epochs while discarding derived judgments. */
+export interface SemanticRedundancyStateV10 {
+  settings: SemanticRedundancySettings;
+  evidenceEpoch: number;
+  consentEpoch: number;
+  /** Cache-row fence for owner-note permission; absent only in pre-upgrade V10 data. */
+  ownerNoteConsentEpoch?: number;
+  factualWeightsEpoch: number;
+  factualWeightsFingerprint: string | null;
+  firstOptInInitialized: boolean;
+  /** Fixed-size, privacy-safe receipt for the one-time v9 semantic cache cutover. */
+  legacyCacheMigration?: SemanticLegacyCacheMigrationReceipt | null;
+}
+
+export interface SemanticLegacyCacheMigrationReceipt {
+  kind: "jev-cache-v9-to-v10";
+  discardedPairCount: number;
+}
+
+export interface CollectionV10 extends Omit<CollectionV8, "schemaVersion"> {
+  schemaVersion: 10;
+  semanticRedundancy: SemanticRedundancyStateV10;
+}
+
+export type Collection = CollectionV10;
 
 /** Additive internal contracts for the future disposable attention projection. */
 export type AttentionExactValue = { numerator: string; denominator: string };
@@ -415,6 +636,16 @@ export interface AttentionCandidateEvaluation {
   dependencyVersion: number;
   ruleCatalogVersion: number;
 }
+
+export type SemanticScoringInputProof =
+  | { version: 1; mode: "disabled" | "factual-only"; identity: string }
+  | {
+      version: 1;
+      mode: "semantic";
+      status: "ready" | "partial" | "factual" | "not-ready";
+      coverageVersion: number;
+      identity: string;
+    };
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
@@ -533,6 +764,13 @@ export interface FitnessResult {
   hypotheticalScore: number | null;
   predictionMeta: PredictionMeta | null;
   redundancyAdjustment: RedundancyAdjustment | null;
+  redundancySimilarityInfo?: RedundancySimilarityInfo;
+}
+
+/** Public, note-free provenance/status for the pair similarities used by redundancy. */
+export interface RedundancySimilarityInfo {
+  status: "disabled" | "factual" | "not-ready" | "stale" | "partial" | "ready";
+  generationId: string | null;
 }
 
 // Tournament types
@@ -953,7 +1191,10 @@ export interface OwnershipMutationResult {
 
 export type CollectionProfileGameSource = Game;
 
-export interface CollectionProfileCollectionSource extends Omit<Collection, "games"> {
+export interface CollectionProfileCollectionSource extends Omit<
+  Collection,
+  "games" | "semanticRedundancy"
+> {
   games: Game[];
 }
 
@@ -1098,6 +1339,7 @@ export interface CollectionProfileGameFitnessEvidence {
   gameName: string;
   currentFitness: number;
   vetoed: boolean;
+  redundancySimilarityInfo?: RedundancySimilarityInfo;
 }
 
 export type CollectionProfileClassExclusionReason =
@@ -1300,7 +1542,7 @@ export type CollectionProfileResult = CollectionProfile | CollectionProfileUnava
 
 export interface ProfileSourceIdentity {
   collectionId: string;
-  collectionSchemaVersion: 8;
+  collectionSchemaVersion: 10;
   collectionRevision: number;
   tournamentHash: string;
   predictionSettingsHash: string;
@@ -1308,16 +1550,17 @@ export interface ProfileSourceIdentity {
 }
 
 export interface ProfileAttentionCandidatePublicationIdentity {
-  schemaVersion: 1;
+  schemaVersion: 2;
   indexVersion: 1;
   evaluatedAt: string;
   identity: {
     collectionId: string;
-    collectionSchemaVersion: 8;
+    collectionSchemaVersion: 10;
     collectionRevision: number;
     tournamentHash: string;
     predictionSettingsHash: string;
     redundancySettingsHash: string;
+    semanticScoringInputProof: SemanticScoringInputProof;
     calculationVersion: number;
     ruleCatalogVersion: number;
     dependencyVersion: number;
@@ -1333,12 +1576,13 @@ export interface ProfileAttentionCandidatePublicationIdentity {
 export interface ProfilePublicationIdentity {
   source: ProfileSourceIdentity;
   profileAttentionCardLimit: number;
+  entityPolicyFingerprint: string;
   attentionCandidates: ProfileAttentionCandidatePublicationIdentity;
 }
 
 export interface ProfileData {
-  contractVersion: 11;
-  algorithmVersion: 13;
+  contractVersion: 12;
+  algorithmVersion: 14;
   publicationIdentity: ProfilePublicationIdentity;
   profile: CollectionProfile;
   computedAt: string;
@@ -1455,10 +1699,17 @@ export interface NicheSettings {
 
 // Redundancy scoring types (redundancy-scoring spec)
 
+/** Feature-vector weighting includes personal axes for prediction/shelf consumers. */
 export interface ComponentWeights {
   binary: number;
   continuous: number;
   personalAxes: number;
+}
+
+/** Redundancy is based on factual signals only. */
+export interface RedundancyComponentWeights {
+  binary: number;
+  continuous: number;
 }
 
 export interface ComponentDistances {
@@ -1490,7 +1741,7 @@ export interface RedundancySettings {
   stage: "annotation" | "integrated";
   similarityThreshold: number;
   maxPenalty: number;
-  componentWeights: ComponentWeights;
+  componentWeights: RedundancyComponentWeights;
   minNeighbors: number;
   expectedNeighbors: number;
 }

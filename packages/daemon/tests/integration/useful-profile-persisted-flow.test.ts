@@ -14,7 +14,7 @@ import {
 import { computeAttentionCandidates } from "../../src/services/attention-candidate-engine.js";
 import { projectPurchaseUtilization } from "../../src/services/purchase-utilization-projection.js";
 import { createAttentionDispositionService } from "../../src/services/attention-disposition-service.js";
-import { createTestApp, jsonRequest } from "../helpers/test-app.js";
+import { createHydratedTestApp, createTestApp, jsonRequest } from "../helpers/test-app.js";
 
 const fixturePath = path.join(import.meta.dir, "../fixtures/useful-profile-schema-v3.json");
 const commandIds = {
@@ -70,7 +70,7 @@ describe("useful profile persisted flow", () => {
       getGame: (bggId) => Promise.resolve(result(bggId, currentNow, 1)),
       getGames: () => Promise.resolve(new Map()),
     };
-    const app = createTestApp({ fileOps, dataDir, configPath, now, bggClient });
+    const app = await createHydratedTestApp({ fileOps, dataDir, configPath, now, bggClient });
     const candidateStorage = attentionCandidateStorageFor(app.storageService);
 
     const recompute = async () => {
@@ -229,7 +229,7 @@ describe("useful profile persisted flow", () => {
       getGame: (bggId) => Promise.resolve(result(bggId, currentNow, 0)),
       getGames: () => Promise.resolve(new Map()),
     };
-    const app = createTestApp({ fileOps, dataDir, configPath, now, bggClient });
+    const app = await createHydratedTestApp({ fileOps, dataDir, configPath, now, bggClient });
     const assertOracleParity = async (context = app) => {
       const source = await createAttentionCandidateProductionSourceLoader(context.storageService)();
       const artifact = await attentionCandidateStorageFor(
@@ -396,7 +396,13 @@ describe("useful profile persisted flow", () => {
 
       currentNow = "2026-09-28T11:02:00.000Z";
       await writeFile(candidatePath, persistedBeforeClockAdvance, "utf8");
-      const restarted = createTestApp({ fileOps, dataDir, configPath, now, bggClient });
+      const restarted = await createHydratedTestApp({
+        fileOps,
+        dataDir,
+        configPath,
+        now,
+        bggClient,
+      });
       const afterDowntime = await restarted.attentionCandidateService.ensureFresh();
       expect(afterDowntime.state).toBe("available");
       if (afterDowntime.state !== "available")
@@ -410,7 +416,13 @@ describe("useful profile persisted flow", () => {
       await assertOracleParity(restarted);
 
       await writeFile(candidatePath, '{"corrupt":true}', "utf8");
-      const recoveredProcess = createTestApp({ fileOps, dataDir, configPath, now, bggClient });
+      const recoveredProcess = await createHydratedTestApp({
+        fileOps,
+        dataDir,
+        configPath,
+        now,
+        bggClient,
+      });
       const repaired = await recoveredProcess.attentionCandidateService.ensureFresh();
       expect(repaired.state).toBe("available");
       if (repaired.state !== "available") throw new Error("Expected corrupt artifact rebuild");
@@ -474,7 +486,7 @@ describe("useful profile persisted flow", () => {
     const now = () => currentNow;
     const intentionIds = ["intention-first", "intention-replay", "intention-renewed"];
     let intentionIdIndex = 0;
-    const firstProcess = createTestApp({
+    const firstProcess = await createHydratedTestApp({
       fileOps,
       dataDir,
       configPath,
@@ -493,7 +505,7 @@ describe("useful profile persisted flow", () => {
           artist: { overviewLimit: 3, minimumSupportedGames: 1 },
         },
       });
-      expect((await firstProcess.storageService.loadCollection()).schemaVersion).toBe(8);
+      expect((await firstProcess.storageService.loadCollection()).schemaVersion).toBe(10);
       await firstProcess.gameService.refreshBggData("bgg-game");
       const added = [];
       for (const bggId of [124, 125, 126]) {
@@ -658,7 +670,13 @@ describe("useful profile persisted flow", () => {
       expect(await fileOps.exists(profilePath)).toBe(true);
       const cachedBeforePolicyChange = await firstProcess.storageService.loadProfile();
       if (cachedBeforePolicyChange === null) throw new Error("Expected current profile cache");
-      const restartedProcess = createTestApp({ fileOps, dataDir, configPath, bggClient, now });
+      const restartedProcess = await createHydratedTestApp({
+        fileOps,
+        dataDir,
+        configPath,
+        bggClient,
+        now,
+      });
       let restartComputations = 0;
       const restartedProfileService = createProfileService({
         storageService: restartedProcess.storageService,
@@ -724,7 +742,13 @@ describe("useful profile persisted flow", () => {
       await firstProcess.storageService.discardProfile?.();
       expect(await fileOps.exists(profilePath)).toBe(false);
 
-      const secondProcess = createTestApp({ fileOps, dataDir, configPath, bggClient, now });
+      const secondProcess = await createHydratedTestApp({
+        fileOps,
+        dataDir,
+        configPath,
+        bggClient,
+        now,
+      });
       expect(await secondProcess.storageService.loadCollection()).toEqual(durableBeforeRestart);
       expect(await readFile(collectionPath, "utf8")).toBe(serializedBeforeRestart);
       expect((await secondProcess.profileService.getProfile()).status).toBe("available");
@@ -758,7 +782,7 @@ describe("useful profile persisted flow", () => {
           configPath: path.join(root, "config.json"),
         });
         const migrated = await process.storageService.loadCollection();
-        expect(migrated.schemaVersion).toBe(8);
+        expect(migrated.schemaVersion).toBe(10);
         outputs.push(await readFile(collectionPath, "utf8"));
       } finally {
         await rm(root, { recursive: true, force: true });

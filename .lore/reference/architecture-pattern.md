@@ -11,22 +11,38 @@ The daemon is the application. Everything else is a client.
 
 Web, CLI, and agents don't make decisions or hold state. They relay user intent to the daemon and render what comes back. If the daemon stops, there is no application. If a client stops, nothing is lost.
 
-## Hard Constraint: One Daemon-Owned pi-agent Boundary
+## Hard Constraint: One Daemon-Owned Inference Gateway
 
-All AI functionality uses one daemon-owned integration built on
-`@earendil-works/pi-coding-agent` and `@earendil-works/pi-agent-core`. Routes,
-feature services, web, and CLI do not call providers or create independent model
-stacks.
+All model work is owned by one daemon inference gateway. The gateway currently
+provides the grounded-analysis capability built on
+`@earendil-works/pi-coding-agent` and `@earendil-works/pi-agent-core`. The approved
+Jev redundancy design adds a distinct typed-Jev capability within that same
+gateway; it does not turn Jev into a pi-agent grounded-analysis session or imply
+that pi-agent supports Jev Score. The Jev capability is an approved future
+contract, not an assertion that it is implemented or currently available.
+Routes, feature services, web, and CLI do not call providers or create independent
+model stacks.
 
-The operator explicitly configures the provider, model, and allowlisted provider
-extensions. There is no implicit model default. The integration binds allowlisted
-extensions before resolving the model through the bound session registry and
-rejects unapproved model-visible tools or hooks before supplying application data.
-Provider authentication remains the selected provider's responsibility.
+For grounded analysis, the operator explicitly configures the provider, model, and
+allowlisted provider extensions. There is no implicit model default. The
+integration binds allowlisted extensions before resolving the model through the
+bound session registry and rejects unapproved model-visible tools or hooks before
+supplying application data. Provider authentication remains the selected
+provider's responsibility. The typed-Jev capability separately owns explicit
+TypeSafe provider/model selection and pinning, credentials, request/answer schemas,
+usage accounting, budget and concurrency limits, retry/backoff, cancellation,
+failure classification, and redacted attempt/outcome logging. All capabilities
+remain behind the daemon gateway and expose test-injectable boundaries.
 
-This rule replaced the prior Claude-Agent-SDK-only constraint by owner decision on
-2026-08-30 so Grounded Profile Reflections and Collection Analyst Chat can share
-one provider-neutral integration surface.
+The one-gateway rule replaced the prior Claude-Agent-SDK-only constraint by owner
+decision on 2026-08-30 so Grounded Profile Reflections and Collection Analyst Chat
+could share one provider-neutral integration surface. The later approved Jev
+amendment preserves the pi-agent boundary for those grounded features while adding
+the separate typed-Jev capability described in [the approved similarity
+design](../work/design/jev-redundancy-similarity.md) and
+[contract-amendment proposal](../work/design/jev-contract-amendments.md). The
+amendment authorizes the architecture contract only; it does not authorize an
+actual request or establish shipped functionality.
 
 ## Three Clients, One App
 
@@ -94,20 +110,34 @@ type RouteModule = {
 
 Tests provide mock deps. The app can start with a fallback if production setup fails.
 
-### One Entry Point for Model Calls
+### One Gateway for Model Calls
 
-All model interaction flows through one grounded-analysis session boundary. No
-direct pi-agent or provider calls are permitted from routes, feature services,
-domain logic, web, or CLI.
+All model interaction flows through the daemon inference gateway, with two
+distinct capabilities: existing grounded analysis through the pi-agent
+provider/session boundary, and (when implemented and explicitly authorized) typed
+Jev requests for redundancy refresh. No direct pi-agent or provider calls are
+permitted from routes, feature services, domain logic, web, CLI, or the pure
+redundancy scoring engine.
 
-The boundary owns extension binding, bound-registry model resolution, capability
-inspection, prompt and evidence submission, schema-backed completion, cancellation,
-usage capture, failure categorization, and redacted logging. Feature callers supply
-an authorized evidence manifest, policy, and strict submission schema.
+The gateway owns capability-specific provider/model configuration, evidence
+submission and validation, cancellation, usage capture, failure categorization,
+and redacted logging. The grounded-analysis capability owns extension binding,
+bound-registry model resolution and capability inspection, and schema-backed
+completion. The typed-Jev capability owns pinned TypeSafe model selection and
+strict typed question/answer validation; it is not a grounded free-form completion.
+Feature callers supply an authorized evidence manifest, policy, and strict
+submission schema. For Jev refresh, the daemon verifies the current authorization
+and disclosed pair/source identity immediately before each submission; the allowed
+evidence is the two current BGG descriptions and, only with separate explicit
+authorization, the two current owner notes for the disclosed eligible pair. No
+broad collection, note history, system tools, or unrelated profile data may be
+sent. Provider-side privacy/retention is disclosed, not presumed local. Ordinary
+reads and note mutations make no Jev call.
 
-This is not abstraction for its own sake. A single boundary prevents each feature
+This is not abstraction for its own sake. A single gateway prevents each feature
 from inventing provider configuration, error handling, streaming, privacy, and tool
-authorization behavior.
+authorization behavior while keeping the typed Jev protocol distinct from
+grounded-analysis session semantics.
 
 ### Tool Definitions as DI Factories
 
@@ -115,8 +145,8 @@ Model-visible tools follow the same factory pattern as routes and services. Each
 factory receives only the narrow callbacks it needs, validates strict input and
 output schemas, and exports pure logic for direct testing. The grounded-analysis
 boundary inspects the final session capability set before transmitting application
-data. Feature policy, not extension registration or model output, determines which
-tools are available.
+data. Typed Jev does not expose system tools. Feature policy, not extension
+registration or model output, determines which tools are available.
 
 ## Operations Registry and CLI Discovery
 
@@ -170,7 +200,7 @@ Humans can inspect and edit state files directly. This is a feature, not a limit
 DI factories are the primary testing seam. Every external dependency is injectable:
 
 - **`fileOps`**: A single interface wrapping all filesystem operations (`readFile`, `writeFile`, `readDir`, `fileExists`, `stat`, etc.). Tests provide in-memory implementations. This is the dominant DI seam in practice: most services need filesystem access, and a single interface keeps the injection surface narrow.
-- **Grounded-analysis session/provider seams**: Inject deterministic local sessions and provider events for exhaustive tests, while retaining focused real-library lifecycle tests for extension binding and model resolution.
+- **Inference gateway seams**: Inject deterministic grounded-analysis sessions/provider events and a typed-Jev client for exhaustive tests. Retain focused real-library lifecycle tests for pi-agent extension binding/model resolution, and test Jev state minimization, authorization, strict answers, usage/errors, budgets, and cancellation at its separate typed seam.
 - **Service interfaces**: Services like `adventureService`, `historyService`, `compactionService` are injected into route factories. Tests can stub individual service methods without replacing the filesystem layer.
 - Hono's `app.request()` test client with injected deps for integration-level route testing.
 - `fs.mkdtemp()` for temp directories, env vars for path isolation when testing against real filesystems.

@@ -13,11 +13,12 @@ function artifact() {
     indexVersion: ATTENTION_CANDIDATE_ARTIFACT_INDEX_VERSION,
     identity: {
       collectionId: "collection",
-      collectionSchemaVersion: 8,
+      collectionSchemaVersion: 10,
       collectionRevision: 1,
       tournamentHash: hash,
       predictionSettingsHash: hash,
       redundancySettingsHash: hash,
+      semanticScoringInputProof: { version: 1, mode: "factual-only", identity: hash },
       calculationVersion: 1,
       ruleCatalogVersion: 1,
       dependencyVersion: 1,
@@ -67,6 +68,33 @@ function artifact() {
 describe("attention candidate artifact contract", () => {
   test("accepts complete canonical rows and exact indexes", () => {
     expect(AttentionCandidateArtifactSchema.safeParse(artifact()).success).toBe(true);
+  });
+  test("requires a versioned privacy-safe semantic input proof", () => {
+    const valid = artifact();
+    expect(
+      AttentionCandidateArtifactSchema.safeParse({
+        ...valid,
+        identity: { ...valid.identity, semanticScoringInputProof: undefined },
+      }).success,
+    ).toBe(false);
+    for (const proof of [
+      { version: 2, mode: "factual-only", identity: hash },
+      {
+        version: 1,
+        mode: "semantic",
+        status: "ready",
+        coverageVersion: 1,
+        identity: hash,
+        source: "private",
+      },
+    ]) {
+      expect(
+        AttentionCandidateArtifactSchema.safeParse({
+          ...valid,
+          identity: { ...valid.identity, semanticScoringInputProof: proof },
+        }).success,
+      ).toBe(false);
+    }
   });
   test("requires the evaluation identity to match its row independently of indexes", () => {
     const row = artifact().rows[0];
@@ -140,7 +168,7 @@ describe("attention candidate artifact contract", () => {
   });
   test("rejects version, hash, timestamp, exact-score, duplicate, and index defects", () => {
     const cases = [
-      { ...artifact(), schemaVersion: 2 },
+      { ...artifact(), schemaVersion: 1 },
       { ...artifact(), identity: { ...artifact().identity, tournamentHash: "not-a-hash" } },
       { ...artifact(), evaluatedAt: "tomorrow" },
       (() => {

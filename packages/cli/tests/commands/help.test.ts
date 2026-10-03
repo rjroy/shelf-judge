@@ -137,6 +137,26 @@ const mockAxisTree = {
 };
 
 describe("help command", () => {
+  test("semantic redundancy settings help exposes factual weight through operation discovery", async () => {
+    const redundancyTree = {
+      name: "redundancy",
+      children: {
+        "semantic-settings": {
+          operationId: "shelf.redundancy.update-semantic-settings",
+          name: "update-semantic-settings",
+          invocation: { method: "PATCH", path: "/api/redundancy/semantic-settings" },
+        },
+      },
+    };
+    const client = createMockClient({
+      routes: {
+        "GET /api/help/redundancy": { response: { ok: true, status: 200, data: redundancyTree } },
+      },
+    });
+    const result = await helpCommand(client, ["redundancy"], { json: false });
+    expect(result).toContain("<enabled|factual|description|ownerNote|cachedOwnerNoteUse>");
+  });
+
   test("displays operation tree", async () => {
     const client = createMockClient({
       routes: {

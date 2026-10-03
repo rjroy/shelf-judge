@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CollectionSchema,
   createInitialEntityMetadata,
+  createInitialSemanticRedundancyStateV10,
   type Collection,
   type DurableGame,
   type IntentionMutationResult,
@@ -68,7 +69,7 @@ function game(overrides: Partial<DurableGame> = {}): DurableGame {
 
 function collection(sourceGame = game()): Collection {
   return {
-    schemaVersion: 8,
+    schemaVersion: 10,
     revision: 0,
     id: "collection",
     name: "Collection",
@@ -78,6 +79,7 @@ function collection(sourceGame = game()): Collection {
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: observedAt,
     updatedAt: observedAt,
   };
@@ -91,7 +93,7 @@ function harness(
     times?: string[];
   } = {},
 ) {
-  let current = CollectionSchema.parse(options.source ?? collection());
+  let current: Collection = CollectionSchema.parse(options.source ?? collection());
   let failSaves = options.failSaves ?? 0;
   let saves = 0;
   const storage: CollectionReader & CollectionPersistence = {
@@ -182,11 +184,13 @@ describe("durable intention lifecycle", () => {
         },
       });
       source.commandReceipts.push({ commandId: commandIds.create, request: command, result });
-      const { attentionDispositions, ...v6Source } = source;
+      const { attentionDispositions, semanticRedundancy, ...v6Source } = source;
       void attentionDispositions;
+      void semanticRedundancy;
       const migrated = migrateCollection({ ...v6Source, schemaVersion: 6 }).data;
       expect(migrated.intentions).toEqual(source.intentions);
       expect(migrated.commandReceipts).toEqual(source.commandReceipts);
+      expect(migrated.semanticRedundancy.settings.enabled).toBe(false);
       expect(migrateCollection(migrated).data).toEqual(migrated);
       const state = harness({ source: migrated });
       expect(await state.restartService().execute(command)).toEqual(result);

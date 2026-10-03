@@ -8,6 +8,11 @@ export interface SourceVector {
   collectionId: string | null;
   collectionSchemaVersion: number | null;
   collectionRevision: number | null;
+  semanticEvidenceEpoch?: number | null;
+  semanticConsentEpoch?: number | null;
+  factualWeightsEpoch?: number | null;
+  factualWeightsFingerprint?: string | null;
+  redundancyWeightsFingerprint?: string | null;
   tournamentRevision: number | null;
   predictionSettingsRevision: number | null;
   nicheSettingsRevision: number | null;
@@ -20,12 +25,62 @@ export interface SourceVector {
 export interface SourceVectorService {
   read(): SourceVector;
   publish(source: RevisionedSourceKind, revision: number): void;
-  publishCollection(identity: { id: string; schemaVersion: number; revision: number }): void;
-  hydrate(
-    identity: { id: string; schemaVersion: number; revision: number },
-    revisions: SourceVectorRevisions,
-  ): void;
+  publishRedundancyWeightsFingerprint(fingerprint: string): void;
+  publishCollection(identity: CollectionSourceIdentity): void;
+  hydrate(identity: CollectionSourceIdentity, revisions: SourceVectorRevisions): void;
   markUnavailable(source: SourceVectorAvailabilitySource): void;
+}
+
+export interface CollectionSourceIdentity {
+  id: string;
+  schemaVersion: number;
+  revision: number;
+  semanticEvidenceEpoch?: number;
+  semanticConsentEpoch?: number;
+  factualWeightsEpoch?: number;
+  factualWeightsFingerprint?: string | null;
+}
+
+export interface SemanticGenerationSourceIdentity {
+  collectionId: string;
+  collectionSchemaVersion: number;
+  evidenceEpoch: number;
+  consentEpoch: number;
+  tournamentRevision: number;
+  predictionSettingsRevision: number;
+  factualWeightsEpoch: number;
+  fencedFactualWeightsFingerprint: string | null;
+  currentFactualWeightsFingerprint: string;
+}
+
+/** Durable semantic freshness identity; deliberately excludes write/process tokens. */
+export function semanticGenerationSourceIdentity(
+  vector: SourceVector,
+): SemanticGenerationSourceIdentity | null {
+  if (
+    !vector.available ||
+    vector.collectionId === null ||
+    vector.collectionSchemaVersion === null ||
+    vector.semanticEvidenceEpoch == null ||
+    vector.semanticConsentEpoch == null ||
+    vector.tournamentRevision === null ||
+    vector.predictionSettingsRevision === null ||
+    vector.factualWeightsEpoch == null
+  )
+    return null;
+  const currentFactualWeightsFingerprint = vector.redundancyWeightsFingerprint;
+  if (currentFactualWeightsFingerprint == null) return null;
+  return {
+    collectionId: vector.collectionId,
+    collectionSchemaVersion: vector.collectionSchemaVersion,
+    evidenceEpoch: vector.semanticEvidenceEpoch,
+    consentEpoch: vector.semanticConsentEpoch,
+    tournamentRevision: vector.tournamentRevision,
+    predictionSettingsRevision: vector.predictionSettingsRevision,
+    factualWeightsEpoch: vector.factualWeightsEpoch,
+    fencedFactualWeightsFingerprint: vector.factualWeightsFingerprint ?? null,
+    currentFactualWeightsFingerprint,
+  };
 }
 
 export type SourceVectorAvailabilitySource =
@@ -50,8 +105,9 @@ export interface SourceVectorRevisions {
 }
 
 interface InternalSourceVectorState {
-  identity: { id: string; schemaVersion: number; revision: number } | null;
+  identity: CollectionSourceIdentity | null;
   revisions: Partial<SourceVectorRevisions>;
+  redundancyWeightsFingerprint: string | null;
   unavailableSources: SourceVectorAvailabilitySource[];
 }
 
@@ -66,8 +122,9 @@ const REVISION_KEY: Record<RevisionedSourceKind, keyof SourceVectorRevisions> = 
 export function createSourceVectorService(): SourceVectorService {
   const processEpoch = randomUUID();
   let changeToken = 0;
-  let identity: { id: string; schemaVersion: number; revision: number } | null = null;
+  let identity: CollectionSourceIdentity | null = null;
   const revisions: Partial<SourceVectorRevisions> = {};
+  let redundancyWeightsFingerprint: string | null = null;
   const unavailable = new Set<SourceVectorAvailabilitySource>(["startup"]);
 
   function mutate(): void {
@@ -84,6 +141,11 @@ export function createSourceVectorService(): SourceVectorService {
       revisions[key] = revision;
       unavailable.delete(source);
       if (!sameInternalState(before, readInternalState())) mutate();
+    },
+    publishRedundancyWeightsFingerprint(fingerprint) {
+      if (redundancyWeightsFingerprint === fingerprint) return;
+      redundancyWeightsFingerprint = fingerprint;
+      mutate();
     },
     publishCollection(nextIdentity) {
       const before = readInternalState();
@@ -122,6 +184,11 @@ export function createSourceVectorService(): SourceVectorService {
       collectionId: ready ? (identity?.id ?? null) : null,
       collectionSchemaVersion: ready ? (identity?.schemaVersion ?? null) : null,
       collectionRevision: ready ? (identity?.revision ?? null) : null,
+      semanticEvidenceEpoch: ready ? (identity?.semanticEvidenceEpoch ?? null) : null,
+      semanticConsentEpoch: ready ? (identity?.semanticConsentEpoch ?? null) : null,
+      factualWeightsEpoch: ready ? (identity?.factualWeightsEpoch ?? null) : null,
+      factualWeightsFingerprint: ready ? (identity?.factualWeightsFingerprint ?? null) : null,
+      redundancyWeightsFingerprint: ready ? redundancyWeightsFingerprint : null,
       tournamentRevision: ready ? (revisions.tournament ?? null) : null,
       predictionSettingsRevision: ready ? (revisions.predictionSettings ?? null) : null,
       nicheSettingsRevision: ready ? (revisions.nicheSettings ?? null) : null,
@@ -136,6 +203,7 @@ export function createSourceVectorService(): SourceVectorService {
     return {
       identity: identity ? { ...identity } : null,
       revisions: { ...revisions },
+      redundancyWeightsFingerprint,
       unavailableSources: [...unavailable].sort(),
     };
   }
@@ -148,11 +216,16 @@ export function createSourceVectorService(): SourceVectorService {
       left.identity?.id === right.identity?.id &&
       left.identity?.schemaVersion === right.identity?.schemaVersion &&
       left.identity?.revision === right.identity?.revision &&
+      left.identity?.semanticEvidenceEpoch === right.identity?.semanticEvidenceEpoch &&
+      left.identity?.semanticConsentEpoch === right.identity?.semanticConsentEpoch &&
+      left.identity?.factualWeightsEpoch === right.identity?.factualWeightsEpoch &&
+      left.identity?.factualWeightsFingerprint === right.identity?.factualWeightsFingerprint &&
       left.revisions.tournament === right.revisions.tournament &&
       left.revisions.predictionSettings === right.revisions.predictionSettings &&
       left.revisions.nicheSettings === right.revisions.nicheSettings &&
       left.revisions.redundancySettings === right.revisions.redundancySettings &&
       left.revisions.shelfConfig === right.revisions.shelfConfig &&
+      left.redundancyWeightsFingerprint === right.redundancyWeightsFingerprint &&
       left.unavailableSources.length === right.unavailableSources.length &&
       left.unavailableSources.every(
         (source, index) => source === right.unavailableSources[index],

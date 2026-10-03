@@ -36,6 +36,7 @@ import type {
 } from "./grounded-analysis/evidence-registry.js";
 import { canonicalSha256, profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 import type { StorageService } from "./storage-service.js";
+import type { SourceVector } from "./source-vector.js";
 import {
   DEFAULT_REFLECTION_EVIDENCE_PAGE_SIZE,
   MAX_REFLECTION_EVIDENCE_PAGE_SIZE,
@@ -43,6 +44,30 @@ import {
   REFLECTION_PROJECTION_POLICIES,
   reflectionPatternCandidateIds,
 } from "./reflection-question-policy.js";
+
+function unavailableSourceVector(): SourceVector {
+  return {
+    available: false,
+    unavailableSources: ["startup"],
+    processEpoch: "unavailable",
+    changeToken: 0,
+    collectionId: null,
+    collectionSchemaVersion: null,
+    collectionRevision: null,
+    semanticEvidenceEpoch: null,
+    semanticConsentEpoch: null,
+    factualWeightsEpoch: null,
+    factualWeightsFingerprint: null,
+    redundancyWeightsFingerprint: null,
+    tournamentRevision: null,
+    predictionSettingsRevision: null,
+    nicheSettingsRevision: null,
+    redundancySettingsRevision: null,
+    shelfConfigRevision: null,
+    representationVersion: 1,
+    algorithmVersion: 1,
+  };
+}
 
 const IdSchema = z.string().min(1);
 const NullableTimestampSchema = z.string().datetime({ offset: true }).nullable();
@@ -402,6 +427,7 @@ export interface ReflectionProjectionSnapshotServiceDeps {
     | "loadPredictionSettings"
     | "loadRedundancySettings"
     | "loadShelfConfig"
+    | "sourceVector"
   >;
   displayedFitnessService: DisplayedFitnessService;
   now?: () => string;
@@ -745,6 +771,22 @@ function candidateConfounders(
     );
 }
 
+function profileGameEvidence(game: {
+  gameId: string;
+  gameName: string;
+  currentFitness: number;
+  vetoed: boolean;
+}) {
+  // Similarity readiness participates in Profile freshness, not Reflection
+  // evidence; construct the approved shape instead of forwarding Profile rows.
+  return {
+    gameId: game.gameId,
+    gameName: game.gameName,
+    currentFitness: game.currentFitness,
+    vetoed: game.vetoed,
+  };
+}
+
 function patternSources(
   profile: CollectionProfile,
   gamesById: ReadonlyMap<string, Game>,
@@ -770,12 +812,12 @@ function patternSources(
         comparator: {
           gameCount: classResult.comparator.gameCount,
           meanCurrentFitness: classResult.comparator.meanCurrentFitness,
-          games: classResult.comparator.games,
+          games: classResult.comparator.games.map(profileGameEvidence),
         },
         metadataReadiness: classResult.metadataReadiness,
         refreshWarnings: classResult.refreshWarnings,
         differenceFromComparator: entity.differenceFromComparator,
-        games: entity.games,
+        games: entity.games.map(profileGameEvidence),
         exclusions: classResult.exclusions.map((exclusion) => {
           const metadata = gamesById.get(exclusion.gameId)?.entityMetadata[entityClass];
           const associationKnown = metadata?.state === "complete";
@@ -1006,9 +1048,17 @@ export function createReflectionProjectionSnapshotService(
             deps.storageService.loadRedundancySettings(),
             deps.storageService.loadShelfConfig(),
           ]);
+        const sourceVector = deps.storageService.sourceVector?.() ?? unavailableSourceVector();
         const collection = projectProfileCollectionSource(durableCollection);
         const displayedGames = await deps.displayedFitnessService.listGamesFromSnapshot(
-          { collection, tournament, predictionSettings, redundancySettings },
+          {
+            kind: "private-capture",
+            collection: durableCollection,
+            sourceVector,
+            tournament,
+            predictionSettings,
+            redundancySettings,
+          },
           { includePredicted: true },
         );
         const fitnessResults = new Map<string, FitnessResult>();

@@ -1,12 +1,21 @@
 /* eslint-disable @typescript-eslint/await-thenable */
 import { describe, expect, test } from "bun:test";
 import { createInitialEntityMetadata, type DurableGame } from "@shelf-judge/shared";
-import type { StorageService } from "../../src/services/storage-service.js";
+import {
+  DurableSourcePostCommitError,
+  type StorageService,
+} from "../../src/services/storage-service.js";
 import { createStorageService } from "../../src/services/storage-service.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
-import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
+import {
+  canonicalSha256,
+  profileSourceCoordinatorFor,
+} from "../../src/services/profile-source-coordinator.js";
 import { createShelfService } from "../../src/services/shelf-service.js";
-import { createSourceVectorService } from "../../src/services/source-vector.js";
+import {
+  createSourceVectorService,
+  semanticGenerationSourceIdentity,
+} from "../../src/services/source-vector.js";
 
 const DATA_DIR = "/source-vector/data";
 const CONFIG_PATH = "/source-vector/config.json";
@@ -81,10 +90,44 @@ async function hydrate(service: StorageService) {
 }
 
 describe("storage source revisions", () => {
+  test("persists legacy redundancy weight migration and reloads factual weights after restart", async () => {
+    const fileOps = createMockFileOps();
+    fileOps.files.set(
+      paths.redundancy,
+      JSON.stringify({
+        enabled: true,
+        stage: "integrated",
+        similarityThreshold: 0.6,
+        maxPenalty: 2,
+        componentWeights: { binary: 0, continuous: 0, personalAxes: 1 },
+        minNeighbors: 1,
+        expectedNeighbors: 5,
+        revision: 12,
+      }),
+    );
+    const first = createStorageService({ dataDir: DATA_DIR, configPath: CONFIG_PATH, fileOps });
+    const firstRead = await first.loadRedundancySettingsRead?.();
+    expect(firstRead?.settings.componentWeights).toEqual({ binary: 4 / 7, continuous: 3 / 7 });
+    expect(firstRead?.settings.stage).toBe("integrated");
+    expect(firstRead?.migrationNotice).toContain("migrated");
+    expect(persisted(fileOps, paths.redundancy)).toMatchObject({
+      revision: 13,
+      componentWeights: { binary: 4 / 7, continuous: 3 / 7 },
+    });
+    expect(persisted(fileOps, paths.redundancy).componentWeights).not.toHaveProperty(
+      "personalAxes",
+    );
+
+    const restarted = createStorageService({ dataDir: DATA_DIR, configPath: CONFIG_PATH, fileOps });
+    const secondRead = await restarted.loadRedundancySettingsRead?.();
+    expect(secondRead?.settings.componentWeights).toEqual({ binary: 4 / 7, continuous: 3 / 7 });
+    expect(secondRead?.migrationNotice).toBeNull();
+  });
+
   test("degraded vector tokens track hidden identity changes and recovery", () => {
     const vector = createSourceVectorService();
     vector.hydrate(
-      { id: "collection-1", schemaVersion: 8, revision: 0 },
+      { id: "collection-1", schemaVersion: 9, revision: 0 },
       {
         tournament: 0,
         predictionSettings: 0,
@@ -98,7 +141,7 @@ describe("storage source revisions", () => {
     expect(degraded.available).toBe(false);
     expect(degraded.collectionRevision).toBeNull();
 
-    vector.publishCollection({ id: "collection-1", schemaVersion: 8, revision: 1 });
+    vector.publishCollection({ id: "collection-1", schemaVersion: 9, revision: 1 });
     const afterCollectionCommit = vector.read();
     expect(afterCollectionCommit.available).toBe(false);
     expect(afterCollectionCommit.collectionRevision).toBeNull();
@@ -139,6 +182,101 @@ describe("storage source revisions", () => {
     const callsAfterHydration = fileOps.calls.length;
     expect(service.sourceVector?.()).toEqual(vector);
     expect(fileOps.calls).toHaveLength(callsAfterHydration);
+  });
+
+  test("semantic source identity excludes collection write revision and includes independent scoring revisions", async () => {
+    const { service } = serviceWith();
+    const initialVector = await hydrate(service);
+    const initial = semanticGenerationSourceIdentity(initialVector);
+    if (initial === null)
+      throw new Error("Expected complete semantic identity after source hydration");
+    expect(initial).toMatchObject({
+      evidenceEpoch: 0,
+      consentEpoch: 0,
+      factualWeightsEpoch: 0,
+      fencedFactualWeightsFingerprint: null,
+      currentFactualWeightsFingerprint: canonicalSha256({ binary: 4 / 7, continuous: 3 / 7 }),
+      tournamentRevision: 0,
+      predictionSettingsRevision: 0,
+    });
+
+    const collection = await service.loadCollection();
+    collection.revision += 1;
+    await service.saveCollection(collection);
+    expect(semanticGenerationSourceIdentity(service.sourceVector!())).toEqual(initial);
+
+    const redundancySettings = await service.loadRedundancySettings();
+    redundancySettings.stage = "integrated";
+    await service.saveRedundancySettings(redundancySettings);
+    expect(service.sourceVector!().redundancySettingsRevision).toBe(1);
+    expect(semanticGenerationSourceIdentity(service.sourceVector!())).toEqual(initial);
+
+    const changedWeights = await service.loadRedundancySettings();
+    changedWeights.componentWeights = { binary: 0.8, continuous: 3 / 7 };
+    await service.saveRedundancySettings(changedWeights);
+    const afterWeightSourceEdit = semanticGenerationSourceIdentity(service.sourceVector!());
+    expect(afterWeightSourceEdit?.factualWeightsEpoch).toBe(0);
+    expect(afterWeightSourceEdit?.currentFactualWeightsFingerprint).not.toBe(
+      initial.currentFactualWeightsFingerprint,
+    );
+
+    const tournament = await service.loadTournament();
+    tournament.settings.kFactorThreshold += 1;
+    await service.saveTournament(tournament);
+    const afterTournament = semanticGenerationSourceIdentity(service.sourceVector!());
+    expect(afterTournament?.tournamentRevision).toBe(1);
+    expect(afterTournament).not.toEqual(afterWeightSourceEdit);
+
+    const prediction = await service.loadPredictionSettings();
+    prediction.defaultK += 1;
+    await service.savePredictionSettings(prediction);
+    const afterPrediction = semanticGenerationSourceIdentity(service.sourceVector!());
+    expect(afterPrediction?.tournamentRevision).toBe(1);
+    expect(afterPrediction?.predictionSettingsRevision).toBe(1);
+    expect(afterPrediction).not.toEqual(afterTournament);
+  });
+
+  test("factual weight A to B to A remains fenced after storage restart", async () => {
+    const fileOps = createMockFileOps();
+    const first = serviceWith(fileOps).service;
+    const initialVector = await hydrate(first);
+    const initial = semanticGenerationSourceIdentity(initialVector);
+    if (!initial) throw new Error("Expected semantic source identity");
+
+    const settingsB = await first.loadRedundancySettings();
+    settingsB.componentWeights = { binary: 0.8, continuous: 3 / 7 };
+    await first.saveRedundancySettings(settingsB);
+    const fingerprintB = canonicalSha256(settingsB.componentWeights);
+    const toB = await first.loadCollection();
+    toB.revision += 1;
+    toB.semanticRedundancy.factualWeightsEpoch = 1;
+    toB.semanticRedundancy.factualWeightsFingerprint = fingerprintB;
+    await first.saveCollection(toB);
+
+    const afterRestart = serviceWith(fileOps).service;
+    const bIdentity = semanticGenerationSourceIdentity(await hydrate(afterRestart));
+    expect(bIdentity?.factualWeightsEpoch).toBe(1);
+    expect(bIdentity?.fencedFactualWeightsFingerprint).toBe(fingerprintB);
+    expect(bIdentity?.currentFactualWeightsFingerprint).toBe(fingerprintB);
+
+    const settingsA = await afterRestart.loadRedundancySettings();
+    settingsA.componentWeights = { binary: 4 / 7, continuous: 3 / 7 };
+    await afterRestart.saveRedundancySettings(settingsA);
+    const toA = await afterRestart.loadCollection();
+    toA.revision += 1;
+    toA.semanticRedundancy.factualWeightsEpoch = 2;
+    toA.semanticRedundancy.factualWeightsFingerprint = canonicalSha256({
+      binary: 4 / 7,
+      continuous: 3 / 7,
+    });
+    await afterRestart.saveCollection(toA);
+    const finalService = serviceWith(fileOps).service;
+    const aIdentity = semanticGenerationSourceIdentity(await hydrate(finalService));
+    expect(aIdentity?.fencedFactualWeightsFingerprint).toBe(
+      canonicalSha256({ binary: 4 / 7, continuous: 3 / 7 }),
+    );
+    expect(aIdentity?.factualWeightsEpoch).toBe(2);
+    expect(aIdentity).not.toEqual(initial);
   });
 
   test("migrates legacy tournament, prediction, and shelf formats to revision zero", async () => {
@@ -499,6 +637,34 @@ describe("storage source revisions", () => {
     expect(service.sourceVector?.()).toMatchObject({
       available: true,
       predictionSettingsRevision: 1,
+    });
+  });
+
+  test("identifies redundancy profile invalidation failure as post-commit", async () => {
+    const fileOps = createMockFileOps({ ["/source-vector/data/profile.json"]: "cached" });
+    const { service } = serviceWith(fileOps);
+    await hydrate(service);
+    fileOps.unlink = (filePath) => {
+      fileOps.calls.push({ method: "unlink", args: [filePath] });
+      if (filePath.endsWith("profile.json"))
+        return Promise.reject(new Error("invalidation failure"));
+      fileOps.files.delete(filePath);
+      return Promise.resolve();
+    };
+    const settings = await service.loadRedundancySettings();
+    settings.similarityThreshold = 0.7;
+    let failure: unknown;
+    try {
+      await service.saveRedundancySettings(settings);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(DurableSourcePostCommitError);
+    expect((failure as DurableSourcePostCommitError).durable).toBe(true);
+    expect(persisted(fileOps, paths.redundancy).revision).toBe(1);
+    expect(service.sourceVector?.()).toMatchObject({
+      available: true,
+      redundancySettingsRevision: 1,
     });
   });
 

@@ -10,7 +10,10 @@ import type {
   Collection,
   DurableGame,
 } from "@shelf-judge/shared";
-import { createInitialEntityMetadata } from "@shelf-judge/shared";
+import {
+  createInitialEntityMetadata,
+  createInitialSemanticRedundancyStateV10,
+} from "@shelf-judge/shared";
 import { createGameRoutes } from "../src/routes/games";
 import type { GameService } from "../src/services/game-service";
 import type { PredictionService } from "../src/services/prediction-service";
@@ -122,7 +125,7 @@ const prevOwned = makeGame("prev", "Delta", "previously-owned");
 // Mutable collection for setOwnership tests
 function makeCollection(): Collection {
   return {
-    schemaVersion: 8,
+    schemaVersion: 10,
     revision: 0,
     id: "coll-1",
     name: "Test",
@@ -145,6 +148,7 @@ function makeCollection(): Collection {
       structuredClone(prevOwned),
     ],
     entertainmentBenchmark: null,
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     intentions: [],
     attentionDispositions: [],
     commandReceipts: [],

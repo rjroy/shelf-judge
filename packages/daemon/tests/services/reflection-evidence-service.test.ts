@@ -22,7 +22,7 @@ import {
   createReflectionEvidenceService,
   type ReflectionEvidencePackage,
 } from "../../src/services/reflection-evidence-service.js";
-import { createTestApp } from "../helpers/test-app.js";
+import { createHydratedTestApp } from "../helpers/test-app.js";
 
 const ASSEMBLED_AT = "2026-08-31T10:00:00.000Z";
 const UPDATED_AT = "2026-08-31T09:00:00.000Z";
@@ -364,7 +364,7 @@ function noteDependencies(evidencePackage: ReflectionEvidencePackage) {
 
 describe("ReflectionEvidenceService", () => {
   test("keeps a 200-game collection lazy until a model-selected readGames call and merges its current testimony", async () => {
-    const context = createTestApp({ now: () => UPDATED_AT });
+    const context = await createHydratedTestApp({ now: () => UPDATED_AT });
     const fixtureGame = (await context.gameService.addGame({ name: "Lazy reflection game 001" }))
       .game;
     const collection = await context.storageService.loadCollection();
@@ -560,7 +560,7 @@ describe("ReflectionEvidenceService", () => {
   });
 
   test("packages only current authorized notes from lifecycle-backed private source data", async () => {
-    const context = createTestApp({ now: () => UPDATED_AT });
+    const context = await createHydratedTestApp({ now: () => UPDATED_AT });
     const games = await Promise.all(
       ["Authorized One", "Authorized Two", "Cleared", "Unrelated"].map((name) =>
         context.gameService.addGame({ name }),

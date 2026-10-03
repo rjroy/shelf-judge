@@ -6,7 +6,10 @@ import type {
   Game,
   FitnessResult,
 } from "@shelf-judge/shared";
-import { createInitialEntityMetadata } from "@shelf-judge/shared";
+import {
+  createInitialEntityMetadata,
+  createInitialSemanticRedundancyStateV10,
+} from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import type { PredictionService, PredictedGameResult } from "../src/services/prediction-service";
 import type { GameService } from "../src/services/game-service";
@@ -125,7 +128,7 @@ function createMockStorage(
 ): StorageService {
   let stored = structuredClone(wishlist);
   const coll: Collection = {
-    schemaVersion: 8,
+    schemaVersion: 10,
     revision: 0,
     id: "coll-1",
     name: "Test",
@@ -135,6 +138,7 @@ function createMockStorage(
     attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
+    semanticRedundancy: createInitialSemanticRedundancyStateV10(),
     createdAt: NOW,
     updatedAt: NOW,
     ...collection,
@@ -175,7 +179,7 @@ function createMockStorage(
         stage: "annotation" as const,
         similarityThreshold: 0.6,
         maxPenalty: 2.0,
-        componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
+        componentWeights: { binary: 0.4, continuous: 0.3 },
         minNeighbors: 1,
         expectedNeighbors: 5,
       }),
@@ -365,6 +369,49 @@ describe("wishlist service", () => {
     expect(refreshed.addedAt).toBe(existing.addedAt);
     expect(refreshed.redundancyPreview).not.toBeNull();
     expect(refreshed.redundancyPreview?.originalScore).toBe(7.5);
+  });
+
+  test("semantic-enabled wishlist add and refresh keep factual snapshots independent of C/D", async () => {
+    const peer = makeGame(300, "Higher Scoring Peer");
+    peer.id = "collection-peer";
+    const peerScore = makeFitnessResult(9, false);
+    const collection = {
+      games: [
+        {
+          ...peer,
+          ownerNote: {
+            state: "present" as const,
+            text: "Private owner-note signal",
+            version: 1,
+            updatedAt: NOW,
+          },
+        },
+      ],
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
+    };
+    collection.semanticRedundancy.settings.enabled = true;
+    storage = createMockStorage([], collection, true);
+    predictionService = createMockPredictionService(predictions, [
+      { game: peer, score: peerScore },
+    ]);
+    const svc = createWishlistService({ storageService: storage, predictionService, gameService });
+
+    const added = await svc.add(100);
+    expect(added.redundancyPreview).not.toBeNull();
+    expect(added.redundancyPreview?.originalScore).toBe(7.5);
+    expect(added.redundancyPreview?.penalty).toBeGreaterThan(0);
+    expect(added.redundancyPreview?.nicheNeighbors.map(({ gameId }) => gameId)).toEqual([
+      "collection-peer",
+    ]);
+    const savedPreview = structuredClone(added.redundancyPreview);
+    expect((await svc.list())[0].redundancyPreview).toEqual(savedPreview);
+
+    const refreshed = await svc.refresh(added.id);
+    expect(refreshed.id).toBe(added.id);
+    expect(refreshed.addedAt).toBe(added.addedAt);
+    expect(refreshed.redundancyPreview).toEqual(savedPreview);
+    expect((await svc.list())[0].redundancyPreview).toEqual(savedPreview);
+    expect(JSON.stringify(refreshed)).not.toContain("Private owner-note signal");
   });
 
   test("add rejects duplicate bggId in wishlist", async () => {

@@ -1904,7 +1904,7 @@ async function handle(request: Request): Promise<Response> {
       stage: collectionState.integratedRedundancy ? "integrated" : "annotation",
       similarityThreshold: 0.8,
       maxPenalty: 2,
-      componentWeights: { binary: 1, continuous: 1, personalAxes: 1 },
+      componentWeights: { binary: 1, continuous: 1 },
       minNeighbors: 1,
       expectedNeighbors: 2,
     });

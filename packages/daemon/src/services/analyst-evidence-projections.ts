@@ -20,6 +20,31 @@ import { canonicalSha256, profileSourceCoordinatorFor } from "./profile-source-c
 import { createProfileService } from "./profile-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { StorageService } from "./storage-service.js";
+import type { SourceVector } from "./source-vector.js";
+
+function unavailableSourceVector(): SourceVector {
+  return {
+    available: false,
+    unavailableSources: ["startup"],
+    processEpoch: "unavailable",
+    changeToken: 0,
+    collectionId: null,
+    collectionSchemaVersion: null,
+    collectionRevision: null,
+    semanticEvidenceEpoch: null,
+    semanticConsentEpoch: null,
+    factualWeightsEpoch: null,
+    factualWeightsFingerprint: null,
+    redundancyWeightsFingerprint: null,
+    tournamentRevision: null,
+    predictionSettingsRevision: null,
+    nicheSettingsRevision: null,
+    redundancySettingsRevision: null,
+    shelfConfigRevision: null,
+    representationVersion: 1,
+    algorithmVersion: 1,
+  };
+}
 
 const IdSchema = z.string().min(1);
 const TimestampSchema = z.string().datetime({ offset: true });
@@ -719,6 +744,22 @@ function candidateConfounders(
     );
 }
 
+function profileGameEvidence(game: {
+  gameId: string;
+  gameName: string;
+  currentFitness: number;
+  vetoed: boolean;
+}) {
+  // Similarity readiness is useful to the Profile calculation, but is not
+  // authorized evidence for Analyst projections.
+  return {
+    gameId: game.gameId,
+    gameName: game.gameName,
+    currentFitness: game.currentFitness,
+    vetoed: game.vetoed,
+  };
+}
+
 function profileSources(
   profile: CollectionProfile,
   gamesById: ReadonlyMap<string, Game>,
@@ -761,7 +802,11 @@ function profileSources(
         entityId: null,
         name: classLabel,
         entityAssociations: [],
-        comparatorCohort: result.comparator,
+        comparatorCohort: {
+          gameCount: result.comparator.gameCount,
+          meanCurrentFitness: result.comparator.meanCurrentFitness,
+          games: result.comparator.games.map(profileGameEvidence),
+        },
         support: null,
         dispersion: null,
         supportingGames: [],
@@ -788,14 +833,18 @@ function profileSources(
           entityClass,
           entityId: entity.entityId,
           name: entity.name,
-          entityAssociations: entity.games,
-          comparatorCohort: result.comparator,
+          entityAssociations: entity.games.map(profileGameEvidence),
+          comparatorCohort: {
+            gameCount: result.comparator.gameCount,
+            meanCurrentFitness: result.comparator.meanCurrentFitness,
+            games: result.comparator.games.map(profileGameEvidence),
+          },
           support: entity.support,
           dispersion: {
             populationStandardDeviation: entity.populationStandardDeviation,
             range: entity.range,
           },
-          supportingGames: entity.games,
+          supportingGames: entity.games.map(profileGameEvidence),
           exclusions: result.exclusions,
           activeIntentions,
           evidenceWarnings: result.refreshWarnings,
@@ -910,9 +959,17 @@ export function createAnalystProjectionSnapshotService(deps: {
             deps.storageService.loadRedundancySettings(),
             deps.storageService.loadShelfConfig(),
           ]);
+        const sourceVector = deps.storageService.sourceVector?.() ?? unavailableSourceVector();
         const collection = projectProfileCollectionSource(durable);
         const displayedGames = await deps.displayedFitnessService.listGamesFromSnapshot(
-          { collection, tournament, predictionSettings, redundancySettings },
+          {
+            kind: "private-capture",
+            collection: durable,
+            sourceVector,
+            tournament,
+            predictionSettings,
+            redundancySettings,
+          },
           { includePredicted: true },
         );
         return buildAnalystProjectionSnapshot({

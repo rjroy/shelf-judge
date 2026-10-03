@@ -4,12 +4,16 @@ import {
   createAttentionCandidateOracle,
   createAttentionCandidateProductionSourceLoader,
 } from "../../src/services/attention-candidate-service.js";
-import { createTestApp, jsonRequest } from "../helpers/test-app.js";
+import { createHydratedTestApp, jsonRequest } from "../helpers/test-app.js";
 import {
   canonicalUtilizationCases,
   UTILIZATION_OBSERVED_AT,
 } from "../../../../test-fixtures/purchase-utilization-responses.js";
-import { createInitialEntityMetadata, type DurableGame } from "@shelf-judge/shared";
+import {
+  createInitialEntityMetadata,
+  createInitialSemanticRedundancyStateV10,
+  type DurableGame,
+} from "@shelf-judge/shared";
 
 const command = {
   commandId: "11111111-1111-4111-8111-111111111111",
@@ -28,7 +32,7 @@ describe("profile attention routes", () => {
     "accepts %s through production-equivalent app wiring exactly once",
     async (operation, commandId) => {
       let now = "2026-01-01T00:00:00.000Z";
-      const context = createTestApp({ now: () => now });
+      const context = await createHydratedTestApp({ now: () => now });
       const fixture = canonicalUtilizationCases.find(
         (candidate) => candidate.id === "canonical-20",
       );
@@ -70,7 +74,7 @@ describe("profile attention routes", () => {
         updatedAt: UTILIZATION_OBSERVED_AT,
       };
       await context.storageService.saveCollection({
-        schemaVersion: 8,
+        schemaVersion: 10,
         revision: 0,
         id: "route-underused-fixture",
         name: "Route underused fixture",
@@ -89,6 +93,7 @@ describe("profile attention routes", () => {
         ],
         games: [game],
         entertainmentBenchmark: fixture.input.entertainmentBenchmark,
+        semanticRedundancy: createInitialSemanticRedundancyStateV10(),
         intentions: [],
         attentionDispositions: [],
         commandReceipts: [],

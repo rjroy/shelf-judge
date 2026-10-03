@@ -1,19 +1,71 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Hono } from "hono";
 import { createRedundancyRoutes } from "../src/routes/redundancy";
-import type { RedundancySettings } from "@shelf-judge/shared";
+import {
+  createInitialSemanticRedundancyStateV10,
+  type Collection,
+  type RedundancySettings,
+} from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
 import { createSettingsRouteStorageStub } from "./helpers/settings-route-storage";
+import { canonicalSha256 } from "../src/services/profile-source-coordinator";
+import { DurableSourcePostCommitError } from "../src/services/storage-service";
 
-function createMockStorageService(): StorageService & { settings: RedundancySettings } {
+function createMockStorageService(): StorageService & {
+  settings: RedundancySettings;
+  migrationNotice: string | null;
+  collection: Collection;
+  collectionWrites: number;
+  settingsWrites: number;
+  failCollectionSave: boolean;
+  failSettingsSave: boolean;
+} {
+  const initialTime = "2026-01-01T00:00:00.000Z";
   const mock = {
     ...createSettingsRouteStorageStub(),
     settings: { ...DEFAULT_REDUNDANCY_SETTINGS },
+    migrationNotice: null as string | null,
+    collection: {
+      schemaVersion: 10 as const,
+      revision: 0,
+      id: "route-test-collection",
+      name: "Route test",
+      axes: [],
+      games: [],
+      intentions: [],
+      attentionDispositions: [],
+      commandReceipts: [],
+      entertainmentBenchmark: null,
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
+      createdAt: initialTime,
+      updatedAt: initialTime,
+    } as Collection,
+    collectionWrites: 0,
+    settingsWrites: 0,
+    failCollectionSave: false,
+    failSettingsSave: false,
+    loadCollection() {
+      return Promise.resolve(structuredClone(mock.collection));
+    },
+    saveCollection(collection: Collection) {
+      mock.collectionWrites += 1;
+      if (mock.failCollectionSave) return Promise.reject(new Error("collection write failed"));
+      mock.collection = structuredClone(collection);
+      return Promise.resolve();
+    },
     loadRedundancySettings() {
       return Promise.resolve(structuredClone(mock.settings));
     },
+    loadRedundancySettingsRead() {
+      return Promise.resolve({
+        settings: structuredClone(mock.settings),
+        migrationNotice: mock.migrationNotice,
+      });
+    },
     saveRedundancySettings(s: RedundancySettings) {
+      mock.settingsWrites += 1;
+      if (mock.failSettingsSave) return Promise.reject(new Error("settings write failed"));
       mock.settings = structuredClone(s);
       return Promise.resolve();
     },
@@ -50,7 +102,7 @@ describe("redundancy settings routes", () => {
       expect(body.similarityThreshold).toBe(0.6);
       expect(body.maxPenalty).toBe(2.0);
       expect(body.minNeighbors).toBe(1);
-      expect(body.componentWeights).toEqual({ binary: 0.4, continuous: 0.3, personalAxes: 0.3 });
+      expect(body.componentWeights).toEqual({ binary: 4 / 7, continuous: 3 / 7 });
     });
 
     test("returns current settings", async () => {
@@ -60,6 +112,58 @@ describe("redundancy settings routes", () => {
       const body = (await res.json()) as RedundancySettings;
       expect(body.enabled).toBe(true);
       expect(body.stage).toBe("integrated");
+    });
+
+    test("includes legacy factual-weight migration notice", async () => {
+      storage.migrationNotice = "Legacy weights migrated to factual 4:3.";
+      const res = await app.request("/api/redundancy/settings");
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        componentWeights: { binary: 4 / 7, continuous: 3 / 7 },
+        migrationNotice: "Legacy weights migrated to factual 4:3.",
+      });
+    });
+
+    test("exposes only the safe semantic cache migration receipt separately", async () => {
+      storage.migrationNotice = "Legacy weights migrated to factual 4:3.";
+      storage.collection.semanticRedundancy.legacyCacheMigration = {
+        kind: "jev-cache-v9-to-v10",
+        discardedPairCount: 3,
+      };
+      const res = await app.request("/api/redundancy/settings");
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        migrationNotice: "Legacy weights migrated to factual 4:3.",
+        semantic: {
+          settings: storage.collection.semanticRedundancy.settings,
+          status: { status: "disabled", publicationStatus: "disabled" },
+          migrationNotice: { kind: "jev-cache-v9-to-v10", discardedPairCount: 3 },
+        },
+      });
+    });
+
+    test("distinguishes an absent semantic migration receipt from a zero-count receipt", async () => {
+      let res = await app.request("/api/redundancy/settings");
+      expect(await res.json()).toMatchObject({
+        semantic: {
+          settings: storage.collection.semanticRedundancy.settings,
+          status: { status: "disabled", publicationStatus: "disabled" },
+          migrationNotice: null,
+        },
+      });
+      storage.collection.semanticRedundancy.legacyCacheMigration = {
+        kind: "jev-cache-v9-to-v10",
+        discardedPairCount: 0,
+      };
+      res = await app.request("/api/redundancy/settings");
+      expect(await res.json()).toMatchObject({
+        semantic: {
+          migrationNotice: {
+            kind: "jev-cache-v9-to-v10",
+            discardedPairCount: 0,
+          },
+        },
+      });
     });
   });
 
@@ -166,7 +270,7 @@ describe("redundancy settings routes", () => {
     test("validates componentWeights values >= 0", async () => {
       const res = await app.request(
         "/api/redundancy/settings",
-        patchRequest({ componentWeights: { binary: -0.1, continuous: 0.5, personalAxes: 0.5 } }),
+        patchRequest({ componentWeights: { binary: -0.1, continuous: 0.5 } }),
       );
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: string };
@@ -176,7 +280,7 @@ describe("redundancy settings routes", () => {
     test("validates componentWeights sum > 0", async () => {
       const res = await app.request(
         "/api/redundancy/settings",
-        patchRequest({ componentWeights: { binary: 0, continuous: 0, personalAxes: 0 } }),
+        patchRequest({ componentWeights: { binary: 0, continuous: 0 } }),
       );
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: string };
@@ -191,19 +295,129 @@ describe("redundancy settings routes", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as RedundancySettings;
       expect(body.componentWeights.binary).toBe(0.8);
-      expect(body.componentWeights.continuous).toBe(0.3); // unchanged
-      expect(body.componentWeights.personalAxes).toBe(0.3); // unchanged
+      expect(body.componentWeights.continuous).toBe(3 / 7); // unchanged
     });
 
-    test("strips unknown properties from patch", async () => {
+    test("rejects personal-axis redundancy weights", async () => {
+      const res = await app.request(
+        "/api/redundancy/settings",
+        patchRequest({ componentWeights: { binary: 1, continuous: 0, personalAxes: 2 } }),
+      );
+      expect(res.status).toBe(400);
+    });
+
+    test("strictly rejects unknown and semantic properties", async () => {
       const res = await app.request(
         "/api/redundancy/settings",
         patchRequest({ enabled: true, unknownField: "should be stripped" }),
       );
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as Record<string, unknown>;
-      expect(body.enabled).toBe(true);
-      expect(body).not.toHaveProperty("unknownField");
+      expect(res.status).toBe(400);
+      expect(storage.settings.enabled).toBe(false);
+
+      const semantic = await app.request(
+        "/api/redundancy/settings",
+        patchRequest({ semanticRedundancy: { enabled: true } }),
+      );
+      expect(semantic.status).toBe(400);
+      const nested = await app.request(
+        "/api/redundancy/settings",
+        patchRequest({ componentWeights: { binary: 1, continuous: 1, semantic: 4 } }),
+      );
+      expect(nested.status).toBe(400);
+    });
+
+    test("weight PATCH commits collection fence before settings and aborts on collection failure", async () => {
+      storage.failCollectionSave = true;
+      const response = await app.request(
+        "/api/redundancy/settings",
+        patchRequest({ componentWeights: { binary: 0.8 } }),
+      );
+      expect(response.status).toBe(500);
+      expect(storage.collectionWrites).toBe(1);
+      expect(storage.settingsWrites).toBe(0);
+      expect(storage.settings.componentWeights).toEqual(
+        DEFAULT_REDUNDANCY_SETTINGS.componentWeights,
+      );
+    });
+
+    test("settings failure leaves the durable factual fence", async () => {
+      storage.failSettingsSave = true;
+      storage.collection.semanticRedundancy.legacyCacheMigration = {
+        kind: "jev-cache-v9-to-v10",
+        discardedPairCount: 0,
+      };
+
+      const response = await app.request(
+        "/api/redundancy/settings",
+        patchRequest({ componentWeights: { binary: 0.8 } }),
+      );
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({
+        factualSettingsPersisted: false,
+        semanticGenerationWithdrawn: true,
+      });
+      expect(storage.settings.componentWeights).toEqual(
+        DEFAULT_REDUNDANCY_SETTINGS.componentWeights,
+      );
+      expect(storage.collection.semanticRedundancy.factualWeightsEpoch).toBe(1);
+      expect(storage.collection.semanticRedundancy.legacyCacheMigration).toEqual({
+        kind: "jev-cache-v9-to-v10",
+        discardedPairCount: 0,
+      });
+    });
+
+    test("reports a durable factual settings write when profile invalidation fails afterward", async () => {
+      storage.saveRedundancySettings = (settings) => {
+        storage.settings = structuredClone(settings);
+        storage.settingsWrites += 1;
+        return Promise.reject(new DurableSourcePostCommitError("profile invalidation failed"));
+      };
+      const response = await app.request(
+        "/api/redundancy/settings",
+        patchRequest({ componentWeights: { binary: 0.8 } }),
+      );
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({
+        factualSettingsPersisted: true,
+        profileInvalidationFailed: true,
+      });
+      expect(storage.settings.componentWeights.binary).toBe(0.8);
+    });
+
+    test("stage-only factual settings do not write collection", async () => {
+      const response = await app.request(
+        "/api/redundancy/settings",
+        patchRequest({ stage: "integrated" }),
+      );
+      expect(response.status).toBe(200);
+      expect(storage.collectionWrites).toBe(0);
+    });
+
+    test("factual weights A to B to A advance a durable fence across route restart", async () => {
+      const first = await app.request(
+        "/api/redundancy/settings",
+        patchRequest({ componentWeights: { binary: 0.8 } }),
+      );
+      expect(first.status).toBe(200);
+      const afterB = storage.collection.semanticRedundancy.factualWeightsEpoch;
+      const fingerprintB = storage.collection.semanticRedundancy.factualWeightsFingerprint;
+      expect(afterB).toBe(1);
+
+      const { routes } = createRedundancyRoutes({ storageService: storage });
+      const restarted = new Hono();
+      restarted.route("/api", routes);
+      const backToA = await restarted.request(
+        "/api/redundancy/settings",
+        patchRequest({ componentWeights: { binary: 4 / 7 } }),
+      );
+      expect(backToA.status).toBe(200);
+      expect(storage.collection.semanticRedundancy.factualWeightsEpoch).toBe(2);
+      expect(storage.collection.semanticRedundancy.factualWeightsFingerprint).not.toBe(
+        fingerprintB,
+      );
+      expect(storage.collection.semanticRedundancy.factualWeightsFingerprint).toBe(
+        canonicalSha256({ binary: 4 / 7, continuous: 3 / 7 }),
+      );
     });
 
     test("rejects non-object body", async () => {

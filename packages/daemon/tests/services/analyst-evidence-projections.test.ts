@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { createAnalystProjectionSnapshotService } from "../../src/services/analyst-evidence-projections.js";
 import { createProfileService } from "../../src/services/profile-service.js";
-import { createTestApp } from "../helpers/test-app.js";
+import { createHydratedTestApp } from "../helpers/test-app.js";
 
 describe("AnalystProjectionSnapshotService Profile cache parity", () => {
   test("captures baseline-free Want to play intentions as Analyst evidence", async () => {
-    const ctx = createTestApp({ now: () => "2026-09-19T10:00:00.000Z" });
+    const ctx = await createHydratedTestApp({ now: () => "2026-09-19T10:00:00.000Z" });
     const game = (await ctx.gameService.addGame({ name: "Unplayed without evidence" })).game;
 
     expect(
@@ -34,9 +34,38 @@ describe("AnalystProjectionSnapshotService Profile cache parity", () => {
     });
   });
 
+  test("scores from a private capture while returning only note-free projections", async () => {
+    const ctx = await createHydratedTestApp();
+    await ctx.gameService.addGame({ name: "Private scoring source" });
+    const original = ctx.displayedFitnessService;
+    let captured: Parameters<typeof original.listGamesFromSnapshot>[0] | undefined;
+    const displayedFitnessService = {
+      ...original,
+      listGamesFromSnapshot(
+        snapshot: Parameters<typeof original.listGamesFromSnapshot>[0],
+        options: Parameters<typeof original.listGamesFromSnapshot>[1],
+      ) {
+        captured = snapshot;
+        return original.listGamesFromSnapshot(snapshot, options);
+      },
+    };
+
+    const projection = await createAnalystProjectionSnapshotService({
+      storageService: ctx.storageService,
+      displayedFitnessService,
+      profileService: ctx.profileService,
+    }).capture();
+
+    expect(captured).toMatchObject({ kind: "private-capture" });
+    if (captured?.kind !== "private-capture") throw new Error("Expected private scoring capture");
+    expect(captured.collection.games[0]).toHaveProperty("ownerNote");
+    expect(captured.sourceVector).toHaveProperty("processEpoch");
+    expect(JSON.stringify(projection)).not.toContain("ownerNote");
+  });
+
   test("captures Want to play count provenance and current derived evidence", async () => {
     const observedAt = "2026-09-19T10:00:00.000Z";
-    const ctx = createTestApp({ now: () => observedAt });
+    const ctx = await createHydratedTestApp({ now: () => observedAt });
     const game = (await ctx.gameService.addGame({ name: "Played with evidence", numPlays: 2 }))
       .game;
 
@@ -75,7 +104,7 @@ describe("AnalystProjectionSnapshotService Profile cache parity", () => {
   });
 
   test("does not rewrite a valid Profile cache", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     await ctx.profileService.getProfile();
     const cachedBefore = ctx.fileOps.files.get("/test/data/profile.json");
     if (cachedBefore === undefined) throw new Error("Expected Profile cache");
@@ -98,7 +127,7 @@ describe("AnalystProjectionSnapshotService Profile cache parity", () => {
   });
 
   test("recomputes a stale Profile cache with the same Profile output as an ordinary read", async () => {
-    const ctx = createTestApp();
+    const ctx = await createHydratedTestApp();
     await ctx.profileService.getProfile();
     const staleProfile = await ctx.storageService.loadProfile();
     if (staleProfile === null) throw new Error("Expected stale Profile cache");

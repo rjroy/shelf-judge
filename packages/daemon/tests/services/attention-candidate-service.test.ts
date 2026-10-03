@@ -1,9 +1,11 @@
+/* eslint-disable @typescript-eslint/require-await -- async service fixtures return already-resolved Promises. */
 import { describe, expect, test } from "bun:test";
 import {
   ATTENTION_CANDIDATE_ARTIFACT_INDEX_VERSION,
   ATTENTION_CANDIDATE_ARTIFACT_SCHEMA_VERSION,
   AttentionCandidateArtifactSchema,
   createInitialEntityMetadata,
+  createInitialSemanticRedundancyStateV10,
   type AttentionCandidateArtifact,
   type Collection,
   type DurableGame,
@@ -15,14 +17,83 @@ import {
   type AttentionCandidateSource,
   type AttentionCandidateProductionSource,
 } from "../../src/services/attention-candidate-service.js";
-import type { DisplayedFitnessService } from "../../src/services/displayed-fitness-service.js";
+import type {
+  DisplayedFitnessService,
+  PrivateDisplayedFitnessService,
+} from "../../src/services/displayed-fitness-service.js";
+import type {
+  AttentionCandidateOracle,
+  AttentionCandidateOracleResult,
+} from "../../src/services/attention-candidate-service.js";
+import type { SourceVector } from "../../src/services/source-vector.js";
 import { DEFAULT_PREDICTION_SETTINGS } from "../../src/services/prediction-engine.js";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "../../src/services/redundancy-engine.js";
 import { attentionRuleCatalog } from "../../src/services/attention-rule-catalog.js";
 import { projectPurchaseUtilization } from "../../src/services/purchase-utilization-projection.js";
+import { createTestApp } from "../helpers/test-app.js";
 
 const hash = "a".repeat(64);
+const syntheticProof = {
+  version: 1 as const,
+  mode: "factual-only" as const,
+  identity: "f".repeat(64),
+};
+function syntheticOracle<Source extends AttentionCandidateSource>(oracle: {
+  evaluate(
+    source: Source,
+    evaluatedAt: string,
+    targetGameIds?: readonly string[],
+  ): Promise<Pick<AttentionCandidateOracleResult, "evaluations" | "presentations">>;
+}): AttentionCandidateOracle<Source> {
+  return {
+    getScoringInput: async () => ({
+      semanticScoringInputProof: syntheticProof,
+      isCurrent: () => true,
+    }),
+    evaluate: async (sourceValue, evaluatedAt, targetGameIds) => ({
+      ...(await oracle.evaluate(sourceValue, evaluatedAt, targetGameIds)),
+      semanticScoringInputProof: syntheticProof,
+      isCurrent: () => true,
+    }),
+  };
+}
+function provenFitness(fitness: DisplayedFitnessService): PrivateDisplayedFitnessService {
+  return {
+    ...fitness,
+    getScoringInputFromSnapshot: async () => ({
+      semanticScoringInputProof: syntheticProof,
+      isCurrent: () => true,
+    }),
+    listGamesFromSnapshotWithProof: async (snapshot, options) => ({
+      games: await fitness.listGamesFromSnapshot(snapshot, options),
+      semanticScoringInputProof: syntheticProof,
+      isCurrent: () => true,
+    }),
+    listSnapshotGames: async () => [],
+  };
+}
 const observedAt = "2026-01-01T00:00:00.000Z";
+const sourceVector: SourceVector = {
+  available: false,
+  unavailableSources: ["startup"],
+  processEpoch: "test",
+  changeToken: 0,
+  collectionId: null,
+  collectionSchemaVersion: null,
+  collectionRevision: null,
+  semanticEvidenceEpoch: null,
+  semanticConsentEpoch: null,
+  factualWeightsEpoch: null,
+  factualWeightsFingerprint: null,
+  redundancyWeightsFingerprint: null,
+  tournamentRevision: null,
+  predictionSettingsRevision: null,
+  nicheSettingsRevision: null,
+  redundancySettingsRevision: null,
+  shelfConfigRevision: null,
+  representationVersion: 1,
+  algorithmVersion: 1,
+};
 const catalogRuleVersions = attentionRuleCatalog
   .map((rule) => ({
     ruleId: rule.id,
@@ -77,7 +148,7 @@ function ownedGame(id: string): DurableGame {
 function source(revision = 1, games: DurableGame[] = []): AttentionCandidateSource {
   return {
     collection: {
-      schemaVersion: 8,
+      schemaVersion: 10,
       revision,
       id: "collection",
       name: "Collection",
@@ -87,12 +158,13 @@ function source(revision = 1, games: DurableGame[] = []): AttentionCandidateSour
       attentionDispositions: [],
       commandReceipts: [],
       entertainmentBenchmark: null,
+      semanticRedundancy: createInitialSemanticRedundancyStateV10(),
       createdAt: observedAt,
       updatedAt: observedAt,
     } satisfies Collection,
     identity: {
       collectionId: "collection",
-      collectionSchemaVersion: 8,
+      collectionSchemaVersion: 10,
       collectionRevision: revision,
       tournamentHash: hash,
       predictionSettingsHash: hash,
@@ -114,6 +186,8 @@ function productionSource(
   const base = source(revision, games);
   return {
     ...base,
+    kind: "private-capture",
+    sourceVector,
     collection: { ...base.collection, attentionDispositions },
     tournament: {
       settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
@@ -128,7 +202,10 @@ function artifact(value: AttentionCandidateSource): AttentionCandidateArtifact {
   return {
     schemaVersion: ATTENTION_CANDIDATE_ARTIFACT_SCHEMA_VERSION,
     indexVersion: ATTENTION_CANDIDATE_ARTIFACT_INDEX_VERSION,
-    identity: value.identity,
+    identity: {
+      ...value.identity,
+      semanticScoringInputProof: syntheticProof,
+    },
     evaluatedAt: "2026-01-01T00:00:00.000Z",
     rows: [],
     dueBuckets: [],
@@ -193,12 +270,17 @@ function setup(initial: AttentionCandidateArtifact | null = null) {
         return Promise.resolve();
       },
     },
-    oracle: {
+    oracle: syntheticOracle({
       evaluate: () => {
         oracleCalls += 1;
-        return Promise.resolve({ evaluations: [], presentations: new Map() });
+        return Promise.resolve({
+          evaluations: [],
+          presentations: new Map(),
+          semanticScoringInputProof: syntheticProof,
+          isCurrent: () => true,
+        });
       },
-    },
+    }),
   });
   return {
     service,
@@ -218,6 +300,94 @@ function setup(initial: AttentionCandidateArtifact | null = null) {
 }
 
 describe("AttentionCandidateService core", () => {
+  test("semantic proof changes invalidate the persisted candidate artifact", async () => {
+    const factual = source();
+    const semantic = {
+      ...factual,
+      collection: {
+        ...factual.collection,
+        semanticRedundancy: {
+          ...factual.collection.semanticRedundancy,
+          settings: {
+            ...factual.collection.semanticRedundancy.settings,
+            enabled: true,
+            weights: { factual: 1, description: 1, ownerNote: 0 },
+          },
+        },
+      },
+    } satisfies AttentionCandidateSource;
+    let current = factual;
+    let stored: AttentionCandidateArtifact | null = null;
+    let oracleCalls = 0;
+    let saves = 0;
+    let generation = 0;
+    const service = new AttentionCandidateService({
+      coordinator: { runExclusive: (operation) => operation() },
+      clock: { now: () => new Date("2026-01-02T00:00:00.000Z") },
+      sourceGeneration: () => generation,
+      loadSource: () => Promise.resolve(current),
+      storage: {
+        loadAttentionCandidates: () => Promise.resolve(stored),
+        saveAttentionCandidates: (value) => {
+          saves += 1;
+          stored = value;
+          return Promise.resolve();
+        },
+        discardAttentionCandidates: () => Promise.resolve(),
+      },
+      oracle: {
+        getScoringInput: (value) =>
+          Promise.resolve({
+            semanticScoringInputProof: value.collection.semanticRedundancy.settings.enabled
+              ? {
+                  version: 1,
+                  mode: "semantic",
+                  status: "ready",
+                  coverageVersion: 1,
+                  identity: "b".repeat(64),
+                }
+              : syntheticProof,
+            isCurrent: () => true,
+          }),
+        evaluate: (value) => {
+          oracleCalls += 1;
+          return Promise.resolve({
+            evaluations: [],
+            presentations: new Map(),
+            semanticScoringInputProof: value.collection.semanticRedundancy.settings.enabled
+              ? {
+                  version: 1,
+                  mode: "semantic",
+                  status: "ready",
+                  coverageVersion: 1,
+                  identity: "b".repeat(64),
+                }
+              : syntheticProof,
+            isCurrent: () => true,
+          });
+        },
+      },
+    });
+
+    // Factual mode retains its persistent warm/cache path.
+    expect((await service.ensureFresh()).state).toBe("available");
+    expect({ oracleCalls, saves }).toEqual({ oracleCalls: 1, saves: 1 });
+    current = semantic;
+    generation += 1;
+    expect((await service.ensureFresh()).state).toBe("available");
+    expect((await service.ensureFresh()).state).toBe("available");
+    expect({ oracleCalls, saves }).toEqual({ oracleCalls: 2, saves: 2 });
+
+    // Explicit maintenance continues to persist the proof-bearing result.
+    stored = artifact(factual);
+    expect((await service.maintain({ kind: "global", reason: "redundancy" })).state).toBe(
+      "available",
+    );
+    expect(
+      (await service.maintainAfterCollectionCommit({ kind: "global", reason: "recovery" })).state,
+    ).toBe("available");
+    expect({ oracleCalls, saves }).toMatchObject({ oracleCalls: 4, saves: 4 });
+  });
   test("valid non-due cache hit neither evaluates nor saves", async () => {
     const value = source();
     const fixture = setup(artifact(value));
@@ -248,12 +418,12 @@ describe("AttentionCandidateService core", () => {
         },
         discardAttentionCandidates: () => Promise.resolve(),
       },
-      oracle: {
+      oracle: syntheticOracle({
         evaluate: () => {
           evaluations += 1;
           return Promise.resolve({ evaluations: [], presentations: new Map() });
         },
-      },
+      }),
     });
     expect(await service.ensureFresh()).toEqual({ state: "unavailable", retryable: true });
     expect({ reads, saves, evaluations }).toEqual({ reads: 0, saves: 0, evaluations: 0 });
@@ -298,12 +468,12 @@ describe("AttentionCandidateService core", () => {
         },
         discardAttentionCandidates: () => Promise.resolve(),
       },
-      oracle: {
+      oracle: syntheticOracle({
         evaluate: () => {
           oracleCalls += 1;
           return Promise.resolve({ evaluations: [], presentations: new Map() });
         },
-      },
+      }),
     });
 
     expect((await service.ensureFresh()).state).toBe("available");
@@ -387,13 +557,13 @@ describe("AttentionCandidateService core", () => {
         },
         discardAttentionCandidates: () => Promise.resolve(),
       },
-      oracle: {
+      oracle: syntheticOracle({
         evaluate: () => {
           displayedFitnessCalls += 1;
           oracleCalls += 1;
           return Promise.resolve({ evaluations: [], presentations: new Map() });
         },
-      },
+      }),
     });
 
     expect((await service.ensureFresh()).state).toBe("available");
@@ -470,7 +640,7 @@ describe("AttentionCandidateService core", () => {
         },
         discardAttentionCandidates: () => Promise.resolve(),
       },
-      oracle: {
+      oracle: syntheticOracle({
         evaluate: (_source, _at, targets) => {
           calls.push(targets);
           return Promise.resolve({
@@ -478,7 +648,7 @@ describe("AttentionCandidateService core", () => {
             presentations: new Map(),
           });
         },
-      },
+      }),
     });
     expect((await service.maintain({ kind: "games", gameIds: ["requested"] })).state).toBe(
       "unavailable",
@@ -502,18 +672,23 @@ describe("AttentionCandidateService core", () => {
         },
         discardAttentionCandidates: () => Promise.resolve(),
       },
-      oracle: {
+      oracle: syntheticOracle({
         evaluate: (_source, _evaluatedAt, targetGameIds) => {
           calls.push(targetGameIds);
           return Promise.resolve({
-            evaluations: [dueArtifact(current).rows[0]?.evaluation].filter(
-              (evaluation): evaluation is NonNullable<typeof evaluation> =>
-                evaluation !== undefined,
-            ),
+            evaluations: [dueArtifact(current).rows[0]?.evaluation]
+              .filter(
+                (evaluation): evaluation is NonNullable<typeof evaluation> =>
+                  evaluation !== undefined,
+              )
+              .map((evaluation) => ({
+                ...evaluation,
+                nextEvaluationBoundary: "2026-01-03T00:00:00.000Z",
+              })),
             presentations: new Map(),
           });
         },
-      },
+      }),
     });
 
     expect((await service.ensureFresh()).state).toBe("available");
@@ -546,12 +721,12 @@ describe("AttentionCandidateService core", () => {
         },
         discardAttentionCandidates: async () => {},
       },
-      oracle: {
+      oracle: syntheticOracle({
         evaluate: () => {
           evaluations += 1;
           return Promise.resolve({ evaluations: [], presentations: new Map() });
         },
-      },
+      }),
     });
     expect(
       (await service.maintainAfterCollectionCommit({ kind: "games", gameIds: [] })).state,
@@ -574,7 +749,9 @@ describe("AttentionCandidateService core", () => {
         saveAttentionCandidates: () => Promise.resolve(),
         discardAttentionCandidates: () => Promise.resolve(),
       },
-      oracle: { evaluate: () => Promise.resolve({ evaluations: [], presentations: new Map() }) },
+      oracle: syntheticOracle({
+        evaluate: () => Promise.resolve({ evaluations: [], presentations: new Map() }),
+      }),
       onMaintenanceError: (error) => errors.push(error),
     });
 
@@ -588,7 +765,7 @@ describe("AttentionCandidateService core", () => {
     expect(error.message).toBe("Attention candidate source changed after collection commit");
   });
   test("post-commit local maintenance matches an isolated full rebuild with a hidden row", async () => {
-    const evaluatedAt = "2026-01-02T00:00:00.000Z";
+    const evaluatedAt = "2026-01-01T00:00:00.000Z";
     const games = [
       ownedGame("local"),
       {
@@ -604,7 +781,7 @@ describe("AttentionCandidateService core", () => {
       },
       ownedGame("other"),
     ];
-    const displayedFitness: DisplayedFitnessService = {
+    const displayedFitness = provenFitness({
       listGames: () => Promise.resolve([]),
       listGamesFromSnapshot: (snapshot) =>
         Promise.resolve(
@@ -615,7 +792,7 @@ describe("AttentionCandidateService core", () => {
             hasScoringContribution: false,
           })),
         ),
-    };
+    });
     const productionOracle = createAttentionCandidateOracle(displayedFitness);
     const undisposed = productionSource(1, games);
     const hiddenEvaluation = (
@@ -636,6 +813,7 @@ describe("AttentionCandidateService core", () => {
     const prior = productionSource(1, games, dispositions);
     const current = productionSource(2, games, dispositions);
     let stored: AttentionCandidateArtifact | null = null;
+    const baselineErrors: unknown[] = [];
     const fullBaseline = new AttentionCandidateService<AttentionCandidateProductionSource>({
       coordinator: { runExclusive: (operation) => operation() },
       clock: { now: () => new Date(evaluatedAt) },
@@ -650,10 +828,12 @@ describe("AttentionCandidateService core", () => {
       },
       oracle: productionOracle,
       dependenciesForGame: productionAttentionCandidateDependenciesForGame,
+      onMaintenanceError: (error) => baselineErrors.push(error),
     });
-    expect((await fullBaseline.maintain({ kind: "global", reason: "recovery" })).state).toBe(
-      "available",
-    );
+    expect(
+      (await fullBaseline.maintain({ kind: "global", reason: "recovery" })).state,
+      baselineErrors.map(String).join(" | "),
+    ).toBe("available");
     const baseline = AttentionCandidateArtifactSchema.parse(stored);
     expect(baseline.rows.find((row) => row.gameId === "hidden")?.evaluation.disposition?.kind).toBe(
       "intentional",
@@ -662,6 +842,8 @@ describe("AttentionCandidateService core", () => {
     const stages: string[] = ["prior-artifact-compatible"];
     const errors: unknown[] = [];
     const localOracle = {
+      getScoringInput: (snapshot: AttentionCandidateProductionSource) =>
+        productionOracle.getScoringInput(snapshot),
       evaluate: async (
         snapshot: AttentionCandidateProductionSource,
         at: string,
@@ -711,6 +893,7 @@ describe("AttentionCandidateService core", () => {
       "oracle-output:local",
       "durable-identity-reread",
       "build-artifact-validation-and-save",
+      "durable-identity-reread",
     ]);
     if (incrementalResult.state !== "available") throw new Error("Expected incremental artifact");
 
@@ -749,17 +932,21 @@ describe("AttentionCandidateService core", () => {
       earliestBoundary: "2026-01-02T00:00:00.000Z",
     } satisfies AttentionCandidateArtifact;
     const calls: (readonly string[] | undefined)[] = [];
-    const oracle = {
+    const oracle = syntheticOracle({
       evaluate: (_source: AttentionCandidateSource, _at: string, targets?: readonly string[]) => {
         calls.push(targets);
         return Promise.resolve({
           evaluations: existing.rows
             .map((row) => row.evaluation)
-            .filter((evaluation) => targets === undefined || targets.includes(evaluation.gameId)),
+            .filter((evaluation) => targets === undefined || targets.includes(evaluation.gameId))
+            .map((evaluation) => ({
+              ...evaluation,
+              nextEvaluationBoundary: "2026-01-03T00:00:00.000Z",
+            })),
           presentations: new Map(),
         });
       },
-    };
+    });
     let stored: AttentionCandidateArtifact | null = existing;
     const incremental = new AttentionCandidateService({
       coordinator: { runExclusive: (operation) => operation() },
@@ -850,10 +1037,10 @@ describe("AttentionCandidateService core", () => {
             return Promise.resolve();
           },
         },
-        oracle: {
+        oracle: syntheticOracle({
           evaluate: () =>
             Promise.resolve({ evaluations: fixture.evaluations, presentations: new Map() }),
-        },
+        }),
         onMaintenanceError: (error) => errors.push(error),
       });
 
@@ -869,7 +1056,7 @@ describe("AttentionCandidateService core", () => {
       );
       expect({ saves, discards, sourceLoads }, fixture.name).toEqual({
         saves: 0,
-        discards: 1,
+        discards: 0,
         sourceLoads: 1,
       });
       expect(JSON.stringify(stored), fixture.name).toBe(priorBytes);
@@ -895,14 +1082,14 @@ describe("AttentionCandidateService core", () => {
         },
         discardAttentionCandidates: () => Promise.resolve(),
       },
-      oracle: {
+      oracle: syntheticOracle({
         evaluate: () =>
           Promise.resolve({ evaluations: [updatedRequested], presentations: new Map() }),
-      },
+      }),
     });
     const result = await valid.maintainAfterCollectionCommit({ kind: "games", gameIds: ["due"] });
     expect(result.state).toBe("available");
-    expect({ saves, sourceLoads }).toEqual({ saves: 1, sourceLoads: 2 });
+    expect({ saves, sourceLoads }).toEqual({ saves: 1, sourceLoads: 3 });
     if (result.state !== "available") throw new Error("Expected exact target result to publish");
     expect(result.artifact.identity.collectionRevision).toBe(2);
     expect(result.artifact.rows.find((row) => row.gameId === "due")?.evaluation).toEqual(
@@ -915,6 +1102,8 @@ describe("AttentionCandidateService core", () => {
   test("production adapter uses the snapshot fitness oracle and projection path", async () => {
     const production: AttentionCandidateProductionSource = {
       ...source(1, [ownedGame("game")]),
+      kind: "private-capture",
+      sourceVector,
       tournament: {
         settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
         sessions: [],
@@ -924,7 +1113,7 @@ describe("AttentionCandidateService core", () => {
       redundancySettings: DEFAULT_REDUNDANCY_SETTINGS,
     };
     const snapshots: Parameters<DisplayedFitnessService["listGamesFromSnapshot"]>[0][] = [];
-    const displayedFitness: DisplayedFitnessService = {
+    const displayedFitness = provenFitness({
       listGames: () => Promise.resolve([]),
       listGamesFromSnapshot: (snapshot, options) => {
         snapshots.push(snapshot);
@@ -938,7 +1127,7 @@ describe("AttentionCandidateService core", () => {
           },
         ]);
       },
-    };
+    });
 
     const result = await createAttentionCandidateOracle(displayedFitness).evaluate(
       production,
@@ -946,14 +1135,78 @@ describe("AttentionCandidateService core", () => {
       ["game"],
     );
 
-    expect(snapshots).toEqual([production]);
+    expect(snapshots).toEqual([
+      {
+        kind: "private-capture",
+        collection: production.collection,
+        sourceVector: production.sourceVector,
+        tournament: production.tournament,
+        predictionSettings: production.predictionSettings,
+        redundancySettings: production.redundancySettings,
+      },
+    ]);
     expect(result.evaluations.map((evaluation) => evaluation.gameId)).toEqual(["game"]);
+  });
+  test("stored-rule scoring omits a staged future note receipt without leaking private capture", async () => {
+    const pendingReceipt = {
+      receiptType: "owner-game-note",
+      commandId: "10000000-0000-4000-8000-000000000099",
+      operation: "set",
+      gameId: "game",
+      expectedVersion: 0,
+      requestFingerprint: hash,
+      accepted: {
+        commandId: "10000000-0000-4000-8000-000000000099",
+        gameId: "game",
+        operation: "set",
+        state: "present",
+        version: 1,
+        updatedAt: observedAt,
+        collectionRevision: 2,
+        alreadyClear: false,
+      },
+    } satisfies Collection["commandReceipts"][number];
+    const game = {
+      ...ownedGame("game"),
+      ownerNote: { state: "present" as const, version: 1, updatedAt: observedAt, text: "private" },
+    };
+    const production: AttentionCandidateProductionSource = {
+      ...productionSource(1, [game]),
+      collection: {
+        ...productionSource(1, [game]).collection,
+        commandReceipts: [pendingReceipt],
+      },
+    };
+    const app = createTestApp();
+    let captured: Parameters<DisplayedFitnessService["listGamesFromSnapshot"]>[0] | undefined;
+    const displayedFitness = provenFitness({
+      listGames: () => Promise.resolve([]),
+      listGamesFromSnapshot: (snapshot, options) => {
+        captured = snapshot;
+        return app.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+      },
+    });
+
+    const matches = await createAttentionCandidateOracle(displayedFitness).evaluateStoredRules(
+      production,
+      observedAt,
+      [{ gameId: "game", ruleId: "unknown-rule" }],
+    );
+
+    expect(matches).toEqual([]);
+    expect(captured).toMatchObject({ kind: "private-capture" });
+    if (captured?.kind !== "private-capture") throw new Error("Expected private scoring capture");
+    expect(captured.collection.revision).toBe(1);
+    expect(captured.collection.commandReceipts).toEqual([]);
+    expect(captured.collection.games[0]?.ownerNote).toMatchObject({ text: "private" });
+    expect(JSON.stringify(matches)).not.toContain("private");
+    expect(production.collection.commandReceipts).toEqual([pendingReceipt]);
   });
   test("production adapter projects only target output while preserving full evaluation parity", async () => {
     const production: AttentionCandidateProductionSource = {
       ...productionSource(1, [ownedGame("target"), ownedGame("peer")]),
     };
-    const displayedFitness: DisplayedFitnessService = {
+    const displayedFitness = provenFitness({
       listGames: () => Promise.resolve([]),
       listGamesFromSnapshot: (snapshot, options) =>
         Promise.resolve(
@@ -969,7 +1222,7 @@ describe("AttentionCandidateService core", () => {
               hasScoringContribution: false,
             })),
         ),
-    };
+    });
     const projected: string[] = [];
     const oracle = createAttentionCandidateOracle(displayedFitness, {
       projectPurchaseUtilization: (entry, benchmark) => {
@@ -990,6 +1243,8 @@ describe("AttentionCandidateService core", () => {
   test("production dependency resolver derives deterministic catalog and BGG indexes", () => {
     const production: AttentionCandidateProductionSource = {
       ...source(1, [{ ...ownedGame("game"), bggId: 7, additionalBggIds: [3, 7, 5] }]),
+      kind: "private-capture",
+      sourceVector,
       tournament: {
         settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
         sessions: [],
@@ -1034,13 +1289,13 @@ describe("AttentionCandidateService core", () => {
           },
           discardAttentionCandidates: () => Promise.resolve(),
         },
-        oracle: {
+        oracle: syntheticOracle({
           evaluate: (_source, _at, targets) => {
             oracleCalls += 1;
             expect(targets).toBeUndefined();
             return Promise.resolve({ evaluations: [], presentations: new Map() });
           },
-        },
+        }),
       });
       expect((await service.ensureFresh()).state, field).toBe("available");
       expect({ oracleCalls, saves }, field).toEqual({ oracleCalls: 1, saves: 1 });
@@ -1065,13 +1320,13 @@ describe("AttentionCandidateService core", () => {
         },
         discardAttentionCandidates: () => Promise.resolve(),
       },
-      oracle: {
+      oracle: syntheticOracle({
         evaluate: (_source, _at, targets) => {
           rebaseOracleCalls += 1;
           expect(targets).toBeUndefined();
           return Promise.resolve({ evaluations: [], presentations: new Map() });
         },
-      },
+      }),
     });
     expect((await rebase.maintainAfterCollectionCommit({ kind: "games", gameIds: [] })).state).toBe(
       "available",
@@ -1093,9 +1348,13 @@ describe("AttentionCandidateService core", () => {
         saveAttentionCandidates: () => Promise.resolve(),
         discardAttentionCandidates: () => Promise.resolve(),
       },
-      oracle: { evaluate: () => Promise.resolve({ evaluations: [], presentations: new Map() }) },
+      oracle: syntheticOracle({
+        evaluate: () => Promise.resolve({ evaluations: [], presentations: new Map() }),
+      }),
     });
-    expect((await raced.maintain({ kind: "global", reason: "recovery" })).state).toBe("available");
+    expect((await raced.maintain({ kind: "global", reason: "recovery" })).state).toBe(
+      "unavailable",
+    );
     void fixture;
   });
   test("oracle or persistence failures are retryable unavailable and publish nothing", async () => {
@@ -1108,11 +1367,195 @@ describe("AttentionCandidateService core", () => {
         saveAttentionCandidates: () => Promise.reject(new Error("disk failed")),
         discardAttentionCandidates: () => Promise.resolve(),
       },
-      oracle: { evaluate: () => Promise.resolve({ evaluations: [], presentations: new Map() }) },
+      oracle: syntheticOracle({
+        evaluate: () => Promise.resolve({ evaluations: [], presentations: new Map() }),
+      }),
     });
     expect(await failed.maintain({ kind: "global", reason: "recovery" })).toEqual({
       state: "unavailable",
       retryable: true,
+    });
+  });
+  test("missing production scoring proof fails closed in factual and semantic modes without touching disk", async () => {
+    for (const semantic of [false, true]) {
+      const initial = productionSource(1, [ownedGame("game")]);
+      const current = semantic
+        ? {
+            ...initial,
+            collection: {
+              ...initial.collection,
+              semanticRedundancy: {
+                ...initial.collection.semanticRedundancy,
+                settings: {
+                  ...initial.collection.semanticRedundancy.settings,
+                  enabled: true,
+                  weights: { factual: 1, description: 1, ownerNote: 0 },
+                },
+              },
+            },
+          }
+        : initial;
+      const before = artifact(current);
+      let stored: AttentionCandidateArtifact | null = before;
+      let saves = 0;
+      let discards = 0;
+      const missingProofFitness: DisplayedFitnessService = {
+        listGames: async () => [],
+        listGamesFromSnapshot: async () => [],
+      };
+      const service = new AttentionCandidateService<AttentionCandidateProductionSource>({
+        coordinator: { runExclusive: (operation) => operation() },
+        clock: { now: () => new Date("2026-01-01T00:00:00.000Z") },
+        loadSource: async () => current,
+        storage: {
+          loadAttentionCandidates: async () => stored,
+          saveAttentionCandidates: async (value) => {
+            saves += 1;
+            stored = value;
+          },
+          discardAttentionCandidates: async () => {
+            discards += 1;
+            stored = null;
+          },
+        },
+        oracle: createAttentionCandidateOracle(missingProofFitness),
+      });
+      expect(await service.ensureFresh()).toEqual({ state: "unavailable", retryable: true });
+      expect({ saves, discards, stored }).toEqual({ saves: 0, discards: 0, stored: before });
+    }
+  });
+  test("proof capture failure preserves a valid persisted artifact", async () => {
+    const current = source(1, [ownedGame("game")]);
+    const before = artifact(current);
+    let stored: AttentionCandidateArtifact | null = before;
+    let discards = 0;
+    const service = new AttentionCandidateService({
+      coordinator: { runExclusive: (operation) => operation() },
+      clock: { now: () => new Date("2026-01-01T00:00:00.000Z") },
+      loadSource: async () => current,
+      storage: {
+        loadAttentionCandidates: async () => stored,
+        saveAttentionCandidates: async () => {
+          throw new Error("unexpected save");
+        },
+        discardAttentionCandidates: async () => {
+          discards += 1;
+          stored = null;
+        },
+      },
+      oracle: {
+        getScoringInput: async () => {
+          throw new Error("proof service unavailable");
+        },
+        evaluate: async () => {
+          throw new Error("evaluation must not run");
+        },
+      },
+    });
+    expect(await service.ensureFresh()).toEqual({ state: "unavailable", retryable: true });
+    expect({ stored, discards }).toEqual({ stored: before, discards: 0 });
+  });
+  test("generation mutation during evaluation cannot publish or stamp with the new generation", async () => {
+    const current = source(1, [ownedGame("game")]);
+    let generation = 4;
+    let saves = 0;
+    const service = new AttentionCandidateService({
+      coordinator: { runExclusive: (operation) => operation() },
+      clock: { now: () => new Date("2026-01-01T00:00:00.000Z") },
+      sourceGeneration: () => generation,
+      loadSource: async () => current,
+      storage: {
+        loadAttentionCandidates: async () => null,
+        saveAttentionCandidates: async () => {
+          saves += 1;
+        },
+        discardAttentionCandidates: async () => {},
+      },
+      oracle: {
+        getScoringInput: async () => ({
+          semanticScoringInputProof: syntheticProof,
+          isCurrent: () => true,
+        }),
+        evaluate: async () => {
+          generation += 1;
+          return {
+            evaluations: [],
+            presentations: new Map(),
+            semanticScoringInputProof: syntheticProof,
+            isCurrent: () => true,
+          };
+        },
+      },
+    });
+    expect(await service.maintain({ kind: "global", reason: "recovery" })).toEqual({
+      state: "unavailable",
+      retryable: true,
+    });
+    expect(saves).toBe(0);
+  });
+  test("due-boundary equality after evaluation fails closed without saving", async () => {
+    const current = source(1, [ownedGame("due"), ownedGame("later")]);
+    const stale = dueArtifact(current);
+    let saves = 0;
+    const service = new AttentionCandidateService({
+      coordinator: { runExclusive: (operation) => operation() },
+      clock: { now: () => new Date("2026-01-02T00:00:00.000Z") },
+      loadSource: async () => current,
+      storage: {
+        loadAttentionCandidates: async () => stale,
+        saveAttentionCandidates: async () => {
+          saves += 1;
+        },
+        discardAttentionCandidates: async () => {},
+      },
+      oracle: syntheticOracle({
+        evaluate: async (_source, _at, targets) => ({
+          evaluations: stale.rows
+            .filter((row) => targets?.includes(row.gameId))
+            .map((row) => row.evaluation),
+          presentations: new Map(),
+        }),
+      }),
+    });
+    expect(await service.ensureFresh()).toEqual({ state: "unavailable", retryable: true });
+    expect(saves).toBe(0);
+  });
+  test("source mutation during save discards only the exact staged artifact", async () => {
+    let current = source(1, [ownedGame("game")]);
+    const persisted: { value: AttentionCandidateArtifact | null } = { value: null };
+    let saves = 0;
+    let discards = 0;
+    const service = new AttentionCandidateService({
+      coordinator: { runExclusive: (operation) => operation() },
+      clock: { now: () => new Date("2026-01-01T00:00:00.000Z") },
+      loadSource: async () => current,
+      storage: {
+        loadAttentionCandidates: async () => persisted.value,
+        saveAttentionCandidates: async (value) => {
+          saves += 1;
+          persisted.value = value;
+          current = source(2, [ownedGame("game")]);
+        },
+        discardAttentionCandidates: async () => {
+          discards += 1;
+          persisted.value = null;
+        },
+      },
+      oracle: syntheticOracle({
+        evaluate: async () => ({
+          evaluations: [{ ...dueArtifact(current).rows[0].evaluation, gameId: "game" }],
+          presentations: new Map(),
+        }),
+      }),
+    });
+    expect(await service.maintain({ kind: "global", reason: "recovery" })).toEqual({
+      state: "unavailable",
+      retryable: true,
+    });
+    expect({ saves, discards, revision: persisted.value?.identity.collectionRevision }).toEqual({
+      saves: 1,
+      discards: 1,
+      revision: undefined,
     });
   });
 });
