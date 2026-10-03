@@ -373,6 +373,7 @@ export {
   AcquisitionMutationRequestSchema,
   EntertainmentBenchmarkMutationRequestSchema,
   ManualGameValuesMutationRequestSchema,
+  WishlistBggSourceSnapshotSchema,
 } from "./validation";
 
 export {

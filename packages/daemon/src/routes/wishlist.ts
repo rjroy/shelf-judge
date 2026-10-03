@@ -1,10 +1,16 @@
 import { Hono } from "hono";
-import { toErrorMessage } from "@shelf-judge/shared";
+import { toErrorMessage, type WishlistEntry, type WishlistEntryView } from "@shelf-judge/shared";
 import type { WishlistService } from "../services/wishlist-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 
 export interface WishlistRoutesDeps {
   wishlistService: WishlistService;
+}
+
+function publicEntry(entry: WishlistEntry): WishlistEntryView {
+  const view = { ...entry };
+  delete view.bggSource;
+  return view;
 }
 
 export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
@@ -17,7 +23,7 @@ export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
       const entries = await wishlistService.list();
       // Sort by addedAt descending (newest first)
       entries.sort((a, b) => b.addedAt.localeCompare(a.addedAt));
-      return c.json(entries);
+      return c.json(entries.map(publicEntry));
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
     }
@@ -43,7 +49,7 @@ export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
 
     try {
       const entry = await wishlistService.add(bggId);
-      return c.json({ entry }, 201);
+      return c.json({ entry: publicEntry(entry) }, 201);
     } catch (err) {
       const message = toErrorMessage(err);
       if (
@@ -81,7 +87,7 @@ export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
     const id = c.req.param("id");
     try {
       const entry = await wishlistService.refresh(id);
-      return c.json({ entry });
+      return c.json({ entry: publicEntry(entry) });
     } catch (err) {
       const message = toErrorMessage(err);
       if (message.includes("not found")) {

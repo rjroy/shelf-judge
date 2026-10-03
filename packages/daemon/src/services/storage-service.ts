@@ -30,6 +30,7 @@ import {
   TournamentDataSchema,
   ShelfConfigurationSchema,
   AttentionCandidateArtifactSchema,
+  WishlistBggSourceSnapshotSchema,
   createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
 import type { FileMetadata, FileOps } from "./file-ops.js";
@@ -1069,7 +1070,19 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       if (!exists) return [];
 
       const raw = await fileOps.readFile(wishlistPath);
-      return JSON.parse(raw) as WishlistEntry[];
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return parsed as WishlistEntry[];
+      const entries: unknown[] = parsed;
+      return entries.map((entry): WishlistEntry => {
+        if (!isRecord(entry) || !Object.hasOwn(entry, "bggSource")) {
+          return entry as WishlistEntry;
+        }
+        const source = WishlistBggSourceSnapshotSchema.safeParse(entry["bggSource"]);
+        if (source.success) return { ...entry, bggSource: source.data } as WishlistEntry;
+        const legacyEntry = { ...entry };
+        delete legacyEntry["bggSource"];
+        return legacyEntry as unknown as WishlistEntry;
+      });
     },
 
     async saveWishlist(entries: WishlistEntry[]): Promise<void> {

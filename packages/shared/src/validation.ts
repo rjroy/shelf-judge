@@ -103,6 +103,23 @@ export {
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 10 as const;
 export const CURRENT_PROFILE_CONTRACT_VERSION = 12 as const;
 export const CURRENT_PROFILE_ALGORITHM_VERSION = 14 as const;
+
+/** Strict compact BGG Thing source persisted for wishlist scoring; absent on legacy entries. */
+export const WishlistBggSourceSnapshotSchema = z
+  .object({
+    observedAt: z.string().datetime({ offset: true }),
+    description: z.string().nullable(),
+    mechanics: z.array(z.string()),
+    categories: z.array(z.string()),
+    weight: z.number().finite().nullable(),
+    communityRating: z.number().finite().nullable(),
+    minPlayers: z.number().finite().nullable(),
+    maxPlayers: z.number().finite().nullable(),
+    bestPlayers: z.number().finite().nullable(),
+    playingTime: z.number().finite().nullable(),
+  })
+  .strict();
+
 const AmountInputSchema = z.string().superRefine((value, context) => {
   try {
     parseAmountInput(value);

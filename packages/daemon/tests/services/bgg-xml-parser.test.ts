@@ -267,11 +267,14 @@ describe("BGG XML Parser", () => {
       const xml = `<items><item type="boardgame" id="1">
         <name type="primary" value="Scoring Test"/>
         <yearpublished value="2020"/><minplayers value="1"/><maxplayers value="4"/>
-        <playingtime value="60"/><link type="boardgamecategory" id="10" value="Strategy"/>
+        <playingtime value="60"/><description>  exact &amp; decoded prose  </description>
+        <statistics><ratings><average value="7.4"/></ratings></statistics>
+        <link type="boardgamecategory" id="10" value="Strategy"/>
         <poll name="suggested_numplayers">${playerCountResult("2", 5)}</poll>
       </item></items>`;
 
-      expect(parseBoardgameScoringThings(xml, "2026-08-26T10:00:00.000Z")[0]).toMatchObject({
+      const scoringInput = parseBoardgameScoringThings(xml, "2026-08-26T10:00:00.000Z")[0];
+      expect(scoringInput).toMatchObject({
         bggId: 1,
         type: "boardgame",
         primaryName: "Scoring Test",
@@ -279,9 +282,14 @@ describe("BGG XML Parser", () => {
         minPlayers: 1,
         maxPlayers: 4,
         playingTime: 60,
+        description: "  exact & decoded prose  ",
+        communityRating: 7.4,
         categories: [{ id: 10, name: "Strategy" }],
         missingFields: ["weight"],
       });
+      expect(parseThingItems(xml, "2026-08-26T10:00:00.000Z")[0]?.bggData.description).toBe(
+        "exact & decoded prose",
+      );
     });
 
     test("parses complete entity classes with deterministic validation and deduplication", async () => {

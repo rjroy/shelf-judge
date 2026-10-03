@@ -5,6 +5,8 @@ import {
   type WishlistBreakdownEntry,
   type NicheImpact,
   type RedundancyAdjustment,
+  type WishlistBggSourceSnapshot,
+  WishlistBggSourceSnapshotSchema,
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import type { PredictionService, PredictedGameResult } from "./prediction-service.js";
@@ -51,17 +53,41 @@ function buildEntry(
     );
   }
 
+  const scoringInput = result.verifiedScoringInput;
+  if (
+    !scoringInput ||
+    scoringInput.bggId !== bggId ||
+    scoringInput.type !== "boardgame" ||
+    !scoringInput.primaryName ||
+    !Number.isFinite(Date.parse(scoringInput.observedAt))
+  ) {
+    throw new Error(`Verified BGG scoring input unavailable or mismatched for ${bggId}`);
+  }
+  const bggSource: WishlistBggSourceSnapshot = WishlistBggSourceSnapshotSchema.parse({
+    observedAt: scoringInput.observedAt,
+    description: scoringInput.description,
+    mechanics: scoringInput.mechanics.map((item) => item.name),
+    categories: scoringInput.categories.map((item) => item.name),
+    weight: scoringInput.weight,
+    communityRating: scoringInput.communityRating,
+    minPlayers: scoringInput.minPlayers,
+    maxPlayers: scoringInput.maxPlayers,
+    bestPlayers: scoringInput.bestPlayers,
+    playingTime: scoringInput.playingTime,
+  });
+
   return {
     id: uuidv4(),
     bggId,
-    name: result.game.name,
-    yearPublished: result.game.yearPublished,
+    name: scoringInput?.primaryName ?? result.game.name,
+    yearPublished: scoringInput?.yearPublished ?? result.game.yearPublished,
     thumbnailUrl: result.game.imageUrl,
     predictedScore: isUnavailable ? null : result.score.score,
     predictionConfidence: isUnavailable ? null : (result.score.predictionMeta?.confidence ?? null),
     predictedBreakdown,
     nicheImpact: nicheImpact.wouldJoin.length > 0 ? nicheImpact : null,
     redundancyPreview,
+    bggSource,
     addedAt: new Date().toISOString(),
   };
 }
@@ -94,6 +120,11 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
       }
 
       const result = await predictionService.predictBggGame(bggId);
+      if (result.bggVerification?.status === "existing-local-unverified") {
+        throw new Error(
+          `BGG Thing verification failed (${result.bggVerification.failure}) for ${bggId}`,
+        );
+      }
       const [nicheSettings, allGames, redundancySettings, tournamentData] = await Promise.all([
         storageService.loadNicheSettings(),
         predictionService.listGamesWithPredictions(),
@@ -144,6 +175,11 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
 
       const existing = wishlist[index];
       const result = await predictionService.predictBggGame(existing.bggId);
+      if (result.bggVerification?.status === "existing-local-unverified") {
+        throw new Error(
+          `BGG Thing verification failed (${result.bggVerification.failure}) for ${existing.bggId}`,
+        );
+      }
       const [collection, nicheSettings, redundancySettings, tournamentData, allGames] =
         await Promise.all([
           storageService.loadCollection(),
@@ -193,6 +229,11 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
         const existing = wishlist[i];
         try {
           const result = await predictionService.predictBggGame(existing.bggId);
+          if (result.bggVerification?.status === "existing-local-unverified") {
+            throw new Error(
+              `BGG Thing verification failed (${result.bggVerification.failure}) for ${existing.bggId}`,
+            );
+          }
           const nicheImpact = computeNicheImpactForResult(result, allGames, nicheSettings);
 
           const redundancyPreview =

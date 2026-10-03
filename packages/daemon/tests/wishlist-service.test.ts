@@ -13,9 +13,42 @@ import {
 import type { StorageService } from "../src/services/storage-service";
 import type { PredictionService, PredictedGameResult } from "../src/services/prediction-service";
 import type { GameService } from "../src/services/game-service";
+import type { BoardgameScoringInput } from "../src/services/bgg-client";
 import { createWishlistService } from "../src/services/wishlist-service";
+import { parseBoardgameScoringThings } from "../src/services/bgg-xml-parser.js";
 
 const NOW = "2026-04-12T12:00:00.000Z";
+
+async function expectPromiseError(promise: Promise<unknown>, message: string): Promise<void> {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes(message)) return;
+    throw new Error(`Expected promise rejection containing: ${message}`, { cause: error });
+  }
+  throw new Error(`Expected promise rejection containing: ${message}`);
+}
+
+function makeScoringInput(bggId: number, primaryName: string): BoardgameScoringInput {
+  return {
+    bggId,
+    type: "boardgame",
+    primaryName,
+    yearPublished: 2020,
+    minPlayers: 2,
+    maxPlayers: 4,
+    bestPlayers: 3,
+    playingTime: 60,
+    weight: 3.2,
+    communityRating: 7.8,
+    description: "  Exact BGG description  ",
+    categories: [{ id: 1, name: "Strategy" }],
+    mechanics: [{ id: 2, name: "Deck Building" }],
+    suggestedPlayerPoll: { state: "absent", buckets: [] },
+    missingFields: [],
+    observedAt: NOW,
+  };
+}
 
 function makeGame(bggId: number, name: string): Game {
   return {
@@ -233,6 +266,8 @@ describe("wishlist service", () => {
     game: game100,
     score: score100,
     predictionUnavailable: null,
+    verifiedScoringInput: makeScoringInput(100, "Test Game"),
+    bggVerification: { status: "verified" },
   };
 
   const game200 = makeGame(200, "Another Game");
@@ -245,6 +280,8 @@ describe("wishlist service", () => {
       ratedGameCount: 2,
       gamesNeeded: 3,
     },
+    verifiedScoringInput: makeScoringInput(200, "Another Game"),
+    bggVerification: { status: "verified" },
   };
 
   const predictions = new Map<number, PredictedGameResult>([
@@ -263,6 +300,14 @@ describe("wishlist service", () => {
   });
 
   test("add creates entry with correct fields", async () => {
+    let predictionCalls = 0;
+    predictionService = {
+      ...predictionService,
+      predictBggGame: (bggId) => {
+        predictionCalls++;
+        return Promise.resolve(predictions.get(bggId) ?? result100);
+      },
+    };
     const svc = createWishlistService({ storageService: storage, predictionService, gameService });
     const entry = await svc.add(100);
 
@@ -279,6 +324,49 @@ describe("wishlist service", () => {
     expect(entry.addedAt).toBeTruthy();
     expect(entry.id).toBeTruthy();
     expect(entry.redundancyPreview).toBeNull();
+    expect(entry.bggSource).toEqual({
+      observedAt: NOW,
+      description: "  Exact BGG description  ",
+      mechanics: ["Deck Building"],
+      categories: ["Strategy"],
+      weight: 3.2,
+      communityRating: 7.8,
+      minPlayers: 2,
+      maxPlayers: 4,
+      bestPlayers: 3,
+      playingTime: 60,
+    });
+    expect(predictionCalls).toBe(1);
+  });
+
+  test("persists decoded description whitespace from the verified XML scoring input", async () => {
+    const observedAt = "2026-04-12T12:00:00.000Z";
+    const sourceXml = `<items><item type="boardgame" id="100">
+      <name type="primary" value="Test Game"/>
+      <description>  Exact &amp; decoded text  </description>
+      <minplayers value="2"/><maxplayers value="4"/><playingtime value="60"/>
+    </item></items>`;
+    const parsedThing = parseBoardgameScoringThings(sourceXml, observedAt)[0];
+    if (!parsedThing) throw new Error("XML fixture did not produce a scoring Thing");
+    const scoringInput: BoardgameScoringInput = { ...parsedThing, observedAt };
+    let scoringObservationCalls = 0;
+    predictionService = {
+      ...createMockPredictionService(predictions),
+      predictBggGame: () => {
+        scoringObservationCalls++;
+        return Promise.resolve({ ...result100, verifiedScoringInput: scoringInput });
+      },
+    };
+
+    const entry = await createWishlistService({
+      storageService: storage,
+      predictionService,
+      gameService,
+    }).add(100);
+
+    expect(entry.bggSource?.description).toBe("  Exact & decoded text  ");
+    expect(entry.bggSource?.observedAt).toBe(observedAt);
+    expect(scoringObservationCalls).toBe(1);
   });
 
   test("add with Stage 0 creates entry with null prediction fields", async () => {
@@ -291,6 +379,47 @@ describe("wishlist service", () => {
     expect(entry.predictionConfidence).toBeNull();
     expect(entry.predictedBreakdown).toBeNull();
     expect(entry.redundancyPreview).toBeNull();
+  });
+
+  test("ordinary list reads persisted source without invoking prediction or BGG", async () => {
+    const entry: WishlistEntry = {
+      id: "offline-entry",
+      bggId: 100,
+      name: "Test Game",
+      yearPublished: 2020,
+      thumbnailUrl: null,
+      predictedScore: 7.5,
+      predictionConfidence: "strong",
+      predictedBreakdown: null,
+      nicheImpact: null,
+      redundancyPreview: null,
+      addedAt: NOW,
+      bggSource: {
+        observedAt: NOW,
+        description: "Description",
+        mechanics: ["Deck Building"],
+        categories: ["Strategy"],
+        weight: 3.2,
+        communityRating: 7.8,
+        minPlayers: 2,
+        maxPlayers: 4,
+        bestPlayers: 3,
+        playingTime: 60,
+      },
+    };
+    storage = createMockStorage([entry]);
+    predictionService = {
+      ...predictionService,
+      predictBggGame: () => Promise.reject(new Error("ordinary reads must stay offline")),
+    };
+
+    expect(
+      await createWishlistService({
+        storageService: storage,
+        predictionService,
+        gameService,
+      }).list(),
+    ).toEqual([entry]);
   });
 
   test("add stores candidate-only redundancy preview when enabled", async () => {
@@ -536,6 +665,136 @@ describe("wishlist service", () => {
     expect(refreshed.addedAt).toBe(originalAddedAt);
     expect(refreshed.predictedScore).toBe(7.5);
     expect(refreshed.predictionConfidence).toBe("strong");
+    expect(refreshed.bggSource?.observedAt).toBe(NOW);
+  });
+
+  test("failed verified refresh retains the complete previous entry", async () => {
+    const existing: WishlistEntry = {
+      id: "entry-failed-source",
+      bggId: 100,
+      name: "Test Game",
+      yearPublished: 2020,
+      thumbnailUrl: null,
+      predictedScore: 5,
+      predictionConfidence: "weak",
+      predictedBreakdown: null,
+      nicheImpact: null,
+      redundancyPreview: null,
+      addedAt: "2026-01-01T00:00:00.000Z",
+      bggSource: {
+        observedAt: "2025-01-01T00:00:00.000Z",
+        description: null,
+        mechanics: [],
+        categories: [],
+        weight: null,
+        communityRating: null,
+        minPlayers: null,
+        maxPlayers: null,
+        bestPlayers: null,
+        playingTime: null,
+      },
+    };
+    storage = createMockStorage([existing]);
+    predictionService = {
+      ...createMockPredictionService(predictions),
+      predictBggGame: () =>
+        Promise.resolve({
+          ...result100,
+          bggVerification: { status: "existing-local-unverified", failure: "unavailable" },
+        }),
+    };
+    const service = createWishlistService({
+      storageService: storage,
+      predictionService,
+      gameService,
+    });
+
+    await expectPromiseError(service.refresh(existing.id), "BGG Thing verification failed");
+    expect(await service.list()).toEqual([existing]);
+  });
+
+  test("mismatched Thing identity cannot replace a saved wishlist snapshot", async () => {
+    const existing: WishlistEntry = {
+      id: "entry-mismatch",
+      bggId: 100,
+      name: "Test Game",
+      yearPublished: 2020,
+      thumbnailUrl: null,
+      predictedScore: 5,
+      predictionConfidence: "weak",
+      predictedBreakdown: null,
+      nicheImpact: null,
+      redundancyPreview: null,
+      addedAt: "2026-01-01T00:00:00.000Z",
+      bggSource: {
+        observedAt: "2025-01-01T00:00:00.000Z",
+        description: null,
+        mechanics: [],
+        categories: [],
+        weight: null,
+        communityRating: null,
+        minPlayers: null,
+        maxPlayers: null,
+        bestPlayers: null,
+        playingTime: null,
+      },
+    };
+    storage = createMockStorage([existing]);
+    predictionService = {
+      ...createMockPredictionService(predictions),
+      predictBggGame: () =>
+        Promise.resolve({
+          ...result100,
+          verifiedScoringInput: makeScoringInput(101, "Mismatched Game"),
+        }),
+    };
+    const service = createWishlistService({
+      storageService: storage,
+      predictionService,
+      gameService,
+    });
+
+    await expectPromiseError(service.refresh(existing.id), "unavailable or mismatched");
+    expect(await service.list()).toEqual([existing]);
+  });
+
+  test("failed refresh persistence keeps the prior durable entry unchanged", async () => {
+    const existing: WishlistEntry = {
+      id: "entry-save-failure",
+      bggId: 100,
+      name: "Test Game",
+      yearPublished: 2020,
+      thumbnailUrl: null,
+      predictedScore: 5,
+      predictionConfidence: "weak",
+      predictedBreakdown: null,
+      nicheImpact: null,
+      redundancyPreview: null,
+      addedAt: "2026-01-01T00:00:00.000Z",
+      bggSource: {
+        observedAt: "2025-01-01T00:00:00.000Z",
+        description: "old source",
+        mechanics: [],
+        categories: [],
+        weight: null,
+        communityRating: null,
+        minPlayers: null,
+        maxPlayers: null,
+        bestPlayers: null,
+        playingTime: null,
+      },
+    };
+    storage = createMockStorage([existing]);
+    storage.saveWishlist = () => Promise.reject(new Error("injected wishlist write failure"));
+    const service = createWishlistService({
+      storageService: storage,
+      predictionService,
+      gameService,
+    });
+
+    await expectPromiseError(service.refresh(existing.id), "injected wishlist write failure");
+    expect(await storage.loadWishlist()).toEqual([existing]);
+    expect(await service.list()).toEqual([existing]);
   });
 
   test("removeByBggId finds and removes matching entry", async () => {

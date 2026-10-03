@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
 import { z } from "zod";
 import type {
   AppConfig,
@@ -23,6 +26,7 @@ import { createStorageService } from "../../src/services/storage-service.js";
 import { computeCollectionProfile } from "../../src/services/collection-profile-engine.js";
 import { profileSourceIdentity } from "../../src/services/profile-source-coordinator.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
+import { createFileOps } from "../../src/services/file-ops.js";
 import type { Logger } from "../../src/services/logger.js";
 
 const DATA_DIR = "/test/data";
@@ -433,6 +437,155 @@ describe("StorageService.loadJevSourceSnapshot", () => {
       service.loadJevSourceSnapshot!(),
       "JEV source freshness metadata is unavailable",
     );
+  });
+});
+
+describe("StorageService wishlist BGG source persistence", () => {
+  test("round-trips observed nulls and exact description offline, and treats malformed source as legacy", async () => {
+    const legacy = {
+      id: "legacy",
+      bggId: 10,
+      name: "Legacy title",
+      yearPublished: null,
+      thumbnailUrl: null,
+      predictedScore: 6,
+      predictionConfidence: null,
+      predictedBreakdown: null,
+      nicheImpact: null,
+      redundancyPreview: null,
+      addedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const malformed = { ...legacy, id: "malformed", bggSource: { description: 42 } };
+    const { service, fileOps } = makeService({
+      [WISHLIST_PATH]: JSON.stringify([
+        legacy,
+        malformed,
+        {
+          ...legacy,
+          id: "observed",
+          bggSource: {
+            observedAt: "2026-02-01T00:00:00.000Z",
+            description: "  Exact prose  ",
+            mechanics: ["Deck Building"],
+            categories: [],
+            weight: null,
+            communityRating: null,
+            minPlayers: 2,
+            maxPlayers: 4,
+            bestPlayers: null,
+            playingTime: 60,
+          },
+        },
+        {
+          ...legacy,
+          id: "observed-null-description",
+          bggSource: {
+            observedAt: "2026-02-02T00:00:00.000Z",
+            description: null,
+            mechanics: [],
+            categories: [],
+            weight: null,
+            communityRating: null,
+            minPlayers: null,
+            maxPlayers: null,
+            bestPlayers: null,
+            playingTime: null,
+          },
+        },
+        {
+          ...legacy,
+          id: "observed-empty-description",
+          bggSource: {
+            observedAt: "2026-02-03T00:00:00.000Z",
+            description: "",
+            mechanics: [],
+            categories: [],
+            weight: null,
+            communityRating: null,
+            minPlayers: null,
+            maxPlayers: null,
+            bestPlayers: null,
+            playingTime: null,
+          },
+        },
+      ]),
+    });
+
+    const loaded = await service.loadWishlist();
+    expect(loaded[0]?.bggSource).toBeUndefined();
+    expect(loaded[1]).toMatchObject({ id: "malformed", predictedScore: 6 });
+    expect(loaded[1]?.bggSource).toBeUndefined();
+    expect(loaded[2]?.bggSource?.description).toBe("  Exact prose  ");
+    expect(loaded[2]?.bggSource?.communityRating).toBeNull();
+    expect(loaded[2]?.bggSource?.weight).toBeNull();
+    expect(loaded[3]?.bggSource?.description).toBeNull();
+    expect(loaded[4]?.bggSource?.description).toBe("");
+
+    await service.saveWishlist(loaded);
+    const restarted = createStorageService({
+      dataDir: DATA_DIR,
+      configPath: CONFIG_PATH,
+      fileOps,
+    });
+    expect((await restarted.loadWishlist())[2]?.bggSource).toEqual(loaded[2]?.bggSource);
+    expect((await restarted.loadWishlist())[3]?.bggSource?.description).toBeNull();
+    expect((await restarted.loadWishlist())[4]?.bggSource?.description).toBe("");
+  });
+
+  test("persists and reloads the compact source through real atomic file writes", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "wishlist-source-storage-"));
+    const dataDir = path.join(root, "data");
+    const wishlistPath = path.join(dataDir, "wishlist.json");
+    try {
+      await mkdir(dataDir, { recursive: true });
+      const entry = {
+        id: "disk-entry",
+        bggId: 99,
+        name: "Disk game",
+        yearPublished: 2024,
+        thumbnailUrl: null,
+        predictedScore: 8,
+        predictionConfidence: "strong",
+        predictedBreakdown: null,
+        nicheImpact: null,
+        redundancyPreview: null,
+        addedAt: "2026-01-01T00:00:00.000Z",
+        bggSource: {
+          observedAt: "2026-02-01T00:00:00.000Z",
+          description: "A local snapshot",
+          mechanics: ["Drafting"],
+          categories: ["Strategy"],
+          weight: 2.5,
+          communityRating: 7.1,
+          minPlayers: 1,
+          maxPlayers: 4,
+          bestPlayers: 2,
+          playingTime: 45,
+        },
+      };
+      await writeFile(wishlistPath, JSON.stringify([entry]));
+      const firstStorage = createStorageService({
+        dataDir,
+        configPath: path.join(root, "config.json"),
+        fileOps: createFileOps(),
+      });
+      const loaded = await firstStorage.loadWishlist();
+      await firstStorage.saveWishlist(loaded);
+
+      const diskJson = await readFile(wishlistPath, "utf8");
+      const restartedStorage = createStorageService({
+        dataDir,
+        configPath: path.join(root, "config.json"),
+        fileOps: createFileOps(),
+      });
+      expect((await restartedStorage.loadWishlist())[0]?.bggSource).toEqual(entry.bggSource);
+      const parsedDisk: unknown = JSON.parse(diskJson);
+      expect(Array.isArray(parsedDisk)).toBe(true);
+      const diskEntries = parsedDisk as Array<Record<string, unknown>>;
+      expect(diskEntries[0]?.["bggSource"]).toEqual(entry.bggSource);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 

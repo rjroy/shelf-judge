@@ -44,6 +44,8 @@ export interface PredictedGameResult {
   score: FitnessResult;
   /** Verified BGG Thing identity/facts used by this preview, independent of local game metadata. */
   verifiedFact?: BoardgameFactResult;
+  /** Complete verified Thing source used by the preview, for daemon persistence consumers. */
+  verifiedScoringInput?: BoardgameScoringInput;
   predictionUnavailable: PredictionUnavailable | null;
   bggObservations?: Pick<
     BggGameResult,
@@ -461,13 +463,21 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
             predictionUnavailable: null,
             previewIdentity,
             verifiedFact: fact,
+            verifiedScoringInput: scoringInput,
             bggVerification: { status: "verified" },
           };
         }
         const targetVector = ctx.gameVectors.get(game.id);
         if (!targetVector) {
           if (!score) throw new Error("Existing local score is unavailable");
-          return { game, score, predictionUnavailable: null, previewIdentity, verifiedFact: fact };
+          return {
+            game,
+            score,
+            predictionUnavailable: null,
+            previewIdentity,
+            verifiedFact: fact,
+            verifiedScoringInput: scoringInput,
+          };
         }
         const predicted = computePredictedFitness(
           game,
@@ -492,6 +502,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
               : null,
           previewIdentity,
           verifiedFact: fact,
+          verifiedScoringInput: scoringInput,
           bggVerification: { status: "verified" },
         };
       }
@@ -593,6 +604,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         predictionUnavailable,
         previewIdentity,
         verifiedFact: fact,
+        verifiedScoringInput: scoringInput,
         bggVerification: { status: "verified" },
       };
     },

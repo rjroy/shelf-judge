@@ -1125,8 +1125,11 @@ describe("prediction-service", () => {
           yearPublished: 2024,
           minPlayers: 2,
           maxPlayers: 4,
+          bestPlayers: null,
           playingTime: 60,
           weight: 2.5,
+          communityRating: null,
+          description: null,
           categories: [],
           mechanics: [{ id: 4, name: "Worker Placement" }],
           suggestedPlayerPoll: { state: "absent" as const, buckets: [] },
@@ -1175,8 +1178,11 @@ describe("prediction-service", () => {
         yearPublished: 2022,
         minPlayers: 2,
         maxPlayers: 5,
+        bestPlayers: null,
         playingTime: 75,
         weight: 3.1,
+        communityRating: null,
+        description: null,
         categories: [{ id: 21, name: "Economic" }],
         mechanics: [{ id: 22, name: "Worker Placement" }],
         suggestedPlayerPoll: { state: "absent" as const, buckets: [] },
@@ -1246,8 +1252,11 @@ describe("prediction-service", () => {
           yearPublished: 2021,
           minPlayers: 2,
           maxPlayers: 5,
+          bestPlayers: 3,
           playingTime: 75,
           weight: 3.25,
+          communityRating: 7.9,
+          description: "Persisted source prose",
           categories: [{ id: 21, name: "Economic" }],
           mechanics: [{ id: 22, name: "Worker Placement" }],
           suggestedPlayerPoll: {
@@ -1269,6 +1278,14 @@ describe("prediction-service", () => {
 
       expect(scoringCalls).toBe(1);
       expect(factsCalls).toBe(0);
+      expect(result.verifiedScoringInput).toMatchObject({
+        bggId: 99999,
+        primaryName: "Rich Thing",
+        observedAt: now,
+        bestPlayers: 3,
+        communityRating: 7.9,
+        description: "Persisted source prose",
+      });
       expect(result.game).toMatchObject({
         name: "Rich Thing",
         yearPublished: 2021,
@@ -1335,8 +1352,11 @@ describe("prediction-service", () => {
           yearPublished: 2024,
           minPlayers: 2,
           maxPlayers: 4,
+          bestPlayers: null,
           playingTime: 60,
           weight: 2.5,
+          communityRating: null,
+          description: null,
           categories: [],
           mechanics: [{ id: 7, name: "Verified Thing mechanic" }],
           suggestedPlayerPoll: { state: "absent" as const, buckets: [] },

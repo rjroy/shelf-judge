@@ -32,6 +32,18 @@ function makeEntry(id: string, bggId: number, name: string, addedAt: string): Wi
     predictedBreakdown: [{ axisName: "Fun", rating: 7, confidence: "strong" }],
     nicheImpact: null,
     redundancyPreview: null,
+    bggSource: {
+      observedAt: NOW,
+      description: "private persisted BGG prose",
+      mechanics: [],
+      categories: [],
+      weight: null,
+      communityRating: null,
+      minPlayers: null,
+      maxPlayers: null,
+      bestPlayers: null,
+      playingTime: null,
+    },
     addedAt,
   };
 }
@@ -132,6 +144,8 @@ describe("wishlist routes", () => {
       expect(body).toHaveLength(2);
       expect(body[0].name).toBe("Newer Game");
       expect(body[1].name).toBe("Older Game");
+      expect(JSON.stringify(body)).not.toContain("private persisted BGG prose");
+      expect(body[0]).not.toHaveProperty("bggSource");
     });
   });
 
@@ -141,6 +155,7 @@ describe("wishlist routes", () => {
       expect(res.status).toBe(201);
       const body = (await res.json()) as { entry: WishlistEntry };
       expect(body.entry.bggId).toBe(100);
+      expect(body.entry).not.toHaveProperty("bggSource");
     });
 
     test("duplicate bggId returns 409", async () => {
@@ -195,6 +210,8 @@ describe("wishlist routes", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { entry: WishlistEntry };
       expect(body.entry.predictedScore).toBe(8.0);
+      expect(body.entry).not.toHaveProperty("bggSource");
+      expect(JSON.stringify(body)).not.toContain("private persisted BGG prose");
     });
 
     test("nonexistent ID returns 404", async () => {
