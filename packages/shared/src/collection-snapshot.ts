@@ -22,7 +22,7 @@ const BoxDimensionsSchema = z
   .strict()
   .nullable();
 
-/** Deliberately small projection for a collection table; never contains owner notes or BGG histories. */
+/** Deliberately small projection for a collection table; never contains owner-note text or BGG histories. */
 export const CollectionSnapshotGameSchema = z
   .object({
     id: Id,
@@ -97,6 +97,8 @@ const VariantResultSchema = z
 export const CollectionSnapshotGameRowSchema = z
   .object({
     game: CollectionSnapshotGameSchema,
+    /** Presence only; private owner-note text is never exposed in a snapshot. */
+    ownerNotePresent: z.boolean(),
     ordinary: VariantResultSchema,
     redundancySimilarityInfo: RedundancySimilarityInfoSchema,
     predicted: z.union([

@@ -15,6 +15,87 @@ test.beforeEach(async ({ page }) => {
   expect(response.ok()).toBe(true);
 });
 
+test("owner-note filters combine, persist, clear, and fit on mobile", async ({ page }) => {
+  await page.goto("/collection");
+  const toggle = page.getByRole("button", { name: /Filters/ });
+  await toggle.click();
+  const group = page.getByRole("group", { name: "Owner note" });
+  await expect(group.getByRole("button", { name: "All", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  for (const [label, games] of [
+    ["With note", [{ id: "game-1", name: "Atlas Equal" }]],
+    [
+      "Without note",
+      [
+        {
+          id: "game-2",
+          name: "Borealis: A Deliberately Long Collection Game Name for Responsive Navigation Evidence",
+        },
+        { id: "game-3", name: "Cinder Equal" },
+        { id: "game-6", name: "Isolated Beacon" },
+        {
+          id: "game-7",
+          name: "Zephyr Mutable Target With Another Exceptionally Long Name for Full Accessible Labels",
+        },
+      ],
+    ],
+  ] as const) {
+    await group.getByRole("button", { name: label, exact: true }).click();
+    await expect(group.getByRole("button", { name: label, exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect
+      .poll(() =>
+        page.locator(".game-row[id]").evaluateAll((rows) => rows.map((row) => row.id).sort()),
+      )
+      .toEqual(games.map(({ id }) => `collection-game-${id}`).sort());
+    await expect
+      .poll(async () => (await page.locator(".game-name").allTextContents()).sort())
+      .toEqual(games.map(({ name }) => name).sort());
+    await expect(page.locator(".filter-chip")).toContainText(label);
+    await page.reload();
+    await page.getByRole("button", { name: /Filters/ }).click();
+    await expect(
+      page
+        .getByRole("group", { name: "Owner note" })
+        .getByRole("button", { name: label, exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+  }
+
+  await group.getByRole("button", { name: "Without note", exact: true }).click();
+  await expect(page.locator("#collection-game-game-2")).toBeVisible(); // cleared note => false
+  await expect(page.locator("#collection-game-game-3")).toBeVisible(); // missing note => false
+  const search = page.getByRole("textbox", { name: "Search games by name" });
+  await search.fill("Atlas");
+  await expect(page.locator(".game-row[id]")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "No games match these filters" })).toBeVisible();
+  await page.getByRole("button", { name: "Remove owner note filter" }).click();
+  await expect(page.locator("#collection-game-game-1")).toBeVisible();
+  await search.fill("definitely no fixture game");
+  await expect(page.getByRole("heading", { name: "No games match these filters" })).toBeVisible();
+  await expect(page.locator(".stats-strip")).toBeVisible();
+  await expect(toggle).toBeVisible();
+  await page.goto("/collection?ownership=all&dimensions=missing");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await page
+    .getByRole("textbox", { name: "Search games by name" })
+    .fill("definitely no fixture game");
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(page).toHaveURL("/collection");
+  await expect(page.locator(".game-row")).toHaveCount(5);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(group.getByRole("button", { name: "Without note", exact: true })).toBeVisible();
+  expect(await page.locator("html").evaluate((element) => element.scrollWidth)).toBe(
+    await page.evaluate(() => window.innerWidth),
+  );
+});
+
 test("collection rows keep scores and penalty without similarity readiness labels on desktop and mobile", async ({
   page,
 }) => {

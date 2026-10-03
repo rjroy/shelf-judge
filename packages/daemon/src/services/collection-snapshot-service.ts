@@ -533,6 +533,9 @@ export function createCollectionSnapshotService(
 
       const predictedById = new Map(predictedUtilized?.map((entry) => [entry.game.id, entry]));
       const ordinaryById = new Map(ordinaryUtilized.map((entry) => [entry.game.id, entry]));
+      const ownerNotePresenceByGameId = new Map(
+        input.collection.games.map((game) => [game.id, game.ownerNote.state === "present"]),
+      );
       let displayStatsUnavailable: string | undefined;
       const games = ordinary.map((raw) => {
         const ordinaryEntry = ordinaryById.get(raw.game.id)!;
@@ -557,6 +560,7 @@ export function createCollectionSnapshotService(
         }
         const ratings = structuredClone(raw.game.ratings);
         return {
+          ownerNotePresent: ownerNotePresenceByGameId.get(raw.game.id) ?? false,
           game: {
             id: raw.game.id,
             name: raw.game.name,

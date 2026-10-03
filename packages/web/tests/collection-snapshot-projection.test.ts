@@ -31,6 +31,7 @@ const snapshot = {
         playingTime: 60,
         ownership: "owned",
       },
+      ownerNotePresent: true,
       ordinary: { score: null, displayScore: "ordinary", purchaseUtilization: {} },
       predicted: {
         availability: "available",
@@ -71,10 +72,22 @@ describe("collection snapshot projection", () => {
     });
     expect(props.axes[0]?.id).toBe("axis");
     expect(props.totalGames).toBe(1);
+    expect(props.ownerNotePresence).toEqual({ g1: true });
     expect(props.ratedCount).toBe(0);
     expect(props.predictedCount).toBe(1);
     expect(props.ignoredTags).toEqual([{ type: "mechanism", name: "deck-building" }]);
     expect(props.isIntegratedRedundancy).toBe(true);
+  });
+
+  test("projects cleared or missing owner notes as false without including note text", () => {
+    const cleared = {
+      ...snapshot,
+      games: [{ ...snapshot.games[0], ownerNotePresent: false }],
+    } as CollectionSnapshot;
+    const props = projectCollectionSnapshot(cleared);
+    expect(props.ownerNotePresence).toEqual({ g1: false });
+    expect(props.games[0]?.game).not.toHaveProperty("ownerNote");
+    expect(JSON.stringify(props)).not.toContain("private");
   });
 
   test("keeps prediction and niche features unavailable instead of inventing empty data", () => {

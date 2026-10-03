@@ -2,7 +2,7 @@
 target: redundancy settings page
 total_score: 21
 max_score: 40
-na_heuristics: 
+na_heuristics:
 p0_count: 0
 p1_count: 2
 target_identity: "file:/home/rjroy/Projects/games/shelf-judge/packages/web/app/redundancy/page.tsx"
@@ -11,25 +11,26 @@ target_path: /home/rjroy/Projects/games/shelf-judge/packages/web/app/redundancy/
 timestamp: 2026-10-02T13-44-08Z
 slug: packages-web-app-redundancy-page-tsx
 ---
+
 ⚠️ DEGRADED: single-context (nested subagents and the desktop browser are unavailable)
 
 ## Redundancy settings critique
 
 **Design health: 21/40, acceptable.** Source-based assessment of `packages/web/app/redundancy/page.tsx` and `packages/web/app/globals.css`; live visual behavior could not be inspected.
 
-| # | Heuristic | Score | Key issue |
-|---|---|---:|---|
-| 1 | System status | 2 | Run progress is buried below configuration and polls every 60 seconds. |
-| 2 | Real-world language | 2 | “JEV,” “reported-token stop threshold,” and “annotation” assume prior knowledge. |
-| 3 | Control and freedom | 2 | A prepared run can remain available after editing semantic weights. |
-| 4 | Consistency | 3 | Both settings groups use similar save/status patterns. |
-| 5 | Error prevention | 2 | Run preview can become inconsistent with unsaved semantic edits. |
-| 6 | Recognition over recall | 2 | Users must connect the two save groups, run limits, preview, and status themselves. |
-| 7 | Flexibility and efficiency | 2 | Direct controls help repeat use, but advanced options dominate routine setup. |
-| 8 | Aesthetic minimalism | 2 | The main task is stretched across two dense sections and a long disclosure. |
-| 9 | Error recovery | 2 | General errors appear at the top, away from the affected control. |
-| 10 | Help and documentation | 2 | Inline explanations exist, but do not make the limits easy to choose. |
-| **Total** | | **21/40** | **Acceptable** |
+| #         | Heuristic                  |     Score | Key issue                                                                           |
+| --------- | -------------------------- | --------: | ----------------------------------------------------------------------------------- |
+| 1         | System status              |         2 | Run progress is buried below configuration and polls every 60 seconds.              |
+| 2         | Real-world language        |         2 | “JEV,” “reported-token stop threshold,” and “annotation” assume prior knowledge.    |
+| 3         | Control and freedom        |         2 | A prepared run can remain available after editing semantic weights.                 |
+| 4         | Consistency                |         3 | Both settings groups use similar save/status patterns.                              |
+| 5         | Error prevention           |         2 | Run preview can become inconsistent with unsaved semantic edits.                    |
+| 6         | Recognition over recall    |         2 | Users must connect the two save groups, run limits, preview, and status themselves. |
+| 7         | Flexibility and efficiency |         2 | Direct controls help repeat use, but advanced options dominate routine setup.       |
+| 8         | Aesthetic minimalism       |         2 | The main task is stretched across two dense sections and a long disclosure.         |
+| 9         | Error recovery             |         2 | General errors appear at the top, away from the affected control.                   |
+| 10        | Help and documentation     |         2 | Inline explanations exist, but do not make the limits easy to choose.               |
+| **Total** |                            | **21/40** | **Acceptable**                                                                      |
 
 ### Design specificity
 

@@ -16,6 +16,8 @@ import {
   buildSortFields,
   DEFAULT_FILTERS,
   DEFAULT_SORT,
+  loadFilters,
+  saveFilters,
   type FilterState,
   type SortState,
 } from "@/lib/collection-utils";
@@ -702,10 +704,57 @@ describe("matchesFilters", () => {
     ratedStatus: "all",
     playedStatus: "all",
     playerCount: null,
+    ownerNoteStatus: "all",
   };
 
   test("default filters match everything", () => {
     expect(matchesFilters(makeGWS(), defaultFilters)).toBe(true);
+  });
+
+  test("owner-note presence filter supports both states and composes with other filters", () => {
+    const game = makeGWS({ name: "Wingspan" }, makeScore(8));
+    expect(matchesFilters(game, { ...defaultFilters, ownerNoteStatus: "with" }, true)).toBe(true);
+    expect(matchesFilters(game, { ...defaultFilters, ownerNoteStatus: "with" }, false)).toBe(false);
+    expect(matchesFilters(game, { ...defaultFilters, ownerNoteStatus: "without" }, false)).toBe(
+      true,
+    );
+    expect(matchesFilters(game, { ...defaultFilters, ownerNoteStatus: "without" }, true)).toBe(
+      false,
+    );
+    expect(
+      matchesFilters(game, { ...defaultFilters, ownerNoteStatus: "with", search: "catan" }, true),
+    ).toBe(false);
+  });
+
+  test("filter persistence migrates missing owner-note status and rejects invalid values", () => {
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    Object.defineProperty(globalThis, "window", { configurable: true, value: {} });
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    try {
+      values.set(
+        "shelf-judge-filters",
+        JSON.stringify({ search: "", ratedStatus: "all", playedStatus: "all", playerCount: null }),
+      );
+      expect(loadFilters()).toEqual(DEFAULT_FILTERS);
+      saveFilters({ ...DEFAULT_FILTERS, ownerNoteStatus: "with" });
+      expect(loadFilters().ownerNoteStatus).toBe("with");
+      values.set(
+        "shelf-judge-filters",
+        JSON.stringify({ ...DEFAULT_FILTERS, ownerNoteStatus: "sometimes" }),
+      );
+      expect(loadFilters()).toEqual(DEFAULT_FILTERS);
+    } finally {
+      if (originalWindow === undefined) Reflect.deleteProperty(globalThis, "window");
+      else Object.defineProperty(globalThis, "window", originalWindow);
+      if (originalStorage === undefined) Reflect.deleteProperty(globalThis, "localStorage");
+      else Object.defineProperty(globalThis, "localStorage", originalStorage);
+    }
   });
 
   test("search matches case-insensitively", () => {
@@ -785,6 +834,7 @@ describe("matchesFilters", () => {
       ratedStatus: "rated",
       playedStatus: "all",
       playerCount: 3,
+      ownerNoteStatus: "all",
     };
     expect(matchesFilters(rated, filter)).toBe(true);
 

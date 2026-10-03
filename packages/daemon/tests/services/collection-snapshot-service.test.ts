@@ -47,7 +47,12 @@ import {
   projectProfileCollectionSource,
 } from "../../src/services/game-projection.js";
 
-type GameWithNote = Game & { ownerNote: { state: "missing"; version: 0; updatedAt: null } };
+type GameWithNote = Game & {
+  ownerNote:
+    | { state: "missing"; version: 0; updatedAt: null }
+    | { state: "cleared"; version: number; updatedAt: string }
+    | { state: "present"; version: number; updatedAt: string; text: string };
+};
 
 function scoreWithSimilarityDefault(score: FitnessResult | null):
   | (FitnessResult & {
@@ -194,6 +199,8 @@ function setup(
     service,
     cache,
     route: createCollectionSnapshotRoutes(cache).routes,
+    collection,
+    vector,
     recoverNicheSettings: () => {
       nicheUnavailable = false;
     },
@@ -554,7 +561,7 @@ describe("CollectionSnapshotService", () => {
         built.semanticRead.result.table.identity.generationId,
     ).toBe("semantic-generation");
     expect(JSON.stringify(built.snapshot)).not.toMatch(
-      /semantic-generation|semanticRedundancy|ownerNote/,
+      /semantic-generation|semanticRedundancy|"ownerNote"/,
     );
     expect(built.semanticRead?.status === "verified" && built.semanticRead.isCurrent()).toBe(true);
   });
@@ -670,7 +677,7 @@ describe("CollectionSnapshotService", () => {
     const row = snapshot.games.find(({ game }) => game.id === "ref-1")!;
     const entry = listed.find(({ game }) => game.id === "ref-1")!;
     expect(snapshot.status).toBe("complete");
-    expect(JSON.stringify(snapshot)).not.toMatch(/semanticRedundancy|pairOutcomes|ownerNote/);
+    expect(JSON.stringify(snapshot)).not.toMatch(/semanticRedundancy|pairOutcomes|"ownerNote"/);
     expect(row.ordinary.score?.redundancySimilarityInfo).toEqual({
       status: "not-ready",
       generationId: null,
@@ -1006,10 +1013,21 @@ describe("CollectionSnapshotService", () => {
     }
   });
 
-  test("projects one narrow row without owner notes", async () => {
-    const { service } = setup({ game: gameWithPrivateNote() });
+  test("projects note presence without exposing owner-note text", async () => {
+    const missing = gameWithPrivateNote();
+    const present = {
+      ...gameWithPrivateNote(),
+      ownerNote: {
+        state: "present" as const,
+        version: 1,
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        text: "private owner note text",
+      },
+    };
+    const { service } = setup({ game: present });
     const snapshot = await service.getSnapshot();
     expect(snapshot.games).toHaveLength(1);
+    expect(snapshot.games[0]?.ownerNotePresent).toBe(true);
     expect(snapshot.games[0]?.game).toEqual({
       id: "row-game",
       name: "Row game",
@@ -1029,8 +1047,46 @@ describe("CollectionSnapshotService", () => {
       ownership: "owned",
     });
     expect(snapshot.games[0]?.game).not.toHaveProperty("ownerNote");
+    expect(JSON.stringify(snapshot)).not.toContain("private owner note text");
     expect(snapshot.games[0]?.hasTournamentData).toBe(false);
     expect(snapshot.games[0]?.tournament).toBeNull();
+    const missingSnapshot = await setup({ game: missing }).service.getSnapshot();
+    expect(missingSnapshot.games[0]?.ownerNotePresent).toBe(false);
+    const clearedSnapshot = await setup({
+      game: {
+        ...missing,
+        ownerNote: { state: "cleared", version: 1, updatedAt: "2026-01-03T00:00:00.000Z" },
+      },
+    }).service.getSnapshot();
+    expect(clearedSnapshot.games[0]?.ownerNotePresent).toBe(false);
+  });
+
+  test("note mutations advance the collection source vector and invalidate cached presence", async () => {
+    const fixture = setup({ game: gameWithPrivateNote() });
+    const first = await fixture.route.request("/collection/snapshot");
+    expect(first.status).toBe(200);
+    expect(((await first.json()) as CollectionSnapshot).games[0]?.ownerNotePresent).toBe(false);
+    const before = fixture.vector.read();
+
+    fixture.collection.games[0].ownerNote = {
+      state: "present",
+      version: 1,
+      updatedAt: "2026-01-02T00:00:00.000Z",
+      text: "private owner note text",
+    };
+    fixture.collection.revision += 1;
+    fixture.vector.publishCollection({
+      id: fixture.collection.id,
+      schemaVersion: fixture.collection.schemaVersion,
+      revision: fixture.collection.revision,
+    });
+    expect(fixture.vector.read().changeToken).toBeGreaterThan(before.changeToken);
+
+    const updated = await fixture.route.request("/collection/snapshot");
+    expect(updated.status).toBe(200);
+    const snapshot = (await updated.json()) as CollectionSnapshot;
+    expect(snapshot.games[0]?.ownerNotePresent).toBe(true);
+    expect(JSON.stringify(snapshot)).not.toContain("private owner note text");
   });
 
   test("required tournament failure rejects instead of returning fabricated scores", () => {
@@ -1176,7 +1232,7 @@ describe("CollectionSnapshotService", () => {
     // project only the valid shared scored game for this public note-leak assertion.
     expect(
       JSON.stringify([projectGameWithScore(target), projectGameWithScore(detailEntry), snapshot]),
-    ).not.toContain("ownerNote");
+    ).not.toContain('"ownerNote"');
   });
 
   test("redundancy is reported off when prediction fails and returns after prediction recovery", async () => {
@@ -1235,7 +1291,7 @@ describe("CollectionSnapshotService", () => {
       true,
     );
     expect(JSON.stringify(snapshot)).not.toContain("legacyPayload");
-    expect(JSON.stringify(snapshot)).not.toContain("ownerNote");
+    expect(JSON.stringify(snapshot)).not.toContain('"ownerNote"');
   });
 
   test("rejects a degraded snapshot when its source vector changes during computation", () => {

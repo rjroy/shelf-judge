@@ -139,22 +139,35 @@ function parseSort(value: unknown): Readonly<SortState> | null {
 }
 
 function parseFilters(value: unknown): Readonly<FilterState> | null {
-  if (!isExactObject(value, ["search", "ratedStatus", "playedStatus", "playerCount"])) {
+  if (
+    !isExactObject(value, ["search", "ratedStatus", "playedStatus", "playerCount"]) &&
+    !isExactObject(value, [
+      "search",
+      "ratedStatus",
+      "playedStatus",
+      "playerCount",
+      "ownerNoteStatus",
+    ])
+  ) {
     return null;
   }
   const search = property(value, "search");
   const ratedStatus = property(value, "ratedStatus");
   const playedStatus = property(value, "playedStatus");
   const playerCount = property(value, "playerCount");
+  const ownerNoteStatus = Object.hasOwn(value, "ownerNoteStatus")
+    ? property(value, "ownerNoteStatus")
+    : "all";
   if (
     typeof search !== "string" ||
     (ratedStatus !== "all" && ratedStatus !== "rated" && ratedStatus !== "unrated") ||
     (playedStatus !== "all" && playedStatus !== "played" && playedStatus !== "unplayed") ||
-    !(playerCount === null || (typeof playerCount === "number" && Number.isFinite(playerCount)))
+    !(playerCount === null || (typeof playerCount === "number" && Number.isFinite(playerCount))) ||
+    (ownerNoteStatus !== "all" && ownerNoteStatus !== "with" && ownerNoteStatus !== "without")
   ) {
     return null;
   }
-  return { search, ratedStatus, playedStatus, playerCount };
+  return { search, ratedStatus, playedStatus, playerCount, ownerNoteStatus };
 }
 
 function parseProjection(value: unknown): CollectionNavigationProjection | null {

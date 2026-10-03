@@ -160,6 +160,36 @@ describe("collection snapshot contract", () => {
     expect(shape.tournament.safeParse(null).success).toBe(true);
   });
 
+  test("requires owner-note presence only on the row, never note text", () => {
+    const game = {
+      id: "game-1",
+      name: "Game",
+      bggId: null,
+      yearPublished: null,
+      imageUrl: null,
+      numPlays: null,
+      createdAt: "2025-01-01T00:00:00Z",
+      updatedAt: "2025-01-02T00:00:00Z",
+      ratings: {},
+      bggData: null,
+      boxDimensions: null,
+      minPlayers: null,
+      maxPlayers: null,
+      bestPlayers: null,
+      playingTime: null,
+      ownership: "owned",
+    };
+    expect(CollectionSnapshotGameRowSchema.shape.ownerNotePresent.safeParse(false).success).toBe(
+      true,
+    );
+    expect(
+      CollectionSnapshotGameRowSchema.shape.ownerNotePresent.safeParse("present").success,
+    ).toBe(false);
+    expect(
+      CollectionSnapshotGameSchema.safeParse({ ...game, ownerNotePresent: true }).success,
+    ).toBe(false);
+  });
+
   test("capacity validates nullable legitimate values but rejects non-finite values", () => {
     const capacity = {
       configured: true,
