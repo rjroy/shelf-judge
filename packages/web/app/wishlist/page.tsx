@@ -1,10 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type {
   WishlistEntry,
+  WishlistEntryReadResult,
+  WishlistRedundancyProjection,
+  JevRunPreview,
+  JevWishlistRunPreview,
   WishlistBreakdownEntry,
   PredictionConfidence,
   NicheImpact,
@@ -48,7 +52,11 @@ export function saveWishlistSortField(
   }
 }
 
-export function sortEntries(entries: WishlistEntry[], field: SortField): WishlistEntry[] {
+export function sortEntries(
+  entries: WishlistEntry[],
+  field: SortField,
+  projections: ReadonlyMap<number, WishlistRedundancyProjection> = new Map(),
+): WishlistEntry[] {
   const sorted = [...entries];
   switch (field) {
     case "addedAt":
@@ -64,8 +72,20 @@ export function sortEntries(entries: WishlistEntry[], field: SortField): Wishlis
       break;
     case "redundancy":
       sorted.sort((a, b) => {
-        const aScore = a.predictedScore === null ? null : a.redundancyPreview?.adjustedScore;
-        const bScore = b.predictedScore === null ? null : b.redundancyPreview?.adjustedScore;
+        const aProjection = projections.get(a.bggId);
+        const bProjection = projections.get(b.bggId);
+        const aScore =
+          a.predictedScore === null
+            ? null
+            : aProjection
+              ? aProjection.orderingScore
+              : (a.redundancyPreview?.adjustedScore ?? a.predictedScore);
+        const bScore =
+          b.predictedScore === null
+            ? null
+            : bProjection
+              ? bProjection.orderingScore
+              : (b.redundancyPreview?.adjustedScore ?? b.predictedScore);
         if (aScore == null && bScore == null) return 0;
         if (aScore == null) return 1;
         if (bScore == null) return -1;
@@ -83,6 +103,10 @@ function ordinal(n: number): string {
   const s = ["th", "st", "nd", "rd"];
   const v = n % 100;
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function isWishlistPreview(preview: JevRunPreview | null): preview is JevWishlistRunPreview {
+  return preview !== null && "scope" in preview && preview.scope.scope === "wishlist";
 }
 
 function ConfidenceBadge({ confidence }: { confidence: PredictionConfidence }) {
@@ -141,17 +165,30 @@ function NicheImpactPanel({ nicheImpact }: { nicheImpact: NicheImpact }) {
 export function WishlistRedundancyPreview({
   preview,
   predictionAvailable,
+  source = "saved-factual",
 }: {
   preview: RedundancyAdjustment | null | undefined;
   predictionAvailable: boolean;
+  source?: WishlistRedundancyProjection["source"];
 }) {
   if (!predictionAvailable) return null;
   if (!preview) {
     return (
-      <div className="preview-redundancy" aria-label="Stored wishlist redundancy preview">
+      <div
+        className="preview-redundancy"
+        aria-label={
+          source === "current"
+            ? "Current wishlist redundancy comparison"
+            : "Wishlist redundancy adjustment"
+        }
+      >
         <div className="preview-redundancy-title">Redundancy</div>
         <p className="preview-redundancy-provenance">
-          Saved wishlist previews use factual data only; no adjustment is available.
+          {source === "base-prediction"
+            ? "Base prediction; no redundancy adjustment is available."
+            : source === "current"
+              ? "Current comparison is unavailable; no adjustment is shown."
+              : "Saved wishlist previews use factual data only; no adjustment is available."}
         </p>
       </div>
     );
@@ -160,7 +197,9 @@ export function WishlistRedundancyPreview({
     <div className="preview-redundancy" aria-label="Redundancy adjustment">
       <div className="preview-redundancy-title">Redundancy</div>
       <p className="preview-redundancy-provenance">
-        Saved wishlist preview uses factual data only.
+        {source === "current"
+          ? "Current comparison using factual and description signals where available."
+          : "Saved wishlist preview uses factual data only."}
       </p>
       <div className="preview-redundancy-score">
         With redundancy: <strong>{preview.adjustedScore.toFixed(1)}</strong>
@@ -188,11 +227,13 @@ export function WishlistRedundancyPreview({
 
 function WishlistCard({
   entry,
+  redundancy,
   onRemove,
   onRefresh,
   onAddToCollection,
 }: {
   entry: WishlistEntry;
+  redundancy?: WishlistRedundancyProjection;
   onRemove: (id: string) => void;
   onRefresh: (id: string) => Promise<void>;
   onAddToCollection: (entry: WishlistEntry) => Promise<void>;
@@ -240,9 +281,22 @@ function WishlistCard({
             )}
           </div>
           <WishlistRedundancyPreview
-            preview={redundancyPreview}
+            preview={
+              redundancy
+                ? redundancy.source === "base-prediction"
+                  ? null
+                  : redundancy.adjustment
+                : redundancyPreview
+            }
             predictionAvailable={hasPrediction}
+            source={redundancy?.source ?? (redundancyPreview ? "saved-factual" : "base-prediction")}
           />
+          {redundancy?.source === "current" && (
+            <span className="wc-added">Current comparison · blended available signals</span>
+          )}
+          {redundancy?.source === "base-prediction" && (
+            <span className="wc-added">No redundancy adjustment available</span>
+          )}
           <div className="wc-added">
             Added {relativeDate(entry.addedAt)}
             {!hasPrediction && (
@@ -341,6 +395,54 @@ export default function WishlistPage() {
   const [sortPreferenceLoaded, setSortPreferenceLoaded] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const [projections, setProjections] = useState<Map<number, WishlistRedundancyProjection>>(
+    new Map(),
+  );
+  const [runMode, setRunMode] = useState<"all" | "selected">("all");
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [runBusy, setRunBusy] = useState(false);
+  const [preview, setPreview] = useState<JevRunPreview | null>(null);
+  const [runMessage, setRunMessage] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{
+    state: string;
+    pairCount: number;
+    completedPairs: number;
+    cacheHits: number;
+    cacheMisses: number;
+    failedPairs: number;
+  } | null>(null);
+  const [wishlistRunId, setWishlistRunId] = useState<string | null>(null);
+  const refreshProjectionAfterWishlistRun = useRef(false);
+  const runStatusVersion = useRef(0);
+  const projectionRevision = useRef(0);
+
+  function invalidateWishlistProjections(bggIds: readonly number[]): number {
+    const revision = ++projectionRevision.current;
+    const invalidated = new Set(bggIds);
+    setProjections((current) => new Map([...current].filter(([bggId]) => !invalidated.has(bggId))));
+    return revision;
+  }
+
+  async function reloadWishlistProjections(revision = projectionRevision.current) {
+    const response = await fetch("/api/daemon/wishlist/redundancy", { cache: "no-store" });
+    if (!response.ok) throw new Error("Current comparison could not be refreshed");
+    const results = (await response.json()) as WishlistEntryReadResult[];
+    if (revision !== projectionRevision.current) return;
+    setProjections(new Map(results.map(({ entry, redundancy }) => [entry.bggId, redundancy])));
+  }
+
+  async function refreshWishlistProjectionAfterRun() {
+    if (!refreshProjectionAfterWishlistRun.current) return;
+    refreshProjectionAfterWishlistRun.current = false;
+    try {
+      await reloadWishlistProjections();
+    } catch (error) {
+      refreshProjectionAfterWishlistRun.current = true;
+      throw error;
+    }
+  }
 
   useEffect(() => {
     let restoredSortField = DEFAULT_SORT_FIELD;
@@ -352,6 +454,177 @@ export default function WishlistPage() {
     setSortField(restoredSortField);
     setSortPreferenceLoaded(true);
   }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    const revision = projectionRevision.current;
+    void reloadWishlistProjections(revision).catch(() => {
+      /* Saved factual previews remain usable when current comparison is unavailable. */
+    });
+  }, [loading]);
+
+  useEffect(() => {
+    let alive = true;
+    let pending = false;
+    const poll = async () => {
+      if (pending) return;
+      pending = true;
+      const requestVersion = runStatusVersion.current;
+      try {
+        const response = await fetch("/api/daemon/redundancy/semantic/refresh-progress", {
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error("Run status is unavailable");
+        const data = (await response.json()) as {
+          activity: { state: string; runId?: string };
+          progress:
+            | { state: string; relation?: string; value?: typeof progress }
+            | { state: string };
+        };
+        if (requestVersion !== runStatusVersion.current) return;
+        if (!alive) return;
+        if (data.activity.state === "active" && data.activity.runId) {
+          setRunId(data.activity.runId);
+          setWishlistRunId((current) => (current === data.activity.runId ? current : null));
+        } else {
+          setRunId(null);
+          setWishlistRunId(null);
+          if (alive) await refreshWishlistProjectionAfterRun();
+        }
+        if (data.progress.state === "saved" && "value" in data.progress && data.progress.value)
+          setProgress(data.progress.value);
+      } catch {
+        if (alive) setRunError("Run status could not be loaded. Try refreshing status.");
+      } finally {
+        pending = false;
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 60_000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  function invalidatePreview() {
+    setPreview(null);
+    setRunError(null);
+  }
+  async function prepareRun() {
+    setRunBusy(true);
+    setRunError(null);
+    setRunMessage(null);
+    setPreview(null);
+    try {
+      const params = new URLSearchParams({ scope: "wishlist" });
+      if (runMode === "selected") {
+        for (const id of [...new Set(selectedIds)]) params.append("bggId", String(id));
+      }
+      const response = await fetch(`/api/daemon/redundancy/semantic/run-preview?${params}`, {
+        cache: "no-store",
+      });
+      if (!response.ok)
+        throw new Error(
+          response.status === 412
+            ? "Wishlist changed during preparation. Prepare a new preview."
+            : "Could not prepare run details.",
+        );
+      setPreview((await response.json()) as JevRunPreview);
+    } catch (cause) {
+      setRunError(cause instanceof Error ? cause.message : "Could not prepare run details.");
+    } finally {
+      setRunBusy(false);
+    }
+  }
+  async function startRun() {
+    if (!isWishlistPreview(preview)) return;
+    setRunBusy(true);
+    setRunError(null);
+    setRunMessage(null);
+    try {
+      const response = await fetch("/api/daemon/redundancy/semantic/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestId: preview.requestId,
+          precondition: preview.precondition,
+          noteTransmissionAuthorized: false,
+        }),
+      });
+      if (!response.ok) {
+        setPreview(null);
+        throw new Error(
+          response.status === 412
+            ? "Wishlist or comparison sources changed. Nothing was started; prepare a new preview."
+            : "Run could not be started. Prepare a new preview before trying again.",
+        );
+      }
+      const result = (await response.json()) as { runId: string };
+      runStatusVersion.current += 1;
+      setRunId(result.runId);
+      setWishlistRunId(result.runId);
+      refreshProjectionAfterWishlistRun.current = true;
+      setPreview(null);
+      setRunMessage(
+        preview.scope.sendablePairCount === 0
+          ? "Wishlist run started. No provider request is expected for this run."
+          : "Wishlist run started. Only the disclosed description comparisons can be sent.",
+      );
+      await refreshRunStatus();
+    } catch (cause) {
+      setRunError(cause instanceof Error ? cause.message : "Run could not be started.");
+    } finally {
+      setRunBusy(false);
+    }
+  }
+  async function cancelRun() {
+    if (
+      !runId ||
+      runId !== wishlistRunId ||
+      !window.confirm("Request cancellation of this wishlist comparison run?")
+    )
+      return;
+    setRunBusy(true);
+    try {
+      const response = await fetch("/api/daemon/redundancy/semantic/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId }),
+      });
+      if (!response.ok) throw new Error("Could not request cancellation.");
+      setRunMessage("Cancellation requested.");
+      await refreshRunStatus();
+    } catch (cause) {
+      setRunError(cause instanceof Error ? cause.message : "Could not request cancellation.");
+    } finally {
+      setRunBusy(false);
+    }
+  }
+  async function refreshRunStatus() {
+    try {
+      const response = await fetch("/api/daemon/redundancy/semantic/refresh-progress", {
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error();
+      const data = (await response.json()) as {
+        activity: { state: string; runId?: string };
+        progress: { state: string; value?: typeof progress } | { state: string };
+      };
+      if (data.activity.state === "active") {
+        setRunId(data.activity.runId ?? null);
+        setWishlistRunId((current) => (current === data.activity.runId ? current : null));
+      } else {
+        setRunId(null);
+        setWishlistRunId(null);
+        await refreshWishlistProjectionAfterRun();
+      }
+      if (data.progress.state === "saved" && "value" in data.progress && data.progress.value)
+        setProgress(data.progress.value);
+    } catch {
+      setRunError("Run status could not be loaded. Try again.");
+    }
+  }
 
   useEffect(() => {
     if (!sortPreferenceLoaded) return;
@@ -406,6 +679,10 @@ export default function WishlistPage() {
       }
       const { entry } = (await res.json()) as { entry: WishlistEntry };
       setEntries((prev) => prev.map((e) => (e.id === id ? entry : e)));
+      const revision = invalidateWishlistProjections([entry.bggId]);
+      void reloadWishlistProjections(revision).catch(() => {
+        /* The refreshed entry remains available through its saved factual/base values. */
+      });
     } catch {
       setError("Failed to refresh entry");
     }
@@ -424,11 +701,15 @@ export default function WishlistPage() {
         refreshed: number;
         errors: string[];
       };
+      const revision = invalidateWishlistProjections(entries.map(({ bggId }) => bggId));
       // Refetch full list to get updated data
       const listRes = await fetch("/api/daemon/wishlist");
       if (listRes.ok) {
         setEntries((await listRes.json()) as WishlistEntry[]);
       }
+      void reloadWishlistProjections(revision).catch(() => {
+        /* Refreshed entries fall back to their saved factual/base values. */
+      });
       if (errors.length > 0) {
         setError(
           `Refreshed ${refreshed} of ${refreshed + errors.length} entries. ${errors.length} error(s).`,
@@ -482,7 +763,7 @@ export default function WishlistPage() {
     }
   }
 
-  const sorted = sortEntries(entries, sortField);
+  const sorted = sortEntries(entries, sortField, projections);
   const activeSortLabel = SORT_OPTIONS.find((o) => o.value === sortField)?.label ?? "Date Added";
 
   if (loading) {
@@ -603,10 +884,190 @@ export default function WishlistPage() {
             </div>
           ) : (
             <>
+              <section
+                aria-labelledby="wishlist-run-heading"
+                style={{
+                  border: "1px solid var(--border)",
+                  background: "var(--bg-surface)",
+                  borderRadius: 6,
+                  padding: "16px 20px",
+                  marginBottom: 16,
+                }}
+              >
+                <h2 id="wishlist-run-heading" style={{ fontSize: 16, margin: "0 0 8px" }}>
+                  Compare wishlist descriptions
+                </h2>
+                <p style={{ margin: "0 0 12px", color: "var(--text-secondary)" }}>
+                  Compare selected wishlist games with eligible games in your collection. Owner
+                  notes are not included.
+                </p>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                  <label>
+                    <input
+                      type="radio"
+                      name="wishlist-run-mode"
+                      checked={runMode === "all"}
+                      disabled={runBusy || !!preview}
+                      onChange={() => {
+                        setRunMode("all");
+                        setSelectedIds([]);
+                        invalidatePreview();
+                      }}
+                    />{" "}
+                    All wishlist games
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="wishlist-run-mode"
+                      checked={runMode === "selected"}
+                      disabled={runBusy || !!preview}
+                      onChange={() => {
+                        setRunMode("selected");
+                        invalidatePreview();
+                      }}
+                    />{" "}
+                    Choose games
+                  </label>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => void prepareRun()}
+                    disabled={
+                      runBusy || !!runId || (runMode === "selected" && selectedIds.length === 0)
+                    }
+                  >
+                    {runBusy ? "Preparing…" : "Prepare comparison"}
+                  </button>
+                  {runId && runId === wishlistRunId && (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => void cancelRun()}
+                      disabled={runBusy}
+                    >
+                      Cancel run
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => void refreshRunStatus()}
+                    disabled={runBusy}
+                  >
+                    Refresh status
+                  </button>
+                </div>
+                {runMode === "selected" && (
+                  <fieldset
+                    disabled={runBusy || !!preview}
+                    style={{
+                      border: 0,
+                      padding: "12px 0 0",
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "8px 16px",
+                    }}
+                  >
+                    <legend className="sr-only">Choose wishlist games to compare</legend>
+                    {entries.map((entry) => (
+                      <label key={entry.id}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(entry.bggId)}
+                          onChange={(event) => {
+                            setSelectedIds((ids) =>
+                              event.target.checked
+                                ? [...new Set([...ids, entry.bggId])]
+                                : ids.filter((id) => id !== entry.bggId),
+                            );
+                            invalidatePreview();
+                          }}
+                        />{" "}
+                        {entry.name}
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
+                {runError && (
+                  <p role="alert" style={{ color: "var(--score-low)" }}>
+                    {runError}
+                  </p>
+                )}
+                {runMessage && <p role="status">{runMessage}</p>}
+                {runId && runId !== wishlistRunId && (
+                  <p role="status">
+                    A redundancy run is active. Its scope is not available here; no wishlist
+                    candidate counts are shown.
+                  </p>
+                )}
+                {progress && (
+                  <p role="status">
+                    {runId
+                      ? runId === wishlistRunId
+                        ? "Wishlist run in progress"
+                        : "Redundancy run progress"
+                      : `Last run: ${progress.state}`}{" "}
+                    · {progress.completedPairs}/{progress.pairCount} pairs · {progress.cacheHits}{" "}
+                    cached · {progress.cacheMisses} misses · {progress.failedPairs} errors
+                  </p>
+                )}
+                {isWishlistPreview(preview) && (
+                  <div
+                    role="group"
+                    aria-labelledby="wishlist-run-disclosure"
+                    style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}
+                  >
+                    <h3 id="wishlist-run-disclosure" style={{ fontSize: 14 }}>
+                      Review before starting
+                    </h3>
+                    <p>
+                      {preview.scope.selectedCandidateCount} selected of{" "}
+                      {preview.scope.wishlistEntryCount} wishlist games ·{" "}
+                      {preview.scope.requestedCandidateCount} requested ·{" "}
+                      {preview.scope.eligibleCandidateCount} eligible ·{" "}
+                      {preview.scope.unavailableCandidateCount} unavailable ·{" "}
+                      {preview.scope.ownedOverlapCandidateCount} already owned
+                    </p>
+                    <p>
+                      {preview.scope.sendablePairCount} description comparisons may be sent ·{" "}
+                      {preview.scope.cachedHitPairCount} current cached results ·{" "}
+                      {preview.scope.eligibleOwnedGameCount} eligible owned games
+                    </p>
+                    <p>
+                      Provider: {preview.provider} · Model: {preview.modelId} · Budget: up to{" "}
+                      {preview.limits.maxProviderAttempts} attempts ·{" "}
+                      {preview.limits.reportedTokenStopThreshold.toLocaleString()} reported tokens
+                      (not a billing ceiling) · up to{" "}
+                      {Math.ceil(preview.limits.maxRunDurationMs / 60_000)} minutes
+                    </p>
+                    <p>{preview.retentionCaveat}</p>
+                    {preview.scope.sendablePairCount === 0 && (
+                      <p>
+                        No provider requests are expected; this run can use current cached results.
+                      </p>
+                    )}
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => void startRun()}
+                      disabled={runBusy}
+                    >
+                      Authorize and start
+                    </button>{" "}
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => {
+                        setPreview(null);
+                        setRunError(null);
+                      }}
+                    >
+                      Back
+                    </button>
+                  </div>
+                )}
+              </section>
               {sorted.map((entry) => (
                 <WishlistCard
                   key={entry.id}
                   entry={entry}
+                  redundancy={projections.get(entry.bggId)}
                   onRemove={(id) => {
                     void handleRemove(id);
                   }}

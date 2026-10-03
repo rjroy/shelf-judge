@@ -29,9 +29,17 @@ const preview: RedundancyAdjustment = {
   ],
 };
 
-function markup(value: RedundancyAdjustment | null | undefined, predictionAvailable = true) {
+function markup(
+  value: RedundancyAdjustment | null | undefined,
+  predictionAvailable = true,
+  source: "current" | "saved-factual" | "base-prediction" = "saved-factual",
+) {
   return renderToString(
-    <WishlistRedundancyPreview preview={value} predictionAvailable={predictionAvailable} />,
+    <WishlistRedundancyPreview
+      preview={value}
+      predictionAvailable={predictionAvailable}
+      source={source}
+    />,
   );
 }
 
@@ -60,5 +68,14 @@ describe("wishlist redundancy preview", () => {
     expect(markup(null)).toContain("Saved wishlist previews use factual data only");
     expect(markup(undefined)).toContain("Saved wishlist previews use factual data only");
     expect(markup(preview, false)).toBe("");
+  });
+
+  test("labels current and base-score projections without claiming a model explanation", () => {
+    expect(markup(preview, true, "current")).toContain(
+      "Current comparison using factual and description signals where available.",
+    );
+    expect(markup(null, true, "base-prediction")).toContain(
+      "Base prediction; no redundancy adjustment is available.",
+    );
   });
 });

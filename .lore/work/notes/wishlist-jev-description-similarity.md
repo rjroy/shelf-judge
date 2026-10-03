@@ -481,4 +481,19 @@ The accepted eight-path CLI manifest was rehashed immediately before this note u
 | `packages/cli/tests/commands/wishlist.test.ts` | `98d8f6ab30e332230eddf3e5af0bdeed7d911501` | `8705d77a2d6e05cae17bac51c6d2706ca8a0ffb772528a25e80fab82a7cb1fa0` |
 | `packages/cli/tests/index.test.ts` | `652c208086748b11e415d814430a70ba339fc87a` | `416c69778e220aa0b4f767c859e4e1a89586784ebf0c15a49807bad9991845ed` |
 
-The CLI checks recorded at implementation were `bun test packages/cli/tests` (487/1,278), `bunx tsc --noEmit -p packages/cli`, scoped ESLint and Prettier, and `git diff --check`; these were not rerun for this administrative checkpoint. Provider transport was fake, with no real provider calls or owner data. The CLI bead is closed; `.7` remains in progress and `.9` remains open. This closes the CLI lane only, not Phase 6 overall or the full feature. Current web-lane changes remain uncheckpointed and excluded; no push was made or authorized.
+The CLI checks recorded at implementation were `bun test packages/cli/tests` (487/1,278), `bunx tsc --noEmit -p packages/cli`, scoped ESLint and Prettier, and `git diff --check`; these were not rerun for this administrative checkpoint. Provider transport was fake, with no real provider calls or owner data. At the CLI checkpoint, `.7` was still in progress; it has since been accepted in the separate Phase 6b checkpoint below. `.9` remains open. This closes the CLI lane only, not Phase 6 overall or the full feature. The web source was excluded from the CLI checkpoint; no push was made or authorized.
+
+## Phase 6b acceptance and checkpoint evidence
+
+The parent accepted `shelf-judge-xi83.7` after the corrected independent web test and design/review gates. The corrected accepted review diff is `/tmp/opencode/wishlist-jev-phase6b-corrected-review.diff`, against baseline `e15d82f7`; a reverse-apply check confirmed the current four-file web delta matches that review exactly. Independent evidence: 10 web unit tests / 30 assertions and 28/28 browser tests across all four projects using fake daemons at ports 32111/32110. Browser typecheck and scoped lint, formatting and diff checks passed after the corrections. Root typecheck, lint, format and build are additionally reported as passing on the combined worktree before the two corrections; final Phase 7 gates will rerun them. No provider calls or owner data were used.
+
+The accepted four-path web manifest was rehashed immediately before this note update. Index blobs and worktree SHA-256 values:
+
+| Path | Index blob | Worktree SHA-256 |
+| --- | --- | --- |
+| `packages/web/app/wishlist/page.tsx` | `574b4f5a049ff50eca7fdb0ce7a44dc4d900a690` | `64f4a6baeba04254a9647a98f2c5e0d69a03d3d3388f4ca5984294dff67d6d49` |
+| `packages/web/tests/wishlist-sorting.test.ts` | `83c0793f5cb18e42cefa32dff3abe55fde8e5eeb` | `5b5acda92183241728d533b29ec93875caeedc9a42ef17bd9249805bd782842a` |
+| `packages/web/tests/wishlist-redundancy.test.tsx` | `60cd078d2107098d2faaba39216b4eba8479494d` | `ca3d0513b5ed1537b3fbfb9eaa565ea247b5ac9209e3d1e0df26dc668899f491` |
+| `packages/web/e2e/wishlist-run.pw.ts` | absent (new file) | `6ea773ace31fb36b73bfdc78fc8c057fc5102b19bfa52e9c9700bfc11ced4963` |
+
+The focused results before review correction are not acceptance evidence; the accepted counts above are the corrected run set. The exact accepted four-file source/test manifest, this note and current `.beads` metadata are included in this checkpoint; no CLI, daemon or shared source was changed. Phase 6b is closed; Phase 7 remains open, and the full wishlist feature is not yet complete. No push was made or authorized.
