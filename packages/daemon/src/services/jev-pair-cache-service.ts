@@ -1,11 +1,15 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
+import { parseWishlistCandidateMember } from "./jev-pair-identity.js";
 
 export type JevSignal = "C" | "D";
 export type JevDependencyKind = "C_ONLY" | "D_ONLY" | "SHARED_CD";
+export type JevPairDomain = "collection" | "wishlist-candidate";
 
 export interface JevPairJudgment {
+  /** Omitted for backwards-compatible collection-domain judgments. */
+  pairDomain?: JevPairDomain;
   collectionId: string;
   consentEpoch?: string;
   gameAId: string;
@@ -36,6 +40,8 @@ export interface JevPairKey {
   gameAId: string;
   gameBId: string;
   signal: JevSignal;
+  /** Omitted keys address the existing collection domain. */
+  pairDomain?: JevPairDomain;
 }
 
 export interface JevRunProgress {
@@ -82,9 +88,28 @@ export interface JevPairCache {
   mutationRevision(): number | null;
   lookup(key: JevPairKey): JevPairJudgment | null;
   upsert(judgment: JevPairJudgment): void;
-  purgePair(gameAId: string, gameBId: string, signal?: JevSignal): number;
-  purgeGame(gameId: string, signal?: JevSignal, dependencyKind?: JevDependencyKind): number;
-  invalidateGame(gameId: string, dependencyKinds: readonly JevDependencyKind[]): number;
+  purgePair(
+    gameAId: string,
+    gameBId: string,
+    signal?: JevSignal,
+    pairDomain?: JevPairDomain,
+  ): number;
+  purgeGame(
+    gameId: string,
+    signal?: JevSignal,
+    dependencyKind?: JevDependencyKind,
+    pairDomain?: JevPairDomain,
+  ): number;
+  invalidateGame(
+    gameId: string,
+    dependencyKinds: readonly JevDependencyKind[],
+    pairDomain?: JevPairDomain,
+  ): number;
+  /** Atomically rekeys a validated candidate C_ONLY row to raw owned local IDs. */
+  transferCandidateCOnlyPair(
+    candidateKey: JevPairKey,
+    ownedLocalGameIds: readonly [string, string],
+  ): boolean;
   purgeDDependent(): number;
   saveRunProgress(progress: JevRunProgress): void;
   checkpointPair(checkpoint: JevPairCheckpoint): void;
@@ -99,7 +124,7 @@ export interface JevPairCache {
 }
 
 const DATABASE_FILENAME = "jev-pair-cache.sqlite";
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 function canonicalPair(left: string, right: string): [string, string] {
   if (!left || !right || left === right) throw new Error("Pair requires two distinct stable IDs");
@@ -180,6 +205,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const judgmentKeys = [
+  "pairDomain",
   "collectionId",
   "consentEpoch",
   "gameAId",
@@ -208,6 +234,9 @@ const dependencyKeys = [
 function validate(j: JevPairJudgment): void {
   if (!isRecord(j)) throw new Error("Invalid judgment");
   requireExactKeys(j, judgmentKeys, "judgment");
+  const pairDomain = j.pairDomain === undefined ? "collection" : j.pairDomain;
+  if (pairDomain !== "collection" && pairDomain !== "wishlist-candidate")
+    throw new Error("Invalid pair domain");
   canonicalPair(j.gameAId, j.gameBId);
   requireText(j.collectionId, "collection ID");
   if (!Number.isFinite(j.value) || j.value < 0 || j.value > 1)
@@ -272,6 +301,25 @@ function validate(j: JevPairJudgment): void {
       requireFingerprint(dep.noteFingerprint, "note fingerprint");
     if (dep.noteVersion !== undefined) requireText(dep.noteVersion, "note version");
   }
+  if (pairDomain === "wishlist-candidate") {
+    if (j.dependencyKind !== "C_ONLY" || j.signal !== "C")
+      throw new Error("Wishlist candidate cache rows must be C_ONLY");
+    const members = [a, b].map(parseWishlistCandidateMember);
+    const candidate = members.find((member) => member?.kind === "wishlist-bgg");
+    const owned = members.find((member) => member?.kind === "owned-local");
+    if (
+      members.some((member) => member === null) ||
+      members.filter((member) => member?.kind === "wishlist-bgg").length !== 1 ||
+      members.filter((member) => member?.kind === "owned-local").length !== 1 ||
+      !candidate ||
+      candidate.kind !== "wishlist-bgg" ||
+      !owned ||
+      owned.kind !== "owned-local" ||
+      candidate.collectionId !== j.collectionId ||
+      owned.collectionId !== j.collectionId
+    )
+      throw new Error("Invalid wishlist candidate pair members");
+  }
 }
 
 function projectDependency(dep: JevPairDependency): JevPairDependency {
@@ -287,6 +335,7 @@ function projectDependency(dep: JevPairDependency): JevPairDependency {
 }
 
 type JudgmentRow = {
+  pair_domain: JevPairDomain;
   game_a: string;
   game_b: string;
   collection_id: string;
@@ -305,18 +354,82 @@ type JudgmentRow = {
   dependencies_json: string;
 };
 
+function projectJudgmentRow(row: JudgmentRow): JevPairJudgment | null {
+  try {
+    const dependencies: unknown = JSON.parse(row.dependencies_json);
+    if (!Array.isArray(dependencies)) return null;
+    const judgment: JevPairJudgment = {
+      ...(row.pair_domain === "collection" ? {} : { pairDomain: row.pair_domain }),
+      gameAId: row.game_a,
+      gameBId: row.game_b,
+      collectionId: row.collection_id,
+      ...(row.consent_epoch === null ? {} : { consentEpoch: row.consent_epoch }),
+      signal: row.signal,
+      dependencyKind: row.dependency_kind,
+      value: row.value,
+      ...(row.confidence === null ? {} : { confidence: row.confidence }),
+      modelId: row.model_id,
+      rubricVersion: row.rubric_version,
+      questionVersion: row.question_version,
+      requestSchemaVersion: row.request_schema_version,
+      scoreMappingVersion: row.score_mapping_version,
+      semanticPolicyId: row.semantic_policy_id,
+      completedAt: row.completed_at,
+      dependencies: dependencies as JevPairDependency[],
+    };
+    validate(judgment);
+    return judgment;
+  } catch {
+    return null;
+  }
+}
+
+/** Canonical persisted representation; field and optional-property order is immaterial. */
+function canonicalJudgmentContent(judgment: JevPairJudgment): string {
+  const [gameAId, gameBId] = canonicalPair(judgment.gameAId, judgment.gameBId);
+  return JSON.stringify({
+    pairDomain: judgment.pairDomain ?? "collection",
+    collectionId: judgment.collectionId,
+    consentEpoch: judgment.consentEpoch ?? null,
+    gameAId,
+    gameBId,
+    signal: judgment.signal,
+    dependencyKind: judgment.dependencyKind,
+    value: judgment.value,
+    confidence: judgment.confidence ?? null,
+    modelId: judgment.modelId,
+    rubricVersion: judgment.rubricVersion,
+    questionVersion: judgment.questionVersion,
+    requestSchemaVersion: judgment.requestSchemaVersion,
+    scoreMappingVersion: judgment.scoreMappingVersion,
+    semanticPolicyId: judgment.semanticPolicyId,
+    completedAt: judgment.completedAt,
+    dependencies: [...judgment.dependencies]
+      .sort((left, right) => compareStableIds(left.gameId, right.gameId))
+      .map((dependency) => ({
+        gameId: dependency.gameId,
+        nameFingerprint: dependency.nameFingerprint,
+        descriptionFingerprint: dependency.descriptionFingerprint ?? null,
+        noteFingerprint: dependency.noteFingerprint ?? null,
+        noteVersion: dependency.noteVersion ?? null,
+      })),
+  });
+}
+
 type RunProgressRow = Omit<JevRunProgress, "stopReason"> & { stopReason: string | null };
 
 function prepareStatements(db: Database) {
   return {
-    get: db.query<JudgmentRow, [string, string, JevSignal]>(
-      "SELECT * FROM judgments WHERE game_a=? AND game_b=? AND signal=?",
+    get: db.query<JudgmentRow, [JevPairDomain, string, string, JevSignal]>(
+      "SELECT * FROM judgments WHERE pair_domain=? AND game_a=? AND game_b=? AND signal=?",
     ),
     upsert: db.query(
-      "INSERT OR REPLACE INTO judgments (game_a,game_b,signal,collection_id,consent_epoch,dependency_kind,value,confidence,model_id,rubric_version,question_version,request_schema_version,score_mapping_version,semantic_policy_id,completed_at,dependencies_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "INSERT OR REPLACE INTO judgments (pair_domain,game_a,game_b,signal,collection_id,consent_epoch,dependency_kind,value,confidence,model_id,rubric_version,question_version,request_schema_version,score_mapping_version,semantic_policy_id,completed_at,dependencies_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     ),
-    deletePairSignal: db.query("DELETE FROM judgments WHERE game_a=? AND game_b=? AND signal=?"),
-    deletePair: db.query("DELETE FROM judgments WHERE game_a=? AND game_b=?"),
+    deletePairSignal: db.query(
+      "DELETE FROM judgments WHERE pair_domain=? AND game_a=? AND game_b=? AND signal=?",
+    ),
+    deletePair: db.query("DELETE FROM judgments WHERE pair_domain=? AND game_a=? AND game_b=?"),
     saveRunProgress: db.query(
       "INSERT OR REPLACE INTO run_progress (singleton,run_id,state,pair_count,completed_pairs,cache_hits,cache_misses,failed_pairs,stop_reason,updated_at) VALUES (1,?,?,?,?,?,?,?,?,?)",
     ),
@@ -346,6 +459,9 @@ function noOpCache(): JevPairCache {
       throw new Error("Jev pair cache unavailable");
     },
     invalidateGame: () => {
+      throw new Error("Jev pair cache unavailable");
+    },
+    transferCandidateCOnlyPair: () => {
       throw new Error("Jev pair cache unavailable");
     },
     purgeDDependent: () => {
@@ -388,14 +504,18 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
     if (version < 1) {
       db.exec(`BEGIN IMMEDIATE;
         CREATE TABLE judgments (
+          pair_domain TEXT NOT NULL CHECK(pair_domain IN ('collection','wishlist-candidate')),
           game_a TEXT NOT NULL, game_b TEXT NOT NULL, signal TEXT NOT NULL CHECK(signal IN ('C','D')),
           collection_id TEXT NOT NULL, consent_epoch TEXT,
           dependency_kind TEXT NOT NULL CHECK(dependency_kind IN ('C_ONLY','D_ONLY','SHARED_CD')),
           value REAL NOT NULL CHECK(value >= 0 AND value <= 1), confidence REAL CHECK(confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
           model_id TEXT NOT NULL, rubric_version TEXT NOT NULL, question_version TEXT NOT NULL,
           request_schema_version TEXT NOT NULL, score_mapping_version TEXT NOT NULL, semantic_policy_id TEXT NOT NULL,
-          completed_at TEXT NOT NULL, dependencies_json TEXT NOT NULL, PRIMARY KEY(game_a, game_b, signal), CHECK(game_a < game_b)
+          completed_at TEXT NOT NULL, dependencies_json TEXT NOT NULL,
+          PRIMARY KEY(pair_domain, game_a, game_b, signal), CHECK(game_a < game_b)
         );
+        CREATE INDEX judgments_domain_member_a ON judgments(pair_domain, game_a);
+        CREATE INDEX judgments_domain_member_b ON judgments(pair_domain, game_b);
         CREATE TABLE run_progress (
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1), run_id TEXT NOT NULL,
           state TEXT NOT NULL CHECK(state IN ('running','completed','interrupted','failed')),
@@ -404,7 +524,7 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
           updated_at TEXT NOT NULL
         );
         CREATE TABLE activation (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), identity TEXT NOT NULL, activated_at TEXT NOT NULL);
-        PRAGMA user_version = 3;
+        PRAGMA user_version = 4;
         COMMIT;`);
     } else {
       if (version < 2) {
@@ -421,6 +541,35 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
         db.exec(`BEGIN IMMEDIATE;
           ALTER TABLE run_progress ADD COLUMN stop_reason TEXT;
           PRAGMA user_version = 3;
+          COMMIT;`);
+      }
+      if (version < 4) {
+        // Every pre-domain row was written by collection-only callers. Rebuild
+        // the key with an explicit collection namespace without dropping rows.
+        db.exec(`BEGIN IMMEDIATE;
+          ALTER TABLE judgments RENAME TO judgments_v3;
+          CREATE TABLE judgments (
+            pair_domain TEXT NOT NULL CHECK(pair_domain IN ('collection','wishlist-candidate')),
+            game_a TEXT NOT NULL, game_b TEXT NOT NULL, signal TEXT NOT NULL CHECK(signal IN ('C','D')),
+            collection_id TEXT NOT NULL, consent_epoch TEXT,
+            dependency_kind TEXT NOT NULL CHECK(dependency_kind IN ('C_ONLY','D_ONLY','SHARED_CD')),
+            value REAL NOT NULL CHECK(value >= 0 AND value <= 1), confidence REAL CHECK(confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+            model_id TEXT NOT NULL, rubric_version TEXT NOT NULL, question_version TEXT NOT NULL,
+            request_schema_version TEXT NOT NULL, score_mapping_version TEXT NOT NULL, semantic_policy_id TEXT NOT NULL,
+            completed_at TEXT NOT NULL, dependencies_json TEXT NOT NULL,
+            PRIMARY KEY(pair_domain, game_a, game_b, signal), CHECK(game_a < game_b)
+          );
+          INSERT INTO judgments (
+            pair_domain,game_a,game_b,signal,collection_id,consent_epoch,dependency_kind,value,confidence,
+            model_id,rubric_version,question_version,request_schema_version,score_mapping_version,
+            semantic_policy_id,completed_at,dependencies_json
+          ) SELECT 'collection',game_a,game_b,signal,collection_id,consent_epoch,dependency_kind,value,confidence,
+            model_id,rubric_version,question_version,request_schema_version,score_mapping_version,
+            semantic_policy_id,completed_at,dependencies_json FROM judgments_v3;
+          DROP TABLE judgments_v3;
+          CREATE INDEX judgments_domain_member_a ON judgments(pair_domain, game_a);
+          CREATE INDEX judgments_domain_member_b ON judgments(pair_domain, game_b);
+          PRAGMA user_version = 4;
           COMMIT;`);
       }
     }
@@ -463,6 +612,7 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
   const writeJudgment = (judgment: JevPairJudgment): void => {
     const [a, b] = canonicalPair(judgment.gameAId, judgment.gameBId);
     statements?.upsert.run(
+      judgment.pairDomain ?? "collection",
       a,
       b,
       judgment.signal,
@@ -534,6 +684,8 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
     },
     lookup(key) {
       if (!usable()) return null;
+      const pairDomain = key.pairDomain === undefined ? "collection" : key.pairDomain;
+      if (pairDomain !== "collection" && pairDomain !== "wishlist-candidate") return null;
       let pair: [string, string];
       try {
         pair = canonicalPair(key.gameAId, key.gameBId);
@@ -542,7 +694,7 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       }
       let row: JudgmentRow | null;
       try {
-        row = statements.get.get(pair[0], pair[1], key.signal) ?? null;
+        row = statements.get.get(pairDomain, pair[0], pair[1], key.signal) ?? null;
       } catch {
         // A query/connection failure makes the cache state unreadable; callers
         // must not treat it as a trustworthy miss.
@@ -551,34 +703,9 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       }
       if (!row) return null;
 
-      try {
-        const dependencies: unknown = JSON.parse(row.dependencies_json);
-        if (!Array.isArray(dependencies)) return null;
-        const judgment: JevPairJudgment = {
-          gameAId: row.game_a,
-          gameBId: row.game_b,
-          collectionId: row.collection_id,
-          ...(row.consent_epoch === null ? {} : { consentEpoch: row.consent_epoch }),
-          signal: row.signal,
-          dependencyKind: row.dependency_kind,
-          value: row.value,
-          ...(row.confidence === null ? {} : { confidence: row.confidence }),
-          modelId: row.model_id,
-          rubricVersion: row.rubric_version,
-          questionVersion: row.question_version,
-          requestSchemaVersion: row.request_schema_version,
-          scoreMappingVersion: row.score_mapping_version,
-          semanticPolicyId: row.semantic_policy_id,
-          completedAt: row.completed_at,
-          dependencies: dependencies as JevPairDependency[],
-        };
-        validate(judgment);
-        return judgment;
-      } catch {
-        // A malformed row is unusable in isolation. It does not make other
-        // rows unreadable or invalidate the cache's mutation revision.
-        return null;
-      }
+      // A malformed row is unusable in isolation. It does not make other
+      // rows unreadable or invalidate the cache's mutation revision.
+      return projectJudgmentRow(row);
     },
     upsert(judgment) {
       assertUsable();
@@ -586,20 +713,106 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       writeJudgment(judgment);
       recordMutation();
     },
-    purgePair(left, right, signal) {
+    transferCandidateCOnlyPair(candidateKey, ownedLocalGameIds) {
+      assertUsable();
+      if (candidateKey.pairDomain !== "wishlist-candidate" || candidateKey.signal !== "C")
+        throw new Error("Candidate transfer requires wishlist-candidate domain");
+      if (
+        !Array.isArray(ownedLocalGameIds) ||
+        ownedLocalGameIds.length !== 2 ||
+        ownedLocalGameIds.some((id) => typeof id !== "string" || !id.trim() || id.length > 2048)
+      )
+        throw new Error("Candidate transfer requires two owned local IDs");
+      const sourcePair = canonicalPair(candidateKey.gameAId, candidateKey.gameBId);
+      const sourceRow = statements.get.get("wishlist-candidate", sourcePair[0], sourcePair[1], "C");
+      if (!sourceRow) return false;
+      const source = projectJudgmentRow(sourceRow);
+      if (!source) throw new Error("Candidate cache row is invalid");
+      if (source.dependencyKind !== "C_ONLY" || source.signal !== "C")
+        throw new Error("Only candidate C_ONLY rows can be transferred");
+      const members = [source.gameAId, source.gameBId].map(parseWishlistCandidateMember);
+      const candidate = members.find((member) => member?.kind === "wishlist-bgg");
+      const priorOwned = members.find((member) => member?.kind === "owned-local");
+      if (
+        !candidate ||
+        candidate.kind !== "wishlist-bgg" ||
+        !priorOwned ||
+        priorOwned.kind !== "owned-local" ||
+        source.collectionId !== candidate.collectionId ||
+        source.collectionId !== priorOwned.collectionId ||
+        ownedLocalGameIds[1] !== priorOwned.localGameId
+      )
+        throw new Error("Candidate cache pair members are invalid");
+      const [acquiredLocalId, otherOwnedLocalId] = ownedLocalGameIds;
+      const targetPair = canonicalPair(acquiredLocalId, otherOwnedLocalId);
+      const candidateMember = [source.gameAId, source.gameBId].find(
+        (memberId) => parseWishlistCandidateMember(memberId)?.kind === "wishlist-bgg",
+      );
+      const ownedMember = [source.gameAId, source.gameBId].find(
+        (memberId) => parseWishlistCandidateMember(memberId)?.kind === "owned-local",
+      );
+      if (!candidateMember || !ownedMember)
+        throw new Error("Candidate cache pair members are invalid");
+      const target: JevPairJudgment = {
+        collectionId: source.collectionId,
+        gameAId: targetPair[0],
+        gameBId: targetPair[1],
+        signal: "C",
+        dependencyKind: "C_ONLY",
+        value: source.value,
+        ...(source.confidence === undefined ? {} : { confidence: source.confidence }),
+        modelId: source.modelId,
+        rubricVersion: source.rubricVersion,
+        questionVersion: source.questionVersion,
+        requestSchemaVersion: source.requestSchemaVersion,
+        scoreMappingVersion: source.scoreMappingVersion,
+        semanticPolicyId: source.semanticPolicyId,
+        completedAt: source.completedAt,
+        dependencies: source.dependencies
+          .map((dependency) => ({
+            ...dependency,
+            gameId:
+              dependency.gameId === candidateMember
+                ? acquiredLocalId
+                : dependency.gameId === ownedMember
+                  ? otherOwnedLocalId
+                  : dependency.gameId,
+          }))
+          .sort((left, right) => compareStableIds(left.gameId, right.gameId)),
+      };
+      validate(target);
+      const targetExisting = statements.get.get("collection", targetPair[0], targetPair[1], "C");
+      const existingJudgment = targetExisting ? projectJudgmentRow(targetExisting) : null;
+      if (targetExisting && !existingJudgment)
+        throw new Error("Existing owned cache row is invalid");
+      if (
+        existingJudgment &&
+        canonicalJudgmentContent(existingJudgment) !== canonicalJudgmentContent(target)
+      )
+        throw new Error("Conflicting owned cache row prevents candidate transfer");
+      db.transaction(() => {
+        if (!existingJudgment) writeJudgment(target);
+        statements.deletePairSignal.run("wishlist-candidate", sourcePair[0], sourcePair[1], "C");
+      })();
+      recordMutation();
+      return true;
+    },
+    purgePair(left, right, signal, pairDomain = "collection") {
       assertUsable();
       const [a, b] = canonicalPair(left, right);
       const deleted = db.transaction(() => {
         statements.deleteActivation.run();
         return Number(
-          (signal ? statements.deletePairSignal.run(a, b, signal) : statements.deletePair.run(a, b))
-            .changes,
+          (signal
+            ? statements.deletePairSignal.run(pairDomain, a, b, signal)
+            : statements.deletePair.run(pairDomain, a, b)
+          ).changes,
         );
       })();
       recordMutation();
       return deleted;
     },
-    purgeGame(gameId, signal, dependencyKind) {
+    purgeGame(gameId, signal, dependencyKind, pairDomain = "collection") {
       const allKinds: JevDependencyKind[] = ["C_ONLY", "D_ONLY", "SHARED_CD"];
       const kinds = dependencyKind ? [dependencyKind] : allKinds;
       const selected = signal
@@ -614,15 +827,15 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
         return Number(
           db
             .query(
-              `DELETE FROM judgments WHERE (game_a=? OR game_b=?) AND dependency_kind IN (${placeholders})${signal ? " AND signal=?" : ""}`,
+              `DELETE FROM judgments WHERE pair_domain=? AND (game_a=? OR game_b=?) AND dependency_kind IN (${placeholders})${signal ? " AND signal=?" : ""}`,
             )
-            .run(gameId, gameId, ...selected, ...(signal ? [signal] : [])).changes,
+            .run(pairDomain, gameId, gameId, ...selected, ...(signal ? [signal] : [])).changes,
         );
       })();
       recordMutation();
       return deleted;
     },
-    invalidateGame(gameId, dependencyKinds) {
+    invalidateGame(gameId, dependencyKinds, pairDomain = "collection") {
       assertUsable();
       requireText(gameId, "game ID");
       const kinds = [...new Set(dependencyKinds)];
@@ -633,9 +846,9 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
         return Number(
           db
             .query(
-              `DELETE FROM judgments WHERE (game_a=? OR game_b=?) AND dependency_kind IN (${placeholders})`,
+              `DELETE FROM judgments WHERE pair_domain=? AND (game_a=? OR game_b=?) AND dependency_kind IN (${placeholders})`,
             )
-            .run(gameId, gameId, ...kinds).changes,
+            .run(pairDomain, gameId, gameId, ...kinds).changes,
         );
       })();
       recordMutation();
@@ -670,13 +883,20 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       const first = judgments[0];
       if (!first) throw new Error("A checkpoint requires at least one judgment");
       const pair = canonicalPair(first.gameAId, first.gameBId);
+      const pairDomain = first.pairDomain === undefined ? "collection" : first.pairDomain;
       if (
         judgments.some((judgment) => {
           const otherPair = canonicalPair(judgment.gameAId, judgment.gameBId);
-          return otherPair[0] !== pair[0] || otherPair[1] !== pair[1];
+          return (
+            otherPair[0] !== pair[0] ||
+            otherPair[1] !== pair[1] ||
+            (judgment.pairDomain === undefined ? "collection" : judgment.pairDomain) !==
+              pairDomain ||
+            judgment.collectionId !== first.collectionId
+          );
         })
       )
-        throw new Error("Checkpoint judgments must identify the same unordered pair");
+        throw new Error("Checkpoint judgments must identify the same domain, collection, and pair");
       if (judgments.length === 2 && judgments[0]?.signal === judgments[1]?.signal)
         throw new Error("Checkpoint judgments must have distinct signals");
       validateProgress(progress);

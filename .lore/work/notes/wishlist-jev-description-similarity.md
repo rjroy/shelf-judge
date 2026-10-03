@@ -179,4 +179,35 @@ The accepted implementation source/test manifest was captured after review and i
 | `packages/daemon/tests/wishlist-routes.test.ts` | `3745f73dd753f92853d2137afbb6bd78c4624994` | `e081aeaf5ba0f8bd7350cd0163f67cce546009a48bbc70eebb510c7dda2a52a1` | modified |
 | `packages/daemon/tests/ownership-routes.test.ts` | `e28576990f8164745bb6697ea9513b89cae810b3` | `ea2e6164961c064dd262a5740b0b0fa8b2aa1f8d31f9208f79a03ea600f6bce0` | modified |
 
-Phase 3 is closed by the parent and this administrative checkpoint records only that accepted phase. Phase 4 is open and ready for the parent to claim; no child beads were created here. No push is authorized.
+Phase 3 is closed by the parent and that checkpoint records only Phase 3 acceptance. Phase 4 remains in progress under its parent bead; its implementation is split into 4a/4b/4c child beads.
+
+## Phase 4a implementation log (parent-accepted)
+
+Implementing only `shelf-judge-xi83.4.1` (cache/schema identity foundation). The explicit `JevPairDomain` is `collection` or `wishlist-candidate`; omitted legacy keys/judgments remain in the collection domain. Schema version 4 adds the domain to the judgment primary key and domain/member indexes. Existing version-3 rows are transactionally copied into the collection namespace and retain their judgment, dependency JSON, completion time, and provenance. The default collection lookup, checkpoint, purge, and invalidation contract remains source-compatible; candidate operations must name their domain.
+
+Candidate members use reversible canonical JSON tuples: `JSON.stringify(["wishlist-bgg", collectionId, bggId])` and `JSON.stringify(["owned-local", collectionId, localGameId])`. Candidate-row validation requires exactly one of each typed member from the row's collection and C_ONLY/C signal, with the existing name/description fingerprints and no note fields. Raw text is not persisted. The bounded `transferCandidateCOnlyPair` cache primitive validates the existing row and owned-local identity, rewrites both members and dependency IDs to the raw collection-owned IDs, rejects conflicting existing collection rows, then atomically writes/rekeys while retaining value, completion and model/rubric/schema/policy provenance. Replaying after source removal is a no-op. Source fingerprint/model/rubric/eligibility proof and acquisition coordination remain Phase 4b/4c work; this primitive alone is not acquisition authorization.
+
+### P4A-01 existing-target comparison correction
+
+Review found that comparing projected and transferred judgments with raw `JSON.stringify` depended on object insertion order. The transfer now compares an explicit canonical persisted representation: every judgment field (including optional consent/confidence normalized to null), sorted canonical pair IDs, and sorted dependencies with every optional fingerprint/version included. Thus semantically identical target content can be reused regardless of property/dependency order, while any real persisted-content difference still rejects transfer and retains the candidate row. Tests use actual temporary SQLite rows for existing-identical target cleanup, injected delete failure with both rows/revision unchanged, and conflicting target rejection with candidate evidence retained. Parent accepted this P4A-01 correction after independent testing and review.
+
+The cache test fixture covers a version-3 reopen migration, identical numeric BGG/local identifiers, opposite candidate/owned roles, domain-isolated lookup and purge, candidate-specific purge isolation, indexed point-query plan, atomic candidate C checkpoint/progress, successful rekey/reopen, and transaction-trigger failure preserving source/target/revision. Indexed key lookup remains domain-scoped; no cache enumeration or batch API was added. Before P4A-01, the broader collection redundancy and existing run regression set passed (191 tests, 1,149 expectations). For P4A-01, focused cache/read-proof/coverage/run-pair suites passed (65 tests, 405 expectations). Parent-accepted independent evidence: 72 tests/474 expectations plus targeted P4A-01 3 tests/12 expectations, root lint/typecheck, scoped formatting/diff checks, and full review of `/tmp/opencode/wishlist-jev-phase4a-review.diff` against baseline `8c9e7b1`. Those independent runs are distinct from the implementation-local test counts above. Parent closed `shelf-judge-xi83.4.1`; 4b and 4c and the Phase 4 parent remain open. No route, read-proof/resolver integration, acquisition lifecycle, run, or client changes are part of this bead. No real provider or owner data was used.
+
+Phase 4a implementation manifest:
+
+- `packages/daemon/src/services/jev-pair-cache-service.ts`
+- `packages/daemon/src/services/jev-pair-identity.ts`
+- `packages/daemon/tests/services/jev-pair-cache-service.test.ts`
+- `.lore/work/notes/wishlist-jev-description-similarity.md`
+
+### Phase 4a acceptance and checkpoint evidence
+
+Phase 4a is closed by the parent after independent testing/review, including P4A-01. The accepted source/test manifest's index blobs, worktree SHA-256, and pre-note-update status were captured immediately before this note amendment:
+
+| Path | Index blob | Worktree SHA-256 | Status at capture |
+| --- | --- | --- | --- |
+| `packages/daemon/src/services/jev-pair-cache-service.ts` | `7beda45a8ef987f0725ef76266054e193dd15821` | `dda116167c29a8b8e57d41fa5c03e049f3dba2f75cc48d2198f57b9105ca1d8e` | modified |
+| `packages/daemon/src/services/jev-pair-identity.ts` | `ad9926efe23a7c55bb6b76fd38c938c62737c08c` | `c2fdc34edcfe58be9c23ec7ed4a66e19d40b713c2067be4df179bd2f8b5103fd` | modified |
+| `packages/daemon/tests/services/jev-pair-cache-service.test.ts` | `dc965918f66005a323822f5d5cd3e950f8eb5639` | `9123e5471f7b8601768f212399f7600f2b7d310f3fc871efe529c2ddc039d466` | modified |
+
+The implementation note is the fourth accepted path and is excluded from its own hash table; this checkpoint also stages the current `.beads` export and interaction log, including Phase 4 split tracking and the accepted 4a closure. The 4b proof/resolver, 4c acquisition/recovery, and Phase 4 parent integration remain unfinished. This checkpoint authorizes no push.
