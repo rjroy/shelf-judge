@@ -438,3 +438,28 @@ This note is the tenth accepted path and is excluded from its own hash table. Th
 The parent confirmed `shelf-judge-xi83.5.1` and `.5.2` are closed in dependency order, with no parent dependency on descendants. Phase 5 obligations are accepted across the child evidence: legacy source hydration is preparation-only and precedes frozen disclosure; selection and source/eligibility/policy identity are immutable and checked before dispatch; C_ONLY reads and payloads are note-independent; exact frozen sendable misses execute serially with lazy gateway creation, budget/cancellation behavior, valid-hit reuse and atomic judgment/progress checkpoints; live source, membership, cache and monotonic wishlist-write fences reject stale previews/callbacks; restart does not restore authorization or auto-resume. The P5B production gateway race correction preserves a valid admission-time cache hit without HTTP dispatch while genuine source failures remain failures. Independent evidence remains in separate sets: Phase 5a's 123 tests/654 expectations; Phase 5b's targeted P5B-02 1/23 and related 146/1,160 suites; and the separately recorded broader 285/1,777 production mutation-race, operation-count and restart run. Root lint/typecheck, formatting, and diff gates passed.
 
 The Phase 5 aggregate is accepted and checkpointed by the parent; the overall wishlist feature remains in progress and Phase 6a is next. This acceptance does not claim route/query/client integration, full feature completion, out-of-band disk mutation detection, or real provider behavior. No push was made or authorized.
+
+## Phase 6a acceptance and checkpoint evidence
+
+The parent accepted `shelf-judge-xi83.6` after independent validation and review. The accepted review diff is `/tmp/opencode/wishlist-jev-phase6a-review.diff`, against baseline `ec5647a4`. Independent evidence: daemon focused suites passed (227 tests, 1,399 expectations), web transport proxy suite passed (12 tests, 42 expectations), and root lint, typecheck, browser typecheck, formatting and diff checks passed. No implementation tests were rerun for this administrative checkpoint. This closes Phase 6a only; Phase 6b web and Phase 6c CLI remain separate, ready lanes, while the feature epic remains in progress.
+
+The accepted 14-path source/test manifest was checked after review and immediately before this note amendment; no source/test contents changed. Index blobs and worktree SHA-256 values are recorded below. This note is the fifteenth manifest path and is excluded from its own hash table.
+
+| Path | Index blob | Worktree SHA-256 |
+| --- | --- | --- |
+| `packages/shared/src/types.ts` | `38f1d9d66c0809a256c4c02fb0ba0210bbedc47f` | `a103d27b63c60c0fb707b18b3c96804e7995993b0c819e5f60d1645d1ea4b4d6` |
+| `packages/shared/src/index.ts` | `cd28437222f10a37bd236ce66f9ce2be1a91853c` | `97512237cebb1dda4e91e46d9a19041d1a9e6069627f83e13f91da770b60e5b8` |
+| `packages/daemon/src/app.ts` | `ceeb1858b42be919c385449e76aaecdf54d1866c` | `1999cc2dada3f2b1b1d951ee856891afe1bd12ad2c8397220e2b650480bafd61` |
+| `packages/daemon/src/routes/redundancy.ts` | `bc6972dc7b4511460be6a874dff5206b207f0f2a` | `ae669892082b0baed54d3736bba61482e5824a893bf28d92f6c5919ff5524600` |
+| `packages/daemon/src/routes/wishlist.ts` | `ef7e17102bf5f61736decc98451f372edda36b94` | `368caee0a18f494d8db0808728d3b37d721e1b72806bd56255abbd8fbe1259bd` |
+| `packages/daemon/src/services/jev-pair-cache-service.ts` | `d2e6eb5e02a2727a28003abe1c2cd1befa8ac8e1` | `0cd2f2c10d6c9da6a9e0f03cbe5c8e9a68e4ac1171710efd1f755022b8772523` |
+| `packages/daemon/src/services/jev-pair-status.ts` | `ae5d8932108983c2186901ace7e78128be84166b` | `84e56832bb6166fc93da9cc5d253b50b0e87a60b584175ed8df7fe4a30b654dc` |
+| `packages/daemon/src/services/jev-run-controller.ts` | `33b98608a2a7923dd197c3440f0ed7b9135e06c2` | `5ee540bc57e32fc8cd5cc053bc1dbd129fc42c7814009005aba9a8ce1637dcde` |
+| `packages/daemon/src/services/jev-run-service.ts` | `67140cafe20e2a7ec541555323f05e13a128d557` | `9cc4ea39c64d2e047436c62774cc4723403a3bf77918c93da9a3422c5bf166d4` |
+| `packages/daemon/tests/semantic-redundancy-routes.test.ts` | `b5fe10accff6b54bcce99e9f2e191fa2f224076e` | `16134d81007f0b4dd52a76261d500c4be9b51d0dd2a65c7dff4a2e135130f792` |
+| `packages/daemon/tests/wishlist-routes.test.ts` | `f94d6b282c1e08189526ff279e5f333d801dc272` | `7ad2a1c82555b9ec2a08a8227664cb910d544fafa5bb03ca6d82d6fb98b78df8` |
+| `packages/daemon/tests/services/jev-pair-cache-service.test.ts` | `4e0c48bc3ebbf152c303f83bdabec4d2c72b8d81` | `3602466f9847780a4dc4354334d6d040fd5f319190f8f31a0844655cb58f7159` |
+| `packages/daemon/tests/jev-run-composition.test.ts` | `241978dc77af8b40746e40c3e4f7c17ba2db1083` | `e8b160eb08efe2cb142934248e11c8990c32829d9241cb3f50b779ec365e5d00` |
+| `packages/web/tests/daemon-transport.test.ts` | `a583efe5c0fe2d88a5703cf626dee147cd257f1f` | `2c3f8cff3cdb25264b5d2e0171d41c4d2c385ace9b341942ed1a5b48a48d7f11` |
+
+The 6a handoff contract is recorded above: clients use `GET /api/wishlist/redundancy` for explicit current/saved/base projection; preview uses the existing Run path with omitted/collection scope or `scope=wishlist` and repeated `bggId` for exact selection; start sends only `{ requestId, precondition, noteTransmissionAuthorized: false }` for wishlist runs. Progress fields and paths are documented there. The web lane owns UI/page and browser workflow; the CLI lane owns CLI selectors/workflow. Those lanes should coordinate on the shared types and existing route contract, not edit this note concurrently. `.beads` changes are administrative tracking state included in the checkpoint; no push is authorized.

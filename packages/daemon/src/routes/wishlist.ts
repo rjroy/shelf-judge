@@ -29,6 +29,22 @@ export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
     }
   });
 
+  // Explicit heavier read: unlike progress polling, this computes one current projection.
+  routes.get("/wishlist/redundancy", async (c) => {
+    c.header("Cache-Control", "no-store");
+    try {
+      const results = await wishlistService.listWithCurrentRedundancy();
+      return c.json(
+        results.map(({ entry, redundancy }) => ({
+          entry: publicEntry(entry as WishlistEntry),
+          redundancy,
+        })),
+      );
+    } catch {
+      return c.json({ error: "Wishlist redundancy projection is unavailable" }, 503);
+    }
+  });
+
   // POST /wishlist
   routes.post("/wishlist", async (c) => {
     let body: unknown;
@@ -118,6 +134,41 @@ export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
       name: "list",
       description: "List all wishlist entries",
       invocation: { method: "GET", path: "/api/wishlist" },
+      hierarchy: { root: "shelf", feature: "wishlist" },
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.wishlist.list-redundancy-projection",
+      name: "list-redundancy-projection",
+      description:
+        "List safe wishlist entries with a separate current/saved/base redundancy projection; source text is omitted",
+      invocation: { method: "GET", path: "/api/wishlist/redundancy" },
+      response: {
+        body: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              entry: {
+                type: "object",
+                description: "Public WishlistEntryView; excludes bggSource.",
+              },
+              redundancy: {
+                type: "object",
+                properties: {
+                  source: { enum: ["current", "saved-factual", "base-prediction"] },
+                  adjustment: { type: ["object", "null"] },
+                  orderingScore: { type: ["number", "null"] },
+                },
+                required: ["source", "adjustment", "orderingScore"],
+                additionalProperties: false,
+              },
+            },
+            required: ["entry", "redundancy"],
+            additionalProperties: false,
+          },
+        },
+      },
       hierarchy: { root: "shelf", feature: "wishlist" },
       idempotent: true,
     },

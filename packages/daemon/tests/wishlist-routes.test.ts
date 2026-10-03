@@ -155,6 +155,49 @@ describe("wishlist routes", () => {
       expect(JSON.stringify(body)).not.toContain("private persisted BGG prose");
       expect(body[0]).not.toHaveProperty("bggSource");
     });
+
+    test("separate redundancy projection keeps safe entry DTO and provenance intact", async () => {
+      const entry = makeEntry("e1", 100, "Projected Game", NOW);
+      let projectionCalls = 0;
+      wishlistService.listWithCurrentRedundancy = () => {
+        projectionCalls++;
+        return Promise.resolve([
+          {
+            entry,
+            redundancy: {
+              source: "saved-factual" as const,
+              adjustment: entry.redundancyPreview,
+              orderingScore: entry.redundancyPreview?.adjustedScore ?? entry.predictedScore,
+            },
+          },
+        ]);
+      };
+      const response = await app.request("/api/wishlist/redundancy");
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      const body = (await response.json()) as unknown;
+      expect(body).toMatchObject([
+        {
+          entry: { id: "e1", bggId: 100, name: "Projected Game" },
+          redundancy: { source: "saved-factual", orderingScore: 7.5 },
+        },
+      ]);
+      expect(JSON.stringify(body)).not.toContain("private persisted BGG prose");
+      expect(JSON.stringify(body)).not.toContain("bggSource");
+      expect(projectionCalls).toBe(1);
+      expect((await app.request("/api/wishlist")).status).toBe(200);
+      expect(projectionCalls).toBe(1);
+    });
+
+    test("projection failure is sanitized and does not expose source details", async () => {
+      wishlistService.listWithCurrentRedundancy = () =>
+        Promise.reject(new Error("private description sentinel"));
+      const response = await app.request("/api/wishlist/redundancy");
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "Wishlist redundancy projection is unavailable",
+      });
+    });
   });
 
   describe("POST /api/wishlist", () => {

@@ -85,7 +85,10 @@ export interface AppDeps {
   semanticRedundancyStateService?: SemanticRedundancyStateService;
   jevStatusService?: Pick<ReturnType<typeof createJevStatusService>, "read">;
   jevRefreshProgressService?: Pick<ReturnType<typeof createJevRefreshProgressService>, "read">;
-  jevRunController?: Pick<JevRunController, "preview" | "start" | "cancel" | "activeRun">;
+  jevRunController?: Pick<
+    JevRunController,
+    "preview" | "previewWishlist" | "start" | "cancel" | "activeRun"
+  >;
   jevPairCache?: JevPairCache;
   ownerGameNoteService: OwnerGameNoteService;
   groundedAnalysisProvider: GroundedAnalysisProvider;

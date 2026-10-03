@@ -192,6 +192,17 @@ describe("Jev pair cache", () => {
         value,confidence,model_id,rubric_version,question_version,request_schema_version,
         score_mapping_version,semantic_policy_id,completed_at,dependencies_json FROM judgments_v4;
       DROP TABLE judgments_v4;
+      ALTER TABLE run_progress RENAME TO run_progress_v4;
+      CREATE TABLE run_progress (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1), run_id TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('running','completed','interrupted','failed')),
+        pair_count INTEGER NOT NULL, completed_pairs INTEGER NOT NULL, cache_hits INTEGER NOT NULL,
+        cache_misses INTEGER NOT NULL, failed_pairs INTEGER NOT NULL, stop_reason TEXT,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO run_progress (singleton,run_id,state,pair_count,completed_pairs,cache_hits,cache_misses,failed_pairs,stop_reason,updated_at)
+        SELECT singleton,run_id,state,pair_count,completed_pairs,cache_hits,cache_misses,failed_pairs,stop_reason,updated_at FROM run_progress_v4;
+      DROP TABLE run_progress_v4;
       PRAGMA user_version=3;`);
     db.close();
 
@@ -208,6 +219,20 @@ describe("Jev pair cache", () => {
       0.63,
     );
     expect(reopened.getRunProgress()).toEqual(progress());
+    reopened.close();
+  });
+
+  test("persists explicit run scope and leaves historical scope unknown", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    cache.saveRunProgress({ ...progress(), scope: "wishlist" });
+    expect(cache.getRunProgress()).toMatchObject({ scope: "wishlist" });
+    cache.close();
+
+    const reopened = await createJevPairCache(dir);
+    expect(reopened.getRunProgress()).toMatchObject({ scope: "wishlist" });
+    reopened.saveRunProgress(progress("completed"));
+    expect(reopened.getRunProgress()).not.toHaveProperty("scope");
     reopened.close();
   });
 

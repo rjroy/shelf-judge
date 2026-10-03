@@ -1826,6 +1826,42 @@ export type JevRunScopeDisclosure =
       sendablePairCount: number;
     };
 
+/** Safe fields disclosed by the existing explicit Run preview endpoint. */
+export interface JevRunPreviewBase {
+  requestId: string;
+  precondition: string;
+  provider: "TypeSafe";
+  modelId: string;
+  eligibleGameCount: number;
+  pairCount: number;
+  descriptionBearingPairCount: number;
+  noteBearingPairCount: number;
+  noteTransmissionPermitted: boolean;
+  providerConfigured: boolean;
+  signalScope: { description: boolean; ownerNotes: boolean };
+  scoringEffect: "integrated-fitness" | "annotation-only";
+  retentionCaveat: string;
+  limits: {
+    maxEligiblePairs: number;
+    maxProviderAttempts: number;
+    maxRetriesPerEvaluation: number;
+    maxRunDurationMs: number;
+    reportedTokenStopThreshold: number;
+    reportedTokenThresholdIsBilledCeiling: false;
+  };
+  withinPairLimit: boolean;
+  expiresAt: string;
+}
+
+/** Wishlist preview on the existing Run boundary; request authorization binds this exact selection. */
+export interface JevWishlistRunPreview extends JevRunPreviewBase {
+  scope: Extract<JevRunScopeDisclosure, { scope: "wishlist" }>;
+  selection: JevWishlistCandidateSelection;
+  unavailableCandidateBggIds: readonly number[];
+}
+
+export type JevRunPreview = JevRunPreviewBase | JevWishlistRunPreview;
+
 /** Redundancy result projected beside a saved entry; never persisted into WishlistEntry. */
 export interface WishlistRedundancyProjection {
   source: "current" | "saved-factual" | "base-prediction";

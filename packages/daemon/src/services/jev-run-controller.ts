@@ -1,8 +1,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type {
   Collection,
-  JevRunScopeDisclosure,
+  JevRunPreviewBase,
   JevWishlistCandidateSelection,
+  JevWishlistRunPreview,
   RedundancySettings,
 } from "@shelf-judge/shared";
 import type { JevPairCache } from "./jev-pair-cache-service.js";
@@ -40,37 +41,8 @@ const DEFAULT_PRECONDITION_TTL_MS = 2 * 60_000;
 const DEFAULT_RECEIPT_TTL_MS = 10 * 60_000;
 const MAX_RECEIPTS = 256;
 
-export interface JevRunControllerPreview {
-  requestId: string;
-  precondition: string;
-  provider: "TypeSafe";
-  modelId: typeof JEV_MODEL_ID;
-  eligibleGameCount: number;
-  pairCount: number;
-  descriptionBearingPairCount: number;
-  noteBearingPairCount: number;
-  noteTransmissionPermitted: boolean;
-  providerConfigured: boolean;
-  signalScope: { description: boolean; ownerNotes: boolean };
-  scoringEffect: "integrated-fitness" | "annotation-only";
-  retentionCaveat: string;
-  limits: {
-    maxEligiblePairs: number;
-    maxProviderAttempts: number;
-    maxRetriesPerEvaluation: number;
-    maxRunDurationMs: number;
-    reportedTokenStopThreshold: number;
-    reportedTokenThresholdIsBilledCeiling: false;
-  };
-  withinPairLimit: boolean;
-  expiresAt: string;
-}
-
-export interface JevWishlistRunControllerPreview extends JevRunControllerPreview {
-  scope: Extract<JevRunScopeDisclosure, { scope: "wishlist" }>;
-  selection: JevWishlistCandidateSelection;
-  unavailableCandidateBggIds: readonly number[];
-}
+export type JevRunControllerPreview = JevRunPreviewBase;
+export type JevWishlistRunControllerPreview = JevWishlistRunPreview;
 
 interface ControllerErrorBody {
   error:

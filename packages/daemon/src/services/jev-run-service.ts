@@ -272,6 +272,7 @@ export class JevRunService {
       progress: {
         runId,
         state: "running" as const,
+        scope: prepared?.scopeKind ?? "collection",
         pairCount: 0,
         completedPairs: 0,
         cacheHits: 0,

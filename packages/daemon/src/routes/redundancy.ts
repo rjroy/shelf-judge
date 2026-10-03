@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import type { RedundancySettings } from "@shelf-judge/shared";
+import type { JevWishlistCandidateSelection, RedundancySettings } from "@shelf-judge/shared";
 import { DurableSourcePostCommitError, type StorageService } from "../services/storage-service.js";
 import type { AttentionMutationImpact } from "../services/attention-candidate-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
@@ -16,7 +16,10 @@ import type { JevRunController } from "../services/jev-run-controller.js";
 import type { createJevRefreshProgressService } from "../services/jev-refresh-progress-service.js";
 import { parseJevRunBudgetQuery } from "../services/jev-run-budget.js";
 
-type JevRunRouteController = Pick<JevRunController, "preview" | "start" | "cancel" | "activeRun">;
+type JevRunRouteController = Pick<
+  JevRunController,
+  "preview" | "previewWishlist" | "start" | "cancel" | "activeRun"
+>;
 
 export interface RedundancyRoutesDeps {
   storageService: StorageService;
@@ -57,6 +60,56 @@ function semanticErrorStatus(outcome: string): 400 | 403 | 409 {
 }
 
 const VALID_STAGES = new Set(["annotation", "integrated"]);
+
+type ParsedRunPreviewQuery = {
+  budget: {
+    maxProviderAttempts: number;
+    reportedTokenStopThreshold: number;
+    maxRunDurationMs: number;
+  };
+  selection: JevWishlistCandidateSelection | undefined;
+};
+
+function parseRunPreviewQuery(
+  params: URLSearchParams,
+): { ok: true; value: ParsedRunPreviewQuery } | { ok: false } {
+  const allowed = new Set([
+    "maxProviderAttempts",
+    "reportedTokenStopThreshold",
+    "maxRunDurationMs",
+    "scope",
+    "bggId",
+  ]);
+  for (const key of params.keys()) if (!allowed.has(key)) return { ok: false };
+
+  const scopeValues = params.getAll("scope");
+  if (scopeValues.length > 1) return { ok: false };
+  const scope = scopeValues[0];
+  const bggValues = params.getAll("bggId");
+  if (scope !== undefined && scope !== "collection" && scope !== "wishlist") return { ok: false };
+  if (bggValues.length > 0 && scope !== "wishlist") return { ok: false };
+
+  let selection: JevWishlistCandidateSelection | undefined;
+  if (scope === "wishlist" && bggValues.length > 0) {
+    const bggIds: number[] = [];
+    for (const value of bggValues) {
+      if (!/^[1-9][0-9]*$/u.test(value)) return { ok: false };
+      const bggId = Number(value);
+      if (!Number.isSafeInteger(bggId)) return { ok: false };
+      bggIds.push(bggId);
+    }
+    if (new Set(bggIds).size !== bggIds.length) return { ok: false };
+    selection = { kind: "selected", bggIds: bggIds.sort((a, b) => a - b) };
+  }
+
+  const budgetParams = new URLSearchParams();
+  for (const key of ["maxProviderAttempts", "reportedTokenStopThreshold", "maxRunDurationMs"])
+    for (const value of params.getAll(key)) budgetParams.append(key, value);
+  const parsedBudget = parseJevRunBudgetQuery(budgetParams);
+  return parsedBudget.ok
+    ? { ok: true, value: { budget: parsedBudget.budget, selection } }
+    : { ok: false };
+}
 
 function validatePatch(patch: Record<string, unknown>): { error: string } | null {
   const allowed = new Set([
@@ -257,7 +310,7 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
 
   const setRunNoStore = (c: Context) => c.header("Cache-Control", "no-store");
   const controllerError = (c: Context, status: number) => {
-    if (status === 400) return c.json({ error: "Invalid Run budget" }, 400);
+    if (status === 400) return c.json({ error: "Invalid Run preview request" }, 400);
     if (status === 409) return c.json({ error: "Run conflict" }, 409);
     if (status === 412) return c.json({ error: "Run precondition failed" }, 412);
     return c.json({ error: "Run is unavailable" }, 503);
@@ -284,10 +337,14 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
     setRunNoStore(c);
     const controller = deps.jevRunController;
     if (!controller) return c.json({ error: "Run is unavailable" }, 503);
-    const parsedBudget = parseJevRunBudgetQuery(new URL(c.req.url).searchParams);
-    if (!parsedBudget.ok) return c.json({ error: "Invalid Run budget" }, 400);
+    const parsedQuery = parseRunPreviewQuery(new URL(c.req.url).searchParams);
+    if (!parsedQuery.ok) return c.json({ error: "Invalid Run preview request" }, 400);
     try {
-      const result = await controller.preview(parsedBudget.budget);
+      const scope = new URL(c.req.url).searchParams.get("scope");
+      const result =
+        scope === "wishlist"
+          ? await controller.previewWishlist(parsedQuery.value.selection, parsedQuery.value.budget)
+          : await controller.preview(parsedQuery.value.budget);
       if (result.status === 200) return c.json(result.body, 200);
       return controllerError(c, result.status);
     } catch {
@@ -530,7 +587,33 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
             eligibleGameCount: { type: ["number", "null"] },
             pairCount: { type: ["number", "null"] },
             coverage: { type: ["object", "null"] },
-            progress: { type: ["object", "null"] },
+            progress: {
+              oneOf: [
+                { type: "null" },
+                {
+                  type: "object",
+                  properties: {
+                    state: { enum: ["last-known-running", "completed", "interrupted", "failed"] },
+                    scope: { enum: ["collection", "wishlist"] },
+                    pairCount: { type: "integer" },
+                    completedPairs: { type: "integer" },
+                    cacheHits: { type: "integer" },
+                    cacheMisses: { type: "integer" },
+                    failedPairs: { type: "integer" },
+                    stopReason: { type: "string" },
+                  },
+                  required: [
+                    "state",
+                    "pairCount",
+                    "completedPairs",
+                    "cacheHits",
+                    "cacheMisses",
+                    "failedPairs",
+                  ],
+                  additionalProperties: false,
+                },
+              ],
+            },
           },
           required: [
             "status",
@@ -592,6 +675,7 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
                         state: {
                           enum: ["last-known-running", "completed", "interrupted", "failed"],
                         },
+                        scope: { enum: ["collection", "wishlist"] },
                         pairCount: { type: "integer" },
                         completedPairs: { type: "integer" },
                         cacheHits: { type: "integer" },
@@ -680,6 +764,63 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
             },
             withinPairLimit: { type: "boolean" },
             expiresAt: { type: "string" },
+            scope: {
+              type: "object",
+              properties: {
+                scope: { const: "wishlist" },
+                wishlistEntryCount: { type: "integer" },
+                selectedCandidateCount: { type: "integer" },
+                unselectedEntryCount: { type: "integer" },
+                ownedOverlapCandidateCount: { type: "integer" },
+                requestedCandidateCount: { type: "integer" },
+                eligibleCandidateCount: { type: "integer" },
+                unavailableCandidateCount: { type: "integer" },
+                eligibleOwnedGameCount: { type: "integer" },
+                comparisonPairCount: { type: "integer" },
+                cachedHitPairCount: { type: "integer" },
+                sendablePairCount: { type: "integer" },
+              },
+              required: [
+                "scope",
+                "wishlistEntryCount",
+                "selectedCandidateCount",
+                "unselectedEntryCount",
+                "ownedOverlapCandidateCount",
+                "requestedCandidateCount",
+                "eligibleCandidateCount",
+                "unavailableCandidateCount",
+                "eligibleOwnedGameCount",
+                "comparisonPairCount",
+                "cachedHitPairCount",
+                "sendablePairCount",
+              ],
+              additionalProperties: false,
+            },
+            selection: {
+              oneOf: [
+                {
+                  type: "object",
+                  properties: { kind: { const: "all" } },
+                  required: ["kind"],
+                  additionalProperties: false,
+                },
+                {
+                  type: "object",
+                  properties: {
+                    kind: { const: "selected" },
+                    bggIds: {
+                      type: "array",
+                      items: { type: "integer", minimum: 1 },
+                      minItems: 1,
+                      uniqueItems: true,
+                    },
+                  },
+                  required: ["kind", "bggIds"],
+                  additionalProperties: false,
+                },
+              ],
+            },
+            unavailableCandidateBggIds: { type: "array", items: { type: "integer" } },
           },
           required: [
             "requestId",
@@ -703,6 +844,30 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
         },
       },
       hierarchy: { root: "shelf", feature: "redundancy" },
+      parameters: [
+        {
+          name: "scope",
+          in: "query",
+          description: "Optional run scope; omission preserves the collection default.",
+          required: false,
+          acceptedValues: ["collection", "wishlist"],
+        },
+        {
+          name: "bggId",
+          in: "query",
+          description:
+            "Repeat for exact selected wishlist candidates; requires scope=wishlist. Omission selects all.",
+          required: false,
+        },
+        ...(["maxProviderAttempts", "reportedTokenStopThreshold", "maxRunDurationMs"] as const).map(
+          (name) => ({
+            name,
+            in: "query" as const,
+            description: "Optional validated run budget override.",
+            required: false,
+          }),
+        ),
+      ],
       idempotent: true,
     },
     {

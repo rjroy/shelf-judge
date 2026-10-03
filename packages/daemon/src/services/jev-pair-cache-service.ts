@@ -47,6 +47,8 @@ export interface JevPairKey {
 export interface JevRunProgress {
   runId: string;
   state: "running" | "completed" | "interrupted" | "failed";
+  /** Absent for pre-v5 historical rows whose run scope is unknown. */
+  scope?: "collection" | "wishlist";
   pairCount: number;
   completedPairs: number;
   cacheHits: number;
@@ -134,7 +136,7 @@ export interface JevPairCache {
 }
 
 const DATABASE_FILENAME = "jev-pair-cache.sqlite";
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 function canonicalPair(left: string, right: string): [string, string] {
   if (!left || !right || left === right) throw new Error("Pair requires two distinct stable IDs");
@@ -165,6 +167,7 @@ function validateProgress(progress: JevRunProgress): void {
     [
       "runId",
       "state",
+      "scope",
       "pairCount",
       "completedPairs",
       "cacheHits",
@@ -177,6 +180,12 @@ function validateProgress(progress: JevRunProgress): void {
   );
   if (!["running", "completed", "interrupted", "failed"].includes(progress.state))
     throw new Error("Invalid run state");
+  if (
+    progress.scope !== undefined &&
+    progress.scope !== "collection" &&
+    progress.scope !== "wishlist"
+  )
+    throw new Error("Invalid run scope");
   if (Object.hasOwn(progress, "stopReason")) {
     if (
       ![
@@ -426,7 +435,10 @@ function canonicalJudgmentContent(judgment: JevPairJudgment): string {
   });
 }
 
-type RunProgressRow = Omit<JevRunProgress, "stopReason"> & { stopReason: string | null };
+type RunProgressRow = Omit<JevRunProgress, "stopReason" | "scope"> & {
+  stopReason: string | null;
+  scope: string | null;
+};
 
 function prepareStatements(db: Database) {
   return {
@@ -444,10 +456,10 @@ function prepareStatements(db: Database) {
     ),
     deletePair: db.query("DELETE FROM judgments WHERE pair_domain=? AND game_a=? AND game_b=?"),
     saveRunProgress: db.query(
-      "INSERT OR REPLACE INTO run_progress (singleton,run_id,state,pair_count,completed_pairs,cache_hits,cache_misses,failed_pairs,stop_reason,updated_at) VALUES (1,?,?,?,?,?,?,?,?,?)",
+      "INSERT OR REPLACE INTO run_progress (singleton,run_id,state,scope_kind,pair_count,completed_pairs,cache_hits,cache_misses,failed_pairs,stop_reason,updated_at) VALUES (1,?,?,?,?,?,?,?,?,?,?)",
     ),
     getRunProgress: db.query<RunProgressRow, []>(
-      "SELECT run_id as runId,state,pair_count as pairCount,completed_pairs as completedPairs,cache_hits as cacheHits,cache_misses as cacheMisses,failed_pairs as failedPairs,stop_reason as stopReason,updated_at as updatedAt FROM run_progress WHERE singleton=1",
+      "SELECT run_id as runId,state,scope_kind as scope,pair_count as pairCount,completed_pairs as completedPairs,cache_hits as cacheHits,cache_misses as cacheMisses,failed_pairs as failedPairs,stop_reason as stopReason,updated_at as updatedAt FROM run_progress WHERE singleton=1",
     ),
     setActivation: db.query("INSERT OR REPLACE INTO activation VALUES (1,?,?)"),
     getActivation: db.query<JevAdvisoryActivation, []>(
@@ -538,12 +550,13 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
         CREATE TABLE run_progress (
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1), run_id TEXT NOT NULL,
           state TEXT NOT NULL CHECK(state IN ('running','completed','interrupted','failed')),
+          scope_kind TEXT CHECK(scope_kind IS NULL OR scope_kind IN ('collection','wishlist')),
           pair_count INTEGER NOT NULL, completed_pairs INTEGER NOT NULL, cache_hits INTEGER NOT NULL,
           cache_misses INTEGER NOT NULL, failed_pairs INTEGER NOT NULL, stop_reason TEXT,
           updated_at TEXT NOT NULL
         );
         CREATE TABLE activation (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), identity TEXT NOT NULL, activated_at TEXT NOT NULL);
-        PRAGMA user_version = 4;
+        PRAGMA user_version = 5;
         COMMIT;`);
     } else {
       if (version < 2) {
@@ -589,6 +602,13 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
           CREATE INDEX judgments_domain_member_a ON judgments(pair_domain, game_a);
           CREATE INDEX judgments_domain_member_b ON judgments(pair_domain, game_b);
           PRAGMA user_version = 4;
+          COMMIT;`);
+      }
+      if (version < 5) {
+        db.exec(`BEGIN IMMEDIATE;
+          ALTER TABLE run_progress ADD COLUMN scope_kind TEXT
+            CHECK(scope_kind IS NULL OR scope_kind IN ('collection','wishlist'));
+          PRAGMA user_version = 5;
           COMMIT;`);
       }
     }
@@ -654,6 +674,7 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
     statements?.saveRunProgress.run(
       progress.runId,
       progress.state,
+      progress.scope ?? null,
       progress.pairCount,
       progress.completedPairs,
       progress.cacheHits,
@@ -671,6 +692,7 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       const progress: JevRunProgress = {
         runId: row.runId,
         state: row.state,
+        ...(row.scope === null ? {} : { scope: row.scope as JevRunProgress["scope"] }),
         pairCount: row.pairCount,
         completedPairs: row.completedPairs,
         cacheHits: row.cacheHits,

@@ -9,6 +9,7 @@ import type {
   PredictionSettings,
   RedundancySettings,
   TournamentData,
+  WishlistEntry,
 } from "@shelf-judge/shared";
 import { createInitialSemanticRedundancyStateV10 } from "@shelf-judge/shared";
 import {
@@ -25,6 +26,7 @@ import type { StorageService } from "../src/services/storage-service.js";
 import type { SourceVector } from "../src/services/source-vector.js";
 import { JEV_MODEL_ID } from "../src/services/jev/jev-gateway.js";
 import { createRedundancyRoutes } from "../src/routes/redundancy.js";
+import { createJevRefreshProgressService } from "../src/services/jev-refresh-progress-service.js";
 
 const originalApiKey = process.env.TYPESAFE_API_KEY;
 afterEach(() => {
@@ -135,6 +137,23 @@ function gatewayResponse(): Response {
   });
 }
 
+async function waitForWishlistProgress(
+  request: (path: string, init?: RequestInit) => Promise<Response>,
+): Promise<unknown> {
+  for (let turn = 0; turn < 100; turn++) {
+    const response = await request("/api/redundancy/semantic/refresh-progress");
+    const value = (await response.json()) as unknown;
+    if (!isRecord(value) || !isRecord(value.progress) || !isRecord(value.progress.value)) continue;
+    if (value.progress.value.state === "completed") return value;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("Wishlist Jev run did not finish within the bounded event-loop turns");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function deferred<Value>() {
   let resolve!: (value: Value) => void;
   const promise = new Promise<Value>((finish) => {
@@ -150,6 +169,177 @@ const json = (body: unknown): RequestInit => ({
 });
 
 describe("Jev run production composition", () => {
+  test("existing Run routes admit only the exact selected wishlist scope and expose scoped progress", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "jev-wishlist-run-routes-"));
+    const cache = await createJevPairCache(directory);
+    const sources = runtimeSources();
+    const storage = sources.storage as unknown as StorageService & {
+      sourceVector(): SourceVector;
+      loadWishlist(): Promise<WishlistEntry[]>;
+      saveWishlist(entries: WishlistEntry[]): Promise<void>;
+    };
+    let entries: WishlistEntry[] = [501, 502].map((bggId) => ({
+      id: `wishlist-${bggId}`,
+      bggId,
+      name: `Candidate ${bggId}`,
+      yearPublished: 2020,
+      thumbnailUrl: null,
+      predictedScore: 7,
+      predictionConfidence: null,
+      predictedBreakdown: null,
+      nicheImpact: null,
+      redundancyPreview: null,
+      addedAt: "2026-01-01T00:00:00.000Z",
+      bggSource: {
+        observedAt: "2026-01-01T00:00:00.000Z",
+        description: `candidate description ${bggId}`,
+        mechanics: [],
+        categories: [],
+        weight: null,
+        communityRating: null,
+        minPlayers: null,
+        maxPlayers: null,
+        bestPlayers: null,
+        playingTime: null,
+      },
+    }));
+    storage.loadWishlist = () => Promise.resolve(structuredClone(entries));
+    storage.saveWishlist = (next) => {
+      entries = structuredClone(next);
+      return Promise.resolve();
+    };
+    const collection = await storage.loadCollection();
+    collection.games[0].ownerNote = {
+      state: "present",
+      version: 1,
+      updatedAt: "synthetic-note-time",
+      text: "private wishlist-run note sentinel",
+    };
+    storage.loadCollection = () => Promise.resolve(structuredClone(collection));
+    const currentVector = storage.sourceVector();
+    storage.sourceVector = () => structuredClone(currentVector);
+    const redundancySettings: RedundancySettings = {
+      enabled: true,
+      stage: "integrated",
+      similarityThreshold: 0.7,
+      maxPenalty: 0.2,
+      componentWeights: { binary: 0, continuous: 0 },
+      minNeighbors: 1,
+      expectedNeighbors: 5,
+    };
+    storage.loadRedundancySettings = () => Promise.resolve(redundancySettings);
+    let hydrationCalls = 0;
+    let transportCalls = 0;
+    let lastBody = "";
+    process.env.TYPESAFE_API_KEY = "integration-fake-key";
+    try {
+      const worker = createJevRunWorker({
+        storageService: storage,
+        predictionService: sources.predictionService,
+        cache,
+        fetch: (_url, init) => {
+          transportCalls++;
+          lastBody = typeof init?.body === "string" ? init.body : "";
+          return Promise.resolve(gatewayResponse());
+        },
+      });
+      const controller = composeJevRunController({
+        storageService: storage,
+        predictionService: sources.predictionService,
+        gameService: {
+          getBoardgameScoringInput: () => {
+            hydrationCalls++;
+            return Promise.reject(new Error("Established source must not hydrate"));
+          },
+        } as never,
+        cache,
+        runService: worker,
+      });
+      if (!controller) throw new Error("Expected composed run controller");
+      const progressService = createJevRefreshProgressService({
+        cache,
+        activeRun: () => controller.activeRun(),
+      });
+      const { routes } = createRedundancyRoutes({
+        storageService: storage,
+        jevRunController: controller,
+        jevRefreshProgressService: progressService,
+      });
+      const app = new Hono();
+      app.route("/api", routes);
+      const request = async (path: string, init?: RequestInit): Promise<Response> =>
+        await app.fetch(new Request(`http://daemon.test${path}`, init));
+
+      const preview = await request(
+        "/api/redundancy/semantic/run-preview?scope=wishlist&bggId=502",
+      );
+      expect(preview.status).toBe(200);
+      const disclosure = (await preview.json()) as {
+        requestId: string;
+        precondition: string;
+        selection: { kind: string; bggIds?: number[] };
+        scope: {
+          scope: string;
+          wishlistEntryCount: number;
+          selectedCandidateCount: number;
+          unselectedEntryCount: number;
+          comparisonPairCount: number;
+          sendablePairCount: number;
+        };
+      };
+      expect(disclosure.selection).toEqual({ kind: "selected", bggIds: [502] });
+      expect(disclosure.scope).toMatchObject({
+        scope: "wishlist",
+        wishlistEntryCount: 2,
+        selectedCandidateCount: 1,
+        unselectedEntryCount: 1,
+        comparisonPairCount: 2,
+        sendablePairCount: 2,
+      });
+      expect(disclosure).not.toHaveProperty("bggSource");
+      expect(JSON.stringify(disclosure)).not.toContain("candidate description");
+      expect(hydrationCalls).toBe(0);
+      expect(transportCalls).toBe(0);
+
+      const forbiddenNoteAuthorization = await request(
+        "/api/redundancy/semantic/run",
+        json({
+          requestId: disclosure.requestId,
+          precondition: disclosure.precondition,
+          noteTransmissionAuthorized: true,
+        }),
+      );
+      expect(forbiddenNoteAuthorization.status).toBe(412);
+      expect(transportCalls).toBe(0);
+      const start = await request(
+        "/api/redundancy/semantic/run",
+        json({
+          requestId: disclosure.requestId,
+          precondition: disclosure.precondition,
+          noteTransmissionAuthorized: false,
+        }),
+      );
+      expect(start.status).toBe(202);
+      const progress = await waitForWishlistProgress(request);
+      expect(progress).toMatchObject({
+        progress: {
+          state: "saved",
+          value: { state: "completed", scope: "wishlist", pairCount: 2, completedPairs: 2 },
+        },
+      });
+      expect(transportCalls).toBe(2);
+      expect(lastBody).not.toContain("owner_note");
+      expect(lastBody).not.toContain("private wishlist-run note sentinel");
+      expect(hydrationCalls).toBe(0);
+      expect(cache.getRunProgress()?.scope).toBe("wishlist");
+    } finally {
+      cache.close();
+      await rm(directory, { recursive: true, force: true });
+      if (originalApiKey === undefined) delete process.env.TYPESAFE_API_KEY;
+      else process.env.TYPESAFE_API_KEY = originalApiKey;
+    }
+  });
+
   test("real Run HTTP boundary keeps reads provider-free and fences explicit note-authorized work", async () => {
     const directory = await mkdtemp(join(tmpdir(), "jev-run-routes-integration-"));
     const cache = await createJevPairCache(directory);
@@ -361,6 +551,7 @@ describe("Jev run production composition", () => {
       expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })).toBeNull();
       expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "D" })).toBeNull();
       expect(cache.getRunProgress()?.state).toBe("interrupted");
+      expect(cache.getRunProgress()?.scope).toBe("collection");
       expect(transportCalls).toBe(1);
     } finally {
       cache.close();
