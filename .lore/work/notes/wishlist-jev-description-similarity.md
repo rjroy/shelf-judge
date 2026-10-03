@@ -513,3 +513,7 @@ Phase 7's focused daemon verification passed 53 tests / 508 assertions across th
 Accepted whole-branch gates: `bun test` reported 3,844 passed, 1 skipped, 0 failed (22,874 assertions across 232 files); root typecheck, browser typecheck, lint, format check and build passed. Full browser verification reported 404 passed and 60 intentional skips; the corrected unmount test passed in all four browser projects. The independent reviewer accepted the whole feature with no material findings. Phase 7 and its child `.9.1` are closed; the feature-level gate is complete. These results are inherited from the parent-accepted validation and were not rerun for this administrative checkpoint.
 
 The `.9` implementation checkpoint contains only `packages/daemon/tests/wishlist-jev-phase7.integration.test.ts`, this note, and current related `.beads` metadata. Its source SHA remains the reviewed value above. No push or Dolt sync was performed.
+
+## Feature epic administrative close
+
+All nine implementation phase beads and the Phase 7.1 polling correction are closed. The parent closed `shelf-judge-xi83` after accepting the full feature review and whole-branch validation recorded above. This close is an administrative tracking checkpoint only; no implementation or test files changed. The separate wishlist Community Rating issue `shelf-judge-06hh` remains open and was not included in this feature's scope. No push or Dolt sync was performed.
