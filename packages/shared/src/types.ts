@@ -1754,6 +1754,20 @@ export interface WishlistBreakdownEntry {
   confidence: PredictionConfidence;
 }
 
+/** BGG scoring inputs captured from the same verified Thing observation as a wishlist entry. */
+export interface WishlistBggSourceSnapshot {
+  observedAt: string;
+  description: string | null;
+  mechanics: string[];
+  categories: string[];
+  weight: number | null;
+  communityRating: number | null;
+  minPlayers: number | null;
+  maxPlayers: number | null;
+  bestPlayers: number | null;
+  playingTime: number | null;
+}
+
 export interface WishlistEntry {
   id: string; // UUID
   bggId: number;
@@ -1765,7 +1779,65 @@ export interface WishlistEntry {
   predictedBreakdown: WishlistBreakdownEntry[] | null;
   nicheImpact: NicheImpact | null;
   redundancyPreview: RedundancyAdjustment | null;
+  /** Absent on legacy entries; persistence/hydration is introduced by the approved wishlist Jev work. */
+  bggSource?: WishlistBggSourceSnapshot;
   addedAt: string; // ISO 8601
+}
+
+/** Public wishlist response shape; daemon-owned source text is not a client projection. */
+export type WishlistEntryView = Omit<WishlistEntry, "bggSource">;
+
+/** Wishlist selection normalized from the existing run-preview query; selected BGG IDs are unique and sorted. */
+export type JevWishlistCandidateSelection =
+  | { kind: "all" }
+  | { kind: "selected"; bggIds: readonly number[] };
+
+/** Run-preview selector. Omission preserves collection; omitted wishlist selection means all. */
+export type JevRunScopeSelector =
+  | { scope?: "collection" }
+  | { scope: "wishlist"; selection?: JevWishlistCandidateSelection };
+
+/** Aggregate scope facts bound by the existing Run preview precondition. */
+export type JevRunScopeDisclosure =
+  | { scope: "collection" }
+  | {
+      scope: "wishlist";
+      /** Global captured wishlist size, independent of selected scope. */
+      wishlistEntryCount: number;
+      /** Distinct captured entries selected; equals global size in all mode. */
+      selectedCandidateCount: number;
+      /** Global entries outside the exact selection; wishlistEntryCount - selectedCandidateCount. */
+      unselectedEntryCount: number;
+      /** Selected entries whose BGG ID is already owned; fenced out of candidate work. */
+      ownedOverlapCandidateCount: number;
+      /** Selected entries after excluding owned overlaps; selected = overlap + requested. */
+      requestedCandidateCount: number;
+      /** Requested candidates with an established compact source, regardless of description usability. */
+      eligibleCandidateCount: number;
+      /** No valid source after preparation; disjoint from eligibleCandidateCount. Requested = eligible + unavailable. */
+      unavailableCandidateCount: number;
+      /** Current collection-scored, positive, non-vetoed owned games only. */
+      eligibleOwnedGameCount: number;
+      /** Cartesian candidate/eligible-owned comparison pairs in the frozen scope. */
+      comparisonPairCount: number;
+      /** Pairs served from current validated candidate-domain C_ONLY cache rows. */
+      cachedHitPairCount: number;
+      /** Exact C_ONLY misses with usable descriptions authorized for submission. */
+      sendablePairCount: number;
+    };
+
+/** Redundancy result projected beside a saved entry; never persisted into WishlistEntry. */
+export interface WishlistRedundancyProjection {
+  source: "current" | "saved-factual" | "base-prediction";
+  adjustment: RedundancyAdjustment | null;
+  /** The selected redundancy ordering value; null preserves existing no-prediction placement. */
+  orderingScore: number | null;
+}
+
+export interface WishlistEntryReadResult {
+  /** Safe public entry projection; compact BGG source remains daemon-owned. */
+  entry: WishlistEntryView;
+  redundancy: WishlistRedundancyProjection;
 }
 
 // Shelf capacity types (shelf-capacity spec)
