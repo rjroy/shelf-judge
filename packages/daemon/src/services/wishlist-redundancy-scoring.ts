@@ -43,9 +43,19 @@ export interface WishlistDescriptionSignalCaptureRequest {
 }
 
 /** Phase 4 supplies one proof-bound capture resolver; values align with request.pairs. */
-export type WishlistDescriptionSignalResolver = (
+export type WishlistDescriptionSignalResolver = ((
   request: WishlistDescriptionSignalCaptureRequest,
-) => Promise<readonly (number | null)[]>;
+) => Promise<readonly (number | null)[]>) & {
+  /** Checks the supplied live capture and cache revision without repeating pair lookups. */
+  isCurrent?(request: WishlistDescriptionSignalCaptureRequest): boolean;
+};
+
+export class WishlistRedundancyCaptureChangedError extends Error {
+  constructor() {
+    super("Wishlist redundancy capture changed before publication");
+    this.name = "WishlistRedundancyCaptureChangedError";
+  }
+}
 
 export interface WishlistRedundancyScoringObserver {
   onEligibleOwnedIndexBuilt?(eligibleOwnedCount: number): void;
@@ -61,6 +71,11 @@ export interface WishlistRedundancyScoringInput {
   scoredGames: readonly GameWithScore[];
   redundancySettings: RedundancySettings;
   resolveDescriptionSignal?: WishlistDescriptionSignalResolver;
+  /** Final source/cache fence, called once after the projection is computed. */
+  validateCaptureBeforePublish?: (
+    request: WishlistDescriptionSignalCaptureRequest | null,
+    usedDescriptionSignal: boolean,
+  ) => Promise<"current" | "source-changed" | "cache-changed">;
   observer?: WishlistRedundancyScoringObserver;
 }
 
@@ -202,20 +217,22 @@ export async function computeWishlistRedundancyReadResults(
     (a, b) => a.candidate.bggId - b.candidate.bggId || a.ownedGame.id.localeCompare(b.ownedGame.id),
   );
   const descriptionByPair = new Map<string, number>();
+  let descriptionCaptureRequest: WishlistDescriptionSignalCaptureRequest | null = null;
   if (descriptionPairs.length > 0 && resolveDescriptionSignal) {
+    descriptionCaptureRequest = {
+      collectionId: collection.id,
+      candidateBggIds: sourceCandidates.map((entry) => entry.bggId).sort((a, b) => a - b),
+      eligibleOwnedIds: eligibleOwned
+        .map((owned) => owned.game.id)
+        .sort((a, b) => a.localeCompare(b)),
+      semanticPolicy: {
+        enabled: semantic.enabled,
+        weights: { factual: factualWeight, description: descriptionWeight },
+      },
+      pairs: descriptionPairs,
+    };
     try {
-      const resolved = await resolveDescriptionSignal({
-        collectionId: collection.id,
-        candidateBggIds: sourceCandidates.map((entry) => entry.bggId).sort((a, b) => a - b),
-        eligibleOwnedIds: eligibleOwned
-          .map((owned) => owned.game.id)
-          .sort((a, b) => a.localeCompare(b)),
-        semanticPolicy: {
-          enabled: semantic.enabled,
-          weights: { factual: factualWeight, description: descriptionWeight },
-        },
-        pairs: descriptionPairs,
-      });
+      const resolved = await resolveDescriptionSignal(descriptionCaptureRequest);
       if (resolved.length === descriptionPairs.length) {
         for (let index = 0; index < descriptionPairs.length; index++) {
           const score = resolved[index];
@@ -235,63 +252,95 @@ export async function computeWishlistRedundancyReadResults(
     }
   }
 
-  const results: WishlistEntryReadResult[] = [];
-  for (const entry of entries) {
-    const publicEntry = safeEntryView(entry);
-    const candidate = candidateFeatures.get(entry.bggId);
-    if (
-      !candidate ||
-      entry.predictedScore === null ||
-      !Number.isFinite(entry.predictedScore) ||
-      !redundancySettings.enabled ||
-      (!activeFactual && !activeDescription)
-    ) {
-      results.push({ entry: publicEntry, redundancy: savedProjection(entry) });
-      continue;
-    }
+  const buildResults = (): WishlistEntryReadResult[] => {
+    const results: WishlistEntryReadResult[] = [];
+    for (const entry of entries) {
+      const publicEntry = safeEntryView(entry);
+      const candidate = candidateFeatures.get(entry.bggId);
+      if (
+        !candidate ||
+        entry.predictedScore === null ||
+        !Number.isFinite(entry.predictedScore) ||
+        !redundancySettings.enabled ||
+        (!activeFactual && !activeDescription)
+      ) {
+        results.push({ entry: publicEntry, redundancy: savedProjection(entry) });
+        continue;
+      }
 
-    const pairSimilarities = new Map<string, number>();
-    for (const owned of eligibleOwned) {
-      observer?.onCandidateOwnedPair?.(entry.bggId, owned.game.id);
-      const factual =
-        canComputeFactual && factualContext
-          ? factualContext.similarity(candidate, owned.game)
-          : null;
-      const description =
-        descriptionByPair.get(JSON.stringify([collection.id, entry.bggId, owned.game.id])) ?? null;
-      const combined = composeRedundancySignals(
-        { factual: factual ?? 0, description, ownerNote: null },
+      const pairSimilarities = new Map<string, number>();
+      for (const owned of eligibleOwned) {
+        observer?.onCandidateOwnedPair?.(entry.bggId, owned.game.id);
+        const factual =
+          canComputeFactual && factualContext
+            ? factualContext.similarity(candidate, owned.game)
+            : null;
+        const description =
+          descriptionByPair.get(JSON.stringify([collection.id, entry.bggId, owned.game.id])) ??
+          null;
+        const combined = composeRedundancySignals(
+          { factual: factual ?? 0, description, ownerNote: null },
+          {
+            factual: canComputeFactual ? factualWeight : 0,
+            description: activeDescription ? descriptionWeight : 0,
+            ownerNote: 0,
+          },
+        );
+        if (combined !== null) pairSimilarities.set(owned.game.id, combined);
+      }
+
+      if (eligibleOwned.length > 0 && pairSimilarities.size === 0) {
+        results.push({ entry: publicEntry, redundancy: savedProjection(entry) });
+        continue;
+      }
+      const adjustment = computeCandidateRedundancyAdjustment(
         {
-          factual: canComputeFactual ? factualWeight : 0,
-          description: activeDescription ? descriptionWeight : 0,
-          ownerNote: 0,
+          id: JSON.stringify(["wishlist-bgg", collection.id, entry.bggId]),
+          name: entry.name,
+          score: entry.predictedScore,
         },
+        eligibleOwned.map((owned) => ({
+          game: owned.game,
+          score: owned.score?.score ?? 0,
+          isPredicted: owned.score?.predictionMeta?.actualAxisCount === 0,
+        })),
+        redundancySettings,
+        (owned) => pairSimilarities.get(owned.game.id) ?? Number.NaN,
       );
-      if (combined !== null) pairSimilarities.set(owned.game.id, combined);
+      results.push({
+        entry: publicEntry,
+        redundancy: adjustment ? currentProjection(adjustment) : savedProjection(entry),
+      });
     }
+    return results;
+  };
 
-    if (eligibleOwned.length > 0 && pairSimilarities.size === 0) {
-      results.push({ entry: publicEntry, redundancy: savedProjection(entry) });
-      continue;
-    }
-    const adjustment = computeCandidateRedundancyAdjustment(
-      {
-        id: JSON.stringify(["wishlist-bgg", collection.id, entry.bggId]),
-        name: entry.name,
-        score: entry.predictedScore,
-      },
-      eligibleOwned.map((owned) => ({
-        game: owned.game,
-        score: owned.score?.score ?? 0,
-        isPredicted: owned.score?.predictionMeta?.actualAxisCount === 0,
-      })),
-      redundancySettings,
-      (owned) => pairSimilarities.get(owned.game.id) ?? Number.NaN,
+  let results = buildResults();
+  if (input.validateCaptureBeforePublish) {
+    const validation = await input.validateCaptureBeforePublish(
+      descriptionCaptureRequest,
+      descriptionByPair.size > 0,
     );
-    results.push({
-      entry: publicEntry,
-      redundancy: adjustment ? currentProjection(adjustment) : savedProjection(entry),
-    });
+    if (validation === "source-changed") throw new WishlistRedundancyCaptureChangedError();
+    if (validation === "cache-changed" && descriptionByPair.size > 0) {
+      descriptionByPair.clear();
+      results = buildResults();
+      if (
+        (await input.validateCaptureBeforePublish(descriptionCaptureRequest, false)) !== "current"
+      ) {
+        throw new WishlistRedundancyCaptureChangedError();
+      }
+    }
   }
   return results;
+}
+
+/** Safe saved-snapshot fallback when live authority cannot be proven current. */
+export function savedWishlistRedundancyReadResults(
+  entries: readonly WishlistEntry[],
+): WishlistEntryReadResult[] {
+  return entries.map((entry) => ({
+    entry: safeEntryView(entry),
+    redundancy: savedProjection(entry),
+  }));
 }

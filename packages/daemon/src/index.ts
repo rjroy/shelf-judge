@@ -528,6 +528,7 @@ export async function main() {
         ...(jevRunController ? { activeRun: () => jevRunController?.activeRun() ?? null } : {}),
       }),
       jevRunController: jevRunController ?? undefined,
+      jevPairCache: jevPairCache ?? undefined,
       ownerGameNoteService,
       groundedAnalysisProvider,
       reflectionRuntime,

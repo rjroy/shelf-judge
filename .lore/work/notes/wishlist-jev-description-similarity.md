@@ -27,7 +27,7 @@ The plan's performance constraints are mandatory: one shared factual context and
 | `shelf-judge-xi83.1` | Phase 1; backend/shared contract owner and design review | Parent-accepted; checkpoint commit in this invocation | Current wishlist/owner-note/redundancy/cache references reconciled; C=description vs D=owner-note; all/default and selected run scope, pre-disclosure hydration, result contract frozen; independent test and review accepted; checkpoint commit. |
 | `shelf-judge-xi83.2` | Phase 2; shared/daemon backend | Parent-accepted; checkpoint commit in this invocation | Compact optional-for-legacy BGG scoring source survives storage/salvage/restart; failed fetch preserves source/snapshots; 175 tests / 778 expectations; independent test/review accepted; parent checkpoint commit. |
 | `shelf-judge-xi83.3` | Phase 3; daemon scoring backend/shared contract | Parent-accepted; checkpoint commit in this invocation | Candidate-only blend/result boundary; exact numeric F/C cases and eligibility/normalization; one context/index and one encoding per distinct game; no owned-owned work; independent test/review accepted; checkpoint commit. |
-| `shelf-judge-xi83.4` | Phase 4; daemon cache/lifecycle backend | Open and ready after .3 acceptance | Typed domain/member identities, read proof/cache revision and transactional C_ONLY acquisition recovery; ID collision/purge/failure-matrix tests; independent test/review; parent checkpoint commit. |
+| `shelf-judge-xi83.4` | Phase 4; daemon cache/lifecycle backend | Parent active; 4a/4b accepted, 4c open after 4b checkpoint | Typed domain/member identities, read proof/cache revision and transactional C_ONLY acquisition recovery; ID collision/purge/failure-matrix tests; independent test/review; parent checkpoint commit. |
 | `shelf-judge-xi83.5` | Phase 5; Jev run backend | Open, blocked on .4 | Legacy source preparation before frozen disclosure; exact all-needed/selected scope; changed preview inputs rejected before sends; sequential bounded run, hit reuse and atomic pair checkpoint counts; independent test/review; parent checkpoint commit. |
 | `shelf-judge-xi83.6` | Phase 6a; daemon API and Next proxy | Open, blocked on .5 | Result/scope routes and proxies agree; scope authorization isolated; unchanged projection/status avoids recomputation; independent test/review; parent checkpoint commit. |
 | `shelf-judge-xi83.7` | Phase 6b; designer web lane | Open, blocked on .6 | Browser test actually prepares/discloses/authorizes/starts wishlist scope and exercises status/progress/cancel; independent test and design/review; parent checkpoint commit. |
@@ -211,3 +211,60 @@ Phase 4a is closed by the parent after independent testing/review, including P4A
 | `packages/daemon/tests/services/jev-pair-cache-service.test.ts` | `dc965918f66005a323822f5d5cd3e950f8eb5639` | `9123e5471f7b8601768f212399f7600f2b7d310f3fc871efe529c2ddc039d466` | modified |
 
 The implementation note is the fourth accepted path and is excluded from its own hash table; this checkpoint also stages the current `.beads` export and interaction log, including Phase 4 split tracking and the accepted 4a closure. The 4b proof/resolver, 4c acquisition/recovery, and Phase 4 parent integration remain unfinished. This checkpoint authorizes no push.
+
+## Phase 4b implementation log (parent-accepted)
+
+Implementing only `shelf-judge-xi83.4.2`. Added a candidate-domain C_ONLY validator and injected resolver for the existing Phase 3 wishlist signal boundary. It derives reversible typed candidate/owned member keys and uses only indexed `wishlist-candidate` C lookups. Validation checks collection/domain/member identities, current candidate and owned names and exact descriptions, source observation identity, all current model/rubric/question/request-schema/score-mapping/policy provenance, numeric value including zero, and absence of consent/note dependencies. It does not inspect or require owner-note state or permission. Collection-domain rows, D/shared rows and mismatched sources/provenance are omitted as unavailable C; no source text is written to cache/logs or returned.
+
+The resolver proof identity binds the request collection, sorted candidate/eligible-owned membership, each usable candidate's full persisted BGG source snapshot, owned identity/name/description, effective semantic weights, and the current judgment contract. It obtains mutation revision before and after the exact requested candidate×eligible-owned point reads; changed/unknown revisions, unavailable cache and thrown reads fail closed without memoizing values. One bounded latest-capture memo returns aligned C values (including valid zero) for unchanged requests; its `isCurrent(request)` fence checks the supplied current capture and revision only and performs no pair reads. This keeps resolver work proportional to the supplied pairs and does not require owned-owned work, full cache enumeration, BGG calls, gateway calls, or owner-note data. The exported row validator/dependency projection is available for Phase 4c to reuse as a source/provenance proof; acquisition transfer and lifecycle wiring remain deferred.
+
+Daemon app composition injects the lifecycle-owned pair cache into the existing wishlist service resolver boundary. It does not change public routes or reads, which remain a later phase. No acquisition, startup reconciliation, run, status, UI, CLI, or ordinary BGG hydration behavior was added. Collection read-proof/coverage paths were not changed.
+
+Initial implementation-local evidence: `bun test packages/daemon/tests/wishlist-candidate-read-proof.test.ts packages/daemon/tests/jev-pair-read-proof.test.ts packages/daemon/tests/services/jev-pair-read-service.test.ts packages/daemon/tests/jev-pair-coverage.test.ts packages/daemon/tests/wishlist-redundancy-scoring.test.ts` passed (41 tests, 287 expectations) before the P4B-01 fence correction. This earlier run is retained as historical evidence and is not merged with later counts.
+
+Phase 4b implementation manifest (including this note):
+
+- `packages/daemon/src/services/wishlist-candidate-read-proof.ts`
+- `packages/daemon/src/app.ts`
+- `packages/daemon/src/index.ts`
+- `packages/daemon/tests/wishlist-candidate-read-proof.test.ts`
+- `.lore/work/notes/wishlist-jev-description-similarity.md`
+
+### P4B-01 live-authority publication fence correction
+
+Review found that a resolver's `isCurrent(oldRequest)` plus a stable cache revision did not establish that wishlist/collection/settings authority remained current while prediction snapshot scoring and C resolution were pending. The service now captures wishlist entries, collection (including ownership/source/eligibility inputs), redundancy and prediction settings, and tournament data under the shared profile source coordinator; it builds the owned prediction capture and candidate projection outside the lock. Immediately before returning a computed projection it rereads and hashes those same durable authorities under the coordinator, then checks the resolver's supplied-capture/cache-revision proof when any C value was used. All wishlist-service saves (add, refresh/refreshAll, remove/clear, and BGG-ID removal) now use that same short coordinator for their persistence commit, so source removal/refresh cannot pass between final validation and publication. No lock spans prediction computation, BGG/provider activity, or Jev work.
+
+If source authority changed or cannot be read at final validation, the service retries one fresh coherent capture; a second invalidation/unreadable source falls back to safe saved factual/base projections from the latest readable wishlist (or last captured entries if even that read fails), never labels the obsolete projection current. If only the cache revision changed after C resolution, the scorer discards every C value and recomputes the projection from the already-built factual context; a final source-only fence confirms it before publication. This preserves F fallback where available and saved prediction snapshots where it is not, without rebuilding the context or issuing extra pair lookups. A cache-unavailable/miss result with no C consumed does not block a current F-only projection. The concrete resolver's `isCurrent` remains a supplied-capture/revision check, but it is now called only after the service has matched that capture to freshly reread live authority under the coordinator.
+
+Barrier tests use fake scoring/resolver/storage inputs: explicit factual refresh changes candidate description during owned scoring and causes retry with the new source; coordinated wishlist removal during scoring causes retry with the removed candidate absent; collection policy and owned-veto changes during scoring force retry; simulated cache revision change after resolver completion before final publication discards C and matches F-only output; unreadable final source authority returns the saved base prediction rather than stale current comparison. The scorer test confirms stale-C removal reuses one factual context/vocabulary/range build. Implementation-local focused validation passed (67 tests, 386 expectations); the separate parent-owned independent run also passed 67 tests/386 expectations, root typecheck/lint, root formatting and diff checks. The parent accepted the refreshed nine-path review diff at `/tmp/opencode/wishlist-jev-phase4b-review.diff` against baseline `177fbdd`, including P4B-01. An earlier partial-scope 79-test/408-expectation run is historical, not additive evidence for this acceptance. No real provider calls or owner data were used. Phase 4b is accepted only; Phase 4c and the Phase 4 parent remain in progress.
+
+Updated Phase 4b implementation manifest:
+
+- `packages/daemon/src/services/wishlist-candidate-read-proof.ts`
+- `packages/daemon/src/services/wishlist-redundancy-scoring.ts`
+- `packages/daemon/src/services/wishlist-service.ts`
+- `packages/daemon/src/app.ts`
+- `packages/daemon/src/index.ts`
+- `packages/daemon/tests/wishlist-candidate-read-proof.test.ts`
+- `packages/daemon/tests/wishlist-redundancy-scoring.test.ts`
+- `packages/daemon/tests/wishlist-service.test.ts`
+- `.lore/work/notes/wishlist-jev-description-similarity.md`
+
+### Phase 4b acceptance and checkpoint evidence
+
+The parent accepted Phase 4b after independent testing, refreshed read-only review and P4B-01 closure. Independent evidence: 67 tests/386 expectations, root typecheck, lint, formatting and diff checks. The accepted review diff is `/tmp/opencode/wishlist-jev-phase4b-review.diff`, reviewed against `177fbdd`. No implementation tests are rerun for this administrative checkpoint. Phase 4b is closed; Phase 4 remains active and Phase 4c remains open/ready. This checkpoint contains no Phase 4c implementation and authorizes no push.
+
+The accepted eight-file source/test manifest was hashed immediately before this note update. Index blobs (or absence), worktree SHA-256, and status at capture:
+
+| Path | Index blob | Worktree SHA-256 | Status at capture |
+| --- | --- | --- | --- |
+| `packages/daemon/src/services/wishlist-candidate-read-proof.ts` | absent | `49cfb56d35dbaf96bf6c4decaae0d139fe72d4f09a644ef2365a61f492b99932` | untracked |
+| `packages/daemon/src/services/wishlist-redundancy-scoring.ts` | `778c479e7362a64477ffe21a299c55da36f6837b` | `91d7108929fd0796ce5107a448dceeb2a2a46e3bf4d19de72e6e4af9fe969d25` | modified |
+| `packages/daemon/src/services/wishlist-service.ts` | `d1ab2a897936a2b2ded0ba01753dffb5306a096d` | `0e8a2f91bf63a7530c279cb6572b853d6fbf31d48221ecc8e315f9860e2092dd` | modified |
+| `packages/daemon/src/app.ts` | `881573f20d82dfe7179aa041c93b575f0d5cf177` | `33dd686d9e526ef71d96abd743528d36252e9d9b8debce1c2ec48b2073166454` | modified |
+| `packages/daemon/src/index.ts` | `920e2495dbaad74e96b7eeec2e0c8164e22e7fb9` | `00e21cfd28b9cd9462d99ab2d35a2adcfd750f70da67f6b248029f9bc29f641d` | modified |
+| `packages/daemon/tests/wishlist-candidate-read-proof.test.ts` | absent | `3b1d729f38c50c65cc05ca99f8035de85086c7a53f10934b99110f815e714cc6` | untracked |
+| `packages/daemon/tests/wishlist-redundancy-scoring.test.ts` | `69bb6f69d1a38273c76d5feaae502e054a21e8bc` | `13ac34ecef83232b9c0d18fd8b1fa0f7f4c82d00f43787da1486586f2058695d` | modified |
+| `packages/daemon/tests/wishlist-service.test.ts` | `465b2dea750dfdf26025ebbe2e7bee62c05da3a7` | `9d5d23ca54b0bc8893bb31c508a3e7aa6759387a112fcf698204bee5946ef25e` | modified |
+
+The note is the ninth accepted path and is excluded from its own hash table; its final blob cannot hash itself. The authoritative tracker export records `.4.2` closed, `.4.3` open, and the Phase 4 parent active. The checkpoint stages all nonignored `.beads` state alongside exactly these nine manifest paths.

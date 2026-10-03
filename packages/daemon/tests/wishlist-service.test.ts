@@ -14,6 +14,7 @@ import type { StorageService } from "../src/services/storage-service";
 import type { PredictionService, PredictedGameResult } from "../src/services/prediction-service";
 import type { GameService } from "../src/services/game-service";
 import type { BoardgameScoringInput } from "../src/services/bgg-client";
+import type { WishlistDescriptionSignalCaptureRequest } from "../src/services/wishlist-redundancy-scoring.js";
 import { createWishlistService } from "../src/services/wishlist-service";
 import { parseBoardgameScoringThings } from "../src/services/bgg-xml-parser.js";
 
@@ -96,6 +97,13 @@ function makeGame(bggId: number, name: string): Game {
     ratings: {},
     createdAt: NOW,
     updatedAt: NOW,
+  };
+}
+
+function asDurableGame(game: Game): Collection["games"][number] {
+  return {
+    ...game,
+    ownerNote: { state: "missing", version: 0, updatedAt: null },
   };
 }
 
@@ -257,6 +265,34 @@ function createMockGameService(): GameService {
     setManualValues: () => Promise.reject(new Error("not implemented")),
     setManualShelf: () => Promise.reject(new Error("not implemented")),
     setAdditionalBggIds: () => Promise.reject(new Error("not implemented")),
+  };
+}
+
+function makeCurrentReadEntry(description: string): WishlistEntry {
+  return {
+    id: "entry-live-read",
+    bggId: 100,
+    name: "Test Game",
+    yearPublished: 2020,
+    thumbnailUrl: null,
+    predictedScore: 7.5,
+    predictionConfidence: "strong",
+    predictedBreakdown: null,
+    nicheImpact: null,
+    redundancyPreview: null,
+    addedAt: NOW,
+    bggSource: {
+      observedAt: NOW,
+      description,
+      mechanics: ["Deck Building"],
+      categories: ["Strategy"],
+      weight: 3.2,
+      communityRating: 7.8,
+      minPlayers: 2,
+      maxPlayers: 4,
+      bestPlayers: 3,
+      playingTime: 60,
+    },
   };
 }
 
@@ -934,5 +970,382 @@ describe("wishlist service", () => {
     expect(results[0].redundancy.adjustment?.originalScore).toBe(7.5);
     expect(results[0].entry).not.toHaveProperty("bggSource");
     expect(await service.list()).toEqual([existing]);
+  });
+
+  test("retries a source capture changed during owned scoring and excludes newly vetoed owners", async () => {
+    const existing = makeCurrentReadEntry("Original candidate prose");
+    const existingSource = existing.bggSource;
+    if (!existingSource) throw new Error("wishlist fixture requires persisted BGG source");
+    const owned = makeGame(900, "Eligible owner");
+    if (!owned.bggData) throw new Error("owned fixture requires BGG source");
+    owned.bggData.description = "Owned description";
+    const baseStorage = createMockStorage([existing], { games: [asDurableGame(owned)] }, true);
+    const initialCollection = await baseStorage.loadCollection();
+    const initialSemantic = initialCollection.semanticRedundancy;
+    let currentEntries = [existing];
+    const currentCollection: Collection = {
+      ...initialCollection,
+      semanticRedundancy: {
+        ...initialSemantic,
+        settings: {
+          ...initialSemantic.settings,
+          enabled: true,
+          weights: { ...initialSemantic.settings.weights, factual: 1, description: 1 },
+        },
+      },
+    };
+    const liveStorage: StorageService = {
+      ...baseStorage,
+      loadWishlist: () => Promise.resolve(structuredClone(currentEntries)),
+      saveWishlist: (entries) => {
+        currentEntries = structuredClone(entries);
+        return Promise.resolve();
+      },
+      loadCollection: () => Promise.resolve(structuredClone(currentCollection)),
+    };
+    let signalStarted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
+    let releaseFirst: () => void = () => undefined;
+    const firstScoringGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let scoringCalls = 0;
+    const updatedResult: PredictedGameResult = {
+      ...result100,
+      verifiedScoringInput: {
+        ...makeScoringInput(100, "Test Game"),
+        description: "Updated candidate prose",
+      },
+    };
+    const basePrediction = createMockPredictionService(new Map([[100, updatedResult]]));
+    const scoringPrediction: PredictionService = {
+      ...basePrediction,
+      listGamesWithPredictionsFromSnapshot: async (collection) => {
+        scoringCalls++;
+        if (scoringCalls === 1) {
+          signalStarted();
+          await firstScoringGate;
+        }
+        return collection.games.map((game) => {
+          const score = makeFitnessResult(5, false);
+          return { game, score };
+        });
+      },
+    };
+    const lastRequest: { current: WishlistDescriptionSignalCaptureRequest | null } = {
+      current: null,
+    };
+    const resolveDescriptionSignal = Object.assign(
+      (request: WishlistDescriptionSignalCaptureRequest) => {
+        lastRequest.current = request;
+        return Promise.resolve(request.pairs.map(() => 0.9));
+      },
+      {
+        isCurrent: (request: WishlistDescriptionSignalCaptureRequest) =>
+          request === lastRequest.current,
+      },
+    );
+    const service = createWishlistService({
+      storageService: liveStorage,
+      predictionService: scoringPrediction,
+      gameService,
+      resolveWishlistDescriptionSignal: resolveDescriptionSignal,
+    });
+
+    const pending = service.listWithCurrentRedundancy();
+    await started;
+    await service.refresh(existing.id);
+    releaseFirst();
+
+    const result = await pending;
+    expect(scoringCalls).toBe(2);
+    expect(lastRequest.current?.pairs[0]?.candidate.bggSource.description).toBe(
+      "Updated candidate prose",
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]?.redundancy.source).toBe("current");
+    expect(result[0]?.entry.predictedScore).toBe(existing.predictedScore);
+    expect(result[0]?.entry).not.toHaveProperty("bggSource");
+  });
+
+  test("removed candidates are absent after a source-change retry", async () => {
+    const existing = makeCurrentReadEntry("Candidate prose before removal");
+    const baseStorage = createMockStorage([existing], undefined, true);
+    let currentEntries = [existing];
+    const liveStorage: StorageService = {
+      ...baseStorage,
+      loadWishlist: () => Promise.resolve(structuredClone(currentEntries)),
+      saveWishlist: (entries) => {
+        currentEntries = structuredClone(entries);
+        return Promise.resolve();
+      },
+    };
+    let signalStarted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
+    let releaseFirst: () => void = () => undefined;
+    const firstScoringGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let scoringCalls = 0;
+    const basePrediction = createMockPredictionService(new Map());
+    const scoringPrediction: PredictionService = {
+      ...basePrediction,
+      listGamesWithPredictionsFromSnapshot: async () => {
+        scoringCalls++;
+        if (scoringCalls === 1) {
+          signalStarted();
+          await firstScoringGate;
+        }
+        return [];
+      },
+    };
+    const service = createWishlistService({
+      storageService: liveStorage,
+      predictionService: scoringPrediction,
+      gameService,
+    });
+
+    const pending = service.listWithCurrentRedundancy();
+    await started;
+    await service.remove(existing.id);
+    releaseFirst();
+
+    expect(await pending).toEqual([]);
+    expect(scoringCalls).toBe(2);
+  });
+
+  test("policy changes during capture retry before current projection publication", async () => {
+    const existing = makeCurrentReadEntry("Candidate prose");
+    const owned = makeGame(902, "Owned");
+    if (!owned.bggData) throw new Error("owned fixture requires BGG source");
+    owned.bggData.description = "Owned description";
+    const baseStorage = createMockStorage([existing], { games: [asDurableGame(owned)] }, true);
+    const baseCollection = await baseStorage.loadCollection();
+    const semantic = baseCollection.semanticRedundancy;
+    let currentCollection: Collection = {
+      ...baseCollection,
+      semanticRedundancy: {
+        ...semantic,
+        settings: {
+          ...semantic.settings,
+          enabled: true,
+          weights: { ...semantic.settings.weights, factual: 1, description: 1 },
+        },
+      },
+    };
+    const liveStorage: StorageService = {
+      ...baseStorage,
+      loadCollection: () => Promise.resolve(structuredClone(currentCollection)),
+    };
+    let signalStarted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
+    let releaseFirst: () => void = () => undefined;
+    const firstScoringGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let scoringCalls = 0;
+    const basePrediction = createMockPredictionService(new Map(), [
+      { game: owned, score: makeFitnessResult(5, false) },
+    ]);
+    const scoringPrediction: PredictionService = {
+      ...basePrediction,
+      listGamesWithPredictionsFromSnapshot: async (collection) => {
+        scoringCalls++;
+        if (scoringCalls === 1) {
+          signalStarted();
+          await firstScoringGate;
+        }
+        return collection.games.map((game) => {
+          const score = makeFitnessResult(5, false);
+          if (game.name === "Vetoed owner") score.vetoed = true;
+          return { game, score };
+        });
+      },
+    };
+    let resolverCalls = 0;
+    const resolveDescriptionSignal = Object.assign(
+      (request: WishlistDescriptionSignalCaptureRequest) => {
+        resolverCalls++;
+        return Promise.resolve(request.pairs.map(() => 1));
+      },
+      { isCurrent: () => true },
+    );
+    const service = createWishlistService({
+      storageService: liveStorage,
+      predictionService: scoringPrediction,
+      gameService,
+      resolveWishlistDescriptionSignal: resolveDescriptionSignal,
+    });
+
+    const pending = service.listWithCurrentRedundancy();
+    await started;
+    currentCollection = {
+      ...currentCollection,
+      revision: currentCollection.revision + 1,
+      games: [{ ...currentCollection.games[0], name: "Vetoed owner" }],
+      semanticRedundancy: {
+        ...currentCollection.semanticRedundancy,
+        settings: {
+          ...currentCollection.semanticRedundancy.settings,
+          weights: {
+            ...currentCollection.semanticRedundancy.settings.weights,
+            description: 0,
+          },
+        },
+      },
+    };
+    releaseFirst();
+
+    const result = await pending;
+    expect(scoringCalls).toBe(2);
+    expect(resolverCalls).toBe(1);
+    expect(result[0]?.redundancy.source).toBe("current");
+    expect(result[0]?.redundancy.adjustment?.penalty).toBe(0);
+    expect(result[0]?.entry.predictedScore).toBe(existing.predictedScore);
+  });
+
+  test("cache revision changes after C resolution cause current F-only publication", async () => {
+    const existing = makeCurrentReadEntry("Candidate prose");
+    const owned = makeGame(901, "Owned");
+    if (!owned.bggData) throw new Error("owned fixture requires BGG source");
+    owned.bggData.description = "Owned description";
+    const baseStorage = createMockStorage([existing], { games: [asDurableGame(owned)] }, true);
+    const baseCollection = await baseStorage.loadCollection();
+    const semantic = baseCollection.semanticRedundancy;
+    const currentCollection: Collection = {
+      ...baseCollection,
+      semanticRedundancy: {
+        ...semantic,
+        settings: {
+          ...semantic.settings,
+          enabled: true,
+          weights: { ...semantic.settings.weights, factual: 1, description: 1 },
+        },
+      },
+    };
+    let cacheRevision = 4;
+    let wishlistReads = 0;
+    const liveStorage: StorageService = {
+      ...baseStorage,
+      loadWishlist: () => {
+        wishlistReads++;
+        // This simulates a cache purge/upsert after resolver completion and before publication.
+        if (wishlistReads === 2) cacheRevision++;
+        return Promise.resolve([existing]);
+      },
+      loadCollection: () => Promise.resolve(structuredClone(currentCollection)),
+    };
+    const basePrediction = createMockPredictionService(new Map(), [
+      { game: owned, score: makeFitnessResult(5, false) },
+    ]);
+    const lastRequest: { current: WishlistDescriptionSignalCaptureRequest | null } = {
+      current: null,
+    };
+    let proofRevision = cacheRevision;
+    const resolveDescriptionSignal = Object.assign(
+      (request: WishlistDescriptionSignalCaptureRequest) => {
+        lastRequest.current = request;
+        proofRevision = cacheRevision;
+        return Promise.resolve(request.pairs.map(() => 1));
+      },
+      {
+        isCurrent: (request: WishlistDescriptionSignalCaptureRequest) =>
+          request === lastRequest.current && proofRevision === cacheRevision,
+      },
+    );
+    const service = createWishlistService({
+      storageService: liveStorage,
+      predictionService: basePrediction,
+      gameService,
+      resolveWishlistDescriptionSignal: resolveDescriptionSignal,
+    });
+
+    const afterInvalidation = await service.listWithCurrentRedundancy();
+    const noCachedC = createWishlistService({
+      storageService: liveStorage,
+      predictionService: basePrediction,
+      gameService,
+      resolveWishlistDescriptionSignal: Object.assign(
+        (request: WishlistDescriptionSignalCaptureRequest) =>
+          Promise.resolve(request.pairs.map(() => null)),
+        { isCurrent: () => true },
+      ),
+    });
+    const factualOnly = await noCachedC.listWithCurrentRedundancy();
+    expect(afterInvalidation[0]?.redundancy.source).toBe("current");
+    expect(afterInvalidation[0]?.redundancy).toEqual(factualOnly[0]?.redundancy);
+  });
+
+  test("unreadable final source authority falls back to the saved prediction snapshot", async () => {
+    const existing = makeCurrentReadEntry("Candidate prose");
+    const owned = makeGame(903, "Owned");
+    if (!owned.bggData) throw new Error("owned fixture requires BGG source");
+    owned.bggData.description = "Owned description";
+    const baseStorage = createMockStorage([existing], { games: [asDurableGame(owned)] }, true);
+    const baseCollection = await baseStorage.loadCollection();
+    const semantic = baseCollection.semanticRedundancy;
+    const currentCollection: Collection = {
+      ...baseCollection,
+      semanticRedundancy: {
+        ...semantic,
+        settings: {
+          ...semantic.settings,
+          enabled: true,
+          weights: { ...semantic.settings.weights, factual: 1, description: 1 },
+        },
+      },
+    };
+    let collectionReads = 0;
+    const liveStorage: StorageService = {
+      ...baseStorage,
+      loadCollection: () => {
+        collectionReads++;
+        if (collectionReads === 2 || collectionReads === 4)
+          return Promise.reject(new Error("final authority unavailable"));
+        return Promise.resolve(structuredClone(currentCollection));
+      },
+    };
+    let scoringCalls = 0;
+    const basePrediction = createMockPredictionService(new Map(), [
+      { game: owned, score: makeFitnessResult(5, false) },
+    ]);
+    const scoringPrediction: PredictionService = {
+      ...basePrediction,
+      listGamesWithPredictionsFromSnapshot: () => {
+        scoringCalls++;
+        return Promise.resolve([{ game: owned, score: makeFitnessResult(5, false) }]);
+      },
+    };
+    const lastRequest: { current: WishlistDescriptionSignalCaptureRequest | null } = {
+      current: null,
+    };
+    const resolver = Object.assign(
+      (request: WishlistDescriptionSignalCaptureRequest) => {
+        lastRequest.current = request;
+        return Promise.resolve(request.pairs.map(() => 0.8));
+      },
+      {
+        isCurrent: (request: WishlistDescriptionSignalCaptureRequest) =>
+          request === lastRequest.current,
+      },
+    );
+    const service = createWishlistService({
+      storageService: liveStorage,
+      predictionService: scoringPrediction,
+      gameService,
+      resolveWishlistDescriptionSignal: resolver,
+    });
+
+    const result = await service.listWithCurrentRedundancy();
+    expect(scoringCalls).toBe(2);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.redundancy.source).toBe("base-prediction");
+    expect(result[0]?.redundancy.orderingScore).toBe(existing.predictedScore);
   });
 });

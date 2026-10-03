@@ -65,6 +65,8 @@ import type { SemanticRedundancyStateService } from "./services/semantic-redunda
 import type { createJevStatusService } from "./services/jev-status-service.js";
 import type { createJevRefreshProgressService } from "./services/jev-refresh-progress-service.js";
 import type { JevRunController } from "./services/jev-run-controller.js";
+import type { JevPairCache } from "./services/jev-pair-cache-service.js";
+import { createWishlistCandidateDescriptionResolver } from "./services/wishlist-candidate-read-proof.js";
 import { createCollectionSnapshotRoutes } from "./routes/collection-snapshot.js";
 
 export interface AppDeps {
@@ -83,6 +85,7 @@ export interface AppDeps {
   jevStatusService?: Pick<ReturnType<typeof createJevStatusService>, "read">;
   jevRefreshProgressService?: Pick<ReturnType<typeof createJevRefreshProgressService>, "read">;
   jevRunController?: Pick<JevRunController, "preview" | "start" | "cancel" | "activeRun">;
+  jevPairCache?: JevPairCache;
   ownerGameNoteService: OwnerGameNoteService;
   groundedAnalysisProvider: GroundedAnalysisProvider;
   reflectionRuntime: ReflectionRuntime;
@@ -130,6 +133,14 @@ export function createApp(deps: AppDeps): AppResult {
     storageService,
     predictionService,
     gameService,
+    coordinator: deps.profileSourceCoordinator,
+    ...(deps.jevPairCache
+      ? {
+          resolveWishlistDescriptionSignal: createWishlistCandidateDescriptionResolver(
+            deps.jevPairCache,
+          ),
+        }
+      : {}),
   });
   const purchaseUtilizationService = createPurchaseUtilizationService({
     storageService,

@@ -545,6 +545,36 @@ describe("wishlist candidate redundancy scoring", () => {
     expect(noUsablePair[0].redundancy.source).toBe("saved-factual");
   });
 
+  test("drops C after a failed final cache fence without rebuilding factual context", async () => {
+    const owner = makeGame("owned-final-fence");
+    const input = makeInput([makeEntry(100)], [owner]);
+    const vocabulary: number[] = [];
+    const ranges: number[] = [];
+    const validations: boolean[] = [];
+    const result = await computeWishlistRedundancyReadResults({
+      ...input,
+      resolveDescriptionSignal: resolvePairs(() => 1),
+      observer: {
+        onFactualVocabularyBuilt: () => vocabulary.push(1),
+        onFactualRangesBuilt: () => ranges.push(1),
+      },
+      validateCaptureBeforePublish: (_request, usedDescriptionSignal) => {
+        validations.push(usedDescriptionSignal);
+        return Promise.resolve(validations.length === 1 ? "cache-changed" : "current");
+      },
+    });
+
+    const factualOnly = await computeWishlistRedundancyReadResults({
+      ...input,
+      resolveDescriptionSignal: () => Promise.resolve([null]),
+    });
+    expect(result[0]?.redundancy).toEqual(factualOnly[0]?.redundancy);
+    expect(result[0]?.redundancy.source).toBe("current");
+    expect(validations).toEqual([true, false]);
+    expect(vocabulary).toHaveLength(1);
+    expect(ranges).toHaveLength(1);
+  });
+
   test("reloaded compact source reproduces F and source text is never returned", async () => {
     const original = makeEntry(100);
     const raw: unknown = JSON.parse(JSON.stringify(original));

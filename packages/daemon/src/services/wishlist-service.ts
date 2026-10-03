@@ -16,8 +16,15 @@ import { computeNicheImpact } from "./niche-engine.js";
 import { computeRedundancyPreview } from "./redundancy-preview.js";
 import {
   computeWishlistRedundancyReadResults,
+  savedWishlistRedundancyReadResults,
+  WishlistRedundancyCaptureChangedError,
   type WishlistDescriptionSignalResolver,
 } from "./wishlist-redundancy-scoring.js";
+import {
+  canonicalSha256,
+  profileSourceCoordinatorFor,
+  type ProfileSourceCoordinator,
+} from "./profile-source-coordinator.js";
 
 export interface WishlistService {
   list(): Promise<WishlistEntry[]>;
@@ -35,6 +42,7 @@ export interface WishlistServiceDeps {
   predictionService: PredictionService;
   gameService: GameService;
   resolveWishlistDescriptionSignal?: WishlistDescriptionSignalResolver;
+  coordinator?: ProfileSourceCoordinator;
 }
 
 function buildEntry(
@@ -109,6 +117,23 @@ function computeNicheImpactForResult(
 
 export function createWishlistService(deps: WishlistServiceDeps): WishlistService {
   const { storageService, predictionService } = deps;
+  const coordinator = deps.coordinator ?? profileSourceCoordinatorFor(storageService);
+
+  async function loadReadCapture() {
+    const [entries, collection, redundancySettings, predictionSettings, tournamentData] =
+      await Promise.all([
+        storageService.loadWishlist(),
+        storageService.loadCollection(),
+        storageService.loadRedundancySettings(),
+        storageService.loadPredictionSettings(),
+        storageService.loadTournament(),
+      ]);
+    return { entries, collection, redundancySettings, predictionSettings, tournamentData };
+  }
+
+  function readCaptureIdentity(capture: Awaited<ReturnType<typeof loadReadCapture>>): string {
+    return canonicalSha256(capture);
+  }
 
   return {
     async list(): Promise<WishlistEntry[]> {
@@ -116,29 +141,64 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
     },
 
     async listWithCurrentRedundancy(): Promise<WishlistEntryReadResult[]> {
-      const [entries, collection, redundancySettings, predictionSettings, tournamentData] =
-        await Promise.all([
-          storageService.loadWishlist(),
-          storageService.loadCollection(),
-          storageService.loadRedundancySettings(),
-          storageService.loadPredictionSettings(),
-          storageService.loadTournament(),
-        ]);
       if (!predictionService.listGamesWithPredictionsFromSnapshot) {
         throw new Error("Snapshot scoring is required for a coherent wishlist comparison capture");
       }
-      const scoredGames = await predictionService.listGamesWithPredictionsFromSnapshot(
-        collection,
-        tournamentData,
-        predictionSettings,
-      );
-      return computeWishlistRedundancyReadResults({
-        entries,
-        collection,
-        scoredGames,
-        redundancySettings,
-        resolveDescriptionSignal: deps.resolveWishlistDescriptionSignal,
+      let lastEntries: WishlistEntry[] = [];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        let capture: Awaited<ReturnType<typeof loadReadCapture>>;
+        try {
+          capture = await coordinator.runExclusive(loadReadCapture);
+        } catch {
+          break;
+        }
+        lastEntries = capture.entries;
+        let identity: string;
+        try {
+          identity = readCaptureIdentity(capture);
+        } catch {
+          break;
+        }
+        const scoredGames = await predictionService.listGamesWithPredictionsFromSnapshot(
+          capture.collection,
+          capture.tournamentData,
+          capture.predictionSettings,
+        );
+        try {
+          return await computeWishlistRedundancyReadResults({
+            entries: capture.entries,
+            collection: capture.collection,
+            scoredGames,
+            redundancySettings: capture.redundancySettings,
+            resolveDescriptionSignal: deps.resolveWishlistDescriptionSignal,
+            async validateCaptureBeforePublish(request, usedDescriptionSignal) {
+              return coordinator.runExclusive(async () => {
+                try {
+                  const current = await loadReadCapture();
+                  if (readCaptureIdentity(current) !== identity) return "source-changed";
+                  if (request === null || !usedDescriptionSignal) return "current";
+                  return deps.resolveWishlistDescriptionSignal?.isCurrent?.(request)
+                    ? "current"
+                    : "cache-changed";
+                } catch {
+                  return "source-changed";
+                }
+              });
+            },
+          });
+        } catch (error) {
+          if (!(error instanceof WishlistRedundancyCaptureChangedError)) throw error;
+        }
+      }
+
+      const fallbackEntries = await coordinator.runExclusive(async () => {
+        try {
+          return (await storageService.loadWishlist()) ?? lastEntries;
+        } catch {
+          return lastEntries;
+        }
       });
+      return savedWishlistRedundancyReadResults(fallbackEntries);
     },
 
     async add(bggId: number): Promise<WishlistEntry> {
@@ -177,26 +237,37 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
           : null;
 
       const entry = buildEntry(bggId, result, nicheImpact, redundancyPreview);
-      wishlist.push(entry);
-      await storageService.saveWishlist(wishlist);
+      await coordinator.runExclusive(async () => {
+        const currentWishlist = await storageService.loadWishlist();
+        const currentCollection = await storageService.loadCollection();
+        if (currentWishlist.some((candidate) => candidate.bggId === bggId)) {
+          throw new Error("This game is already on your wishlist");
+        }
+        if (currentCollection.games.some((game) => game.bggId === bggId)) {
+          throw new Error("This game is already in your collection");
+        }
+        currentWishlist.push(entry);
+        await storageService.saveWishlist(currentWishlist);
+      });
       return entry;
     },
 
     async remove(id: string): Promise<void> {
-      const wishlist = await storageService.loadWishlist();
-      const index = wishlist.findIndex((e) => e.id === id);
-      if (index === -1) {
-        throw new Error(`Wishlist entry not found: ${id}`);
-      }
-      wishlist.splice(index, 1);
-      await storageService.saveWishlist(wishlist);
+      await coordinator.runExclusive(async () => {
+        const wishlist = await storageService.loadWishlist();
+        const index = wishlist.findIndex((e) => e.id === id);
+        if (index === -1) throw new Error(`Wishlist entry not found: ${id}`);
+        wishlist.splice(index, 1);
+        await storageService.saveWishlist(wishlist);
+      });
     },
 
     async clear(): Promise<number> {
-      const wishlist = await storageService.loadWishlist();
-      const count = wishlist.length;
-      await storageService.saveWishlist([]);
-      return count;
+      return coordinator.runExclusive(async () => {
+        const wishlist = await storageService.loadWishlist();
+        await storageService.saveWishlist([]);
+        return wishlist.length;
+      });
     },
 
     async refresh(id: string): Promise<WishlistEntry> {
@@ -238,15 +309,27 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
       updated.id = existing.id;
       updated.addedAt = existing.addedAt;
 
-      wishlist[index] = updated;
-      await storageService.saveWishlist(wishlist);
-      return updated;
+      return coordinator.runExclusive(async () => {
+        const current = await storageService.loadWishlist();
+        const currentIndex = current.findIndex((entry) => entry.id === existing.id);
+        if (currentIndex < 0) throw new Error(`Wishlist entry not found: ${existing.id}`);
+        const currentEntry = current[currentIndex];
+        if (canonicalSha256(currentEntry) !== canonicalSha256(existing)) {
+          throw new Error("Wishlist entry changed during refresh; retry the refresh");
+        }
+        updated.id = currentEntry.id;
+        updated.addedAt = currentEntry.addedAt;
+        current[currentIndex] = updated;
+        await storageService.saveWishlist(current);
+        return updated;
+      });
     },
 
     async refreshAll(): Promise<{ refreshed: number; errors: string[] }> {
       const wishlist = await storageService.loadWishlist();
       let refreshed = 0;
       const errors: string[] = [];
+      const stagedUpdates = new Map<string, { original: WishlistEntry; updated: WishlistEntry }>();
 
       // Preload shared data once rather than per-entry
       const [nicheSettings, allGames, collection, redundancySettings, tournamentData] =
@@ -283,25 +366,45 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
           const updated = buildEntry(existing.bggId, result, nicheImpact, redundancyPreview);
           updated.id = existing.id;
           updated.addedAt = existing.addedAt;
-          wishlist[i] = updated;
-          refreshed++;
+          stagedUpdates.set(existing.id, { original: existing, updated });
         } catch (err) {
           const message = toErrorMessage(err);
           errors.push(`${existing.name}: ${message}`);
         }
       }
 
-      await storageService.saveWishlist(wishlist);
+      await coordinator.runExclusive(async () => {
+        const current = await storageService.loadWishlist();
+        for (const [id, staged] of stagedUpdates) {
+          const currentIndex = current.findIndex((entry) => entry.id === id);
+          const currentEntry = current[currentIndex];
+          if (
+            currentIndex < 0 ||
+            !currentEntry ||
+            canonicalSha256(currentEntry) !== canonicalSha256(staged.original)
+          ) {
+            errors.push(`${staged.original.name}: wishlist entry changed during refresh`);
+            continue;
+          }
+          staged.updated.id = currentEntry.id;
+          staged.updated.addedAt = currentEntry.addedAt;
+          current[currentIndex] = staged.updated;
+          refreshed++;
+        }
+        if (refreshed > 0) await storageService.saveWishlist(current);
+      });
       return { refreshed, errors };
     },
 
     async removeByBggId(bggId: number): Promise<boolean> {
-      const wishlist = await storageService.loadWishlist();
-      const index = wishlist.findIndex((e) => e.bggId === bggId);
-      if (index === -1) return false;
-      wishlist.splice(index, 1);
-      await storageService.saveWishlist(wishlist);
-      return true;
+      return coordinator.runExclusive(async () => {
+        const wishlist = await storageService.loadWishlist();
+        const index = wishlist.findIndex((e) => e.bggId === bggId);
+        if (index === -1) return false;
+        wishlist.splice(index, 1);
+        await storageService.saveWishlist(wishlist);
+        return true;
+      });
     },
   };
 }
