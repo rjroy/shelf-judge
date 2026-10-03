@@ -195,6 +195,7 @@ function preserveCollectionScrollPosition(event: ReactMouseEvent<HTMLAnchorEleme
 
 interface CollectionTableProps {
   games: GameWithPurchaseUtilization[];
+  ownerNotePresence: Record<string, boolean>;
   predictedGames: GameWithPurchaseUtilization[] | null;
   nicheGames: GameWithPurchaseUtilization[] | null;
   axes: Axis[];
@@ -231,6 +232,7 @@ interface CollectionViewState {
 
 export function CollectionTable({
   games,
+  ownerNotePresence,
   predictedGames,
   nicheGames,
   axes,
@@ -569,6 +571,11 @@ export function CollectionTable({
     setPlayerCountInput("");
   }, []);
 
+  const clearAllCollectionFilters = useCallback(() => {
+    clearAllFilters();
+    if (showPreviouslyOwned || missingDimensionsOnly) router.push("/collection");
+  }, [clearAllFilters, missingDimensionsOnly, router, showPreviouslyOwned]);
+
   const handlePlayerCountChange = useCallback(
     (value: string) => {
       setPlayerCountInput(value);
@@ -580,8 +587,9 @@ export function CollectionTable({
 
   // Apply filters then sort
   const first_filter = useMemo(
-    () => activeGames.filter((g) => matchesFilters(g, filters)),
-    [activeGames, filters],
+    () =>
+      activeGames.filter((g) => matchesFilters(g, filters, ownerNotePresence[g.game.id] ?? false)),
+    [activeGames, filters, ownerNotePresence],
   );
   const after_ownership = useMemo(
     () =>
@@ -683,11 +691,13 @@ export function CollectionTable({
   const hasSearch = filters.search !== "";
   const hasRatedFilter = filters.ratedStatus !== "all";
   const hasPlayedFilter = filters.playedStatus !== "all";
+  const hasOwnerNoteFilter = filters.ownerNoteStatus !== "all";
   const hasPlayerCount = filters.playerCount !== null;
   const activeFilterCount =
     (hasRatedFilter ? 1 : 0) +
     (hasPlayedFilter ? 1 : 0) +
     (hasPlayerCount ? 1 : 0) +
+    (hasOwnerNoteFilter ? 1 : 0) +
     (showPreviouslyOwned ? 1 : 0) +
     (missingDimensionsOnly ? 1 : 0);
   const hasAnyFilter =
@@ -695,6 +705,7 @@ export function CollectionTable({
     hasRatedFilter ||
     hasPlayedFilter ||
     hasPlayerCount ||
+    hasOwnerNoteFilter ||
     showPreviouslyOwned ||
     missingDimensionsOnly;
   const hiddenCount =
@@ -921,6 +932,28 @@ export function CollectionTable({
               </div>
             </div>
             <div className="filter-group">
+              <div className="filter-group-label" id="owner-note-filter-label">
+                Owner note
+              </div>
+              <div
+                className="filter-group-controls"
+                role="group"
+                aria-labelledby="owner-note-filter-label"
+              >
+                {(["all", "with", "without"] as const).map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    aria-pressed={filters.ownerNoteStatus === status}
+                    className={`seg-btn${filters.ownerNoteStatus === status ? " active" : ""}`}
+                    onClick={() => updateFilter("ownerNoteStatus", status)}
+                  >
+                    {status === "all" ? "All" : status === "with" ? "With note" : "Without note"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="filter-group">
               <div className="filter-group-label">Player Count</div>
               <div className="filter-group-controls">
                 <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Plays at</span>
@@ -1007,6 +1040,18 @@ export function CollectionTable({
                 </button>
               </span>
             )}
+            {hasOwnerNoteFilter && (
+              <span className="filter-chip chip-spec">
+                {filters.ownerNoteStatus === "with" ? "With note" : "Without note"}{" "}
+                <button
+                  className="chip-x"
+                  aria-label="Remove owner note filter"
+                  onClick={() => updateFilter("ownerNoteStatus", "all")}
+                >
+                  &times;
+                </button>
+              </span>
+            )}
             {showPreviouslyOwned && (
               <span className="filter-chip chip-prev-owned">
                 Prev Owned{" "}
@@ -1027,9 +1072,10 @@ export function CollectionTable({
               (hasRatedFilter ? 1 : 0) +
               (hasPlayedFilter ? 1 : 0) +
               (hasPlayerCount ? 1 : 0) +
+              (hasOwnerNoteFilter ? 1 : 0) +
               (showPreviouslyOwned ? 1 : 0) +
               (missingDimensionsOnly ? 1 : 0) >=
-              2 && (
+              1 && (
               <button
                 className="clear-all-link"
                 onClick={() => {
@@ -1152,57 +1198,67 @@ export function CollectionTable({
       </div>
 
       {/* Table header with clickable columns */}
-      <div className="collection-header">
-        <div className="rank">#</div>
-        <div className="game-thumb-col"></div>
-        <button
-          type="button"
-          aria-pressed={sort.field === "name"}
-          aria-label={`Game: ${sort.field === "name" ? `sorted ${sort.direction === "asc" ? "ascending" : "descending"}` : "sort by name"}`}
-          className={`col-label sortable${sort.field === "name" ? " sort-active" : ""}`}
-          onClick={handleGameHeaderClick}
-          style={{ justifyContent: "flex-start" }}
-        >
-          Game
-          {sort.field === "name" && <span className="sort-arrow">{dirArrow}</span>}
-        </button>
-        {!usePredictions && (
-          <div className="axes-used-col col-label">{isAxisSort ? "Scores" : "Axes Rated"}</div>
-        )}
-        {usePredictions && <div className="axes-used-col col-label">Confidence</div>}
-        <button
-          type="button"
-          aria-pressed={sort.field === "updatedAt"}
-          aria-label={`Last Updated: ${sort.field === "updatedAt" ? `sorted ${sort.direction === "asc" ? "ascending" : "descending"}` : "sort by last updated"}`}
-          className={`last-rated-col col-label sortable${sort.field === "updatedAt" ? " sort-active" : ""}`}
-          onClick={handleLastRatedHeaderClick}
-        >
-          Last Updated
-          {sort.field === "updatedAt" && <span className="sort-arrow">{dirArrow}</span>}
-        </button>
-        <button
-          type="button"
-          aria-pressed={scoreOwnsSort}
-          aria-label={`Score (${scoreSubtitle}): ${scoreOwnsSort ? `sorted ${sort.direction === "asc" ? "ascending" : "descending"}` : "reverse current sort direction"}`}
-          className="score-col-label sortable"
-          onClick={handleScoreHeaderClick}
-          style={{ cursor: "pointer" }}
-        >
-          <span className={`score-col-main${scoreOwnsSort ? " sort-active" : ""}`}>
-            Score
-            {scoreOwnsSort && <span className="sort-arrow">{dirArrow}</span>}
-          </span>
-          <span className="score-col-sub">
-            {usePredictions && sort.field === "fitness" ? (
-              <span style={{ color: "var(--predict-accent)" }}>Pred. Fitness</span>
-            ) : (
-              scoreSubtitle
-            )}
-          </span>
-        </button>
-      </div>
+      {filtered.length > 0 && (
+        <div className="collection-header">
+          <div className="rank">#</div>
+          <div className="game-thumb-col"></div>
+          <button
+            type="button"
+            aria-pressed={sort.field === "name"}
+            aria-label={`Game: ${sort.field === "name" ? `sorted ${sort.direction === "asc" ? "ascending" : "descending"}` : "sort by name"}`}
+            className={`col-label sortable${sort.field === "name" ? " sort-active" : ""}`}
+            onClick={handleGameHeaderClick}
+            style={{ justifyContent: "flex-start" }}
+          >
+            Game
+            {sort.field === "name" && <span className="sort-arrow">{dirArrow}</span>}
+          </button>
+          {!usePredictions && (
+            <div className="axes-used-col col-label">{isAxisSort ? "Scores" : "Axes Rated"}</div>
+          )}
+          {usePredictions && <div className="axes-used-col col-label">Confidence</div>}
+          <button
+            type="button"
+            aria-pressed={sort.field === "updatedAt"}
+            aria-label={`Last Updated: ${sort.field === "updatedAt" ? `sorted ${sort.direction === "asc" ? "ascending" : "descending"}` : "sort by last updated"}`}
+            className={`last-rated-col col-label sortable${sort.field === "updatedAt" ? " sort-active" : ""}`}
+            onClick={handleLastRatedHeaderClick}
+          >
+            Last Updated
+            {sort.field === "updatedAt" && <span className="sort-arrow">{dirArrow}</span>}
+          </button>
+          <button
+            type="button"
+            aria-pressed={scoreOwnsSort}
+            aria-label={`Score (${scoreSubtitle}): ${scoreOwnsSort ? `sorted ${sort.direction === "asc" ? "ascending" : "descending"}` : "reverse current sort direction"}`}
+            className="score-col-label sortable"
+            onClick={handleScoreHeaderClick}
+            style={{ cursor: "pointer" }}
+          >
+            <span className={`score-col-main${scoreOwnsSort ? " sort-active" : ""}`}>
+              Score
+              {scoreOwnsSort && <span className="sort-arrow">{dirArrow}</span>}
+            </span>
+            <span className="score-col-sub">
+              {usePredictions && sort.field === "fitness" ? (
+                <span style={{ color: "var(--predict-accent)" }}>Pred. Fitness</span>
+              ) : (
+                scoreSubtitle
+              )}
+            </span>
+          </button>
+        </div>
+      )}
 
-      {nicheViewMode && nichesOn ? (
+      {filtered.length === 0 ? (
+        <div className="empty-state" role="status">
+          <h2>No games match these filters</h2>
+          <p>Try changing a filter or clear all filters to see your collection again.</p>
+          <button type="button" className="btn btn-secondary" onClick={clearAllCollectionFilters}>
+            Clear filters
+          </button>
+        </div>
+      ) : nicheViewMode && nichesOn ? (
         /* Group by Niche view (REQ-NICHE-24, REQ-NICHE-25) */
         <>
           {nicheGroups.length > 0 ? (

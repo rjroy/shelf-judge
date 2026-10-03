@@ -116,6 +116,7 @@ export interface FilterState {
   ratedStatus: "all" | "rated" | "unrated";
   playedStatus: "all" | "played" | "unplayed";
   playerCount: number | null;
+  ownerNoteStatus: "all" | "with" | "without";
 }
 
 const FILTER_STORAGE_KEY = "shelf-judge-filters";
@@ -124,6 +125,7 @@ export const DEFAULT_FILTERS: FilterState = {
   ratedStatus: "all",
   playedStatus: "all",
   playerCount: null,
+  ownerNoteStatus: "all",
 };
 
 export function loadFilters(): FilterState {
@@ -131,7 +133,8 @@ export function loadFilters(): FilterState {
   try {
     const raw = localStorage.getItem(FILTER_STORAGE_KEY);
     if (!raw) return DEFAULT_FILTERS;
-    const parsed = JSON.parse(raw) as FilterState;
+    const parsed = JSON.parse(raw) as Partial<FilterState>;
+    const hasOwnerNoteStatus = Object.hasOwn(parsed, "ownerNoteStatus");
     if (
       typeof parsed.search === "string" &&
       (parsed.ratedStatus === "all" ||
@@ -140,9 +143,13 @@ export function loadFilters(): FilterState {
       (parsed.playedStatus === "all" ||
         parsed.playedStatus === "played" ||
         parsed.playedStatus === "unplayed") &&
-      (parsed.playerCount === null || typeof parsed.playerCount === "number")
+      (parsed.playerCount === null || typeof parsed.playerCount === "number") &&
+      (!hasOwnerNoteStatus ||
+        parsed.ownerNoteStatus === "all" ||
+        parsed.ownerNoteStatus === "with" ||
+        parsed.ownerNoteStatus === "without")
     ) {
-      return parsed;
+      return { ...parsed, ownerNoteStatus: parsed.ownerNoteStatus ?? "all" } as FilterState;
     }
   } catch {
     // Corrupt data, fall back
@@ -162,7 +169,11 @@ export function saveFilters(filters: FilterState): void {
 // Filter predicate (REQ-CFS-18)
 // ---------------------------------------------------------------------------
 
-export function matchesFilters(gws: GameWithPurchaseUtilization, filters: FilterState): boolean {
+export function matchesFilters(
+  gws: GameWithPurchaseUtilization,
+  filters: FilterState,
+  ownerNotePresent = false,
+): boolean {
   const { game, score } = gws;
   const numPlays = game?.numPlays ?? 0;
 
@@ -179,6 +190,8 @@ export function matchesFilters(gws: GameWithPurchaseUtilization, filters: Filter
 
   if (filters.playedStatus === "played" && numPlays === 0) return false;
   if (filters.playedStatus === "unplayed" && numPlays > 0) return false;
+  if (filters.ownerNoteStatus === "with" && !ownerNotePresent) return false;
+  if (filters.ownerNoteStatus === "without" && ownerNotePresent) return false;
 
   if (filters.playerCount !== null) {
     if (game.minPlayers == null || game.maxPlayers == null) return false;

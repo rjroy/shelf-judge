@@ -302,6 +302,19 @@ function reset(next: Scenario): void {
   manualValuesState = createManualValuesState();
   rmSync(ownerNotePersistencePath, { force: true });
   ownerNoteState = createOwnerNoteState();
+  if (next === "collection") {
+    ownerNoteState.notes.set("game-1", {
+      state: "present",
+      version: 1,
+      updatedAt: observedAt,
+      text: "A fixture owner note for filtering.",
+    });
+    ownerNoteState.notes.set("game-2", {
+      state: "cleared",
+      version: 1,
+      updatedAt: observedAt,
+    });
+  }
   reflectionState = createReflectionState();
   activeReflectionBatch = null;
   reflectionFixtureMode = "normal";
@@ -722,7 +735,7 @@ async function handle(request: Request): Promise<Response> {
         : []),
     ];
     const scoreDelta = (refreshMutationCount + normalizeMutationCount) / 2;
-    const etag = `"fixture-collection-${collectionState.empty ? "empty" : "populated"}-${[...collectionState.previouslyOwnedIds].sort().join(",")}-${[...collectionState.deletedIds].sort().join(",")}-${Number(collectionState.axesAvailable)}-${Number(collectionState.tournamentAvailable)}-${Number(collectionState.predictionsAvailable)}-${Number(collectionState.nichesAvailable)}-${Number(collectionState.integratedRedundancy)}-${[...collectionIgnoredTags].sort().join(",")}-${scoreDelta}"`;
+    const etag = `"fixture-collection-${collectionState.empty ? "empty" : "populated"}-${[...collectionState.previouslyOwnedIds].sort().join(",")}-${[...collectionState.deletedIds].sort().join(",")}-${Number(collectionState.axesAvailable)}-${Number(collectionState.tournamentAvailable)}-${Number(collectionState.predictionsAvailable)}-${Number(collectionState.nichesAvailable)}-${Number(collectionState.integratedRedundancy)}-${[...collectionIgnoredTags].sort().join(",")}-${ownerNoteState.collectionRevision}-${scoreDelta}"`;
     if (unavailableFeatures.length === 0 && request.headers.get("if-none-match") === etag) {
       return new Response(null, {
         status: 304,
@@ -789,6 +802,7 @@ async function handle(request: Request): Promise<Response> {
             playingTime: entry.game.playingTime,
             ownership: entry.game.ownership,
           },
+          ownerNotePresent: ownerNote(ownerNoteState, entry.game.id).state === "present",
           ordinary: {
             score: withScoreDelta(entry.score),
             displayScore: entry.score === null ? null : (entry.score.score + scoreDelta).toFixed(1),

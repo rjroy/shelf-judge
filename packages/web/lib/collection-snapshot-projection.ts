@@ -11,6 +11,7 @@ import type {
 /** Typed input matching CollectionTable's data props (navigation props are supplied by the page). */
 export interface CollectionSnapshotTableData {
   readonly games: GameWithPurchaseUtilization[];
+  readonly ownerNotePresence: Record<string, boolean>;
   readonly predictedGames: GameWithPurchaseUtilization[] | null;
   readonly nicheGames: GameWithPurchaseUtilization[] | null;
   readonly axes: Axis[];
@@ -93,6 +94,9 @@ export function projectCollectionSnapshot(
 
   return {
     games,
+    ownerNotePresence: Object.fromEntries(
+      snapshot.games.map((row) => [row.game.id, row.ownerNotePresent]),
+    ),
     predictedGames,
     nicheGames,
     axes: snapshot.axes as Axis[],

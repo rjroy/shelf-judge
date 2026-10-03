@@ -79,6 +79,7 @@ function input(
         ratedStatus: "rated",
         playedStatus: "all",
         playerCount: 2,
+        ownerNoteStatus: "with",
       },
       predictionsOn: true,
       effectivePredictionsOn: false,
@@ -248,6 +249,35 @@ describe("collection navigation context store", () => {
     ).toEqual(context(key ?? "", 12_000));
   });
 
+  test("resolves legacy contexts without ownerNoteStatus as all and round-trips new status", async () => {
+    const storage = new MemoryStorage();
+    const legacy = context();
+    const legacyProjection = {
+      ...legacy.projection,
+      filters: {
+        search: "game",
+        ratedStatus: "rated",
+        playedStatus: "all",
+        playerCount: 2,
+      },
+    };
+    seed(storage, { ...legacy, projection: legacyProjection });
+
+    const resolvedLegacy = await resolveCollectionNavigationContext(UUIDS[0] ?? "", {
+      ...dependencies(storage, 1_000),
+      currentId: "game-1",
+    });
+    expect(resolvedLegacy?.projection.filters.ownerNoteStatus).toBe("all");
+
+    const newStorage = new MemoryStorage();
+    const key = await createCollectionNavigationContext(input(), dependencies(newStorage, 2_000));
+    expect(storedContext(newStorage, key ?? "").projection.filters.ownerNoteStatus).toBe("with");
+    expect(
+      (await resolveCollectionNavigationContext(key ?? "", dependencies(newStorage, 2_000)))
+        ?.projection.filters.ownerNoteStatus,
+    ).toBe("with");
+  });
+
   test("sets creation recency and refreshes detail and return accesses", async () => {
     const storage = new MemoryStorage();
     const key = await createCollectionNavigationContext(input(), dependencies(storage, 1_000));
@@ -360,6 +390,16 @@ describe("collection navigation context store", () => {
           projection: {
             ...valid.projection,
             filters: { ...valid.projection.filters, playerCount: "two" },
+          },
+        },
+      },
+      {
+        label: "owner note status union",
+        value: {
+          ...valid,
+          projection: {
+            ...valid.projection,
+            filters: { ...valid.projection.filters, ownerNoteStatus: "sometimes" },
           },
         },
       },
