@@ -95,7 +95,11 @@ describe("owner note text contract", () => {
   test("counts Unicode code points rather than UTF-16 code units", () => {
     expect(countOwnerGameNoteCodePoints("A😀e\u0301")).toBe(4);
     expect(OwnerGameNoteTextSchema.safeParse("😀".repeat(10_000)).success).toBe(true);
-    expect(OwnerGameNoteTextSchema.safeParse("😀".repeat(10_001)).success).toBe(false);
+    const overLimit = OwnerGameNoteTextSchema.safeParse("😀".repeat(10_001));
+    expect(overLimit.success).toBe(false);
+    if (!overLimit.success) {
+      expect(overLimit.error.issues[0]?.message).toBe("Note text cannot exceed 10,000 characters");
+    }
   });
 
   test.each(["", " \t\n", "\u00a0\u2003", "contains\0nul", "bad\u0007control"])(

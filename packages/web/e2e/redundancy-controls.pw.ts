@@ -236,9 +236,9 @@ async function installDaemon(page: Page) {
             retentionCaveat: "Retention duration is unspecified.",
             limits: {
               maxEligiblePairs: 100,
-              maxProviderAttempts: Number(url.searchParams.get("maxProviderAttempts") ?? 100),
+              maxProviderAttempts: Number(url.searchParams.get("maxProviderAttempts") ?? 1000),
               reportedTokenStopThreshold: Number(
-                url.searchParams.get("reportedTokenStopThreshold") ?? 200000,
+                url.searchParams.get("reportedTokenStopThreshold") ?? 2000000,
               ),
               maxRunDurationMs: Number(url.searchParams.get("maxRunDurationMs") ?? 30 * 60_000),
               reportedTokenThresholdIsBilledCeiling: false,
@@ -327,6 +327,8 @@ test("selected run limits bind the preview and changing them clears it", async (
 }, testInfo) => {
   await installDaemon(page);
   await page.goto("/redundancy");
+  await expect(page.getByLabel("Maximum HTTP attempts")).toHaveValue("1000");
+  await expect(page.getByLabel("Reported-token stop threshold")).toHaveValue("2000000");
   const touchTargetHeight = await page
     .getByLabel("Maximum HTTP attempts")
     .evaluate((input) => getComputedStyle(input).minHeight);
@@ -352,6 +354,25 @@ test("selected run limits bind the preview and changing them clears it", async (
   });
   await page.getByLabel("Maximum HTTP attempts").fill("1300");
   await expect(page.getByRole("region", { name: "Before you run" })).toHaveCount(0);
+});
+
+test("default run limits are sent to the preview", async ({ page }) => {
+  await installDaemon(page);
+  await page.goto("/redundancy");
+  await expect(page.getByLabel("Maximum HTTP attempts")).toHaveValue("1000");
+  await expect(page.getByLabel("Reported-token stop threshold")).toHaveValue("2000000");
+  await page.getByRole("button", { name: "Preview one run" }).click();
+
+  const preview = page.getByRole("region", { name: "Before you run" });
+  await expect(preview).toContainText("1,000 HTTP attempts");
+  await expect(preview).toContainText("2,000,000 reported tokens");
+  const previewCall = await page.evaluate(() =>
+    (
+      window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+    ).__redundancyCalls.find((entry) => entry.url.includes("/semantic/run-preview?")),
+  );
+  expect(previewCall?.url).toContain("maxProviderAttempts=1000");
+  expect(previewCall?.url).toContain("reportedTokenStopThreshold=2000000");
 });
 
 test("changing a similarity weight invalidates the saved-settings preview without a provider call", async ({
@@ -492,7 +513,7 @@ test("note consent is opt-in and declining still runs without note text", async 
   await expect(preview).toContainText("TypeSafe");
   await expect(preview).toContainText("2 game pairs");
   await expect(preview).toContainText("unknown");
-  await expect(preview).toContainText("100 HTTP attempts");
+  await expect(preview).toContainText("1,000 HTTP attempts");
   await expect(preview).toContainText(/note-based results may remain incomplete/i);
   const callsBefore = await page.evaluate(
     () =>
