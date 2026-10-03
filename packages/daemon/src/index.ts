@@ -54,6 +54,8 @@ import { JevRunController } from "./services/jev-run-controller.js";
 import type { JevPairCache } from "./services/jev-pair-cache-service.js";
 import type { StorageService } from "./services/storage-service.js";
 import type { PredictionService } from "./services/prediction-service.js";
+import type { GameService } from "./services/game-service.js";
+import { createWishlistRunPreparationService } from "./services/wishlist-run-preparation.js";
 
 const logger = createLogger("daemon");
 
@@ -101,6 +103,7 @@ export function createJevRunWorker(options: {
 export function composeJevRunController(options: {
   storageService: StorageService;
   predictionService: PredictionService;
+  gameService?: GameService;
   cache: JevPairCache | null;
   runService: JevRunService | null;
 }): JevRunController | null {
@@ -116,11 +119,20 @@ export function composeJevRunController(options: {
         predictSnapshot(collection, tournament, settings, targetGameIds),
     },
   });
+  const wishlistPreparation = options.gameService
+    ? createWishlistRunPreparationService({
+        storageService: options.storageService,
+        gameService: options.gameService,
+        sourceAdapter,
+        cache: options.cache,
+      })
+    : undefined;
   return new JevRunController({
     storageService: options.storageService,
     sourceAdapter,
     cache: options.cache,
     runService: options.runService,
+    ...(wishlistPreparation ? { wishlistPreparation } : {}),
   });
 }
 
@@ -484,6 +496,7 @@ export async function main() {
       jevRunController = composeJevRunController({
         storageService,
         predictionService,
+        gameService,
         cache: jevPairCache,
         runService: jevRunWorker,
       });

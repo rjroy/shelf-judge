@@ -3,6 +3,7 @@ import type { Collection, GameWithScore } from "@shelf-judge/shared";
 import { createInitialSemanticRedundancyStateV10 } from "@shelf-judge/shared";
 import { JevRunController } from "../../src/services/jev-run-controller.js";
 import { JevRunService, type JevRunCapture } from "../../src/services/jev-run-service.js";
+import type { PreparedWishlistRun } from "../../src/services/wishlist-run-preparation.js";
 import type { JevRunSourceAdapter } from "../../src/services/jev-run-source-adapter.js";
 import {
   type JevPairCache,
@@ -131,6 +132,7 @@ function harness(
     maxPairs?: number;
     gatewayConfigured?: boolean;
     noteTransmissionPermitted?: boolean;
+    wishlistPreparation?: { prepare: () => Promise<PreparedWishlistRun> };
     receiptTtlMs?: number;
     maxReceipts?: number;
   } = {},
@@ -209,6 +211,9 @@ function harness(
     gatewayConfigured: () => providerConfigured,
     ...(options.receiptTtlMs === undefined ? {} : { receiptTtlMs: options.receiptTtlMs }),
     ...(options.maxReceipts === undefined ? {} : { maxReceipts: options.maxReceipts }),
+    ...(options.wishlistPreparation === undefined
+      ? {}
+      : { wishlistPreparation: options.wishlistPreparation }),
   });
   return {
     controller,
@@ -248,6 +253,65 @@ function harness(
 }
 
 describe("JevRunController", () => {
+  test("wishlist preview binds frozen preparation and start fails closed until executor exists", async () => {
+    const capture = makeCapture();
+    let current = true;
+    const preparation = {
+      prepare: () =>
+        Promise.resolve({
+          scope: "wishlist",
+          selection: { kind: "selected", bggIds: [501] },
+          selectionIdentity: "selection",
+          capture,
+          entries: [],
+          unavailableCandidateBggIds: [],
+          eligibleOwnedIds: ["owned-a"],
+          pairs: [],
+          disclosure: {
+            scope: "wishlist",
+            wishlistEntryCount: 1,
+            selectedCandidateCount: 1,
+            unselectedEntryCount: 0,
+            ownedOverlapCandidateCount: 0,
+            requestedCandidateCount: 1,
+            eligibleCandidateCount: 1,
+            unavailableCandidateCount: 0,
+            eligibleOwnedGameCount: 1,
+            comparisonPairCount: 1,
+            cachedHitPairCount: 0,
+            sendablePairCount: 1,
+          },
+          cacheRevision: 0,
+          identity: "frozen-wishlist-preparation",
+          isCurrent: () => Promise.resolve(current),
+        } as PreparedWishlistRun),
+    };
+    const h = harness({ wishlistPreparation: preparation });
+    const preview = await h.controller.previewWishlist({ kind: "selected", bggIds: [501] });
+    expect(preview.status).toBe(200);
+    if (preview.status !== 200) throw new Error("Expected wishlist preview");
+    expect(preview.body).toMatchObject({
+      scope: { scope: "wishlist", selectedCandidateCount: 1, sendablePairCount: 1 },
+      selection: { kind: "selected", bggIds: [501] },
+    });
+
+    const startInput = {
+      requestId: preview.body.requestId,
+      precondition: preview.body.precondition,
+      noteTransmissionAuthorized: false,
+    };
+    const unavailable = await h.controller.start(startInput);
+    expect(unavailable).toEqual({ status: 503, body: { error: "run-unavailable" } });
+    expect(h.gatewayConstructions).toBe(0);
+    expect(h.starts).toBe(0);
+
+    current = false;
+    const changed = await h.controller.start(startInput);
+    expect(changed).toEqual({ status: 412, body: { error: "precondition-failed" } });
+    expect(h.gatewayConstructions).toBe(0);
+    expect(h.starts).toBe(0);
+  });
+
   test("preview exposes and binds validated per-run budget through opaque authorization", async () => {
     const h = harness();
     const selected = {

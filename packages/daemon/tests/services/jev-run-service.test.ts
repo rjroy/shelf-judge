@@ -2368,6 +2368,40 @@ describe("JevRunService attempt barriers", () => {
     expect(rows.size).toBe(0);
   });
 
+  test("wishlist scope cannot fall through the collection executor", async () => {
+    const capture = fixture(["a", "b"]);
+    const planned = planJevRunScope(capture.collection, capture.predictionCapture);
+    if (!planned.ok) throw new Error("Expected a valid collection fixture");
+    const { cache, rows } = cacheFake();
+    let gatewayConstructions = 0;
+    const service = new JevRunService({
+      storageService: {},
+      cache,
+      loadCapture: () => Promise.reject(new Error("Wishlist scope must not recapture")),
+      readCurrent: () =>
+        Promise.resolve({
+          collection: capture.collection,
+          sourceVectorIdentity: capture.sourceVectorIdentity,
+          policyIdentity: capture.policyIdentity,
+          canTransmitNotes: false,
+        }),
+      createGateway: () => {
+        gatewayConstructions++;
+        return { evaluatePair: () => Promise.resolve(scoreResult()) };
+      },
+    });
+
+    const reservation = await service.prepareValidatedPreparedRun({
+      scopeKind: "wishlist",
+      capture,
+      scope: planned.scope,
+      noteTransmissionAuthorized: false,
+    });
+    expect(reservation).toBeNull();
+    expect(gatewayConstructions).toBe(0);
+    expect(rows.size).toBe(0);
+  });
+
   test("prepared scope validation yields outside the coordinator and reservation does no pair scan", async () => {
     const capture = fixture(Array.from({ length: 200 }, (_, index) => `game-${index}`));
     const planned = planJevRunScope(capture.collection, capture.predictionCapture);

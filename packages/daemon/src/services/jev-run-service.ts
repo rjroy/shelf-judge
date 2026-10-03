@@ -36,6 +36,8 @@ export interface JevRunCapture {
   factualWeights: RedundancyComponentWeights;
   sourceVectorIdentity: string;
   policyIdentity: string;
+  /** Revision identity for prediction/eligibility inputs, excluding collection write tokens. */
+  eligibilityIdentity?: string;
 }
 
 export interface JevRunCurrentState {
@@ -43,6 +45,8 @@ export interface JevRunCurrentState {
   sourceVectorIdentity: string;
   policyIdentity: string;
   canTransmitNotes: boolean;
+  /** Revision identity for prediction/eligibility inputs, excluding collection write tokens. */
+  eligibilityIdentity?: string;
 }
 
 export interface JevRunServiceOptions {
@@ -74,6 +78,8 @@ export interface JevRunHandle {
 }
 
 export interface JevPreparedRunInput {
+  /** Wishlist execution is intentionally unsupported until Phase 5b. */
+  scopeKind?: "collection" | "wishlist";
   capture: JevRunCapture;
   scope: JevRunScope;
   noteTransmissionAuthorized: boolean;
@@ -153,6 +159,7 @@ export class JevRunService {
   prepareValidatedPreparedRun(input: JevPreparedRunInput): Promise<ValidatedPreparedJevRun | null> {
     return runOutsideProfileSourceCoordinator(async () => {
       try {
+        if (input.scopeKind === "wishlist") return null;
         if (typeof input.noteTransmissionAuthorized !== "boolean") return null;
         const capture = structuredClone(input.capture);
         const providerBudget = input.providerBudget ?? {

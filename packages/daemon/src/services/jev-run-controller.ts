@@ -1,8 +1,17 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import type { Collection, RedundancySettings } from "@shelf-judge/shared";
+import type {
+  Collection,
+  JevRunScopeDisclosure,
+  JevWishlistCandidateSelection,
+  RedundancySettings,
+} from "@shelf-judge/shared";
 import type { JevPairCache } from "./jev-pair-cache-service.js";
 import type { JevRunCapture, JevRunHandle, JevRunService } from "./jev-run-service.js";
 import type { JevRunSourceAdapter } from "./jev-run-source-adapter.js";
+import type {
+  PreparedWishlistRun,
+  WishlistRunPreparationService,
+} from "./wishlist-run-preparation.js";
 import {
   createJevRunCollectionLookup,
   planJevRunScope,
@@ -57,6 +66,12 @@ export interface JevRunControllerPreview {
   expiresAt: string;
 }
 
+export interface JevWishlistRunControllerPreview extends JevRunControllerPreview {
+  scope: Extract<JevRunScopeDisclosure, { scope: "wishlist" }>;
+  selection: JevWishlistCandidateSelection;
+  unavailableCandidateBggIds: readonly number[];
+}
+
 interface ControllerErrorBody {
   error:
     | "status-unavailable"
@@ -69,8 +84,8 @@ interface ControllerErrorBody {
 }
 
 export type JevRunControllerPreviewResponse =
-  | { status: 200; body: JevRunControllerPreview }
-  | { status: 400 | 412 | 503; body: ControllerErrorBody };
+  | { status: 200; body: JevRunControllerPreview | JevWishlistRunControllerPreview }
+  | { status: 400 | 409 | 412 | 503; body: ControllerErrorBody };
 
 export type JevRunControllerStartResponse =
   | { status: 200; body: { state: "started"; runId: string } }
@@ -90,6 +105,8 @@ interface AuthorizationRecord {
   providerBudget: Readonly<JevRunBudget>;
   expiresAtMs: number;
   consumed: boolean;
+  scopeKind: "collection" | "wishlist";
+  wishlistPreparation?: PreparedWishlistRun;
 }
 
 interface Receipt {
@@ -120,6 +137,7 @@ export class JevRunController {
       preconditionTtlMs?: number;
       receiptTtlMs?: number;
       gatewayConfigured?: () => boolean;
+      wishlistPreparation?: Pick<WishlistRunPreparationService, "prepare">;
       maxReceipts?: number;
     },
   ) {
@@ -172,6 +190,7 @@ export class JevRunController {
       providerBudget,
       expiresAtMs,
       consumed: false,
+      scopeKind: "collection",
     });
     this.trimAuthorizations();
     const semantic = capture.collection.semanticRedundancy.settings;
@@ -210,6 +229,112 @@ export class JevRunController {
         expiresAt: new Date(expiresAtMs).toISOString(),
       },
     };
+  }
+
+  /** Internal wishlist preview boundary. Public route selection is wired in Phase 6. */
+  async previewWishlist(
+    selection?: JevWishlistCandidateSelection,
+    budget: JevRunBudget = DEFAULT_JEV_RUN_BUDGET,
+  ): Promise<JevRunControllerPreviewResponse> {
+    if (!isValidJevRunBudget(budget)) return { status: 400, body: { error: "invalid-budget" } };
+    if (!this.options.wishlistPreparation)
+      return { status: 503, body: { error: "run-unavailable" } };
+
+    let prepared: PreparedWishlistRun;
+    try {
+      prepared = await this.options.wishlistPreparation.prepare(selection);
+    } catch (error) {
+      const code = (error as { code?: unknown })?.code;
+      if (code === "invalid-selection")
+        return { status: 400, body: { error: "precondition-failed" } };
+      if (code === "scope-changed") return { status: 412, body: { error: "precondition-failed" } };
+      return { status: 503, body: { error: "status-unavailable" } };
+    }
+    if (!(await prepared.isCurrent()))
+      return { status: 412, body: { error: "precondition-failed" } };
+    if (
+      prepared.disclosure.comparisonPairCount >
+      this.options.runService.effectiveLimits.maxEligiblePairs
+    )
+      return { status: 409, body: { error: "scope-over-limit" } };
+
+    const now = this.now();
+    const requestId = randomUUID();
+    const expiresAtMs = now.getTime() + this.preconditionTtlMs();
+    const precondition = randomBytes(32).toString("base64url");
+    const providerBudget = Object.freeze({ ...budget });
+    const limits = this.limitsIdentity(providerBudget);
+    const publication = await this.coordinator.runExclusive(async () => {
+      if (!(await prepared.isCurrent())) return { status: 412 as const };
+      const currentAuthority = await this.readCurrentAuthority();
+      if (!currentAuthority) return { status: 503 as const };
+      if (!this.enabled(prepared.capture.collection, currentAuthority.redundancySettings))
+        return { status: 503 as const };
+      if (
+        currentAuthority.source.policyIdentity !== prepared.capture.policyIdentity ||
+        (prepared.cacheRevision !== null &&
+          currentAuthority.cacheRevision !== prepared.cacheRevision)
+      )
+        return { status: 412 as const };
+
+      this.expireRecords();
+      this.authorizations.set(precondition, {
+        requestId,
+        precondition,
+        sourceVectorIdentity: prepared.capture.sourceVectorIdentity,
+        policyIdentity: prepared.capture.policyIdentity,
+        scopeIdentity: prepared.identity,
+        limitsIdentity: limits.identity,
+        providerBudget,
+        expiresAtMs,
+        consumed: false,
+        scopeKind: "wishlist",
+        wishlistPreparation: prepared,
+      });
+      this.trimAuthorizations();
+      return { status: 200 as const, authority: currentAuthority };
+    });
+    if (publication.status === 412) return { status: 412, body: { error: "precondition-failed" } };
+    if (publication.status === 503) return { status: 503, body: { error: "status-unavailable" } };
+    const authority = publication.authority;
+
+    const semantic = prepared.capture.collection.semanticRedundancy.settings;
+    const body: JevWishlistRunControllerPreview = {
+      requestId,
+      precondition,
+      provider: "TypeSafe",
+      modelId: JEV_MODEL_ID,
+      eligibleGameCount: prepared.disclosure.eligibleCandidateCount,
+      pairCount: prepared.disclosure.sendablePairCount,
+      descriptionBearingPairCount:
+        prepared.disclosure.sendablePairCount + prepared.disclosure.cachedHitPairCount,
+      noteBearingPairCount: 0,
+      noteTransmissionPermitted: false,
+      providerConfigured: this.isGatewayConfigured(),
+      signalScope: {
+        description: semantic.enabled && semantic.weights.description > 0,
+        ownerNotes: false,
+      },
+      scoringEffect:
+        authority.redundancySettings.stage === "integrated" && semantic.weights.description > 0
+          ? "integrated-fitness"
+          : "annotation-only",
+      retentionCaveat: JEV_RETENTION_CAVEAT,
+      limits: {
+        maxEligiblePairs: limits.run.maxEligiblePairs,
+        maxProviderAttempts: providerBudget.maxProviderAttempts,
+        maxRetriesPerEvaluation: JEV_GATEWAY_LIMITS.maxRetriesPerEvaluation,
+        maxRunDurationMs: providerBudget.maxRunDurationMs,
+        reportedTokenStopThreshold: providerBudget.reportedTokenStopThreshold,
+        reportedTokenThresholdIsBilledCeiling: false,
+      },
+      withinPairLimit: prepared.disclosure.comparisonPairCount <= limits.run.maxEligiblePairs,
+      expiresAt: new Date(expiresAtMs).toISOString(),
+      scope: prepared.disclosure,
+      selection: prepared.selection,
+      unavailableCandidateBggIds: prepared.unavailableCandidateBggIds,
+    };
+    return { status: 200, body };
   }
 
   start(input: {
@@ -299,6 +424,17 @@ export class JevRunController {
     )
       return { status: 412, body: { error: "precondition-failed" } };
     if (authorization.consumed) return { status: 409, body: { error: "run-conflict" } };
+    if (authorization.scopeKind === "wishlist") {
+      return this.coordinator.runExclusive(async () => {
+        if (
+          !authorization.wishlistPreparation ||
+          !(await authorization.wishlistPreparation.isCurrent())
+        )
+          return { status: 412, body: { error: "precondition-failed" } };
+        // Phase 5a freezes and discloses this scope; Phase 5b installs its executor.
+        return { status: 503, body: { error: "run-unavailable" } };
+      });
+    }
     if (!this.available()) return { status: 503, body: { error: "run-unavailable" } };
 
     let capture: JevRunCapture;
