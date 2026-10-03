@@ -233,6 +233,7 @@ function createMockPredictionService(
       return Promise.resolve(r);
     },
     listGamesWithPredictions: () => Promise.resolve(allGames),
+    listGamesWithPredictionsFromSnapshot: () => Promise.resolve(allGames),
     predictGame: () => Promise.reject(new Error("not implemented")),
     getReadiness: () => Promise.reject(new Error("not implemented")),
     getSettings: () => Promise.reject(new Error("not implemented")),
@@ -881,5 +882,57 @@ describe("wishlist service", () => {
       nicheRank: 2,
       nicheSize: 1,
     }); // failed refresh retains the previous snapshot
+  });
+
+  test("current redundancy read projects separately without refreshing prediction or leaking source", async () => {
+    const existing: WishlistEntry = {
+      id: "entry-current-read",
+      bggId: 100,
+      name: "Test Game",
+      yearPublished: 2020,
+      thumbnailUrl: null,
+      predictedScore: 7.5,
+      predictionConfidence: "strong",
+      predictedBreakdown: null,
+      nicheImpact: null,
+      redundancyPreview: null,
+      addedAt: NOW,
+      bggSource: {
+        observedAt: NOW,
+        description: "Candidate prose",
+        mechanics: ["Deck Building"],
+        categories: ["Strategy"],
+        weight: 3.2,
+        communityRating: 7.8,
+        minPlayers: 2,
+        maxPlayers: 4,
+        bestPlayers: 3,
+        playingTime: 60,
+      },
+    };
+    storage = createMockStorage([existing], undefined, true);
+    let captureCount = 0;
+    const basePrediction = createMockPredictionService(new Map(), []);
+    const scoringPredictionService: PredictionService = {
+      ...basePrediction,
+      listGamesWithPredictionsFromSnapshot: () => {
+        captureCount++;
+        return Promise.resolve([]);
+      },
+      predictBggGame: () => Promise.reject(new Error("ordinary comparison must not predict")),
+    };
+    const service = createWishlistService({
+      storageService: storage,
+      predictionService: scoringPredictionService,
+      gameService,
+    });
+
+    const results = await service.listWithCurrentRedundancy();
+    expect(captureCount).toBe(1);
+    expect(results[0].redundancy.source).toBe("current");
+    expect(results[0].redundancy.adjustment?.penalty).toBe(0);
+    expect(results[0].redundancy.adjustment?.originalScore).toBe(7.5);
+    expect(results[0].entry).not.toHaveProperty("bggSource");
+    expect(await service.list()).toEqual([existing]);
   });
 });

@@ -26,8 +26,8 @@ The plan's performance constraints are mandatory: one shared factual context and
 | --- | --- | --- | --- |
 | `shelf-judge-xi83.1` | Phase 1; backend/shared contract owner and design review | Parent-accepted; checkpoint commit in this invocation | Current wishlist/owner-note/redundancy/cache references reconciled; C=description vs D=owner-note; all/default and selected run scope, pre-disclosure hydration, result contract frozen; independent test and review accepted; checkpoint commit. |
 | `shelf-judge-xi83.2` | Phase 2; shared/daemon backend | Parent-accepted; checkpoint commit in this invocation | Compact optional-for-legacy BGG scoring source survives storage/salvage/restart; failed fetch preserves source/snapshots; 175 tests / 778 expectations; independent test/review accepted; parent checkpoint commit. |
-| `shelf-judge-xi83.3` | Phase 3; daemon scoring backend/shared contract | Open and ready after .2 acceptance | Candidate-only blend/result boundary; exact numeric F/C cases and eligibility/normalization; one context/index and one encoding per distinct game; no owned-owned work; independent test/review; parent checkpoint commit. |
-| `shelf-judge-xi83.4` | Phase 4; daemon cache/lifecycle backend | Open, blocked on .3 | Typed domain/member identities, read proof/cache revision and transactional C_ONLY acquisition recovery; ID collision/purge/failure-matrix tests; independent test/review; parent checkpoint commit. |
+| `shelf-judge-xi83.3` | Phase 3; daemon scoring backend/shared contract | Parent-accepted; checkpoint commit in this invocation | Candidate-only blend/result boundary; exact numeric F/C cases and eligibility/normalization; one context/index and one encoding per distinct game; no owned-owned work; independent test/review accepted; checkpoint commit. |
+| `shelf-judge-xi83.4` | Phase 4; daemon cache/lifecycle backend | Open and ready after .3 acceptance | Typed domain/member identities, read proof/cache revision and transactional C_ONLY acquisition recovery; ID collision/purge/failure-matrix tests; independent test/review; parent checkpoint commit. |
 | `shelf-judge-xi83.5` | Phase 5; Jev run backend | Open, blocked on .4 | Legacy source preparation before frozen disclosure; exact all-needed/selected scope; changed preview inputs rejected before sends; sequential bounded run, hit reuse and atomic pair checkpoint counts; independent test/review; parent checkpoint commit. |
 | `shelf-judge-xi83.6` | Phase 6a; daemon API and Next proxy | Open, blocked on .5 | Result/scope routes and proxies agree; scope authorization isolated; unchanged projection/status avoids recomputation; independent test/review; parent checkpoint commit. |
 | `shelf-judge-xi83.7` | Phase 6b; designer web lane | Open, blocked on .6 | Browser test actually prepares/discloses/authorizes/starts wishlist scope and exercises status/progress/cancel; independent test and design/review; parent checkpoint commit. |
@@ -137,3 +137,46 @@ Phase 2 is parent-accepted based on the independent test run, root lint/typechec
 | `packages/daemon/tests/wishlist-service.test.ts` | `258351fa17bb2813e2f9ac6dd7e4d4c6be14416d` | `4d716effc15ebec52b616a974c9831fc19e8e631f95ee7d1eff782eab290d43f` | modified |
 
 This acceptance closes Phase 2 only. Runtime comparison/run behavior remains deferred, no later phase is started here, and the authorized checkpoint does not include a push.
+
+## Phase 3 implementation log (accepted)
+
+Implemented and parent-accepted the candidate-only scoring boundary and service-level current read projection. `computeWishlistRedundancyReadResults` consumes persisted compact BGG factual fields, one captured collection/scored-owned set, saved base prediction snapshots, and an optional injected description-signal capture resolver. The resolver receives collection ID, sorted candidate BGG IDs, sorted eligible-owned local IDs, only factual/description enabled weights, and candidate-owned pairs with candidate BGG ID/name/verified compact source plus a minimal owned ID/BGG ID/name/description projection (no owner-note state/text). Its positional `Promise<readonly (number | null)[]>` aligns exactly to requested usable-description pairs; only finite `[0,1]` values (including zero) count, null/invalid per-pair values are omitted, and a failed or mismatched-length capture trusts no C while retaining factual fallback. Phase 4 must implement this as one proof-bound resolution per coherent candidate projection/capture, reusing the cache mutation-revision proof and indexed pair point lookups rather than re-resolving proofs/scanning pairs per candidate or repeated currentness check. This interface does not imply a SQLite batch API. No SQLite identity/read-proof/cache implementation or C_ONLY inference request is included in Phase 3.
+
+One shared factual context is built per result capture against all current collection games with BGG data, including ineligible normalization sources. One eligible-owned index includes only current owned games with a finite positive, non-vetoed score; BGG overlap candidates are excluded. Candidate compact fields project to the encoder's factual-only input without persisting a `Game` or vector. Vectors memoize collection members by local ID and candidate projections by disjoint object identity. The candidate scorer reuses shared available-weight blend and the extracted neighbor/penalty arithmetic; it compares only requested candidate-to-eligible-owned pairs, does not call `computeRedundancyAnalysis`, and does not compute owned-owned or candidate-candidate pairs. Zero qualifying neighbors produce a current zero-penalty/base-score adjustment when at least one signal class is enabled; when eligible pairs exist but every signal is unavailable, the scorer falls back rather than fabricating a comparison.
+
+`WishlistService.listWithCurrentRedundancy()` exposes the frozen safe `WishlistEntryReadResult` boundary and requires owned predictions from `listGamesWithPredictionsFromSnapshot` using the same captured collection/tournament/settings. It never refreshes wishlist predictions or mutates stored entry snapshots; returned entries omit `bggSource`. The existing list route/CLI/web are unchanged and do not consume this new method until Phase 6.
+
+Implementation-local evidence: the ten scorer, redundancy, wishlist, ownership and feature-vector suites passed (234 tests, 989 expectations). `bun run typecheck` (shared/daemon/CLI), `bun run lint`, scoped Prettier, and `git diff --check` passed. Structural counter fixture records one vocabulary/range/context build, seven vector encodes for four candidates plus three eligible owned games, and exactly 12 candidate-owned comparisons (4×3), with no owned-owned work. Numeric assertions cover F-only, F+C, valid C=0 denominator, disabled/zero-weight/all-unavailable signals, heterogeneous pair fallback, threshold/penalty, and no-neighbor zero penalty. Additional cases cover noneligible normalization effects without neighbor membership, eligibility exclusions, ID-collision-safe vector memoization, offline JSON source reload, saved/current/base precedence, source redaction, and snapshot immutability. No provider or BGG calls were used.
+
+Phase 3 implementation manifest:
+
+- `packages/daemon/src/services/feature-vector.ts`
+- `packages/daemon/src/services/redundancy-factual.ts`
+- `packages/daemon/src/services/redundancy-engine.ts`
+- `packages/daemon/src/services/wishlist-redundancy-scoring.ts`
+- `packages/daemon/src/services/wishlist-service.ts`
+- `packages/daemon/tests/wishlist-redundancy-scoring.test.ts`
+- `packages/daemon/tests/wishlist-service.test.ts`
+- `packages/daemon/tests/wishlist-routes.test.ts`
+- `packages/daemon/tests/ownership-routes.test.ts`
+- `.lore/work/notes/wishlist-jev-description-similarity.md`
+
+## Phase 3 acceptance and checkpoint evidence
+
+Parent accepted Phase 3 after separate independent validation and read-only review. Independent validation passed its focused ten-suite run (225 tests, 874 assertions), root typecheck/lint, scoped formatting/docs/diff checks. The complete review diff `/tmp/opencode/wishlist-jev-phase3-review.diff` was reviewed against baseline `4aeb8f2` with no material findings. These are separate evidence sets: the implementation-local ten-suite run above was 234 tests/989 expectations; it is not the independent 225/874 run. No Phase 4 implementation was included.
+
+The accepted implementation source/test manifest was captured after review and immediately before this note update. Index blobs, worktree SHA-256, and status are recorded below. This note is part of the accepted ten-path manifest and is excluded from its own hash table; `.beads` changes are administrative tracker state.
+
+| Path | Index blob | Worktree SHA-256 | Status at capture |
+| --- | --- | --- | --- |
+| `packages/daemon/src/services/feature-vector.ts` | `ce828cdd47c7cd2ceaf7680b2c2e431a80085fac` | `941e0c42b74bb72ff877de82c69b13fb70e5798615348d790f3ac201c15f836b` | modified |
+| `packages/daemon/src/services/redundancy-factual.ts` | `ef6d86a284523dbcfc9db18d41e020f46df2bdff` | `27b89c0f3c576a75ea27d67fd76abf2cf24ebb4525c879938d8d9a94b15889da` | modified |
+| `packages/daemon/src/services/redundancy-engine.ts` | `00c7f2da1cc90077c0af0e16ef82fae6c22a4bf2` | `0cc5b1aee47768e3ee111eba2d2bda4e13c0de9f0815aab3299bdc70b755742d` | modified |
+| `packages/daemon/src/services/wishlist-service.ts` | `d1ab2a897936a2b2ded0ba01753dffb5306a096d` | `bee2c3f030b2606a0b748847833eb80d3f0919107af353a5c9f75cabc526beef` | modified |
+| `packages/daemon/src/services/wishlist-redundancy-scoring.ts` | `778c479e7362a64477ffe21a299c55da36f6837b` | `a86d6b755fb163b649cacb8cfc3511ec3324145a65008f51d3c215614bae46fa` | untracked at pre-stage capture |
+| `packages/daemon/tests/wishlist-redundancy-scoring.test.ts` | `69bb6f69d1a38273c76d5feaae502e054a21e8bc` | `15c9ebc79a0f4bb64d1e47a6c4d994d02b17d689f92e8fcbf107d9b980fa6896` | untracked at pre-stage capture |
+| `packages/daemon/tests/wishlist-service.test.ts` | `465b2dea750dfdf26025ebbe2e7bee62c05da3a7` | `c1c532c1780665b44bea8cc5c9faf2bc20f7274651847b4ffa5470d879823872` | modified |
+| `packages/daemon/tests/wishlist-routes.test.ts` | `3745f73dd753f92853d2137afbb6bd78c4624994` | `e081aeaf5ba0f8bd7350cd0163f67cce546009a48bbc70eebb510c7dda2a52a1` | modified |
+| `packages/daemon/tests/ownership-routes.test.ts` | `e28576990f8164745bb6697ea9513b89cae810b3` | `ea2e6164961c064dd262a5740b0b0fa8b2aa1f8d31f9208f79a03ea600f6bce0` | modified |
+
+Phase 3 is closed by the parent and this administrative checkpoint records only that accepted phase. Phase 4 is open and ready for the parent to claim; no child beads were created here. No push is authorized.

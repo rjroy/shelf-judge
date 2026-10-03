@@ -55,6 +55,17 @@ export interface RedundancyPairTable {
   pairs: RedundancyPairScore[];
 }
 
+export interface CandidateRedundancyGame {
+  id: string;
+  name: string;
+}
+
+export interface CandidateRedundancyNeighbor {
+  game: Pick<Game, "id" | "name">;
+  score: number;
+  isPredicted: boolean;
+}
+
 export interface RedundancySimilarityInfo {
   status: RedundancySimilarityStatus;
   generationId: string | null;
@@ -120,30 +131,41 @@ function validatePairTable(
       throw new Error("Redundancy factual pair score must be finite and in [0, 1]");
     }
     factualPairs.set(key, pair.factual);
-    const available: [number, number][] = [];
-    if (factual > 0) available.push([factual, pair.factual]);
-    if (description > 0 && pair.description != null) {
-      if (!Number.isFinite(pair.description) || pair.description < 0 || pair.description > 1) {
-        throw new Error("Redundancy description pair score must be finite and in [0, 1]");
-      }
-      available.push([description, pair.description]);
-    }
-    if (ownerNote > 0 && pair.ownerNote != null) {
-      if (!Number.isFinite(pair.ownerNote) || pair.ownerNote < 0 || pair.ownerNote > 1) {
-        throw new Error("Redundancy owner-note pair score must be finite and in [0, 1]");
-      }
-      available.push([ownerNote, pair.ownerNote]);
-    }
-    const total = available.reduce((sum, [weight]) => sum + weight, 0);
-    if (total > 0 && Number.isFinite(total))
-      composedPairs.set(
-        key,
-        available.reduce((sum, [weight, score]) => sum + weight * score, 0) / total,
-      );
+    const composed = composeRedundancySignals(pair, table.weights);
+    if (composed !== null) composedPairs.set(key, composed);
   }
   if (seen.size !== expected.size || [...expected].some((key) => !seen.has(key)))
     throw new Error("Redundancy factual pair universe is incomplete");
   return { factualPairs, composedPairs };
+}
+
+/** Existing pairwise available-weight normalization, shared with candidate scoring. */
+export function composeRedundancySignals(
+  pair: Pick<RedundancyPairScore, "factual" | "description" | "ownerNote">,
+  weights: RedundancyPairTable["weights"],
+): number | null {
+  const available: [number, number][] = [];
+  if (weights.factual > 0) {
+    if (!Number.isFinite(pair.factual) || pair.factual < 0 || pair.factual > 1) {
+      throw new Error("Redundancy factual pair score must be finite and in [0, 1]");
+    }
+    available.push([weights.factual, pair.factual]);
+  }
+  if (weights.description > 0 && pair.description != null) {
+    if (!Number.isFinite(pair.description) || pair.description < 0 || pair.description > 1) {
+      throw new Error("Redundancy description pair score must be finite and in [0, 1]");
+    }
+    available.push([weights.description, pair.description]);
+  }
+  if (weights.ownerNote > 0 && pair.ownerNote != null) {
+    if (!Number.isFinite(pair.ownerNote) || pair.ownerNote < 0 || pair.ownerNote > 1) {
+      throw new Error("Redundancy owner-note pair score must be finite and in [0, 1]");
+    }
+    available.push([weights.ownerNote, pair.ownerNote]);
+  }
+  const total = available.reduce((sum, [weight]) => sum + weight, 0);
+  if (total <= 0 || !Number.isFinite(total)) return null;
+  return available.reduce((sum, [weight, score]) => sum + weight * score, 0) / total;
 }
 
 /**
@@ -339,52 +361,87 @@ function scoreNeighbors(
 
     if (neighbors.length < settings.minNeighbors) continue;
 
-    // Sort neighbors by similarity descending
-    neighbors.sort((a, b) => b.similarity - a.similarity);
-
-    const gameScore = gws.score!.score;
-    const gameIsActual = !isFullyPredicted(gws);
-
-    // Count better neighbors
-    let betterCount = 0;
-    for (const n of neighbors) {
-      const neighborScore = n.gws.score!.score;
-
-      // Tied scores don't count as "better"
-      if (scoresAreTied(gameScore, neighborScore)) continue;
-
-      // Predicted neighbors don't count as "better" for actual-scored games (REQ-REDUN-12)
-      if (gameIsActual && isFullyPredicted(n.gws)) continue;
-
-      if (neighborScore > gameScore) {
-        betterCount++;
-      }
-    }
-
-    const nicheSize = neighbors.length;
-    const coverageRatio = betterCount / Math.max(nicheSize, settings.expectedNeighbors);
-    const penalty = coverageRatio * settings.maxPenalty;
-    const adjustedScore = Math.max(1.0, gameScore - penalty);
-
-    // Rank among niche: betterCount + 1. Uses the same predicted authority filter
-    // as penalty computation so rank and penalty agree.
-    const nicheRank = betterCount + 1;
-
-    const nicheNeighbors: RedundancyNeighbor[] = neighbors.map((n) => ({
-      gameId: n.gws.game.id,
-      gameName: n.gws.game.name,
-      similarity: Math.round(n.similarity * 1000) / 1000,
-      fitnessScore: n.gws.score!.score,
-      isPredicted: isFullyPredicted(n.gws),
-    }));
-
-    result.set(gws.game.id, {
-      penalty: Math.round(penalty * 100) / 100,
-      originalScore: gameScore,
-      adjustedScore: Math.round(adjustedScore * 100) / 100,
-      nicheNeighbors,
-      nicheRank,
-      nicheSize,
-    });
+    result.set(
+      gws.game.id,
+      buildAdjustment(
+        { game: gws.game, score: gws.score!.score, isPredicted: isFullyPredicted(gws) },
+        neighbors.map(({ gws: neighbor, similarity }) => ({
+          game: neighbor.game,
+          score: neighbor.score!.score,
+          isPredicted: isFullyPredicted(neighbor),
+          similarity,
+        })),
+        settings,
+      ),
+    );
   }
+}
+
+/** Candidate-to-owned scoring reuses the collection neighbor/penalty equations without
+ * constructing a collection pair table or evaluating any owned-owned comparisons. */
+export function computeCandidateRedundancyAdjustment(
+  candidate: CandidateRedundancyGame & { score: number },
+  eligibleOwned: readonly CandidateRedundancyNeighbor[],
+  settings: RedundancySettings,
+  similarityWithOwned: (owned: CandidateRedundancyNeighbor) => number,
+): RedundancyAdjustment | null {
+  if (!settings.enabled || !Number.isFinite(candidate.score)) return null;
+  const neighbors = eligibleOwned.flatMap((owned) => {
+    const similarity = similarityWithOwned(owned);
+    return Number.isFinite(similarity) && similarity >= settings.similarityThreshold
+      ? [{ ...owned, similarity }]
+      : [];
+  });
+  if (neighbors.length < settings.minNeighbors) {
+    return neighbors.length === 0 ? zeroPenaltyAdjustment(candidate.score) : null;
+  }
+  return buildAdjustment(
+    { game: candidate, score: candidate.score, isPredicted: true },
+    neighbors,
+    settings,
+  );
+}
+
+function buildAdjustment(
+  target: CandidateRedundancyNeighbor,
+  neighbors: readonly (CandidateRedundancyNeighbor & { similarity: number })[],
+  settings: RedundancySettings,
+): RedundancyAdjustment {
+  const sortedNeighbors = [...neighbors].sort((a, b) => b.similarity - a.similarity);
+  let betterCount = 0;
+  for (const neighbor of sortedNeighbors) {
+    if (scoresAreTied(target.score, neighbor.score)) continue;
+    if (!target.isPredicted && neighbor.isPredicted) continue;
+    if (neighbor.score > target.score) betterCount++;
+  }
+  const nicheSize = sortedNeighbors.length;
+  const coverageRatio = betterCount / Math.max(nicheSize, settings.expectedNeighbors);
+  const penalty = coverageRatio * settings.maxPenalty;
+  const adjustedScore = Math.max(1.0, target.score - penalty);
+  const nicheNeighbors: RedundancyNeighbor[] = sortedNeighbors.map((neighbor) => ({
+    gameId: neighbor.game.id,
+    gameName: neighbor.game.name,
+    similarity: Math.round(neighbor.similarity * 1000) / 1000,
+    fitnessScore: neighbor.score,
+    isPredicted: neighbor.isPredicted,
+  }));
+  return {
+    penalty: Math.round(penalty * 100) / 100,
+    originalScore: target.score,
+    adjustedScore: Math.round(adjustedScore * 100) / 100,
+    nicheNeighbors,
+    nicheRank: betterCount + 1,
+    nicheSize,
+  };
+}
+
+function zeroPenaltyAdjustment(score: number): RedundancyAdjustment {
+  return {
+    penalty: 0,
+    originalScore: score,
+    adjustedScore: score,
+    nicheNeighbors: [],
+    nicheRank: 1,
+    nicheSize: 0,
+  };
 }

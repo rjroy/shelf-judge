@@ -56,6 +56,10 @@ function createMockWishlistService(): WishlistService & { entries: WishlistEntry
       return Promise.resolve(structuredClone(mock.entries));
     },
 
+    listWithCurrentRedundancy() {
+      return Promise.resolve([]);
+    },
+
     add(bggId: number) {
       if (mock.entries.some((e) => e.bggId === bggId)) {
         return Promise.reject(new Error("This game is already on your wishlist"));

@@ -6,6 +6,7 @@ import {
   type NicheImpact,
   type RedundancyAdjustment,
   type WishlistBggSourceSnapshot,
+  type WishlistEntryReadResult,
   WishlistBggSourceSnapshotSchema,
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
@@ -13,9 +14,14 @@ import type { PredictionService, PredictedGameResult } from "./prediction-servic
 import type { GameService } from "./game-service.js";
 import { computeNicheImpact } from "./niche-engine.js";
 import { computeRedundancyPreview } from "./redundancy-preview.js";
+import {
+  computeWishlistRedundancyReadResults,
+  type WishlistDescriptionSignalResolver,
+} from "./wishlist-redundancy-scoring.js";
 
 export interface WishlistService {
   list(): Promise<WishlistEntry[]>;
+  listWithCurrentRedundancy(): Promise<WishlistEntryReadResult[]>;
   add(bggId: number): Promise<WishlistEntry>;
   remove(id: string): Promise<void>;
   clear(): Promise<number>;
@@ -28,6 +34,7 @@ export interface WishlistServiceDeps {
   storageService: StorageService;
   predictionService: PredictionService;
   gameService: GameService;
+  resolveWishlistDescriptionSignal?: WishlistDescriptionSignalResolver;
 }
 
 function buildEntry(
@@ -106,6 +113,32 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
   return {
     async list(): Promise<WishlistEntry[]> {
       return storageService.loadWishlist();
+    },
+
+    async listWithCurrentRedundancy(): Promise<WishlistEntryReadResult[]> {
+      const [entries, collection, redundancySettings, predictionSettings, tournamentData] =
+        await Promise.all([
+          storageService.loadWishlist(),
+          storageService.loadCollection(),
+          storageService.loadRedundancySettings(),
+          storageService.loadPredictionSettings(),
+          storageService.loadTournament(),
+        ]);
+      if (!predictionService.listGamesWithPredictionsFromSnapshot) {
+        throw new Error("Snapshot scoring is required for a coherent wishlist comparison capture");
+      }
+      const scoredGames = await predictionService.listGamesWithPredictionsFromSnapshot(
+        collection,
+        tournamentData,
+        predictionSettings,
+      );
+      return computeWishlistRedundancyReadResults({
+        entries,
+        collection,
+        scoredGames,
+        redundancySettings,
+        resolveDescriptionSignal: deps.resolveWishlistDescriptionSignal,
+      });
     },
 
     async add(bggId: number): Promise<WishlistEntry> {
