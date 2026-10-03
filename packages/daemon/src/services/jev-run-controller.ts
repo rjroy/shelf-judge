@@ -425,15 +425,68 @@ export class JevRunController {
       return { status: 412, body: { error: "precondition-failed" } };
     if (authorization.consumed) return { status: 409, body: { error: "run-conflict" } };
     if (authorization.scopeKind === "wishlist") {
-      return this.coordinator.runExclusive(async () => {
-        if (
-          !authorization.wishlistPreparation ||
-          !(await authorization.wishlistPreparation.isCurrent())
-        )
-          return { status: 412, body: { error: "precondition-failed" } };
-        // Phase 5a freezes and discloses this scope; Phase 5b installs its executor.
+      const prepared = authorization.wishlistPreparation;
+      if (input.noteTransmissionAuthorized)
+        return { status: 412, body: { error: "precondition-failed" } };
+      if (!prepared || !this.available())
         return { status: 503, body: { error: "run-unavailable" } };
-      });
+      if (!(await prepared.isCurrent()))
+        return { status: 412, body: { error: "precondition-failed" } };
+      if (
+        prepared.pairs.some((pair) => pair.state === "sendable-miss") &&
+        !this.isGatewayConfigured()
+      )
+        return { status: 503, body: { error: "run-unavailable" } };
+      const validated = await runOutsideProfileSourceCoordinator(() =>
+        this.options.runService.prepareValidatedPreparedRun({
+          scopeKind: "wishlist",
+          wishlistPreparation: prepared,
+          noteTransmissionAuthorized: false,
+          providerBudget: authorization.providerBudget,
+        }),
+      );
+      if (!validated) return { status: 412, body: { error: "precondition-failed" } };
+      try {
+        return await this.coordinator.runExclusive(async () => {
+          if (authorization.expiresAtMs <= this.now().getTime() || !(await prepared.isCurrent()))
+            return { status: 412 as const, body: { error: "precondition-failed" as const } };
+          const authority = await this.readCurrentAuthority();
+          if (!authority || !this.available() || authority.cacheRevision === null)
+            return { status: 503 as const, body: { error: "run-unavailable" as const } };
+          if (!this.enabled(prepared.capture.collection, authority.redundancySettings))
+            return { status: 503 as const, body: { error: "run-unavailable" as const } };
+          if (
+            authority.source.policyIdentity !== authorization.policyIdentity ||
+            this.limitsIdentity(authorization.providerBudget).identity !==
+              authorization.limitsIdentity
+          )
+            return { status: 412 as const, body: { error: "precondition-failed" as const } };
+          if (this.activeHandle)
+            return { status: 409 as const, body: { error: "run-conflict" as const } };
+          if (authorization.consumed)
+            return { status: 409 as const, body: { error: "run-conflict" as const } };
+          const handle = this.options.runService.reserveValidatedPreparedRun(validated);
+          authorization.consumed = true;
+          this.activeHandle = handle;
+          const receipt = this.receipts.get(input.requestId);
+          if (receipt) {
+            receipt.state = "active";
+            receipt.expiresAtMs = Number.POSITIVE_INFINITY;
+          }
+          void handle.completion
+            .finally(() => {
+              if (this.activeHandle === handle) this.activeHandle = null;
+              if (receipt && this.receipts.get(input.requestId) === receipt) {
+                receipt.state = "replay";
+                receipt.expiresAtMs = this.now().getTime() + this.receiptTtlMs();
+              }
+            })
+            .catch(() => {});
+          return { status: 200 as const, body: { state: "started" as const, runId: handle.runId } };
+        });
+      } catch {
+        return { status: 409, body: { error: "run-conflict" } };
+      }
     }
     if (!this.available()) return { status: 503, body: { error: "run-unavailable" } };
 

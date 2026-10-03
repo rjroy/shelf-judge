@@ -2368,10 +2368,8 @@ describe("JevRunService attempt barriers", () => {
     expect(rows.size).toBe(0);
   });
 
-  test("wishlist scope cannot fall through the collection executor", async () => {
+  test("wishlist execution uses its typed executor and never recaptures collection scope", async () => {
     const capture = fixture(["a", "b"]);
-    const planned = planJevRunScope(capture.collection, capture.predictionCapture);
-    if (!planned.ok) throw new Error("Expected a valid collection fixture");
     const { cache, rows } = cacheFake();
     let gatewayConstructions = 0;
     const service = new JevRunService({
@@ -2391,13 +2389,44 @@ describe("JevRunService attempt barriers", () => {
       },
     });
 
+    const wishlistPreparation = {
+      scope: "wishlist" as const,
+      selection: { kind: "all" as const },
+      selectionIdentity: "selection",
+      capture,
+      entries: [],
+      unavailableCandidateBggIds: [],
+      eligibleOwnedIds: [],
+      pairs: [],
+      disclosure: {
+        scope: "wishlist" as const,
+        wishlistEntryCount: 0,
+        selectedCandidateCount: 0,
+        unselectedEntryCount: 0,
+        ownedOverlapCandidateCount: 0,
+        requestedCandidateCount: 0,
+        eligibleCandidateCount: 0,
+        unavailableCandidateCount: 0,
+        eligibleOwnedGameCount: 0,
+        comparisonPairCount: 0,
+        cachedHitPairCount: 0,
+        sendablePairCount: 0,
+      },
+      cacheRevision: null,
+      wishlistMutationGeneration: "0",
+      identity: "identity",
+      isSourceCurrent: () => Promise.resolve(true),
+      isCurrent: () => Promise.resolve(true),
+    };
     const reservation = await service.prepareValidatedPreparedRun({
       scopeKind: "wishlist",
-      capture,
-      scope: planned.scope,
+      wishlistPreparation,
       noteTransmissionAuthorized: false,
     });
-    expect(reservation).toBeNull();
+    expect(reservation).not.toBeNull();
+    if (!reservation) throw new Error("Expected frozen wishlist reservation");
+    const result = await service.reserveValidatedPreparedRun(reservation).completion;
+    expect(result.state).toBe("completed");
     expect(gatewayConstructions).toBe(0);
     expect(rows.size).toBe(0);
   });

@@ -13,6 +13,7 @@ import { planJevRunScope } from "./jev-run-scope.js";
 import {
   canonicalSha256,
   profileSourceCoordinatorFor,
+  wishlistMutationGenerationFor,
   type ProfileSourceCoordinator,
 } from "./profile-source-coordinator.js";
 import type { JevRunSourceAdapter } from "./jev-run-source-adapter.js";
@@ -41,7 +42,10 @@ export interface PreparedWishlistRun {
   readonly pairs: readonly FrozenWishlistRunPair[];
   readonly disclosure: Extract<JevRunScopeDisclosure, { scope: "wishlist" }>;
   readonly cacheRevision: number | null;
+  readonly wishlistMutationGeneration: string;
   readonly identity: string;
+  /** Live wishlist/collection authority fence, deliberately independent of cache revision. */
+  isSourceCurrent(): Promise<boolean>;
   isCurrent(): Promise<boolean>;
 }
 
@@ -173,7 +177,11 @@ export function createWishlistRunPreparationService(options: {
           options.storageService.loadWishlist(),
           options.storageService.loadCollection(),
         ]);
-        return { entries, collection };
+        return {
+          entries,
+          collection,
+          wishlistMutationGeneration: wishlistMutationGenerationFor(options.storageService),
+        };
       });
       const capturedCollection = freezeValue(structuredClone(finalSources.collection));
       const capturedEntries = freezeValue(structuredClone(finalSources.entries));
@@ -313,6 +321,7 @@ export function createWishlistRunPreparationService(options: {
         pairs,
         disclosure,
         cacheRevision: revision,
+        wishlistMutationGeneration: finalSources.wishlistMutationGeneration,
       });
       const frozenEntries = freezeValue(selectedEntries.map((entry) => structuredClone(entry)));
       const frozenAllEntries = capturedEntries;
@@ -332,7 +341,21 @@ export function createWishlistRunPreparationService(options: {
         pairs: freezeValue(pairs),
         disclosure,
         cacheRevision: revision,
+        wishlistMutationGeneration: finalSources.wishlistMutationGeneration,
         identity,
+        isSourceCurrent: async () =>
+          isPreparedCurrent({
+            selection,
+            allEntries: frozenAllEntries,
+            capture,
+            collectionIdentity: capturedCollectionIdentity,
+            revision: null,
+            wishlistMutationGeneration: finalSources.wishlistMutationGeneration,
+            sourceAdapter: options.sourceAdapter,
+            storageService: options.storageService,
+            coordinator,
+            cache: options.cache,
+          }),
         isCurrent: async () =>
           isPreparedCurrent({
             selection,
@@ -340,6 +363,7 @@ export function createWishlistRunPreparationService(options: {
             capture,
             collectionIdentity: capturedCollectionIdentity,
             revision,
+            wishlistMutationGeneration: finalSources.wishlistMutationGeneration,
             sourceAdapter: options.sourceAdapter,
             storageService: options.storageService,
             coordinator,
@@ -358,6 +382,7 @@ async function isPreparedCurrent(input: {
   capture: JevRunCapture;
   collectionIdentity: string;
   revision: number | null;
+  wishlistMutationGeneration: string;
   sourceAdapter: Pick<JevRunSourceAdapter, "readCurrent">;
   storageService: WishlistRunPreparationStorage;
   coordinator: ProfileSourceCoordinator;
@@ -365,6 +390,8 @@ async function isPreparedCurrent(input: {
 }): Promise<boolean> {
   try {
     return await input.coordinator.runExclusive(async () => {
+      if (wishlistMutationGenerationFor(input.storageService) !== input.wishlistMutationGeneration)
+        return false;
       const authority = await input.sourceAdapter.readCurrent();
       const [entries, collection] = await Promise.all([
         input.storageService.loadWishlist(),
@@ -395,7 +422,9 @@ async function isPreparedCurrent(input: {
         return false;
       if (input.revision !== null && input.cache.mutationRevision() !== input.revision)
         return false;
-      return true;
+      return (
+        wishlistMutationGenerationFor(input.storageService) === input.wishlistMutationGeneration
+      );
     });
   } catch {
     return false;

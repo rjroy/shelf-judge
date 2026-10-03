@@ -41,6 +41,7 @@ import { createWishlistRunPreparationService } from "../src/services/wishlist-ru
 import { JevRunService, type JevRunCapture } from "../src/services/jev-run-service.js";
 import { JevRunController } from "../src/services/jev-run-controller.js";
 import { createJevRunSourceAdapter } from "../src/services/jev-run-source-adapter.js";
+import { createJevGateway } from "../src/services/jev/jev-gateway.js";
 import { wishlistCollectionSourceIdentity } from "../src/services/wishlist-collection-source-identity.js";
 import { createHydratedTestApp } from "./helpers/test-app.js";
 import {
@@ -2362,6 +2363,78 @@ describe("wishlist service", () => {
       }
       expect(cacheFailure).toMatchObject({ code: "cache-unavailable" });
 
+      let gatewayConstructions = 0;
+      let providerStarts = 0;
+      const candidateRun = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: () => Promise.reject(new Error("Frozen wishlist run must not recapture")),
+        readCurrent: () => sourceAdapter.readCurrent(),
+        createGateway: (admit) => {
+          gatewayConstructions++;
+          return {
+            evaluatePair: async (request) => {
+              expect(request.mode).toBe("description-only");
+              expect(JSON.stringify(request)).not.toContain("ownerNote");
+              expect(JSON.stringify(request)).not.toContain("note edit unrelated");
+              await admit({
+                mode: "description-only",
+                attemptId: "wishlist-c-only",
+                start: () => {
+                  providerStarts++;
+                  return { response: Promise.resolve(new Response()) };
+                },
+              });
+              return {
+                description: {
+                  score: 0.42,
+                  confidence: 0.8,
+                  modelId: JEV_JUDGMENT_CONTRACT.modelId,
+                  rubricVersion: 2,
+                  questionVersion: 2,
+                },
+                ownerNote: null,
+                usage: { inputTokens: 4, outputTokens: 2 },
+              };
+            },
+          };
+        },
+      });
+      const candidateReservation = await candidateRun.prepareValidatedPreparedRun({
+        scopeKind: "wishlist",
+        wishlistPreparation: selected,
+        noteTransmissionAuthorized: false,
+      });
+      expect(candidateReservation).not.toBeNull();
+      if (!candidateReservation) throw new Error("Expected frozen wishlist run reservation");
+      const candidateProgress =
+        await candidateRun.reserveValidatedPreparedRun(candidateReservation).completion;
+      expect(candidateProgress).toMatchObject({
+        state: "completed",
+        pairCount: 1,
+        completedPairs: 1,
+        cacheMisses: 1,
+        failedPairs: 0,
+      });
+      expect(gatewayConstructions).toBe(1);
+      expect(providerStarts).toBe(1);
+      const ownedForCandidateRun = currentCollection.games[0];
+      if (!ownedForCandidateRun) throw new Error("owned test game is missing");
+      const generatedRow = cache.lookup({
+        gameAId: encodeWishlistBggMember(collection.id, String(eligible.bggId)),
+        gameBId: encodeOwnedLocalMember(collection.id, ownedForCandidateRun.id),
+        signal: "C",
+        pairDomain: "wishlist-candidate",
+      });
+      expect(generatedRow).toMatchObject({
+        pairDomain: "wishlist-candidate",
+        dependencyKind: "C_ONLY",
+        value: 0.42,
+      });
+      expect(
+        generatedRow?.dependencies.every((dependency) => dependency.noteFingerprint === undefined),
+      ).toBe(true);
+
       const eligibleSource = eligible.bggSource;
       if (!eligibleSource) throw new Error("eligible candidate needs its saved source");
       cache.upsert(
@@ -2382,6 +2455,158 @@ describe("wishlist service", () => {
       expect(cached.disclosure.sendablePairCount).toBe(0);
       expect(cached.pairs[0]?.state).toBe("cached-hit");
       expect(await selected.isCurrent()).toBe(false);
+
+      let allHitGatewayConstructions = 0;
+      const allHitRun = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: () => Promise.reject(new Error("All-hit run must not recapture")),
+        readCurrent: () => sourceAdapter.readCurrent(),
+        createGateway: () => {
+          allHitGatewayConstructions++;
+          throw new Error("All-hit run must not construct a provider gateway");
+        },
+      });
+      const allHitReservation = await allHitRun.prepareValidatedPreparedRun({
+        scopeKind: "wishlist",
+        wishlistPreparation: cached,
+        noteTransmissionAuthorized: false,
+      });
+      expect(allHitReservation).not.toBeNull();
+      if (!allHitReservation) throw new Error("Expected all-hit reservation");
+      expect(
+        await allHitRun.reserveValidatedPreparedRun(allHitReservation).completion,
+      ).toMatchObject({
+        state: "completed",
+        pairCount: 1,
+        completedPairs: 1,
+        cacheHits: 1,
+        cacheMisses: 0,
+        failedPairs: 0,
+      });
+      expect(allHitGatewayConstructions).toBe(0);
+
+      const candidateMember = encodeWishlistBggMember(collection.id, String(eligible.bggId));
+      const ownedMember = encodeOwnedLocalMember(collection.id, ownedForCandidateRun.id);
+      cache.purgePair(candidateMember, ownedMember, "C", "wishlist-candidate");
+      const latePreparation = await preparation.prepare({
+        kind: "selected",
+        bggIds: [unavailable.bggId, eligible.bggId, overlap.bggId],
+      });
+      let markStarted!: () => void;
+      let releaseResult!: () => void;
+      const providerStarted = new Promise<void>((resolve) => (markStarted = resolve));
+      const providerRelease = new Promise<void>((resolve) => (releaseResult = resolve));
+      const lateRun = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: () => Promise.reject(new Error("Late wishlist run must not recapture")),
+        readCurrent: () => sourceAdapter.readCurrent(),
+        createGateway: (admit) => ({
+          evaluatePair: async () => {
+            await admit({
+              mode: "description-only",
+              attemptId: "wishlist-late-removal",
+              start: () => {
+                markStarted();
+                return { response: Promise.resolve(new Response()) };
+              },
+            });
+            await providerRelease;
+            return {
+              description: {
+                score: 0.61,
+                confidence: null,
+                modelId: JEV_JUDGMENT_CONTRACT.modelId,
+                rubricVersion: 2,
+                questionVersion: 2,
+              },
+              ownerNote: null,
+              usage: { inputTokens: 2, outputTokens: 1 },
+            };
+          },
+        }),
+      });
+      const lateReservation = await lateRun.prepareValidatedPreparedRun({
+        scopeKind: "wishlist",
+        wishlistPreparation: latePreparation,
+        noteTransmissionAuthorized: false,
+      });
+      if (!lateReservation) throw new Error("Expected late callback reservation");
+      const lateCompletion = lateRun.reserveValidatedPreparedRun(lateReservation).completion;
+      await providerStarted;
+      const beforeRemoval = await storage.loadWishlist();
+      await storage.saveWishlist(beforeRemoval.filter((entry) => entry.id !== eligible.id));
+      releaseResult();
+      expect(await lateCompletion).toMatchObject({ state: "failed", failedPairs: 1 });
+      expect(
+        cache.lookup({
+          gameAId: candidateMember,
+          gameBId: ownedMember,
+          signal: "C",
+          pairDomain: "wishlist-candidate",
+        }),
+      ).toBeNull();
+      await storage.saveWishlist(beforeRemoval);
+
+      const failingTriggerDb = new Database(join(directory, "jev-pair-cache.sqlite"));
+      failingTriggerDb.exec(`CREATE TRIGGER reject_wishlist_judgment
+        BEFORE INSERT ON judgments WHEN NEW.pair_domain = 'wishlist-candidate'
+        BEGIN SELECT RAISE(ABORT, 'injected wishlist checkpoint failure'); END`);
+      const checkpointPreparation = await preparation.prepare({
+        kind: "selected",
+        bggIds: [unavailable.bggId, eligible.bggId, overlap.bggId],
+      });
+      const checkpointRun = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: () => Promise.reject(new Error("Frozen wishlist run must not recapture")),
+        readCurrent: () => sourceAdapter.readCurrent(),
+        createGateway: (admit) => ({
+          evaluatePair: async () => {
+            await admit({
+              mode: "description-only",
+              attemptId: "wishlist-checkpoint-failure",
+              start: () => ({ response: Promise.resolve(new Response()) }),
+            });
+            return {
+              description: {
+                score: 0.31,
+                confidence: 0.5,
+                modelId: JEV_JUDGMENT_CONTRACT.modelId,
+                rubricVersion: 2,
+                questionVersion: 2,
+              },
+              ownerNote: null,
+              usage: { inputTokens: 2, outputTokens: 1 },
+            };
+          },
+        }),
+      });
+      const checkpointReservation = await checkpointRun.prepareValidatedPreparedRun({
+        scopeKind: "wishlist",
+        wishlistPreparation: checkpointPreparation,
+        noteTransmissionAuthorized: false,
+      });
+      if (!checkpointReservation) throw new Error("Expected checkpoint-failure reservation");
+      expect(
+        await checkpointRun.reserveValidatedPreparedRun(checkpointReservation).completion,
+      ).toMatchObject({ state: "failed", completedPairs: 0, failedPairs: 0, cacheMisses: 1 });
+      expect(
+        cache.lookup({
+          gameAId: candidateMember,
+          gameBId: ownedMember,
+          signal: "C",
+          pairDomain: "wishlist-candidate",
+        }),
+      ).toBeNull();
+      expect(cache.getRunProgress()).toMatchObject({
+        state: "failed",
+        completedPairs: 0,
+        failedPairs: 0,
+      });
+      failingTriggerDb.exec("DROP TRIGGER reject_wishlist_judgment");
+      failingTriggerDb.close();
 
       currentPolicyIdentity = "changed-policy";
       expect(await cached.isCurrent()).toBe(false);
@@ -2612,7 +2837,7 @@ describe("wishlist service", () => {
     expect(wishlistCollectionSourceIdentity(axesReordered)).not.toBe(identity);
   });
 
-  test("production axis veto change invalidates a zero-pair wishlist preview", async () => {
+  test("production veto and policy changes fence wishlist preview and active sends", async () => {
     const directory = await mkdtemp(join(tmpdir(), "wishlist-run-axis-source-fence-"));
     const cache = await createJevPairCache(directory);
     const context = await createHydratedTestApp({ jevPairCache: cache });
@@ -2743,6 +2968,103 @@ describe("wishlist service", () => {
 
       const fresh = await preparation.prepare({ kind: "selected", bggIds: [candidate.bggId] });
       expect(fresh.disclosure.eligibleOwnedGameCount).toBe(1);
+      const cacheRevisionBeforeActiveMutation = cache.mutationRevision();
+      expect(cacheRevisionBeforeActiveMutation).not.toBeNull();
+      const checkpointPair = cache.checkpointPair.bind(cache);
+      let stalePairCheckpoints = 0;
+      cache.checkpointPair = (checkpoint) => {
+        stalePairCheckpoints++;
+        checkpointPair(checkpoint);
+      };
+      let markProviderStarted!: () => void;
+      let releaseProvider!: () => void;
+      const providerStarted = new Promise<void>((resolve) => (markProviderStarted = resolve));
+      const providerGate = new Promise<void>((resolve) => (releaseProvider = resolve));
+      let activeGatewayConstructions = 0;
+      const activeRunService = new JevRunService({
+        storageService: context.storageService,
+        cache,
+        loadCapture: () => sourceAdapter.loadCapture(),
+        readCurrent: () => sourceAdapter.readCurrent(),
+        createGateway: (admit) => {
+          activeGatewayConstructions++;
+          return {
+            evaluatePair: async () => {
+              await admit({
+                mode: "description-only",
+                attemptId: "wishlist-policy-change-during-provider",
+                start: () => {
+                  markProviderStarted();
+                  return { response: Promise.resolve(new Response()) };
+                },
+              });
+              await providerGate;
+              return {
+                description: {
+                  score: 0.5,
+                  confidence: null,
+                  modelId: JEV_JUDGMENT_CONTRACT.modelId,
+                  rubricVersion: 2,
+                  questionVersion: 2,
+                },
+                ownerNote: null,
+                usage: { inputTokens: 2, outputTokens: 1 },
+              };
+            },
+          };
+        },
+      });
+      const activeController = new JevRunController({
+        storageService: context.storageService,
+        sourceAdapter,
+        cache,
+        runService: activeRunService,
+        wishlistPreparation: preparation,
+      });
+      const activePreview = await activeController.previewWishlist({
+        kind: "selected",
+        bggIds: [candidate.bggId],
+      });
+      if (activePreview.status !== 200)
+        throw new Error("Expected eligible wishlist preview before axis mutation");
+      const activeStarted = await activeController.start({
+        requestId: activePreview.body.requestId,
+        precondition: activePreview.body.precondition,
+        noteTransmissionAuthorized: false,
+      });
+      if (activeStarted.status !== 200) throw new Error("Expected eligible wishlist run start");
+      await providerStarted;
+      const activeInternals = activeController as unknown as {
+        activeHandle: { completion: Promise<unknown> } | null;
+      };
+      const activeCompletion = activeInternals.activeHandle?.completion;
+      if (!activeCompletion) throw new Error("Expected active axis-race completion");
+      const priorRedundancySettings = await context.storageService.loadRedundancySettings();
+      await context.storageService.saveRedundancySettings({
+        ...priorRedundancySettings,
+        similarityThreshold: priorRedundancySettings.similarityThreshold + 0.01,
+      });
+      expect(cache.mutationRevision()).toBe(cacheRevisionBeforeActiveMutation);
+      expect(await fresh.isSourceCurrent()).toBe(false);
+      releaseProvider();
+      await activeCompletion;
+      expect(activeController.activeRun()).toBeNull();
+      expect(cache.getRunProgress()).toMatchObject({
+        state: "failed",
+        completedPairs: 1,
+        failedPairs: 1,
+      });
+      expect(stalePairCheckpoints).toBe(0);
+      cache.checkpointPair = checkpointPair;
+      expect(activeGatewayConstructions).toBe(1);
+      expect(
+        cache.lookup({
+          gameAId: encodeWishlistBggMember(collection.id, String(candidate.bggId)),
+          gameBId: encodeOwnedLocalMember(collection.id, ownedId),
+          signal: "C",
+          pairDomain: "wishlist-candidate",
+        }),
+      ).toBeNull();
     } finally {
       cache.close();
       await rm(directory, { recursive: true, force: true });
@@ -2873,6 +3195,1152 @@ describe("wishlist service", () => {
       });
       expect(persisted?.bggSource?.mechanics).toEqual(["Deck Building"]);
       expect(await prepared.isCurrent()).toBe(true);
+    } finally {
+      cache.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("production wishlist writes monotonically revoke frozen authority across exact restoration", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "wishlist-generation-aba-"));
+    const cache = await createJevPairCache(directory);
+    try {
+      const entry = makeCurrentReadEntry("Stable candidate source");
+      entry.id = "aba-stable-entry";
+      entry.bggId = 733;
+      const owned = makeGame(799, "Persistent owned comparator");
+      owned.id = "persistent-owned-comparator";
+      if (!owned.bggData) throw new Error("owned test fixture requires BGG data");
+      owned.bggData.description = "Stable owned description";
+      const ownedSecond = makeGame(798, "Second persistent comparator");
+      ownedSecond.id = "second-persistent-comparator";
+      if (!ownedSecond.bggData) throw new Error("second owned fixture requires BGG data");
+      ownedSecond.bggData.description = "Second stable owned description";
+      const semantic = createInitialSemanticRedundancyStateV10();
+      semantic.settings = {
+        ...semantic.settings,
+        enabled: true,
+        weights: { ...semantic.settings.weights, description: 1 },
+      };
+      const fixture = createMockStorage(
+        [entry],
+        { games: [asDurableGame(owned), asDurableGame(ownedSecond)], semanticRedundancy: semantic },
+        true,
+      );
+      const collection = await fixture.loadCollection();
+      const fileOps = createFileOps();
+      const storage = createStorageService({
+        dataDir: directory,
+        configPath: join(directory, "config.json"),
+        fileOps,
+      });
+      await storage.saveCollection(collection);
+      await storage.saveRedundancySettings(await fixture.loadRedundancySettings());
+      await storage.saveWishlist([entry]);
+
+      const capture: JevRunCapture = {
+        collection: await storage.loadCollection(),
+        predictionCapture: [
+          { game: asDurableGame(owned), score: makeValidCaptureFitnessResult(6) },
+          { game: asDurableGame(ownedSecond), score: makeValidCaptureFitnessResult(6) },
+        ],
+        captureIdentity: {
+          sourceVectorIdentity: "wishlist-generation-vector",
+          tournamentIdentity: "wishlist-generation-tournament",
+          predictionCaptureIdentity: "wishlist-generation-predictions",
+        },
+        factualWeights: { binary: 0.4, continuous: 0.3 },
+        sourceVectorIdentity: "wishlist-generation-vector",
+        policyIdentity: "wishlist-generation-policy",
+        eligibilityIdentity: "wishlist-generation-eligibility",
+      };
+      const sourceAdapter = {
+        loadCapture: () => Promise.resolve(structuredClone(capture)),
+        readCurrent: async () => ({
+          collection: await storage.loadCollection(),
+          sourceVectorIdentity: capture.sourceVectorIdentity,
+          policyIdentity: capture.policyIdentity,
+          canTransmitNotes: false,
+          eligibilityIdentity: capture.eligibilityIdentity,
+        }),
+      };
+      const preparation = createWishlistRunPreparationService({
+        storageService: storage,
+        gameService: createMockGameService(),
+        sourceAdapter,
+        cache,
+      });
+      let refreshedScore = 7;
+      const predictionRows = [
+        { game: owned, score: makeValidCaptureFitnessResult(6) },
+        { game: ownedSecond, score: makeValidCaptureFitnessResult(6) },
+      ];
+      const refreshPredictions = createMockPredictionService(new Map(), predictionRows);
+      refreshPredictions.listGamesWithPredictionsFromSnapshot = (currentCollection) =>
+        Promise.resolve(
+          currentCollection.games.map((game) => ({
+            game,
+            score: makeValidCaptureFitnessResult(6),
+          })),
+        );
+      refreshPredictions.predictBggGame = (bggId) => {
+        const name = bggId === entry.bggId ? entry.name : `Transient candidate ${bggId}`;
+        return Promise.resolve({
+          game: makeGame(bggId, name),
+          score: makeFitnessResult(refreshedScore, false),
+          verifiedScoringInput: makeScoringInput(bggId, name),
+          predictionUnavailable: null,
+        });
+      };
+      let acquisitionEligibleOwnedCount = 0;
+      const wishlistService = createWishlistService({
+        storageService: storage,
+        predictionService: refreshPredictions,
+        gameService: {
+          ...createMockGameService(),
+          addGame: async () => {
+            const acquired = makeGame(entry.bggId, entry.name);
+            acquired.id = "acquired-during-wishlist-run";
+            if (!acquired.bggData) throw new Error("acquired fixture requires BGG data");
+            acquired.bggData.description = entry.bggSource?.description ?? "";
+            const currentCollection = await storage.loadCollection();
+            await storage.saveCollection({
+              ...currentCollection,
+              games: [...currentCollection.games, asDurableGame(acquired)],
+            });
+            predictionRows.push({ game: acquired, score: makeValidCaptureFitnessResult(6) });
+            return { game: acquired, bggImported: false };
+          },
+        },
+        jevPairCache: cache,
+        acquisitionObserver: {
+          onEligibleOwnedSetBuilt: (count) => (acquisitionEligibleOwnedCount = count),
+        },
+      });
+      await wishlistService.refresh(entry.id);
+      const refreshedA = await storage.loadWishlist();
+      const refreshPrepared = await preparation.prepare();
+      let startGatewayConstructions = 0;
+      const startRunService = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: () => sourceAdapter.loadCapture(),
+        readCurrent: () => sourceAdapter.readCurrent(),
+        createGateway: () => {
+          startGatewayConstructions++;
+          return { evaluatePair: () => Promise.reject(new Error("Stale preview must not send")) };
+        },
+      });
+      const runController = new JevRunController({
+        storageService: storage,
+        sourceAdapter,
+        cache,
+        runService: startRunService,
+        wishlistPreparation: preparation,
+      });
+      const stalePreview = await runController.previewWishlist();
+      expect(stalePreview.status).toBe(200);
+      if (stalePreview.status !== 200) throw new Error("Expected production wishlist preview");
+      refreshedScore = 8;
+      await wishlistService.refresh(entry.id);
+      refreshedScore = 7;
+      await wishlistService.refresh(entry.id);
+      expect(await storage.loadWishlist()).toEqual(refreshedA);
+      expect(await refreshPrepared.isSourceCurrent()).toBe(false);
+      expect(
+        await runController.start({
+          requestId: stalePreview.body.requestId,
+          precondition: stalePreview.body.precondition,
+          noteTransmissionAuthorized: false,
+        }),
+      ).toEqual({ status: 412, body: { error: "precondition-failed" } });
+      expect(startGatewayConstructions).toBe(0);
+
+      const unchanged = await preparation.prepare();
+      const unchangedWishlist = await storage.loadWishlist();
+      await storage.saveWishlist(unchangedWishlist);
+      expect(unchanged.wishlistMutationGeneration).toBe(
+        (await preparation.prepare()).wishlistMutationGeneration,
+      );
+      expect(await unchanged.isSourceCurrent()).toBe(true);
+
+      let concurrentPairs = 0;
+      let maxConcurrentPairs = 0;
+      let serialProviderStarts = 0;
+      const serialRunService = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: () => Promise.reject(new Error("Wishlist run must use its frozen capture")),
+        readCurrent: sourceAdapter.readCurrent,
+        createGateway: (admit) => ({
+          evaluatePair: async () => {
+            concurrentPairs++;
+            maxConcurrentPairs = Math.max(maxConcurrentPairs, concurrentPairs);
+            try {
+              await admit({
+                mode: "description-only",
+                attemptId: `wishlist-serial-${serialProviderStarts}`,
+                start: () => {
+                  serialProviderStarts++;
+                  return { response: Promise.resolve(new Response()) };
+                },
+              });
+              return {
+                description: {
+                  score: 0.4,
+                  confidence: null,
+                  modelId: JEV_JUDGMENT_CONTRACT.modelId,
+                  rubricVersion: 2,
+                  questionVersion: 2,
+                },
+                ownerNote: null,
+                usage: { inputTokens: 2, outputTokens: 1 },
+              };
+            } finally {
+              concurrentPairs--;
+            }
+          },
+        }),
+      });
+      const serialReservation = await serialRunService.prepareValidatedPreparedRun({
+        scopeKind: "wishlist",
+        wishlistPreparation: unchanged,
+        noteTransmissionAuthorized: false,
+      });
+      if (!serialReservation) throw new Error("Expected serial wishlist reservation");
+      const cacheLookup = cache.lookup.bind(cache);
+      const cacheCheckpointPair = cache.checkpointPair.bind(cache);
+      const candidateEnumeration = cache.candidateCOnlyPairs.bind(cache);
+      let runLookups = 0;
+      let pairCheckpoints = 0;
+      let candidateEnumerations = 0;
+      const checkpointRevisions: Array<{ before: number | null; after: number | null }> = [];
+      cache.lookup = (key) => {
+        runLookups++;
+        return cacheLookup(key);
+      };
+      cache.checkpointPair = (checkpoint) => {
+        pairCheckpoints++;
+        const before = cache.mutationRevision();
+        cacheCheckpointPair(checkpoint);
+        checkpointRevisions.push({ before, after: cache.mutationRevision() });
+      };
+      cache.candidateCOnlyPairs = (candidateMemberId) => {
+        candidateEnumerations++;
+        return candidateEnumeration(candidateMemberId);
+      };
+      expect(
+        await serialRunService.reserveValidatedPreparedRun(serialReservation).completion,
+      ).toMatchObject({
+        state: "completed",
+        pairCount: 2,
+        completedPairs: 2,
+        cacheMisses: 2,
+        failedPairs: 0,
+      });
+      expect(serialProviderStarts).toBe(2);
+      expect(maxConcurrentPairs).toBe(1);
+      expect(runLookups).toBe(6);
+      expect(pairCheckpoints).toBe(2);
+      expect(checkpointRevisions).toHaveLength(2);
+      expect(
+        checkpointRevisions.every(({ before, after }) => before !== null && after! > before),
+      ).toBe(true);
+      expect(candidateEnumerations).toBe(0);
+      cache.lookup = cacheLookup;
+      cache.checkpointPair = cacheCheckpointPair;
+      cache.candidateCOnlyPairs = candidateEnumeration;
+      expect(await unchanged.isSourceCurrent()).toBe(true);
+      expect((await preparation.prepare()).wishlistMutationGeneration).toBe(
+        unchanged.wishlistMutationGeneration,
+      );
+      const beforeAmbiguousWrite = await preparation.prepare();
+      const writeFileExclusive = fileOps.writeFileExclusive.bind(fileOps);
+      fileOps.writeFileExclusive = (path, content) =>
+        path.includes("wishlist.json")
+          ? Promise.reject(new Error("injected ambiguous wishlist write"))
+          : writeFileExclusive(path, content);
+      let ambiguousWriteError: unknown;
+      try {
+        await storage.saveWishlist(await storage.loadWishlist());
+      } catch (error) {
+        ambiguousWriteError = error;
+      }
+      fileOps.writeFileExclusive = writeFileExclusive;
+      expect(ambiguousWriteError).toBeInstanceOf(Error);
+      expect(await beforeAmbiguousWrite.isSourceCurrent()).toBe(false);
+      for (const localId of [owned.id, ownedSecond.id]) {
+        cache.purgePair(
+          encodeWishlistBggMember(collection.id, String(entry.bggId)),
+          encodeOwnedLocalMember(collection.id, localId),
+          "C",
+          "wishlist-candidate",
+        );
+      }
+      const lateProviderPreparation = await preparation.prepare();
+
+      let markProviderStarted!: () => void;
+      let releaseProvider!: () => void;
+      const providerStarted = new Promise<void>((resolve) => (markProviderStarted = resolve));
+      const providerGate = new Promise<void>((resolve) => (releaseProvider = resolve));
+      const lateCallbackRun = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: () => Promise.reject(new Error("Wishlist run must use its frozen capture")),
+        readCurrent: sourceAdapter.readCurrent,
+        createGateway: (admit) => ({
+          evaluatePair: async (request) => {
+            expect(request.mode).toBe("description-only");
+            await admit({
+              mode: "description-only",
+              attemptId: "wishlist-refresh-aba",
+              start: () => {
+                markProviderStarted();
+                return { response: Promise.resolve(new Response()) };
+              },
+            });
+            await providerGate;
+            return {
+              description: {
+                score: 0.73,
+                confidence: null,
+                modelId: JEV_JUDGMENT_CONTRACT.modelId,
+                rubricVersion: 2,
+                questionVersion: 2,
+              },
+              ownerNote: null,
+              usage: { inputTokens: 2, outputTokens: 1 },
+            };
+          },
+        }),
+      });
+      const lateReservation = await lateCallbackRun.prepareValidatedPreparedRun({
+        scopeKind: "wishlist",
+        wishlistPreparation: lateProviderPreparation,
+        noteTransmissionAuthorized: false,
+      });
+      if (!lateReservation) throw new Error("Expected production-backed wishlist reservation");
+      const lateCompletion =
+        lateCallbackRun.reserveValidatedPreparedRun(lateReservation).completion;
+      await providerStarted;
+      refreshedScore = 8;
+      await wishlistService.refresh(entry.id);
+      refreshedScore = 7;
+      await wishlistService.refresh(entry.id);
+      expect(await storage.loadWishlist()).toEqual(unchangedWishlist);
+      releaseProvider();
+      expect(await lateCompletion).toMatchObject({ state: "failed", failedPairs: 1 });
+      expect(await lateProviderPreparation.isSourceCurrent()).toBe(false);
+      for (const localId of [owned.id, ownedSecond.id])
+        expect(
+          cache.lookup({
+            gameAId: encodeWishlistBggMember(collection.id, String(entry.bggId)),
+            gameBId: encodeOwnedLocalMember(collection.id, localId),
+            signal: "C",
+            pairDomain: "wishlist-candidate",
+          }),
+        ).toBeNull();
+
+      for (const mutation of ["remove", "clear"] as const) {
+        const beforeRemoval = await storage.loadWishlist();
+        const oldPreparation = await preparation.prepare();
+        let markMutationProviderStarted!: () => void;
+        let releaseMutationProvider!: () => void;
+        const mutationProviderStarted = new Promise<void>(
+          (resolve) => (markMutationProviderStarted = resolve),
+        );
+        const mutationProviderGate = new Promise<void>(
+          (resolve) => (releaseMutationProvider = resolve),
+        );
+        const mutationRunService = new JevRunService({
+          storageService: storage,
+          cache,
+          loadCapture: () => Promise.reject(new Error("Frozen wishlist capture is required")),
+          readCurrent: sourceAdapter.readCurrent,
+          createGateway: (admit) => ({
+            evaluatePair: async () => {
+              await admit({
+                mode: "description-only",
+                attemptId: `wishlist-${mutation}-late-callback`,
+                start: () => {
+                  markMutationProviderStarted();
+                  return { response: Promise.resolve(new Response()) };
+                },
+              });
+              // This fake intentionally ignores the abort signal until released.
+              await mutationProviderGate;
+              return {
+                description: {
+                  score: 0.48,
+                  confidence: null,
+                  modelId: JEV_JUDGMENT_CONTRACT.modelId,
+                  rubricVersion: 2,
+                  questionVersion: 2,
+                },
+                ownerNote: null,
+                usage: { inputTokens: 2, outputTokens: 1 },
+              };
+            },
+          }),
+        });
+        const mutationController = new JevRunController({
+          storageService: storage,
+          sourceAdapter,
+          cache,
+          runService: mutationRunService,
+          wishlistPreparation: preparation,
+        });
+        const mutationPreview = await mutationController.previewWishlist();
+        expect(mutationPreview.status).toBe(200);
+        if (mutationPreview.status !== 200)
+          throw new Error("Expected controller wishlist preview before source mutation");
+        const mutationStarted = await mutationController.start({
+          requestId: mutationPreview.body.requestId,
+          precondition: mutationPreview.body.precondition,
+          noteTransmissionAuthorized: false,
+        });
+        expect(mutationStarted.status).toBe(200);
+        if (mutationStarted.status !== 200)
+          throw new Error("Expected controller to start the blocked provider run");
+        await mutationProviderStarted;
+        const controllerInternals = mutationController as unknown as {
+          activeHandle: { completion: Promise<unknown> } | null;
+        };
+        const mutationCompletion = controllerInternals.activeHandle?.completion;
+        if (!mutationCompletion) throw new Error("Expected active controller completion");
+        expect(mutationController.activeRun()).toEqual({ runId: mutationStarted.body.runId });
+
+        if (mutation === "remove") await wishlistService.remove(entry.id);
+        else await wishlistService.clear();
+        expect(await storage.loadWishlist()).toEqual([]);
+        // Restore exactly the same persisted identity/content; this is restoration, not add/UUID ABA.
+        await storage.saveWishlist(beforeRemoval);
+        expect(await storage.loadWishlist()).toEqual(beforeRemoval);
+        expect(await oldPreparation.isSourceCurrent()).toBe(false);
+
+        releaseMutationProvider();
+        await mutationCompletion;
+        expect(mutationController.activeRun()).toBeNull();
+        expect(cache.getRunProgress()).toMatchObject({ state: "failed", failedPairs: 1 });
+        for (const localId of [owned.id, ownedSecond.id])
+          expect(
+            cache.lookup({
+              gameAId: encodeWishlistBggMember(collection.id, String(entry.bggId)),
+              gameBId: encodeOwnedLocalMember(collection.id, localId),
+              signal: "C",
+              pairDomain: "wishlist-candidate",
+            }),
+          ).toBeNull();
+      }
+
+      const cancelPreparation = await preparation.prepare();
+      let markCancelProviderStarted!: () => void;
+      let releaseCancelProvider!: () => void;
+      const cancelProviderStarted = new Promise<void>(
+        (resolve) => (markCancelProviderStarted = resolve),
+      );
+      const cancelProviderGate = new Promise<void>((resolve) => (releaseCancelProvider = resolve));
+      const cancelRunService = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: () => Promise.reject(new Error("Frozen wishlist capture is required")),
+        readCurrent: sourceAdapter.readCurrent,
+        createGateway: (admit) => ({
+          evaluatePair: async () => {
+            await admit({
+              mode: "description-only",
+              attemptId: "wishlist-controller-cancel-late-callback",
+              start: () => {
+                markCancelProviderStarted();
+                return { response: Promise.resolve(new Response()) };
+              },
+            });
+            await cancelProviderGate;
+            return {
+              description: {
+                score: 0.52,
+                confidence: null,
+                modelId: JEV_JUDGMENT_CONTRACT.modelId,
+                rubricVersion: 2,
+                questionVersion: 2,
+              },
+              ownerNote: null,
+              usage: { inputTokens: 2, outputTokens: 1 },
+            };
+          },
+        }),
+      });
+      const cancelController = new JevRunController({
+        storageService: storage,
+        sourceAdapter,
+        cache,
+        runService: cancelRunService,
+        wishlistPreparation: preparation,
+      });
+      const cancelPreview = await cancelController.previewWishlist();
+      if (cancelPreview.status !== 200) throw new Error("Expected cancellation preview");
+      const cancelStarted = await cancelController.start({
+        requestId: cancelPreview.body.requestId,
+        precondition: cancelPreview.body.precondition,
+        noteTransmissionAuthorized: false,
+      });
+      if (cancelStarted.status !== 200) throw new Error("Expected cancellation run start");
+      await cancelProviderStarted;
+      const cancelInternals = cancelController as unknown as {
+        activeHandle: { completion: Promise<unknown> } | null;
+      };
+      const cancelCompletion = cancelInternals.activeHandle?.completion;
+      if (!cancelCompletion) throw new Error("Expected active cancellation completion");
+      expect(cancelController.activeRun()).toEqual({ runId: cancelStarted.body.runId });
+      expect(cancelController.cancel({ runId: cancelStarted.body.runId })).toEqual({
+        status: 200,
+        body: { state: "cancellation-requested" },
+      });
+      releaseCancelProvider();
+      await cancelCompletion;
+      expect(cancelController.activeRun()).toBeNull();
+      expect(cache.getRunProgress()).toMatchObject({
+        state: "interrupted",
+        completedPairs: 0,
+        failedPairs: 0,
+      });
+      expect(cancelPreparation.pairs.length).toBeGreaterThan(0);
+      for (const localId of [owned.id, ownedSecond.id])
+        expect(
+          cache.lookup({
+            gameAId: encodeWishlistBggMember(collection.id, String(entry.bggId)),
+            gameBId: encodeOwnedLocalMember(collection.id, localId),
+            signal: "C",
+            pairDomain: "wishlist-candidate",
+          }),
+        ).toBeNull();
+
+      const before = await storage.loadWishlist();
+      const scopeBeforeOtherCandidate = await preparation.prepare();
+      const extra = await wishlistService.add(734);
+      await wishlistService.remove(extra.id);
+      expect(await storage.loadWishlist()).toEqual(before);
+      expect(await scopeBeforeOtherCandidate.isSourceCurrent()).toBe(false);
+
+      const beforeClear = await preparation.prepare();
+      await wishlistService.clear();
+      await storage.saveWishlist(before);
+      expect(await beforeClear.isSourceCurrent()).toBe(false);
+
+      const beforeFailedRemove = await preparation.prepare();
+      cache.upsert(
+        makeCandidateCRow(
+          collection.id,
+          entry.bggId,
+          entry.name,
+          entry.bggSource?.description ?? "",
+          owned,
+          0.55,
+        ),
+      );
+      const durableSaveWishlist = storage.saveWishlist.bind(storage);
+      storage.saveWishlist = () => Promise.reject(new Error("injected wishlist save failure"));
+      let removeError: unknown;
+      try {
+        await wishlistService.remove(entry.id);
+      } catch (error) {
+        removeError = error;
+      }
+      storage.saveWishlist = durableSaveWishlist;
+      expect(removeError).toBeInstanceOf(Error);
+      expect(await storage.loadWishlist()).toEqual(before);
+      expect(await beforeFailedRemove.isSourceCurrent()).toBe(false);
+      expect(
+        cache.lookup({
+          gameAId: encodeWishlistBggMember(collection.id, String(entry.bggId)),
+          gameBId: encodeOwnedLocalMember(collection.id, owned.id),
+          signal: "C",
+          pairDomain: "wishlist-candidate",
+        }),
+      ).toBeNull();
+
+      cache.upsert(
+        makeCandidateCRow(
+          collection.id,
+          entry.bggId,
+          entry.name,
+          entry.bggSource?.description ?? "",
+          owned,
+          0.66,
+        ),
+      );
+      const acquisitionPreparation = await preparation.prepare();
+      let markAcquisitionProviderStarted!: () => void;
+      let releaseAcquisitionProvider!: () => void;
+      const acquisitionProviderStarted = new Promise<void>(
+        (resolve) => (markAcquisitionProviderStarted = resolve),
+      );
+      const acquisitionProviderGate = new Promise<void>(
+        (resolve) => (releaseAcquisitionProvider = resolve),
+      );
+      const acquisitionRaceRun = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: () => Promise.reject(new Error("Wishlist run must use frozen scope")),
+        readCurrent: sourceAdapter.readCurrent,
+        createGateway: (admit) => ({
+          evaluatePair: async () => {
+            await admit({
+              mode: "description-only",
+              attemptId: "wishlist-acquisition-race",
+              start: () => {
+                markAcquisitionProviderStarted();
+                return { response: Promise.resolve(new Response()) };
+              },
+            });
+            await acquisitionProviderGate;
+            return {
+              description: {
+                score: 0.79,
+                confidence: null,
+                modelId: JEV_JUDGMENT_CONTRACT.modelId,
+                rubricVersion: 2,
+                questionVersion: 2,
+              },
+              ownerNote: null,
+              usage: { inputTokens: 2, outputTokens: 1 },
+            };
+          },
+        }),
+      });
+      const acquisitionReservation = await acquisitionRaceRun.prepareValidatedPreparedRun({
+        scopeKind: "wishlist",
+        wishlistPreparation: acquisitionPreparation,
+        noteTransmissionAuthorized: false,
+      });
+      if (!acquisitionReservation) throw new Error("Expected acquisition-race reservation");
+      const acquisitionCompletion =
+        acquisitionRaceRun.reserveValidatedPreparedRun(acquisitionReservation).completion;
+      await acquisitionProviderStarted;
+      expect((await storage.loadWishlist())[0]?.bggSource?.description).toBe(
+        "  Exact BGG description  ",
+      );
+      expect((await storage.loadCollection()).semanticRedundancy.settings.enabled).toBe(true);
+      await wishlistService.acquireGame({ bggId: entry.bggId, name: entry.name });
+      expect(await storage.loadWishlist()).toHaveLength(0);
+      expect(acquisitionEligibleOwnedCount).toBe(3);
+      const targetRow = {
+        ...makeCandidateCRow(
+          collection.id,
+          entry.bggId,
+          entry.name,
+          entry.bggSource?.description ?? "",
+          owned,
+          0.66,
+        ),
+        pairDomain: "collection" as const,
+        gameAId: "acquired-during-wishlist-run",
+        gameBId: owned.id,
+        dependencies: buildJevPairDependencies(
+          "C_ONLY",
+          {
+            gameId: "acquired-during-wishlist-run",
+            name: entry.name,
+            description: entry.bggSource?.description ?? "",
+          },
+          { gameId: owned.id, name: owned.name, description: owned.bggData?.description ?? "" },
+        ),
+      };
+      cache.upsert(targetRow);
+      releaseAcquisitionProvider();
+      expect(await acquisitionCompletion).toMatchObject({ state: "failed", failedPairs: 1 });
+      for (const localId of [owned.id, ownedSecond.id, "acquired-during-wishlist-run"])
+        expect(
+          cache.lookup({
+            gameAId: encodeWishlistBggMember(collection.id, String(entry.bggId)),
+            gameBId: encodeOwnedLocalMember(collection.id, localId),
+            signal: "C",
+            pairDomain: "wishlist-candidate",
+          }),
+        ).toBeNull();
+      expect(
+        cache.lookup({
+          gameAId: "acquired-during-wishlist-run",
+          gameBId: owned.id,
+          signal: "C",
+        }),
+      ).toMatchObject({ value: 0.66, completedAt: NOW });
+    } finally {
+      cache.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("wishlist run restart restores progress only, never active execution or preview authority", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "wishlist-run-restart-authority-"));
+    const fileOps = createFileOps();
+    let cache = await createJevPairCache(directory);
+    try {
+      const entry = makeCurrentReadEntry("Restart candidate description");
+      entry.id = "restart-candidate-entry";
+      entry.bggId = 9401;
+      const owned = makeGame(9402, "Restart owned comparator");
+      owned.id = "restart-owned-local";
+      if (!owned.bggData) throw new Error("Expected owned description fixture");
+      owned.bggData.description = "Restart owned description";
+      const initialFixture = createMockStorage([entry], { games: [asDurableGame(owned)] }, true);
+      const collection = await initialFixture.loadCollection();
+      collection.semanticRedundancy.settings.enabled = true;
+      collection.semanticRedundancy.settings.weights.description = 1;
+
+      const storage = createStorageService({
+        dataDir: directory,
+        configPath: join(directory, "config.json"),
+        fileOps,
+      });
+      await storage.saveCollection(collection);
+      await storage.saveRedundancySettings(await initialFixture.loadRedundancySettings());
+      await storage.saveWishlist([entry]);
+
+      const captureFor = async (currentStorage: ReturnType<typeof createStorageService>) => {
+        const currentCollection = await currentStorage.loadCollection();
+        const ownedGame = currentCollection.games.find((game) => game.id === owned.id);
+        if (!ownedGame) throw new Error("Expected persisted restart comparator");
+        return {
+          collection: currentCollection,
+          predictionCapture: [{ game: ownedGame, score: makeValidCaptureFitnessResult(6) }],
+          captureIdentity: {
+            sourceVectorIdentity: "restart-source-vector",
+            tournamentIdentity: "restart-tournament",
+            predictionCaptureIdentity: "restart-predictions",
+          },
+          factualWeights: { binary: 0.4, continuous: 0.3 },
+          sourceVectorIdentity: "restart-source-vector",
+          policyIdentity: "restart-policy",
+          eligibilityIdentity: "restart-eligibility",
+        } satisfies JevRunCapture;
+      };
+      const sourceAdapterFor = (currentStorage: ReturnType<typeof createStorageService>) => ({
+        loadCapture: () => captureFor(currentStorage),
+        readCurrent: async () => ({
+          collection: await currentStorage.loadCollection(),
+          sourceVectorIdentity: "restart-source-vector",
+          policyIdentity: "restart-policy",
+          canTransmitNotes: false,
+          eligibilityIdentity: "restart-eligibility",
+        }),
+      });
+      const sourceAdapter = sourceAdapterFor(storage);
+      const preparation = createWishlistRunPreparationService({
+        storageService: storage,
+        gameService: createMockGameService(),
+        sourceAdapter,
+        cache,
+      });
+      const prepared = await preparation.prepare();
+      expect(prepared.pairs).toHaveLength(1);
+
+      let markProviderStarted!: () => void;
+      let releaseProvider!: () => void;
+      const providerStarted = new Promise<void>((resolve) => (markProviderStarted = resolve));
+      const providerGate = new Promise<void>((resolve) => (releaseProvider = resolve));
+      let gatewayConstructions = 0;
+      const runService = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: sourceAdapter.loadCapture,
+        readCurrent: sourceAdapter.readCurrent,
+        createGateway: (admit) => {
+          gatewayConstructions++;
+          return {
+            evaluatePair: async () => {
+              await admit({
+                mode: "description-only",
+                attemptId: "restart-pending-provider",
+                start: () => {
+                  markProviderStarted();
+                  return { response: Promise.resolve(new Response()) };
+                },
+              });
+              // Simulate an uncooperative provider; its result arrives only after release.
+              await providerGate;
+              return {
+                description: {
+                  score: 0.5,
+                  confidence: null,
+                  modelId: JEV_JUDGMENT_CONTRACT.modelId,
+                  rubricVersion: 2,
+                  questionVersion: 2,
+                },
+                ownerNote: null,
+                usage: { inputTokens: 2, outputTokens: 1 },
+              };
+            },
+          };
+        },
+      });
+      const controller = new JevRunController({
+        storageService: storage,
+        sourceAdapter,
+        cache,
+        runService,
+        wishlistPreparation: preparation,
+      });
+      const preview = await controller.previewWishlist();
+      if (preview.status !== 200) throw new Error("Expected restart test wishlist preview");
+      const started = await controller.start({
+        requestId: preview.body.requestId,
+        precondition: preview.body.precondition,
+        noteTransmissionAuthorized: false,
+      });
+      if (started.status !== 200) throw new Error("Expected restart test run admission");
+      await providerStarted;
+      expect(cache.getRunProgress()).toMatchObject({ state: "running", pairCount: 1 });
+      expect(controller.activeRun()).toEqual({ runId: started.body.runId });
+
+      expect(controller.cancel({ runId: started.body.runId }).status).toBe(200);
+      const active = controller as unknown as {
+        activeHandle: { completion: Promise<unknown> } | null;
+      };
+      const completion = active.activeHandle?.completion;
+      if (!completion) throw new Error("Expected live controller completion before restart");
+      releaseProvider();
+      await completion;
+      expect(controller.activeRun()).toBeNull();
+      expect(cache.getRunProgress()).toMatchObject({
+        runId: started.body.runId,
+        state: "interrupted",
+        completedPairs: 0,
+        failedPairs: 0,
+      });
+      expect(gatewayConstructions).toBe(1);
+      expect(
+        cache.lookup({
+          gameAId: encodeWishlistBggMember(collection.id, String(entry.bggId)),
+          gameBId: encodeOwnedLocalMember(collection.id, owned.id),
+          signal: "C",
+          pairDomain: "wishlist-candidate",
+        }),
+      ).toBeNull();
+
+      cache.close();
+      cache = await createJevPairCache(directory);
+      const reopenedStorage = createStorageService({
+        dataDir: directory,
+        configPath: join(directory, "config.json"),
+        fileOps: createFileOps(),
+      });
+      const reopenedSourceAdapter = sourceAdapterFor(reopenedStorage);
+      const reopenedPreparation = createWishlistRunPreparationService({
+        storageService: reopenedStorage,
+        gameService: createMockGameService(),
+        sourceAdapter: reopenedSourceAdapter,
+        cache,
+      });
+      let restartedGatewayConstructions = 0;
+      const restartedService = new JevRunService({
+        storageService: reopenedStorage,
+        cache,
+        loadCapture: reopenedSourceAdapter.loadCapture,
+        readCurrent: reopenedSourceAdapter.readCurrent,
+        createGateway: () => {
+          restartedGatewayConstructions++;
+          throw new Error("Restart/status reads must never dispatch a provider");
+        },
+      });
+      const restartedController = new JevRunController({
+        storageService: reopenedStorage,
+        sourceAdapter: reopenedSourceAdapter,
+        cache,
+        runService: restartedService,
+        wishlistPreparation: reopenedPreparation,
+      });
+      expect(restartedController.activeRun()).toBeNull();
+      expect(cache.getRunProgress()).toMatchObject({
+        runId: started.body.runId,
+        state: "interrupted",
+        completedPairs: 0,
+        failedPairs: 0,
+      });
+      expect(
+        await restartedController.start({
+          requestId: preview.body.requestId,
+          precondition: preview.body.precondition,
+          noteTransmissionAuthorized: false,
+        }),
+      ).toEqual({ status: 412, body: { error: "precondition-failed" } });
+      expect(restartedController.activeRun()).toBeNull();
+      expect(restartedGatewayConstructions).toBe(0);
+      expect(
+        cache.lookup({
+          gameAId: encodeWishlistBggMember(collection.id, String(entry.bggId)),
+          gameBId: encodeOwnedLocalMember(collection.id, owned.id),
+          signal: "C",
+          pairDomain: "wishlist-candidate",
+        }),
+      ).toBeNull();
+    } finally {
+      cache.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("production gateway preserves a valid cache-hit admission outcome without hiding source failures", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "wishlist-gateway-admission-hit-"));
+    const cache = await createJevPairCache(directory);
+    try {
+      const entry = makeCurrentReadEntry("Admission race candidate description");
+      entry.id = "gateway-admission-candidate";
+      entry.bggId = 9501;
+      const owned = makeGame(9502, "Admission race owned comparator");
+      owned.id = "gateway-admission-owned";
+      if (!owned.bggData) throw new Error("Expected owned description fixture");
+      owned.bggData.description = "Admission race owned description";
+      const initialFixture = createMockStorage([entry], { games: [asDurableGame(owned)] }, true);
+      const collection = await initialFixture.loadCollection();
+      collection.semanticRedundancy.settings = {
+        ...collection.semanticRedundancy.settings,
+        enabled: true,
+        weights: { ...collection.semanticRedundancy.settings.weights, description: 1 },
+      };
+      const storage = createStorageService({
+        dataDir: directory,
+        configPath: join(directory, "config.json"),
+        fileOps: createFileOps(),
+      });
+      await storage.saveCollection(collection);
+      const initialSettings = await initialFixture.loadRedundancySettings();
+      await storage.saveRedundancySettings(initialSettings);
+      await storage.saveWishlist([entry]);
+
+      const policyIdentity = async () =>
+        `threshold:${(await storage.loadRedundancySettings()).similarityThreshold}`;
+      let policyIdentityOverride: string | null = null;
+      const currentPolicyIdentity = async () => policyIdentityOverride ?? (await policyIdentity());
+      const sourceAdapter = {
+        loadCapture: async (): Promise<JevRunCapture> => {
+          const currentCollection = await storage.loadCollection();
+          const settingsPolicy = await currentPolicyIdentity();
+          const ownedGame = currentCollection.games.find((game) => game.id === owned.id);
+          if (!ownedGame) throw new Error("Expected persisted owned comparator");
+          return {
+            collection: currentCollection,
+            predictionCapture: [{ game: ownedGame, score: makeValidCaptureFitnessResult(6) }],
+            captureIdentity: {
+              sourceVectorIdentity: "gateway-admission-vector",
+              tournamentIdentity: "gateway-admission-tournament",
+              predictionCaptureIdentity: "gateway-admission-predictions",
+            },
+            factualWeights: { binary: 0.4, continuous: 0.3 },
+            sourceVectorIdentity: "gateway-admission-vector",
+            policyIdentity: settingsPolicy,
+            eligibilityIdentity: "gateway-admission-eligibility",
+          };
+        },
+        readCurrent: async () => ({
+          collection: await storage.loadCollection(),
+          sourceVectorIdentity: "gateway-admission-vector",
+          policyIdentity: await currentPolicyIdentity(),
+          canTransmitNotes: false,
+          eligibilityIdentity: "gateway-admission-eligibility",
+        }),
+      };
+      const preparation = createWishlistRunPreparationService({
+        storageService: storage,
+        gameService: createMockGameService(),
+        sourceAdapter,
+        cache,
+      });
+      let fetchCalls = 0;
+      const transport = (): Promise<Response> => {
+        fetchCalls++;
+        const legend = {
+          "0": "Level zero",
+          "1": "Level one",
+          "2": "Level two",
+          "3": "Level three",
+        };
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              model: JEV_JUDGMENT_CONTRACT.modelId,
+              answers: {
+                description_similarity: {
+                  type: "score",
+                  score: 2,
+                  legend,
+                  probabilities: { "0": 0, "1": 0, "2": 1, "3": 0 },
+                  confidence: 0.7,
+                },
+              },
+              usage: { input_tokens: 3, output_tokens: 2 },
+            }),
+          ),
+        );
+      };
+      const makeRunService = (onGatewayCreation: () => void) =>
+        new JevRunService({
+          storageService: storage,
+          cache,
+          loadCapture: sourceAdapter.loadCapture,
+          readCurrent: sourceAdapter.readCurrent,
+          createGateway: (admit) => {
+            onGatewayCreation();
+            return createJevGateway({
+              apiKey: "test-only-key",
+              fetch: transport,
+              admitAndDispatch: admit,
+            });
+          },
+        });
+      const prepareReservation = async (service: JevRunService) => {
+        const prepared = await preparation.prepare({ kind: "selected", bggIds: [entry.bggId] });
+        expect(prepared.pairs).toHaveLength(1);
+        expect(prepared.pairs[0]?.state).toBe("sendable-miss");
+        const reservation = await service.prepareValidatedPreparedRun({
+          scopeKind: "wishlist",
+          wishlistPreparation: prepared,
+          noteTransmissionAuthorized: false,
+        });
+        if (!reservation) throw new Error("Expected validated frozen wishlist run");
+        return { prepared, reservation };
+      };
+
+      const firstService = makeRunService(() => {
+        // Gateway creation occurs only after the executor's initial candidate point-read missed.
+        expect(firstWorkerLookups).toBe(1);
+        cache.upsert(existingCandidateRow);
+        rowAtInsert = actualLookup({
+          gameAId: existingCandidateRow.gameAId,
+          gameBId: existingCandidateRow.gameBId,
+          signal: "C",
+          pairDomain: "wishlist-candidate",
+        });
+        revisionAfterInsertedHit = cache.mutationRevision();
+      });
+      const existingCandidateRow = makeCandidateCRow(
+        collection.id,
+        entry.bggId,
+        entry.name,
+        entry.bggSource?.description ?? "",
+        owned,
+        0.27,
+        "2025-09-08T12:34:56.000Z",
+      );
+      let firstWorkerLookups = 0;
+      let revisionAfterInsertedHit: number | null = null;
+      let rowAtInsert: JevPairJudgment | null = null;
+      const first = await prepareReservation(firstService);
+      const actualLookup = cache.lookup.bind(cache);
+      let firstLookups = 0;
+      cache.lookup = (key) => {
+        firstLookups++;
+        if (firstLookups === 1) firstWorkerLookups++;
+        return actualLookup(key);
+      };
+      const actualUpsert = cache.upsert.bind(cache);
+      let upserts = 0;
+      cache.upsert = (row) => {
+        upserts++;
+        actualUpsert(row);
+      };
+      const actualCheckpoint = cache.checkpointPair.bind(cache);
+      let pairCheckpoints = 0;
+      cache.checkpointPair = (checkpoint) => {
+        pairCheckpoints++;
+        actualCheckpoint(checkpoint);
+      };
+      const firstProgress = await firstService.reserveValidatedPreparedRun(first.reservation)
+        .completion;
+      expect(firstProgress).toMatchObject({
+        state: "completed",
+        pairCount: 1,
+        completedPairs: 1,
+        cacheHits: 1,
+        cacheMisses: 0,
+        failedPairs: 0,
+      });
+      expect(firstWorkerLookups).toBe(1);
+      expect(firstLookups).toBe(2);
+      expect(upserts).toBe(1);
+      expect(pairCheckpoints).toBe(0);
+      expect(fetchCalls).toBe(0);
+      expect(revisionAfterInsertedHit).not.toBeNull();
+      expect(cache.mutationRevision()).toBe(revisionAfterInsertedHit);
+      expect(rowAtInsert).toMatchObject({
+        pairDomain: "wishlist-candidate",
+        dependencyKind: "C_ONLY",
+        value: 0.27,
+        completedAt: "2025-09-08T12:34:56.000Z",
+        modelId: JEV_JUDGMENT_CONTRACT.modelId,
+        rubricVersion: JEV_JUDGMENT_CONTRACT.rubricVersion,
+        questionVersion: JEV_JUDGMENT_CONTRACT.questionVersion,
+      });
+      expect(
+        actualLookup({
+          gameAId: existingCandidateRow.gameAId,
+          gameBId: existingCandidateRow.gameBId,
+          signal: "C",
+          pairDomain: "wishlist-candidate",
+        }),
+      ).toEqual(rowAtInsert);
+      expect(await first.prepared.isSourceCurrent()).toBe(true);
+
+      cache.lookup = actualLookup;
+      cache.upsert = actualUpsert;
+      cache.checkpointPair = actualCheckpoint;
+      cache.purgePair(
+        existingCandidateRow.gameAId,
+        existingCandidateRow.gameBId,
+        "C",
+        "wishlist-candidate",
+      );
+
+      let secondWorkerLookups = 0;
+      let secondFetchCalls = 0;
+      const secondTransport = (): Promise<Response> => {
+        secondFetchCalls++;
+        return transport();
+      };
+      const secondService = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: sourceAdapter.loadCapture,
+        readCurrent: sourceAdapter.readCurrent,
+        createGateway: (admit) => {
+          expect(secondWorkerLookups).toBe(1);
+          policyIdentityOverride = "changed-source-policy";
+          return createJevGateway({
+            apiKey: "test-only-key",
+            fetch: secondTransport,
+            admitAndDispatch: admit,
+          });
+        },
+      });
+      const second = await prepareReservation(secondService);
+      const secondLookup = cache.lookup.bind(cache);
+      cache.lookup = (key) => {
+        secondWorkerLookups++;
+        return secondLookup(key);
+      };
+      const revisionBeforeSourceChange = cache.mutationRevision();
+      const secondProgress = await secondService.reserveValidatedPreparedRun(second.reservation)
+        .completion;
+      expect(secondProgress).toMatchObject({
+        state: "failed",
+        pairCount: 1,
+        completedPairs: 1,
+        cacheHits: 0,
+        cacheMisses: 1,
+        failedPairs: 1,
+      });
+      expect(await second.prepared.isSourceCurrent()).toBe(false);
+      expect(secondWorkerLookups).toBe(1);
+      expect(secondFetchCalls).toBe(0);
+      expect(cache.mutationRevision()).toBe(revisionBeforeSourceChange);
+      expect(
+        cache.lookup({
+          gameAId: existingCandidateRow.gameAId,
+          gameBId: existingCandidateRow.gameBId,
+          signal: "C",
+          pairDomain: "wishlist-candidate",
+        }),
+      ).toBeNull();
     } finally {
       cache.close();
       await rm(directory, { recursive: true, force: true });

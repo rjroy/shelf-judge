@@ -282,7 +282,9 @@ describe("JevRunController", () => {
             sendablePairCount: 1,
           },
           cacheRevision: 0,
+          wishlistMutationGeneration: "0",
           identity: "frozen-wishlist-preparation",
+          isSourceCurrent: () => Promise.resolve(current),
           isCurrent: () => Promise.resolve(current),
         } as PreparedWishlistRun),
     };
@@ -300,13 +302,19 @@ describe("JevRunController", () => {
       precondition: preview.body.precondition,
       noteTransmissionAuthorized: false,
     };
-    const unavailable = await h.controller.start(startInput);
-    expect(unavailable).toEqual({ status: 503, body: { error: "run-unavailable" } });
+    const started = await h.controller.start(startInput);
+    expect(started.status).toBe(200);
     expect(h.gatewayConstructions).toBe(0);
-    expect(h.starts).toBe(0);
+    if (started.status === 200) await startedRunCompletion(h);
 
+    const secondPreview = await h.controller.previewWishlist({ kind: "selected", bggIds: [501] });
+    if (secondPreview.status !== 200) throw new Error("Expected second wishlist preview");
     current = false;
-    const changed = await h.controller.start(startInput);
+    const changed = await h.controller.start({
+      requestId: secondPreview.body.requestId,
+      precondition: secondPreview.body.precondition,
+      noteTransmissionAuthorized: false,
+    });
     expect(changed).toEqual({ status: 412, body: { error: "precondition-failed" } });
     expect(h.gatewayConstructions).toBe(0);
     expect(h.starts).toBe(0);

@@ -61,7 +61,11 @@ import {
   type SourceVector,
   type SourceVectorRevisions,
 } from "./source-vector.js";
-import { canonicalSha256, profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
+import {
+  advanceWishlistMutationGeneration,
+  canonicalSha256,
+  profileSourceCoordinatorFor,
+} from "./profile-source-coordinator.js";
 
 export interface CollectionReader {
   loadCollection(): Promise<Collection>;
@@ -1161,8 +1165,10 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   const saveNicheSettings = storage.saveNicheSettings.bind(storage);
   const saveRedundancySettings = storage.saveRedundancySettings.bind(storage);
   const saveShelfConfig = storage.saveShelfConfig.bind(storage);
+  const saveWishlist = storage.saveWishlist.bind(storage);
   const hydrateVector = storage.hydrateSourceVector?.bind(storage);
   const loadCollection = storage.loadCollection.bind(storage);
+  const loadWishlist = storage.loadWishlist.bind(storage);
   const loadJevSourceSnapshot = storage.loadJevSourceSnapshot?.bind(storage);
   const loadTournament = storage.loadTournament.bind(storage);
   const loadPredictionSettings = storage.loadPredictionSettings.bind(storage);
@@ -1171,6 +1177,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   const loadRedundancySettingsRead = storage.loadRedundancySettingsRead?.bind(storage);
   const loadShelfConfig = storage.loadShelfConfig.bind(storage);
   storage.loadCollection = () => coordinate(loadCollection);
+  storage.loadWishlist = () => coordinate(loadWishlist);
   if (loadJevSourceSnapshot)
     storage.loadJevSourceSnapshot = () => coordinate(loadJevSourceSnapshot);
   storage.loadTournament = () => coordinate(loadTournament);
@@ -1181,6 +1188,27 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     storage.loadRedundancySettingsRead = () => coordinate(loadRedundancySettingsRead);
   storage.loadShelfConfig = () => coordinate(loadShelfConfig);
   storage.saveCollection = (collection) => coordinate(() => saveCollection(collection));
+  storage.saveWishlist = (entries) =>
+    coordinate(async () => {
+      let effectiveChange = true;
+      try {
+        effectiveChange = canonicalSha256(await loadWishlist()) !== canonicalSha256(entries);
+      } catch {
+        // If prior durable state cannot be established, conservatively revoke prepared scopes.
+      }
+      let revoked = false;
+      if (effectiveChange) {
+        advanceWishlistMutationGeneration(storage);
+        revoked = true;
+      }
+      try {
+        await saveWishlist(entries);
+      } catch (error) {
+        // A failed atomic write may have changed durable state despite its error result.
+        if (!revoked) advanceWishlistMutationGeneration(storage);
+        throw error;
+      }
+    });
   storage.saveTournament = (data) => coordinate(() => saveTournament(data));
   storage.savePredictionSettings = (settings) => coordinate(() => savePredictionSettings(settings));
   storage.saveNicheSettings = (settings) => coordinate(() => saveNicheSettings(settings));

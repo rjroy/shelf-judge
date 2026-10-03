@@ -23,6 +23,7 @@ import {
   type WishlistDescriptionSignalResolver,
 } from "./wishlist-redundancy-scoring.js";
 import {
+  advanceWishlistMutationGeneration,
   canonicalSha256,
   profileSourceCoordinatorFor,
   type ProfileSourceCoordinator,
@@ -328,6 +329,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
         if (index === -1) throw new Error(`Wishlist entry not found: ${id}`);
         const entry = wishlist[index];
         if (!entry) throw new Error(`Wishlist entry not found: ${id}`);
+        advanceWishlistMutationGeneration(storageService);
         await purgeCandidate(entry.bggId);
         wishlist.splice(index, 1);
         await storageService.saveWishlist(wishlist);
@@ -337,6 +339,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
     async clear(): Promise<number> {
       return coordinator.runExclusive(async () => {
         const wishlist = await storageService.loadWishlist();
+        if (wishlist.length > 0) advanceWishlistMutationGeneration(storageService);
         for (const entry of wishlist) await purgeCandidate(entry.bggId);
         await storageService.saveWishlist([]);
         return wishlist.length;
@@ -474,6 +477,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
         const wishlist = await storageService.loadWishlist();
         const index = wishlist.findIndex((e) => e.bggId === bggId);
         if (index === -1) return false;
+        advanceWishlistMutationGeneration(storageService);
         await purgeCandidate(bggId);
         wishlist.splice(index, 1);
         await storageService.saveWishlist(wishlist);
