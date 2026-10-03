@@ -6,6 +6,7 @@ async function installDaemon(page: Page) {
       __redundancyCalls: Array<{ url: string; method: string; body?: unknown }>;
       __releasePreview?: () => void;
       __releaseCoverage?: () => void;
+      __releaseProgress?: () => void;
     };
     target.__redundancyCalls = [];
     const original = window.fetch.bind(window);
@@ -48,6 +49,16 @@ async function installDaemon(page: Page) {
         else if (url.pathname.endsWith("/refresh-progress")) {
           const runState = window.localStorage.getItem("run-state");
           const locationUrl = new URL(location.href);
+          if (
+            locationUrl.searchParams.get("hold-poll") === "1" &&
+            runState === "complete" &&
+            window.localStorage.getItem("hold-poll-used") !== "1"
+          ) {
+            window.localStorage.setItem("hold-poll-used", "1");
+            await new Promise<void>((resolve) => {
+              target.__releaseProgress = resolve;
+            });
+          }
           const stopReason =
             window.localStorage.getItem("stop-reason") ?? locationUrl.searchParams.get("stop");
           const progressCount = (key: string, fallback: number) =>
@@ -822,25 +833,104 @@ test("progress polling waits one minute and keeps polling only cheap status afte
 test("progress polling stops when the page unmounts", async ({ page }) => {
   await page.clock.pauseAt(new Date("2025-01-01T00:00:00Z"));
   await installDaemon(page);
+  await page.addInitScript(() => {
+    const target = window as typeof window & {
+      __pollIntervals: Array<{ id: number; startedAt: number }>;
+      __pollTimerTicks: number;
+      __pollTimerTicksByInterval: Record<number, number>;
+    };
+    target.__pollIntervals = [];
+    target.__pollTimerTicks = 0;
+    target.__pollTimerTicksByInterval = {};
+    const setInterval = window.setInterval.bind(window);
+    const clearInterval = window.clearInterval.bind(window);
+    window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      let wrappedHandler = handler;
+      let startedAt: number | null = null;
+      let intervalId = 0;
+      if (timeout === 60_000) {
+        startedAt = Date.now();
+        if (typeof handler === "function") {
+          const callback = handler as (...callbackArgs: unknown[]) => void;
+          wrappedHandler = (...callbackArgs: unknown[]) => {
+            target.__pollTimerTicks += 1;
+            target.__pollTimerTicksByInterval[intervalId] =
+              (target.__pollTimerTicksByInterval[intervalId] ?? 0) + 1;
+            callback(...callbackArgs);
+          };
+        }
+      }
+      intervalId = setInterval(wrappedHandler, timeout, ...args);
+      if (startedAt !== null) target.__pollIntervals.push({ id: intervalId, startedAt });
+      return intervalId;
+    }) as typeof window.setInterval;
+    window.clearInterval = ((id?: number) => {
+      target.__pollIntervals = target.__pollIntervals.filter((interval) => interval.id !== id);
+      return clearInterval(id);
+    }) as typeof window.clearInterval;
+  });
   await page.addInitScript(() => window.localStorage.setItem("run-state", "running"));
-  await page.goto("/redundancy");
+  await page.goto("/redundancy?hold-poll=1");
   await expect(page.getByRole("button", { name: "Cancel live run" })).toBeVisible();
   await page.setViewportSize({ width: 1280, height: 900 });
-  const progressCalls = () =>
-    page.evaluate(
-      () =>
-        (
-          window as typeof window & { __redundancyCalls: Array<{ url: string }> }
-        ).__redundancyCalls.filter((entry) => entry.url.endsWith("/refresh-progress")).length,
-    );
-  await page.clock.fastForward(100);
-  const loadedCount = await progressCalls();
-  await page.clock.fastForward(100);
-  expect(await progressCalls()).toBe(loadedCount);
-  const beforeUnmount = await progressCalls();
+  const outgoingIntervals = await page.evaluate(() =>
+    (
+      window as typeof window & { __pollIntervals: Array<{ id: number; startedAt: number }> }
+    ).__pollIntervals.map(({ id }) => id),
+  );
+  expect(outgoingIntervals.length).toBeGreaterThan(0);
+  await page.evaluate(() => window.localStorage.setItem("run-state", "complete"));
+  await page.clock.fastForward(60_000);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => !!(window as typeof window & { __releaseProgress?: () => void }).__releaseProgress,
+      ),
+    )
+    .toBe(true);
+  const coverageCallsBeforeUnmount = await page.evaluate(
+    () =>
+      (
+        window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+      ).__redundancyCalls.filter((entry) => entry.url.endsWith("/refresh-status")).length,
+  );
   await page.getByRole("link", { name: "Wishlist" }).click();
   await expect(page).toHaveURL(/\/wishlist/);
   await expect(page.getByRole("button", { name: "Cancel live run" })).toHaveCount(0);
+  const activeIntervalsAfterUnmount = await page.evaluate(() =>
+    (
+      window as typeof window & { __pollIntervals: Array<{ id: number; startedAt: number }> }
+    ).__pollIntervals.map(({ id }) => id),
+  );
+  expect(activeIntervalsAfterUnmount.some((id) => outgoingIntervals.includes(id))).toBe(false);
+  await page.evaluate(() => {
+    const target = window as typeof window & { __releaseProgress?: () => void };
+    target.__releaseProgress?.();
+    target.__releaseProgress = undefined;
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+          ).__redundancyCalls.filter((entry) => entry.url.endsWith("/refresh-status")).length,
+      ),
+    )
+    .toBe(coverageCallsBeforeUnmount);
+  const outgoingTimerTicks = await page.evaluate((ids) => {
+    const counts = (
+      window as typeof window & { __pollTimerTicksByInterval: Record<number, number> }
+    ).__pollTimerTicksByInterval;
+    return Object.fromEntries(ids.map((id) => [id, counts[id] ?? 0]));
+  }, outgoingIntervals);
   await page.clock.fastForward(120_000);
-  expect(await progressCalls()).toBe(beforeUnmount);
+  expect(
+    await page.evaluate((ids) => {
+      const counts = (
+        window as typeof window & { __pollTimerTicksByInterval: Record<number, number> }
+      ).__pollTimerTicksByInterval;
+      return Object.fromEntries(ids.map((id) => [id, counts[id] ?? 0]));
+    }, outgoingIntervals),
+  ).toEqual(outgoingTimerTicks);
 });
