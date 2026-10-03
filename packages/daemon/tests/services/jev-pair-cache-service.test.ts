@@ -446,6 +446,73 @@ describe("Jev pair cache", () => {
     cache.close();
   });
 
+  test("candidate acquisition finalization rolls back the whole batch and uses indexed candidate lookup", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    const candidate = candidateRecord("123", "456", 0.81);
+    const secondCandidatePair = candidateRecord("123", "789", 0.63);
+    cache.upsert(candidate);
+    cache.upsert(secondCandidatePair);
+    const candidateMember = encodeWishlistBggMember("collection-1", "123");
+    expect(cache.candidateCOnlyPairs(candidateMember)).toHaveLength(2);
+    const db = new Database(join(dir, "jev-pair-cache.sqlite"), { readonly: true });
+    const queryPlan = db
+      .query<
+        { detail: string },
+        [string, string]
+      >("EXPLAIN QUERY PLAN SELECT * FROM judgments WHERE pair_domain='wishlist-candidate' AND signal='C' AND (game_a=? OR game_b=?)")
+      .all(candidateMember, candidateMember);
+    db.close();
+    expect(queryPlan.some((row) => row.detail.includes("judgments_domain_member_"))).toBe(true);
+
+    const dbWriter = new Database(join(dir, "jev-pair-cache.sqlite"));
+    dbWriter.exec(
+      "CREATE TRIGGER fail_second_batch_transfer BEFORE INSERT ON judgments WHEN NEW.pair_domain='collection' AND NEW.game_a='789' BEGIN SELECT RAISE(ABORT, 'second transfer failure'); END;",
+    );
+    dbWriter.close();
+    const revision = cache.mutationRevision();
+    expect(() =>
+      cache.finalizeCandidateAcquisition(candidateMember, [
+        {
+          candidateKey: candidateKey(candidate),
+          ownedLocalGameIds: ["local-acquired", "456"],
+        },
+        {
+          candidateKey: candidateKey(secondCandidatePair),
+          ownedLocalGameIds: ["local-acquired", "789"],
+        },
+      ]),
+    ).toThrow("second transfer failure");
+    expect(cache.mutationRevision()).toBe(revision);
+    expect(cache.lookup(candidateKey(candidate))).toEqual(candidate);
+    expect(cache.lookup(candidateKey(secondCandidatePair))).toEqual(secondCandidatePair);
+    expect(cache.lookup({ gameAId: "local-acquired", gameBId: "456", signal: "C" })).toBeNull();
+    expect(cache.lookup({ gameAId: "local-acquired", gameBId: "789", signal: "C" })).toBeNull();
+
+    const cleanup = new Database(join(dir, "jev-pair-cache.sqlite"));
+    cleanup.exec("DROP TRIGGER fail_second_batch_transfer");
+    cleanup.close();
+    const beforeSuccess = cache.mutationRevision();
+    cache.finalizeCandidateAcquisition(candidateMember, [
+      { candidateKey: candidateKey(candidate), ownedLocalGameIds: ["local-acquired", "456"] },
+      {
+        candidateKey: candidateKey(secondCandidatePair),
+        ownedLocalGameIds: ["local-acquired", "789"],
+      },
+    ]);
+    expect(cache.mutationRevision()).toBe((beforeSuccess ?? 0) + 1);
+    expect(cache.candidateCOnlyPairs(candidateMember)).toHaveLength(0);
+    expect(cache.lookup({ gameAId: "local-acquired", gameBId: "456", signal: "C" })).toMatchObject({
+      value: 0.81,
+      completedAt: candidate.completedAt,
+    });
+    expect(cache.lookup({ gameAId: "local-acquired", gameBId: "789", signal: "C" })).toMatchObject({
+      value: 0.63,
+      completedAt: secondCandidatePair.completedAt,
+    });
+    cache.close();
+  });
+
   test("checkpoints C and D judgments with progress atomically and persists after reopen", async () => {
     const dir = await tempDir();
     const cache = await createJevPairCache(dir);

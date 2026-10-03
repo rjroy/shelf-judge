@@ -24,6 +24,12 @@ export type WishlistCandidateDescriptionValidation =
   | WishlistCandidateDescriptionProof
   | { valid: false };
 
+export interface WishlistCandidateMembershipIndex {
+  candidateBggIds: ReadonlySet<number>;
+  eligibleOwnedIds: ReadonlySet<string>;
+  onProbe?: (domain: "candidate" | "owned") => void;
+}
+
 function usableSource(value: string | null): value is string {
   return value !== null && value.trim().length > 0 && value.length <= 12_000;
 }
@@ -92,17 +98,20 @@ export function validateWishlistCandidateCOnlyRow(
   row: JevPairJudgment | null,
   collectionId: string,
   pair: WishlistDescriptionPairRequest,
-  candidateBggIds: readonly number[],
-  eligibleOwnedIds: readonly string[],
+  membership: WishlistCandidateMembershipIndex,
 ): WishlistCandidateDescriptionValidation {
+  membership.onProbe?.("candidate");
+  const candidateIsRequested = membership.candidateBggIds.has(pair.candidate.bggId);
+  membership.onProbe?.("owned");
+  const ownedIsEligible = membership.eligibleOwnedIds.has(pair.ownedGame.id);
   if (
     !row ||
     !collectionId.trim() ||
     !Number.isSafeInteger(pair.candidate.bggId) ||
     pair.candidate.bggId <= 0 ||
     pair.ownedGame.bggId === pair.candidate.bggId ||
-    !candidateBggIds.includes(pair.candidate.bggId) ||
-    !eligibleOwnedIds.includes(pair.ownedGame.id) ||
+    !candidateIsRequested ||
+    !ownedIsEligible ||
     !validName(pair.candidate.name) ||
     !validName(pair.ownedGame.name) ||
     !usableSource(pair.candidate.bggSource.description) ||
@@ -230,7 +239,9 @@ function requestIdentity(request: WishlistDescriptionSignalCaptureRequest): stri
   });
 }
 
-function validateCapture(request: WishlistDescriptionSignalCaptureRequest): boolean {
+function validateCapture(
+  request: WishlistDescriptionSignalCaptureRequest,
+): WishlistCandidateMembershipIndex | null {
   if (
     !request.collectionId.trim() ||
     request.semanticPolicy.enabled !== true ||
@@ -239,7 +250,7 @@ function validateCapture(request: WishlistDescriptionSignalCaptureRequest): bool
     !Number.isFinite(request.semanticPolicy.weights.description) ||
     request.semanticPolicy.weights.description <= 0
   )
-    return false;
+    return null;
   const candidates = new Set(request.candidateBggIds);
   const owned = new Set(request.eligibleOwnedIds);
   if (
@@ -248,7 +259,7 @@ function validateCapture(request: WishlistDescriptionSignalCaptureRequest): bool
     request.candidateBggIds.some((id) => !Number.isSafeInteger(id) || id <= 0) ||
     request.eligibleOwnedIds.some((id) => !id.trim())
   )
-    return false;
+    return null;
   const seenPairs = new Set<string>();
   for (const pair of request.pairs) {
     const key = JSON.stringify([pair.candidate.bggId, pair.ownedGame.id]);
@@ -262,10 +273,10 @@ function validateCapture(request: WishlistDescriptionSignalCaptureRequest): bool
       !usableSource(pair.candidate.bggSource.description) ||
       !usableSource(pair.ownedGame.description)
     )
-      return false;
+      return null;
     seenPairs.add(key);
   }
-  return true;
+  return { candidateBggIds: candidates, eligibleOwnedIds: owned };
 }
 
 export interface WishlistCandidateDescriptionResolver extends WishlistDescriptionSignalResolver {
@@ -292,7 +303,8 @@ export function createWishlistCandidateDescriptionResolver(
   const resolver: WishlistCandidateDescriptionResolver = Object.assign(
     (request: WishlistDescriptionSignalCaptureRequest) => {
       const empty = request.pairs.map(() => null);
-      if (!cache.available || !validateCapture(request)) {
+      const membership = cache.available ? validateCapture(request) : null;
+      if (!membership) {
         lastProof = null;
         return Promise.resolve(empty);
       }
@@ -328,8 +340,7 @@ export function createWishlistCandidateDescriptionResolver(
             row,
             request.collectionId,
             pair,
-            request.candidateBggIds,
-            request.eligibleOwnedIds,
+            membership,
           );
           return checked.valid ? checked.value : null;
         });

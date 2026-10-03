@@ -27,7 +27,7 @@ The plan's performance constraints are mandatory: one shared factual context and
 | `shelf-judge-xi83.1` | Phase 1; backend/shared contract owner and design review | Parent-accepted; checkpoint commit in this invocation | Current wishlist/owner-note/redundancy/cache references reconciled; C=description vs D=owner-note; all/default and selected run scope, pre-disclosure hydration, result contract frozen; independent test and review accepted; checkpoint commit. |
 | `shelf-judge-xi83.2` | Phase 2; shared/daemon backend | Parent-accepted; checkpoint commit in this invocation | Compact optional-for-legacy BGG scoring source survives storage/salvage/restart; failed fetch preserves source/snapshots; 175 tests / 778 expectations; independent test/review accepted; parent checkpoint commit. |
 | `shelf-judge-xi83.3` | Phase 3; daemon scoring backend/shared contract | Parent-accepted; checkpoint commit in this invocation | Candidate-only blend/result boundary; exact numeric F/C cases and eligibility/normalization; one context/index and one encoding per distinct game; no owned-owned work; independent test/review accepted; checkpoint commit. |
-| `shelf-judge-xi83.4` | Phase 4; daemon cache/lifecycle backend | Parent active; 4a/4b accepted, 4c open after 4b checkpoint | Typed domain/member identities, read proof/cache revision and transactional C_ONLY acquisition recovery; ID collision/purge/failure-matrix tests; independent test/review; parent checkpoint commit. |
+| `shelf-judge-xi83.4` | Phase 4; daemon cache/lifecycle backend | Parent active; 4a/4b/4c child gates accepted, aggregate reconciliation pending | Typed domain/member identities, revision-bound proof reuse/live source fences, transactional C_ONLY acquisition recovery, durable startup reconciliation, and privacy/performance gates. Phase 5 provider-run callback fencing remains separate and unimplemented. |
 | `shelf-judge-xi83.5` | Phase 5; Jev run backend | Open, blocked on .4 | Legacy source preparation before frozen disclosure; exact all-needed/selected scope; changed preview inputs rejected before sends; sequential bounded run, hit reuse and atomic pair checkpoint counts; independent test/review; parent checkpoint commit. |
 | `shelf-judge-xi83.6` | Phase 6a; daemon API and Next proxy | Open, blocked on .5 | Result/scope routes and proxies agree; scope authorization isolated; unchanged projection/status avoids recomputation; independent test/review; parent checkpoint commit. |
 | `shelf-judge-xi83.7` | Phase 6b; designer web lane | Open, blocked on .6 | Browser test actually prepares/discloses/authorizes/starts wishlist scope and exercises status/progress/cancel; independent test and design/review; parent checkpoint commit. |
@@ -268,3 +268,68 @@ The accepted eight-file source/test manifest was hashed immediately before this 
 | `packages/daemon/tests/wishlist-service.test.ts` | `465b2dea750dfdf26025ebbe2e7bee62c05da3a7` | `9d5d23ca54b0bc8893bb31c508a3e7aa6759387a112fcf698204bee5946ef25e` | modified |
 
 The note is the ninth accepted path and is excluded from its own hash table; its final blob cannot hash itself. The authoritative tracker export records `.4.2` closed, `.4.3` open, and the Phase 4 parent active. The checkpoint stages all nonignored `.beads` state alongside exactly these nine manifest paths.
+
+## Phase 4c implementation log (parent-accepted)
+
+Implementing only `shelf-judge-xi83.4.3`. The game-add route now delegates BGG acquisitions to the wishlist service's coordinated entry point. BGG retrieval remains in `gameService.addGame` outside the source coordinator; after the existing collection mutation commits, a short coordinator section verifies durable BGG/local identity and current scoring eligibility, validates each candidate C_ONLY row against the accepted Phase 4b proof, then performs one SQLite transaction to rekey proven rows and purge remaining candidate rows for that typed wishlist member. The wishlist JSON entry is removed only after cache finalization succeeds. Existing identical owned judgments remain; real target conflicts fail closed and retain candidate evidence. No cross-store transaction/rollback is claimed.
+
+Collection/wishlist BGG overlap is excluded from ordinary `list()` and the Phase 3 current projection. Startup creates the same wishlist lifecycle service and reconciles durable overlaps before `createApp` exposes routes; an unresolved cache/storage error aborts startup. The game-add route returns HTTP 500 with `acquisition_recovery_pending` and the committed game projection if collection commit succeeded but cache/wishlist finalization did not. Ordinary remove, clear, and BGG-ID removal purge candidate rows under the existing short source coordinator before saving the wishlist removal; acquisition uses its distinct transfer/recovery path, not that purge operation. Recovery after SQLite success and wishlist-save failure is idempotent and retains original completion/provenance. Cache candidate enumeration is a typed-member indexed query, not a whole-table scan.
+
+Initial implementation-local evidence before the independent correction was 103 tests / 459 expectations in the same four-suite command; it is superseded by the correction run below. No independent gate is claimed by these implementation-local checks.
+
+Phase 4c stable implementation manifest (including this note):
+
+- `packages/daemon/src/services/jev-pair-cache-service.ts`
+- `packages/daemon/src/services/wishlist-candidate-read-proof.ts`
+- `packages/daemon/src/services/wishlist-service.ts`
+- `packages/daemon/src/routes/games.ts`
+- `packages/daemon/src/app.ts`
+- `packages/daemon/src/index.ts`
+- `packages/daemon/src/services/wishlist-acquisition-startup.ts`
+- `packages/daemon/tests/services/jev-pair-cache-service.test.ts`
+- `packages/daemon/tests/wishlist-candidate-read-proof.test.ts`
+- `packages/daemon/tests/wishlist-service.test.ts`
+- `packages/daemon/tests/wishlist-routes.test.ts`
+- `packages/daemon/tests/ownership-routes.test.ts`
+- `.lore/work/notes/wishlist-jev-description-similarity.md`
+
+The complete explicit Jev run admission/callback fence is Phase 5 and was not changed here; these tests do not claim an in-flight Jev run exists or prove its future callback lifecycle. Phase 4c implementation, independent validation, and review are accepted by the parent; the checkpoint is recorded below. No real provider calls or owner data were used.
+
+### P4C independent-verification corrections (parent-accepted)
+
+The correction now exercises transferred rows through the actual `createJevPairReadService` and collection proof validator after closing/reopening SQLite. With cached owner-note use disabled and missing note inputs, the collection reader accepts the transferred raw-ID C_ONLY value and retains its original completion/provenance. Durable restart coverage uses real temporary `wishlist.json`, `collection.json`, and SQLite files with newly created storage/cache/service instances. An injected post-collection-commit cache failure leaves the persisted wishlist source as recovery evidence and hides the BGG overlap; failed recovery does not call the application factory. After removing the injected failure, recovery transfers and cleans up before the application factory runs. No network or provider dependency was introduced.
+
+Batch finalization now has two candidate pairs in a real SQLite fixture: a trigger fails on the second target after the first target write has begun, and the test proves transaction rollback leaves both candidate sources, no target rows, and the prior mutation revision. The subsequent successful batch produces both raw-owned rows with a single mutation-revision increment. Target conflict/source matching remain fail-closed. The proof matrix exercises candidate/owned source fingerprint, model, rubric and policy mismatches plus vetoed, zero-score and null-score owned members; only the compatible row transfers and the remaining candidate evidence is purged. A synthetic raw SHARED_CD row is rejected/purged and never appears as a candidate C_ONLY transfer. Ordinary remove/clear tests prove one candidate's purge leaves another candidate and unrelated collection C rows intact until clear.
+
+P4C performance correction replaces per-cache-row `collection.games.find` scans with one captured `gameById` map per finalization. The deterministic fixture has 24 collection games and 3 candidate rows; structural observer counts assert one map build, three O(1) member lookups, and one owned scoring capture per finalization rather than per row. It does not use elapsed-time thresholds.
+
+### P4C-01 ownership-disclosure and P4C-02 membership-index corrections
+
+Current redundancy reads now build one primary-plus-additional BGG ownership set from the coherent collection capture and filter wishlist entries before both current scoring and saved-projection fallback. The final publication fence still compares the complete unfiltered source capture; if ownership changes during scoring, the request retries against a fresh capture and cannot publish an acquired overlap. If collection authority is unreadable, the saved fallback returns no entries rather than disclosing entries with unknown ownership. Tests cover additional-ID overlap with zero resolver calls, a barrier-controlled acquisition overlap during C resolution, cache-transfer and wishlist-save recovery entries hidden from both list methods, and fail-closed fallback when membership authority cannot be read.
+
+Candidate row proof now receives a captured `ReadonlySet` membership index for requested candidate IDs and the complete eligible-owned IDs; resolver sets are built once per request and acquisition reuses its single eligible set. Validation uses one candidate and one owned `.has` probe per row rather than linear `includes` over the full owned list. Operation evidence: the acquisition fixture has 24 eligible owned members and 3 rows with exactly 3 candidate plus 3 owned proof probes per finalization; the proof fixture increases the full eligible set to 124 members and still records exactly 3+3 probes for 3 rows. Full membership validation remains intact; no eligibility check was removed.
+
+Correction-local focused evidence: `bun test packages/daemon/tests/wishlist-service.test.ts packages/daemon/tests/wishlist-routes.test.ts packages/daemon/tests/services/jev-pair-cache-service.test.ts packages/daemon/tests/ownership-routes.test.ts packages/daemon/tests/wishlist-candidate-read-proof.test.ts` passed (114 tests, 568 expectations). `bun run typecheck`, `bun run lint`, scoped Prettier, and `git diff --check` passed after formatting. Parent-accepted independent evidence supersedes local counts: 202 tests / 1,104 expectations across the focused ten-suite gate, root lint/typecheck, root formatting and diff checks, and refreshed review of the 13-path diff against `c58e794f`. P4C-01/02 were closed after confirming durable filesystem restart recovery before app construction, production owned-reader acceptance without D permission, real second-target SQLite rollback with one successful batch revision, and constant 124-member eligibility probes. No provider calls or owner data were used.
+
+The earlier 106-test/507-expectation implementation run is retained as historical evidence and is not combined with later counts. Phase 5 late Jev callback admission/publication fencing remains explicitly deferred and was not tested as existing behavior.
+
+### Phase 4c acceptance and checkpoint evidence
+
+Parent accepted Phase 4c after independent testing and review. The accepted 13-path source/test manifest's index blobs, worktree SHA-256, and status were captured immediately before this note edit. The note is excluded from its own hash table; `.beads` is administrative tracking state.
+
+| Path | Index blob | Worktree SHA-256 | Status at capture |
+| --- | --- | --- | --- |
+| `packages/daemon/src/services/jev-pair-cache-service.ts` | `1152c501b723f09b04c4dfcecd362695102b034f` | `8916a03687c975a60ea26b9f0fa86d56ae8339e05ceb21cb240f49fba118d76d` | modified |
+| `packages/daemon/src/services/wishlist-candidate-read-proof.ts` | `29442b16b6d61ac7e143240cd3735bdb6a515e12` | `153ae300f2041672564a697be35906f92dda462f0e669dbc63c27d44c42716dd` | modified |
+| `packages/daemon/src/services/wishlist-service.ts` | `a15668336ce377dce941fd2f19089c67cdea7fd9` | `00c4da233929118bc54e5d66f5550d91609002f474f07201f907f1a69436f492` | modified |
+| `packages/daemon/src/routes/games.ts` | `145781e2ae66fb0181763d97fd00e33f218563b2` | `8b2b00c0e8f2551c4a924aab2a50282935a4ee7666ef2bf51d0e137b4fc6e338` | modified |
+| `packages/daemon/src/app.ts` | `f698a9c77dde437986f2cce7c469070570940f0d` | `2f3f9c7616a4134e9e61b9a0e6d756cde73f7aa22d3de9e19705f7d33929fe39` | modified |
+| `packages/daemon/src/index.ts` | `53ead95d41d17c0dbc5ee1377d9de22330e656c8` | `badb39536b6b4fb323f3bb1a8fb255ca98c4c31456139ff7023a94f8c6852a49` | modified |
+| `packages/daemon/src/services/wishlist-acquisition-startup.ts` | absent | `51299bfe43cdd4cc9e6e9c64fc4bea1163f72c7b85d4ac9b874f4f1a8170af69` | untracked |
+| `packages/daemon/tests/services/jev-pair-cache-service.test.ts` | `4013c5a91ca50b25ef0a447a890027849bf271ca` | `583b6935f215f5df01907f6e3264cc42a6fe5c03222f9f445b62480160b8fe5c` | modified |
+| `packages/daemon/tests/wishlist-candidate-read-proof.test.ts` | `e86401ca84456f62e51d61ceff7f4883dbde9945` | `85749400c7c8923ca8fd4b5a8ac3bbd3ca415a29c06b2170e722b1f7b8ff9d00` | modified |
+| `packages/daemon/tests/wishlist-service.test.ts` | `453a37079dcc0bf1710797d9559a4c3a358f4124` | `d217559c732a19d0e88a1f551e59eb2450760b734d0cb5b90987b225a7aed75e` | modified |
+| `packages/daemon/tests/wishlist-routes.test.ts` | `3745f73dd753f92853d2137afbb6bd78c4624994` | `e4cd5c6e7642659c8af854aade3f17264c1f611a74b783ac9c7f6b0d6420201d` | modified |
+| `packages/daemon/tests/ownership-routes.test.ts` | `e28576990f8164745bb6697ea9513b89cae810b3` | `c95ffc45a5b534dff2acfac7fde10f48e02e85eae9b91138b2a95f55a17a7891` | modified |
+
+The current delivery ends at the accepted Phase 4 cache/read-proof/acquisition/recovery boundary. Parent aggregate reconciliation is the next administrative checkpoint after confirming all three child beads closed; the overall wishlist feature remains in progress and Phase 5 is next. This checkpoint authorizes no push.

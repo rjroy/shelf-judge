@@ -110,6 +110,16 @@ export interface JevPairCache {
     candidateKey: JevPairKey,
     ownedLocalGameIds: readonly [string, string],
   ): boolean;
+  /** Indexed rows for one typed candidate member; never enumerates the cache. */
+  candidateCOnlyPairs(candidateMemberId: string): JevPairJudgment[];
+  /** Atomically rekeys proven rows and purges the remaining rows for this candidate. */
+  finalizeCandidateAcquisition(
+    candidateMemberId: string,
+    transfers: readonly {
+      candidateKey: JevPairKey;
+      ownedLocalGameIds: readonly [string, string];
+    }[],
+  ): number;
   purgeDDependent(): number;
   saveRunProgress(progress: JevRunProgress): void;
   checkpointPair(checkpoint: JevPairCheckpoint): void;
@@ -423,6 +433,9 @@ function prepareStatements(db: Database) {
     get: db.query<JudgmentRow, [JevPairDomain, string, string, JevSignal]>(
       "SELECT * FROM judgments WHERE pair_domain=? AND game_a=? AND game_b=? AND signal=?",
     ),
+    candidateRowsByMember: db.query<JudgmentRow, [string, string]>(
+      "SELECT * FROM judgments WHERE pair_domain='wishlist-candidate' AND signal='C' AND (game_a=? OR game_b=?)",
+    ),
     upsert: db.query(
       "INSERT OR REPLACE INTO judgments (pair_domain,game_a,game_b,signal,collection_id,consent_epoch,dependency_kind,value,confidence,model_id,rubric_version,question_version,request_schema_version,score_mapping_version,semantic_policy_id,completed_at,dependencies_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     ),
@@ -462,6 +475,12 @@ function noOpCache(): JevPairCache {
       throw new Error("Jev pair cache unavailable");
     },
     transferCandidateCOnlyPair: () => {
+      throw new Error("Jev pair cache unavailable");
+    },
+    candidateCOnlyPairs: () => {
+      throw new Error("Jev pair cache unavailable");
+    },
+    finalizeCandidateAcquisition: () => {
       throw new Error("Jev pair cache unavailable");
     },
     purgeDDependent: () => {
@@ -796,6 +815,141 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       })();
       recordMutation();
       return true;
+    },
+    candidateCOnlyPairs(candidateMemberId) {
+      assertUsable();
+      requireText(candidateMemberId, "candidate member ID");
+      const parsed = parseWishlistCandidateMember(candidateMemberId);
+      if (parsed?.kind !== "wishlist-bgg") throw new Error("Invalid candidate member ID");
+      return statements.candidateRowsByMember
+        .all(candidateMemberId, candidateMemberId)
+        .flatMap((row) => {
+          const judgment = projectJudgmentRow(row);
+          return judgment?.dependencyKind === "C_ONLY" ? [judgment] : [];
+        });
+    },
+    finalizeCandidateAcquisition(candidateMemberId, transfers) {
+      assertUsable();
+      const candidateIdentity = parseWishlistCandidateMember(candidateMemberId);
+      if (candidateIdentity?.kind !== "wishlist-bgg")
+        throw new Error("Invalid candidate member ID");
+      const planned: Array<{
+        sourcePair: [string, string];
+        sourceIdentity: string;
+        target: JevPairJudgment;
+      }> = [];
+      for (const transfer of transfers) {
+        const { candidateKey, ownedLocalGameIds } = transfer;
+        if (candidateKey.pairDomain !== "wishlist-candidate" || candidateKey.signal !== "C")
+          throw new Error("Candidate transfer requires wishlist-candidate domain");
+        if (
+          !Array.isArray(ownedLocalGameIds) ||
+          ownedLocalGameIds.length !== 2 ||
+          ownedLocalGameIds.some((id) => typeof id !== "string" || !id.trim() || id.length > 2048)
+        )
+          throw new Error("Candidate transfer requires two owned local IDs");
+        const sourcePair = canonicalPair(candidateKey.gameAId, candidateKey.gameBId);
+        const sourceRow = statements.get.get(
+          "wishlist-candidate",
+          sourcePair[0],
+          sourcePair[1],
+          "C",
+        );
+        if (!sourceRow) continue;
+        const source = projectJudgmentRow(sourceRow);
+        if (!source || source.dependencyKind !== "C_ONLY")
+          throw new Error("Only valid candidate C_ONLY rows can be transferred");
+        const members = [source.gameAId, source.gameBId].map(parseWishlistCandidateMember);
+        const candidate = members.find((member) => member?.kind === "wishlist-bgg");
+        const priorOwned = members.find((member) => member?.kind === "owned-local");
+        if (
+          !candidate ||
+          candidate.kind !== "wishlist-bgg" ||
+          !priorOwned ||
+          priorOwned.kind !== "owned-local" ||
+          (source.gameAId !== candidateMemberId && source.gameBId !== candidateMemberId) ||
+          candidate.collectionId !== source.collectionId ||
+          priorOwned.collectionId !== source.collectionId ||
+          ownedLocalGameIds[1] !== priorOwned.localGameId
+        )
+          throw new Error("Candidate cache pair does not match acquisition transfer");
+        const [acquiredId, priorOwnedId] = ownedLocalGameIds;
+        const [gameAId, gameBId] = canonicalPair(acquiredId, priorOwnedId);
+        const candidateRawId =
+          source.gameAId === candidateMemberId ? source.gameAId : source.gameBId;
+        const ownedRawId = source.gameAId === candidateMemberId ? source.gameBId : source.gameAId;
+        const target: JevPairJudgment = {
+          collectionId: source.collectionId,
+          gameAId,
+          gameBId,
+          signal: "C",
+          dependencyKind: "C_ONLY",
+          value: source.value,
+          ...(source.confidence === undefined ? {} : { confidence: source.confidence }),
+          modelId: source.modelId,
+          rubricVersion: source.rubricVersion,
+          questionVersion: source.questionVersion,
+          requestSchemaVersion: source.requestSchemaVersion,
+          scoreMappingVersion: source.scoreMappingVersion,
+          semanticPolicyId: source.semanticPolicyId,
+          completedAt: source.completedAt,
+          dependencies: source.dependencies
+            .map((dependency) => ({
+              ...dependency,
+              gameId:
+                dependency.gameId === candidateRawId
+                  ? acquiredId
+                  : dependency.gameId === ownedRawId
+                    ? priorOwnedId
+                    : dependency.gameId,
+            }))
+            .sort((left, right) => compareStableIds(left.gameId, right.gameId)),
+        };
+        validate(target);
+        const existing = statements.get.get("collection", gameAId, gameBId, "C");
+        const existingJudgment = existing ? projectJudgmentRow(existing) : null;
+        if (existing && !existingJudgment) throw new Error("Existing owned cache row is invalid");
+        if (
+          existingJudgment &&
+          canonicalJudgmentContent(existingJudgment) !== canonicalJudgmentContent(target)
+        )
+          throw new Error("Conflicting owned cache row prevents candidate transfer");
+        planned.push({ sourcePair, sourceIdentity: canonicalJudgmentContent(source), target });
+      }
+      const changed = db.transaction(() => {
+        let count = 0;
+        for (const { sourcePair, sourceIdentity, target } of planned) {
+          const currentSourceRow = statements.get.get(
+            "wishlist-candidate",
+            sourcePair[0],
+            sourcePair[1],
+            "C",
+          );
+          const currentSource = currentSourceRow ? projectJudgmentRow(currentSourceRow) : null;
+          if (!currentSource || canonicalJudgmentContent(currentSource) !== sourceIdentity)
+            throw new Error("Candidate cache row changed during acquisition transfer");
+          const existingRow = statements.get.get("collection", target.gameAId, target.gameBId, "C");
+          const existing = existingRow ? projectJudgmentRow(existingRow) : null;
+          if (existingRow && !existing) throw new Error("Existing owned cache row is invalid");
+          if (existing && canonicalJudgmentContent(existing) !== canonicalJudgmentContent(target))
+            throw new Error("Conflicting owned cache row prevents candidate transfer");
+          if (!existing) writeJudgment(target);
+          count += Number(
+            statements.deletePairSignal.run("wishlist-candidate", sourcePair[0], sourcePair[1], "C")
+              .changes,
+          );
+        }
+        count += Number(
+          db
+            .query(
+              "DELETE FROM judgments WHERE pair_domain='wishlist-candidate' AND (game_a=? OR game_b=?)",
+            )
+            .run(candidateMemberId, candidateMemberId).changes,
+        );
+        return count;
+      })();
+      if (changed > 0) recordMutation();
+      return changed;
     },
     purgePair(left, right, signal, pairDomain = "collection") {
       assertUsable();

@@ -22,6 +22,7 @@ import { createWishlistRoutes } from "./routes/wishlist.js";
 import { createShelfRoutes } from "./routes/shelf.js";
 import { createCollectionRoutes } from "./routes/collection.js";
 import { createWishlistService } from "./services/wishlist-service.js";
+import type { WishlistService } from "./services/wishlist-service.js";
 import { createShelfService } from "./services/shelf-service.js";
 import { createCapacityService } from "./services/capacity-service.js";
 import type { TournamentService } from "./services/tournament-service.js";
@@ -96,6 +97,7 @@ export interface AppDeps {
   afterCandidateSourceSave?: (
     impact: import("./services/attention-candidate-service.js").AttentionMutationImpact,
   ) => Promise<void>;
+  wishlistService?: WishlistService;
 }
 
 export interface AppResult {
@@ -129,19 +131,22 @@ export function createApp(deps: AppDeps): AppResult {
   } = deps;
 
   // Build wishlist service (used by both wishlist routes and game routes for auto-removal)
-  const wishlistService = createWishlistService({
-    storageService,
-    predictionService,
-    gameService,
-    coordinator: deps.profileSourceCoordinator,
-    ...(deps.jevPairCache
-      ? {
-          resolveWishlistDescriptionSignal: createWishlistCandidateDescriptionResolver(
-            deps.jevPairCache,
-          ),
-        }
-      : {}),
-  });
+  const wishlistService =
+    deps.wishlistService ??
+    createWishlistService({
+      storageService,
+      predictionService,
+      gameService,
+      coordinator: deps.profileSourceCoordinator,
+      jevPairCache: deps.jevPairCache,
+      ...(deps.jevPairCache
+        ? {
+            resolveWishlistDescriptionSignal: createWishlistCandidateDescriptionResolver(
+              deps.jevPairCache,
+            ),
+          }
+        : {}),
+    });
   const purchaseUtilizationService = createPurchaseUtilizationService({
     storageService,
     collectionMutationService,

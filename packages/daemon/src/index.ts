@@ -8,6 +8,9 @@ import { createBggClient } from "./services/bgg-client.js";
 import { createTournamentService } from "./services/tournament-service.js";
 import { createProfileService } from "./services/profile-service.js";
 import { createPredictionService } from "./services/prediction-service.js";
+import { createWishlistService } from "./services/wishlist-service.js";
+import { createWishlistCandidateDescriptionResolver } from "./services/wishlist-candidate-read-proof.js";
+import { createAfterWishlistAcquisitionRecovery } from "./services/wishlist-acquisition-startup.js";
 import { createApp } from "./app.js";
 import { createLogger } from "./services/logger.js";
 import { createCollectionMutationService } from "./services/collection-mutation-service.js";
@@ -394,6 +397,19 @@ export async function main() {
       bggClient,
       afterSourceSave: maintainCandidateSource,
     });
+    const wishlistService = createWishlistService({
+      storageService,
+      predictionService,
+      gameService,
+      coordinator: profileSourceCoordinatorFor(storageService),
+      ...(jevPairCache
+        ? {
+            jevPairCache,
+            resolveWishlistDescriptionSignal:
+              createWishlistCandidateDescriptionResolver(jevPairCache),
+          }
+        : {}),
+    });
     const resolveSemanticRead = createJevProductionSemanticRead(jevPairCache);
     displayedFitnessService = createDisplayedFitnessService({
       gameService,
@@ -509,38 +525,50 @@ export async function main() {
       });
     }
 
-    const { app } = createApp({
-      storageService,
-      collectionMutationService,
-      axisService,
-      gameService,
-      tournamentService,
-      profileService,
-      predictionService,
-      displayedFitnessService,
-      intentionService,
-      attentionDispositionService,
-      collectionSnapshotService,
-      semanticRedundancyStateService: semanticStateService,
-      jevStatusService: jevStatusService ?? undefined,
-      jevRefreshProgressService: createJevRefreshProgressService({
-        cache: jevPairCache,
-        ...(jevRunController ? { activeRun: () => jevRunController?.activeRun() ?? null } : {}),
+    logger.log("Wishlist acquisition reconciliation started", { trigger: "startup" });
+    const {
+      application: { app },
+      reconciledEntries: acquisitionReconciled,
+    } = await createAfterWishlistAcquisitionRecovery(wishlistService, () =>
+      createApp({
+        storageService,
+        collectionMutationService,
+        axisService,
+        gameService,
+        tournamentService,
+        profileService,
+        predictionService,
+        displayedFitnessService,
+        intentionService,
+        attentionDispositionService,
+        collectionSnapshotService,
+        semanticRedundancyStateService: semanticStateService,
+        jevStatusService: jevStatusService ?? undefined,
+        jevRefreshProgressService: createJevRefreshProgressService({
+          cache: jevPairCache,
+          ...(jevRunController ? { activeRun: () => jevRunController?.activeRun() ?? null } : {}),
+        }),
+        jevRunController: jevRunController ?? undefined,
+        jevPairCache: jevPairCache ?? undefined,
+        ownerGameNoteService,
+        groundedAnalysisProvider,
+        reflectionRuntime,
+        bggClient,
+        profileSourceCoordinator: profileSourceCoordinatorFor(storageService),
+        wishlistService,
+        afterCandidateSourceSave: maintainCandidateSource,
+        onShutdown() {
+          logger.log("Shutting down via API...");
+          void serverRef.current?.stop();
+          jevPairCacheLifecycle.close();
+          process.exit(0);
+        },
       }),
-      jevRunController: jevRunController ?? undefined,
-      jevPairCache: jevPairCache ?? undefined,
-      ownerGameNoteService,
-      groundedAnalysisProvider,
-      reflectionRuntime,
-      bggClient,
-      profileSourceCoordinator: profileSourceCoordinatorFor(storageService),
-      afterCandidateSourceSave: maintainCandidateSource,
-      onShutdown() {
-        logger.log("Shutting down via API...");
-        void serverRef.current?.stop();
-        jevPairCacheLifecycle.close();
-        process.exit(0);
-      },
+    );
+    logger.log("Wishlist acquisition reconciliation completed", {
+      trigger: "startup",
+      reconciledEntries: acquisitionReconciled,
+      outcome: "reconciled-before-app",
     });
 
     serverRef.current = Bun.serve({

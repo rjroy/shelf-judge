@@ -16,7 +16,26 @@ import type { GameService } from "../src/services/game-service";
 import type { BoardgameScoringInput } from "../src/services/bgg-client";
 import type { WishlistDescriptionSignalCaptureRequest } from "../src/services/wishlist-redundancy-scoring.js";
 import { createWishlistService } from "../src/services/wishlist-service";
+import { WishlistAcquisitionRecoveryError } from "../src/services/wishlist-service.js";
 import { parseBoardgameScoringThings } from "../src/services/bgg-xml-parser.js";
+import {
+  createJevPairCache,
+  type JevPairJudgment,
+} from "../src/services/jev-pair-cache-service.js";
+import {
+  buildJevPairDependencies,
+  encodeOwnedLocalMember,
+  encodeWishlistBggMember,
+} from "../src/services/jev-pair-identity.js";
+import { JEV_JUDGMENT_CONTRACT } from "../src/services/jev/jev-judgment-contract.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Database } from "bun:sqlite";
+import { createStorageService } from "../src/services/storage-service.js";
+import { createFileOps } from "../src/services/file-ops.js";
+import { createAfterWishlistAcquisitionRecovery } from "../src/services/wishlist-acquisition-startup.js";
+import { createJevPairReadService } from "../src/services/jev-pair-read-service.js";
 
 const NOW = "2026-04-12T12:00:00.000Z";
 
@@ -162,6 +181,17 @@ function makeFitnessResult(score: number, unavailable: boolean): FitnessResult {
   };
 }
 
+function makeValidCaptureFitnessResult(score: number): FitnessResult {
+  const result = makeFitnessResult(score, false);
+  return {
+    ...result,
+    predictionMeta:
+      result.predictionMeta === null
+        ? null
+        : { ...result.predictionMeta, actualAxisCount: result.ratedAxisCount },
+  };
+}
+
 function createMockStorage(
   wishlist: WishlistEntry[] = [],
   collection?: Partial<Collection>,
@@ -293,6 +323,42 @@ function makeCurrentReadEntry(description: string): WishlistEntry {
       bestPlayers: 3,
       playingTime: 60,
     },
+  };
+}
+
+function makeCandidateCRow(
+  collectionId: string,
+  bggId: number,
+  candidateName: string,
+  candidateDescription: string,
+  owned: Game,
+  value: number,
+  completedAt = NOW,
+): JevPairJudgment {
+  if (!owned.bggData?.description) throw new Error("owned test fixture requires description");
+  const candidateMember = encodeWishlistBggMember(collectionId, String(bggId));
+  const ownedMember = encodeOwnedLocalMember(collectionId, owned.id);
+  const [gameAId, gameBId] = [candidateMember, ownedMember].sort();
+  return {
+    pairDomain: "wishlist-candidate",
+    collectionId,
+    gameAId,
+    gameBId,
+    signal: "C",
+    dependencyKind: "C_ONLY",
+    value,
+    modelId: JEV_JUDGMENT_CONTRACT.modelId,
+    rubricVersion: JEV_JUDGMENT_CONTRACT.rubricVersion,
+    questionVersion: JEV_JUDGMENT_CONTRACT.questionVersion,
+    requestSchemaVersion: JEV_JUDGMENT_CONTRACT.requestSchemaVersion,
+    scoreMappingVersion: JEV_JUDGMENT_CONTRACT.scoreMappingVersion,
+    semanticPolicyId: JEV_JUDGMENT_CONTRACT.semanticPolicyId,
+    completedAt,
+    dependencies: buildJevPairDependencies(
+      "C_ONLY",
+      { gameId: candidateMember, name: candidateName, description: candidateDescription },
+      { gameId: ownedMember, name: owned.name, description: owned.bggData.description },
+    ),
   };
 }
 
@@ -1347,5 +1413,775 @@ describe("wishlist service", () => {
     expect(result).toHaveLength(1);
     expect(result[0]?.redundancy.source).toBe("base-prediction");
     expect(result[0]?.redundancy.orderingScore).toBe(existing.predictedScore);
+  });
+
+  test("current wishlist reads exclude additional owned BGG IDs before scoring", async () => {
+    const existing = makeCurrentReadEntry("Candidate prose");
+    existing.bggId = 904;
+    const owner = makeGame(903, "Owned with additional BGG identity");
+    owner.additionalBggIds = [existing.bggId];
+    const storage = createMockStorage([existing], { games: [asDurableGame(owner)] }, true);
+    let resolverCalls = 0;
+    const service = createWishlistService({
+      storageService: storage,
+      predictionService: createMockPredictionService(new Map(), [
+        { game: owner, score: makeFitnessResult(5, false) },
+      ]),
+      gameService,
+      resolveWishlistDescriptionSignal: Object.assign(
+        () => {
+          resolverCalls++;
+          return Promise.resolve([]);
+        },
+        { isCurrent: () => true },
+      ),
+    });
+
+    expect(await service.list()).toEqual([]);
+    expect(await service.listWithCurrentRedundancy()).toEqual([]);
+    expect(resolverCalls).toBe(0);
+  });
+
+  test("acquisition overlap appearing during scoring is excluded at the final source fence", async () => {
+    const existing = makeCurrentReadEntry("Candidate prose");
+    existing.bggId = 906;
+    const owner = makeGame(907, "Owner");
+    if (!owner.bggData) throw new Error("owner fixture requires BGG source");
+    owner.bggData.description = "Owner description";
+    const baseStorage = createMockStorage([existing], { games: [asDurableGame(owner)] }, true);
+    const currentCollection = await baseStorage.loadCollection();
+    currentCollection.semanticRedundancy.settings = {
+      ...currentCollection.semanticRedundancy.settings,
+      enabled: true,
+      weights: {
+        ...currentCollection.semanticRedundancy.settings.weights,
+        description: 1,
+      },
+    };
+    const storage: StorageService = {
+      ...baseStorage,
+      loadCollection: () => Promise.resolve(structuredClone(currentCollection)),
+    };
+    let signalResolverCalls = 0;
+    let markResolverEntered: () => void = () => {};
+    let releaseResolver: () => void = () => {};
+    const resolverEntered = new Promise<void>((resolve) => {
+      markResolverEntered = resolve;
+    });
+    const resolverGate = new Promise<void>((resolve) => {
+      releaseResolver = resolve;
+    });
+    const service = createWishlistService({
+      storageService: storage,
+      predictionService: createMockPredictionService(new Map(), [
+        { game: owner, score: makeFitnessResult(5, false) },
+      ]),
+      gameService,
+      resolveWishlistDescriptionSignal: Object.assign(
+        async (request: WishlistDescriptionSignalCaptureRequest) => {
+          signalResolverCalls++;
+          markResolverEntered();
+          await resolverGate;
+          return request.pairs.map(() => 0.8);
+        },
+        { isCurrent: () => true },
+      ),
+    });
+
+    const resultPromise = service.listWithCurrentRedundancy();
+    await resolverEntered;
+    const currentOwner = currentCollection.games[0];
+    if (!currentOwner) throw new Error("owner fixture is missing from collection");
+    currentOwner.additionalBggIds = [existing.bggId];
+    releaseResolver();
+
+    expect(await resultPromise).toEqual([]);
+    expect(signalResolverCalls).toBe(1);
+  });
+
+  test("saved fallback fails closed when ownership membership cannot be read", async () => {
+    const existing = makeCurrentReadEntry("Candidate prose");
+    const owner = makeGame(905, "Owned");
+    const baseStorage = createMockStorage([existing], { games: [asDurableGame(owner)] }, true);
+    let collectionReads = 0;
+    const storage: StorageService = {
+      ...baseStorage,
+      loadCollection: async () => {
+        collectionReads++;
+        if (collectionReads > 1) throw new Error("ownership authority unavailable");
+        return baseStorage.loadCollection();
+      },
+    };
+    const service = createWishlistService({
+      storageService: storage,
+      predictionService: createMockPredictionService(new Map(), [
+        { game: owner, score: makeFitnessResult(5, false) },
+      ]),
+      gameService,
+      resolveWishlistDescriptionSignal: Object.assign(() => Promise.resolve([]), {
+        isCurrent: () => true,
+      }),
+    });
+
+    expect(await service.listWithCurrentRedundancy()).toEqual([]);
+    expect(collectionReads).toBeGreaterThan(1);
+  });
+
+  test("acquisition transfers compatible C_ONLY evidence before cleanup and restart replays safely", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "wishlist-acquisition-test-"));
+    let cache = await createJevPairCache(directory);
+    try {
+      const entry = makeCurrentReadEntry("Exact candidate description");
+      entry.bggId = 200;
+      entry.name = "Acquired candidate";
+      const acquired = makeGame(200, entry.name);
+      acquired.id = "owned-acquired-200";
+      if (!acquired.bggData) throw new Error("acquired fixture requires BGG data");
+      acquired.bggData.description = "Exact candidate description";
+      const other = makeGame(900, "Existing owned game");
+      other.id = "owned-existing-900";
+      if (!other.bggData) throw new Error("owned fixture requires BGG data");
+      other.bggData.description = "Exact owned description";
+      const otherOwners = [other];
+      for (let index = 0; index < 2; index++) {
+        const owner = makeGame(901 + index, `Additional owner ${index}`);
+        owner.id = `owned-existing-${901 + index}`;
+        if (!owner.bggData) throw new Error("owned fixture requires BGG data");
+        owner.bggData.description = `Exact owner description ${index}`;
+        otherOwners.push(owner);
+      }
+      const normalizationOnlyGames = Array.from({ length: 20 }, (_, index) => {
+        const game = makeGame(1000 + index, `Normalization source ${index}`);
+        game.id = `normalization-${index}`;
+        return game;
+      });
+
+      const baseStorage = createMockStorage(
+        [entry],
+        {
+          games: [
+            asDurableGame(acquired),
+            ...otherOwners.map(asDurableGame),
+            ...normalizationOnlyGames.map(asDurableGame),
+          ],
+        },
+        true,
+      );
+      const initial = await baseStorage.loadCollection();
+      const semantic = initial.semanticRedundancy;
+      initial.semanticRedundancy = {
+        ...semantic,
+        settings: {
+          ...semantic.settings,
+          enabled: true,
+          weights: { ...semantic.settings.weights, factual: 1, description: 1 },
+        },
+      };
+      const storage: StorageService = {
+        ...baseStorage,
+        loadCollection: () => Promise.resolve(structuredClone(initial)),
+      };
+      const predictionGames = [
+        { game: acquired, score: makeFitnessResult(7, false) },
+        ...otherOwners.map((owner) => ({ game: owner, score: makeFitnessResult(6, false) })),
+        ...normalizationOnlyGames.map((game) => ({ game, score: makeFitnessResult(4, false) })),
+      ];
+      const predictionBase = createMockPredictionService(new Map(), predictionGames);
+      let scoringCaptureCalls = 0;
+      const prediction: PredictionService = {
+        ...predictionBase,
+        listGamesWithPredictionsFromSnapshot: async () => {
+          scoringCaptureCalls++;
+          return Promise.resolve(predictionGames);
+        },
+      };
+      const candidateId = encodeWishlistBggMember(initial.id, "200");
+      for (const [index, owner] of otherOwners.entries()) {
+        cache.upsert(
+          makeCandidateCRow(
+            initial.id,
+            200,
+            entry.name,
+            entry.bggSource?.description ?? "",
+            owner,
+            0.82 - index * 0.1,
+            "2026-09-30T12:00:00.000Z",
+          ),
+        );
+      }
+      let failWishlistSave = true;
+      const savingStorage: StorageService = {
+        ...storage,
+        saveWishlist: (entries) => {
+          if (failWishlistSave) {
+            failWishlistSave = false;
+            return Promise.reject(new Error("injected post-transfer wishlist save failure"));
+          }
+          return baseStorage.saveWishlist(entries);
+        },
+      };
+      let indexBuilds = 0;
+      let ownedLookups = 0;
+      let eligibleSetSize = 0;
+      const membershipProbes = { candidate: 0, owned: 0 };
+      let candidateResolverCalls = 0;
+      const service = createWishlistService({
+        storageService: savingStorage,
+        predictionService: prediction,
+        gameService: {
+          ...gameService,
+          addGame: () => Promise.resolve({ game: acquired, bggImported: false }),
+        },
+        jevPairCache: cache,
+        resolveWishlistDescriptionSignal: Object.assign(
+          (request: WishlistDescriptionSignalCaptureRequest) => {
+            candidateResolverCalls++;
+            return Promise.resolve(request.pairs.map(() => 0.9));
+          },
+          { isCurrent: () => true },
+        ),
+        acquisitionObserver: {
+          onCollectionIndexBuilt: (gameCount) => {
+            indexBuilds++;
+            expect(gameCount).toBe(24);
+          },
+          onOwnedGameLookup: () => {
+            ownedLookups++;
+          },
+          onEligibleOwnedSetBuilt: (count) => {
+            eligibleSetSize = count;
+          },
+          onEligibilityMembershipProbe: (domain) => {
+            membershipProbes[domain]++;
+          },
+        },
+      });
+
+      const failedBeforeCommit = createWishlistService({
+        storageService: savingStorage,
+        predictionService: prediction,
+        gameService: {
+          ...gameService,
+          addGame: () => Promise.reject(new Error("collection write failed")),
+        },
+        jevPairCache: cache,
+      });
+      await expectPromiseError(
+        failedBeforeCommit.acquireGame({ bggId: 200, name: entry.name }),
+        "collection write failed",
+      );
+      expect(await savingStorage.loadWishlist()).toHaveLength(1);
+
+      const cacheDb = new Database(join(directory, "jev-pair-cache.sqlite"));
+      cacheDb.exec(
+        "CREATE TRIGGER fail_acquisition_transfer BEFORE INSERT ON judgments WHEN NEW.pair_domain='collection' BEGIN SELECT RAISE(ABORT, 'injected transfer failure'); END;",
+      );
+      cacheDb.close();
+      let acquisitionError: unknown;
+      try {
+        await service.acquireGame({ bggId: 200, name: entry.name });
+      } catch (error) {
+        acquisitionError = error;
+      }
+      expect(acquisitionError).toBeInstanceOf(WishlistAcquisitionRecoveryError);
+      expect(await service.list()).toEqual([]);
+      expect(await service.listWithCurrentRedundancy()).toEqual([]);
+      expect(candidateResolverCalls).toBe(0);
+      expect(await savingStorage.loadWishlist()).toHaveLength(1);
+      expect(cache.candidateCOnlyPairs(candidateId)).toHaveLength(3);
+      expect(indexBuilds).toBe(1);
+      expect(ownedLookups).toBe(3);
+      expect(eligibleSetSize).toBe(24);
+      expect(membershipProbes).toEqual({ candidate: 3, owned: 3 });
+      expect(scoringCaptureCalls).toBe(2);
+      const cleanupDb = new Database(join(directory, "jev-pair-cache.sqlite"));
+      cleanupDb.exec("DROP TRIGGER fail_acquisition_transfer");
+      cleanupDb.close();
+
+      await expectPromiseError(
+        service.finalizeAcquisition(200, acquired.id),
+        "injected post-transfer wishlist save failure",
+      );
+      expect(indexBuilds).toBe(2);
+      expect(ownedLookups).toBe(6);
+      expect(membershipProbes).toEqual({ candidate: 6, owned: 6 });
+      expect(scoringCaptureCalls).toBe(3);
+      expect(await savingStorage.loadWishlist()).toHaveLength(1);
+      expect(await service.listWithCurrentRedundancy()).toEqual([]);
+      expect(candidateResolverCalls).toBe(0);
+      const transferred = cache.lookup({ gameAId: acquired.id, gameBId: other.id, signal: "C" });
+      expect(transferred?.value).toBe(0.82);
+      expect(transferred?.completedAt).toBe("2026-09-30T12:00:00.000Z");
+      expect(cache.candidateCOnlyPairs(candidateId)).toHaveLength(0);
+
+      failWishlistSave = false;
+      expect(await service.reconcileAcquisitions()).toBe(1);
+      expect(scoringCaptureCalls).toBe(5);
+      expect(await savingStorage.loadWishlist()).toHaveLength(0);
+      expect(cache.lookup({ gameAId: acquired.id, gameBId: other.id, signal: "C" })).toEqual(
+        transferred,
+      );
+
+      cache.close();
+      cache = await createJevPairCache(directory);
+      const ownedReadCollection = await savingStorage.loadCollection();
+      ownedReadCollection.semanticRedundancy.settings.cachedOwnerNoteUse = false;
+      const predictionCapture = [acquired, ...otherOwners, ...normalizationOnlyGames].map(
+        (game) => ({
+          game: asDurableGame(game),
+          score: makeValidCaptureFitnessResult(game.id === acquired.id ? 7 : 5),
+        }),
+      );
+      const ownedRead = createJevPairReadService(cache).resolveWithProof({
+        collection: ownedReadCollection,
+        predictionCapture,
+        factualWeights: { binary: 1, continuous: 1 },
+        captureIdentity: {
+          sourceVectorIdentity: "acquisition-source-vector",
+          tournamentIdentity: "acquisition-tournament",
+          predictionCaptureIdentity: "acquisition-prediction-capture",
+        },
+      });
+      expect(ownedRead.result.status).not.toBe("not-ready");
+      if (!("table" in ownedRead.result) || !ownedRead.result.table)
+        throw new Error("owned read did not produce a pair table");
+      expect(
+        ownedRead.result.table.pairs.find(
+          (pair) => pair.gameAId === acquired.id && pair.gameBId === other.id,
+        ),
+      ).toMatchObject({ description: 0.82, ownerNote: null });
+      expect(ownedRead.proof).not.toHaveProperty("noteText");
+
+      const removable = makeCurrentReadEntry("Removal candidate prose");
+      removable.id = "ordinary-removal-entry";
+      removable.bggId = 201;
+      const removableMember = encodeWishlistBggMember(initial.id, "201");
+      const removableOwned = encodeOwnedLocalMember(initial.id, other.id);
+      const [removableA, removableB] = [removableMember, removableOwned].sort();
+      cache.upsert({
+        pairDomain: "wishlist-candidate",
+        collectionId: initial.id,
+        gameAId: removableA,
+        gameBId: removableB,
+        signal: "C",
+        dependencyKind: "C_ONLY",
+        value: 0.5,
+        modelId: JEV_JUDGMENT_CONTRACT.modelId,
+        rubricVersion: JEV_JUDGMENT_CONTRACT.rubricVersion,
+        questionVersion: JEV_JUDGMENT_CONTRACT.questionVersion,
+        requestSchemaVersion: JEV_JUDGMENT_CONTRACT.requestSchemaVersion,
+        scoreMappingVersion: JEV_JUDGMENT_CONTRACT.scoreMappingVersion,
+        semanticPolicyId: JEV_JUDGMENT_CONTRACT.semanticPolicyId,
+        completedAt: NOW,
+        dependencies: buildJevPairDependencies(
+          "C_ONLY",
+          {
+            gameId: removableMember,
+            name: removable.name,
+            description: removable.bggSource?.description ?? undefined,
+          },
+          {
+            gameId: removableOwned,
+            name: other.name,
+            description: other.bggData?.description ?? undefined,
+          },
+        ),
+      });
+      await baseStorage.saveWishlist([removable]);
+      const reopenedService = createWishlistService({
+        storageService: savingStorage,
+        predictionService: prediction,
+        gameService,
+        jevPairCache: cache,
+      });
+      await reopenedService.remove(removable.id);
+      expect(cache.candidateCOnlyPairs(removableMember)).toHaveLength(0);
+      expect(await baseStorage.loadWishlist()).toHaveLength(0);
+    } finally {
+      cache.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("durable startup recovery gates app creation and owned C_ONLY reads survive cache reopen", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "wishlist-acquisition-restart-"));
+    let cache = await createJevPairCache(directory);
+    try {
+      const entry = makeCurrentReadEntry("Persisted candidate description");
+      entry.id = "persisted-wishlist-entry";
+      entry.bggId = 320;
+      entry.name = "Persisted acquired game";
+      const acquired = makeGame(320, entry.name);
+      acquired.id = "persisted-owned-320";
+      if (!acquired.bggData) throw new Error("acquired fixture requires BGG data");
+      acquired.bggData.description = entry.bggSource?.description ?? null;
+      const other = makeGame(920, "Persisted existing owner");
+      other.id = "persisted-owned-920";
+      if (!other.bggData) throw new Error("owned fixture requires BGG data");
+      other.bggData.description = "Persisted owned description";
+
+      const fixtureStorage = createMockStorage(
+        [entry],
+        { games: [asDurableGame(acquired), asDurableGame(other)] },
+        true,
+      );
+      const collection = await fixtureStorage.loadCollection();
+      collection.semanticRedundancy.settings = {
+        ...collection.semanticRedundancy.settings,
+        enabled: true,
+        cachedOwnerNoteUse: false,
+        weights: { ...collection.semanticRedundancy.settings.weights, factual: 1, description: 1 },
+      };
+      const persistedStorage = createStorageService({
+        dataDir: directory,
+        configPath: join(directory, "config.json"),
+        fileOps: createFileOps(),
+      });
+      await persistedStorage.saveCollection(collection);
+      await persistedStorage.saveWishlist([entry]);
+      cache.upsert(
+        makeCandidateCRow(
+          collection.id,
+          entry.bggId,
+          entry.name,
+          entry.bggSource?.description ?? "",
+          other,
+          0.77,
+          "2026-09-29T08:30:00.000Z",
+        ),
+      );
+      const prediction = createMockPredictionService(new Map(), [
+        { game: acquired, score: makeFitnessResult(7, false) },
+        { game: other, score: makeFitnessResult(6, false) },
+      ]);
+      const addCommittedGame = {
+        ...gameService,
+        addGame: () => Promise.resolve({ game: acquired, bggImported: false }),
+      };
+      const firstService = createWishlistService({
+        storageService: persistedStorage,
+        predictionService: prediction,
+        gameService: addCommittedGame,
+        jevPairCache: cache,
+      });
+      const failureDb = new Database(join(directory, "jev-pair-cache.sqlite"));
+      failureDb.exec(
+        "CREATE TRIGGER fail_restart_transfer BEFORE INSERT ON judgments WHEN NEW.pair_domain='collection' BEGIN SELECT RAISE(ABORT, 'injected restart transfer failure'); END;",
+      );
+      failureDb.close();
+      let routeError: unknown;
+      try {
+        await firstService.acquireGame({ bggId: entry.bggId, name: entry.name });
+      } catch (error) {
+        routeError = error;
+      }
+      expect(routeError).toBeInstanceOf(WishlistAcquisitionRecoveryError);
+      expect(await persistedStorage.loadWishlist()).toHaveLength(1);
+      expect(await firstService.list()).toHaveLength(0);
+
+      cache.close();
+      cache = await createJevPairCache(directory);
+      const restartedStorage = createStorageService({
+        dataDir: directory,
+        configPath: join(directory, "config.json"),
+        fileOps: createFileOps(),
+      });
+      const restartedService = createWishlistService({
+        storageService: restartedStorage,
+        predictionService: prediction,
+        gameService: addCommittedGame,
+        jevPairCache: cache,
+      });
+      let appFactoryCalls = 0;
+      await expectPromiseError(
+        createAfterWishlistAcquisitionRecovery(restartedService, () => {
+          appFactoryCalls++;
+          return "app";
+        }),
+        "injected restart transfer failure",
+      );
+      expect(appFactoryCalls).toBe(0);
+      const recoveryDb = new Database(join(directory, "jev-pair-cache.sqlite"));
+      recoveryDb.exec("DROP TRIGGER fail_restart_transfer");
+      recoveryDb.close();
+      const boot = await createAfterWishlistAcquisitionRecovery(restartedService, () => {
+        appFactoryCalls++;
+        return "app";
+      });
+      expect(boot).toEqual({ application: "app", reconciledEntries: 1 });
+      expect(appFactoryCalls).toBe(1);
+      expect(await restartedStorage.loadWishlist()).toHaveLength(0);
+
+      const transferred = cache.lookup({ gameAId: acquired.id, gameBId: other.id, signal: "C" });
+      expect(transferred).toMatchObject({ value: 0.77, completedAt: "2026-09-29T08:30:00.000Z" });
+      cache.close();
+      cache = await createJevPairCache(directory);
+      const readCollection = await restartedStorage.loadCollection();
+      const read = createJevPairReadService(cache).resolveWithProof({
+        collection: readCollection,
+        predictionCapture: [
+          { game: acquired, score: makeValidCaptureFitnessResult(7) },
+          { game: other, score: makeValidCaptureFitnessResult(6) },
+        ],
+        factualWeights: { binary: 1, continuous: 1 },
+        captureIdentity: {
+          sourceVectorIdentity: "durable-acquisition-vector",
+          tournamentIdentity: "durable-acquisition-tournament",
+          predictionCaptureIdentity: "durable-acquisition-predictions",
+        },
+      });
+      expect(read.result.status).not.toBe("not-ready");
+      if (!("table" in read.result) || !read.result.table)
+        throw new Error("owned reader did not produce a pair table");
+      const ownedPair = read.result.table.pairs.find(
+        (pair) => pair.gameAId === acquired.id && pair.gameBId === other.id,
+      );
+      expect(ownedPair?.description).toBe(0.77);
+      expect(ownedPair?.ownerNote).toBeNull();
+    } finally {
+      cache.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("remove and clear purge only selected candidate rows and preserve collection judgments", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "wishlist-removal-cache-"));
+    const cache = await createJevPairCache(directory);
+    try {
+      const first = makeCurrentReadEntry("First candidate prose");
+      first.id = "candidate-one-entry";
+      first.bggId = 701;
+      const second = makeCurrentReadEntry("Second candidate prose");
+      second.id = "candidate-two-entry";
+      second.bggId = 702;
+      const owner = makeGame(970, "Owned comparator");
+      owner.id = "owned-comparator";
+      if (!owner.bggData) throw new Error("owned fixture requires BGG data");
+      owner.bggData.description = "Owned comparator description";
+      const storage = createMockStorage([first, second], { games: [asDurableGame(owner)] });
+      const collection = await storage.loadCollection();
+      const firstMember = encodeWishlistBggMember(collection.id, String(first.bggId));
+      const secondMember = encodeWishlistBggMember(collection.id, String(second.bggId));
+      const firstRow = makeCandidateCRow(
+        collection.id,
+        first.bggId,
+        first.name,
+        first.bggSource?.description ?? "",
+        owner,
+        0.4,
+      );
+      const secondRow = makeCandidateCRow(
+        collection.id,
+        second.bggId,
+        second.name,
+        second.bggSource?.description ?? "",
+        owner,
+        0.6,
+      );
+      const collectionRow: JevPairJudgment = {
+        collectionId: collection.id,
+        gameAId: "owned-a",
+        gameBId: "owned-b",
+        signal: "C",
+        dependencyKind: "C_ONLY",
+        value: 0.9,
+        modelId: JEV_JUDGMENT_CONTRACT.modelId,
+        rubricVersion: JEV_JUDGMENT_CONTRACT.rubricVersion,
+        questionVersion: JEV_JUDGMENT_CONTRACT.questionVersion,
+        requestSchemaVersion: JEV_JUDGMENT_CONTRACT.requestSchemaVersion,
+        scoreMappingVersion: JEV_JUDGMENT_CONTRACT.scoreMappingVersion,
+        semanticPolicyId: JEV_JUDGMENT_CONTRACT.semanticPolicyId,
+        completedAt: NOW,
+        dependencies: buildJevPairDependencies(
+          "C_ONLY",
+          { gameId: "owned-a", name: "Owned A", description: "Owned A description" },
+          { gameId: "owned-b", name: "Owned B", description: "Owned B description" },
+        ),
+      };
+      cache.upsert(firstRow);
+      cache.upsert(secondRow);
+      cache.upsert(collectionRow);
+      const service = createWishlistService({
+        storageService: storage,
+        predictionService: createMockPredictionService(new Map()),
+        gameService,
+        jevPairCache: cache,
+      });
+
+      await service.remove(first.id);
+      expect(cache.candidateCOnlyPairs(firstMember)).toHaveLength(0);
+      expect(cache.candidateCOnlyPairs(secondMember)).toHaveLength(1);
+      expect(cache.lookup({ gameAId: "owned-a", gameBId: "owned-b", signal: "C" })).toEqual(
+        collectionRow,
+      );
+      expect(await service.clear()).toBe(1);
+      expect(cache.candidateCOnlyPairs(secondMember)).toHaveLength(0);
+      expect(cache.lookup({ gameAId: "owned-a", gameBId: "owned-b", signal: "C" })).toEqual(
+        collectionRow,
+      );
+      expect(await storage.loadWishlist()).toHaveLength(0);
+    } finally {
+      cache.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("acquisition transfers only currently proven rows and purges invalid or ineligible candidates", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "wishlist-acquisition-proof-matrix-"));
+    const cache = await createJevPairCache(directory);
+    try {
+      const entry = makeCurrentReadEntry("Exact candidate source");
+      entry.id = "proof-matrix-entry";
+      entry.bggId = 811;
+      entry.name = "Proof matrix candidate";
+      const acquired = makeGame(811, entry.name);
+      acquired.id = "proof-matrix-acquired";
+      if (!acquired.bggData) throw new Error("candidate fixture requires BGG source");
+      acquired.bggData.description = entry.bggSource?.description ?? null;
+      const labels = [
+        "valid",
+        "description",
+        "name",
+        "model",
+        "rubric",
+        "policy",
+        "veto",
+        "zero",
+        "null",
+      ];
+      const owners = labels.map((label, index) => {
+        const owner = makeGame(1200 + index, `Owner ${label}`);
+        owner.id = `proof-owner-${label}`;
+        if (!owner.bggData) throw new Error("owned fixture requires BGG source");
+        owner.bggData.description = `Description ${label}`;
+        return owner;
+      });
+      const storage = createMockStorage([entry], {
+        games: [asDurableGame(acquired), ...owners.map(asDurableGame)],
+      });
+      const collection = await storage.loadCollection();
+      collection.semanticRedundancy.settings = {
+        ...collection.semanticRedundancy.settings,
+        enabled: true,
+        weights: { ...collection.semanticRedundancy.settings.weights, description: 1 },
+      };
+      const liveStorage: StorageService = {
+        ...storage,
+        loadCollection: () => Promise.resolve(structuredClone(collection)),
+      };
+      const candidateMember = encodeWishlistBggMember(collection.id, String(entry.bggId));
+      for (const [index, owner] of owners.entries()) {
+        const label = labels[index];
+        if (!label) throw new Error("owner label missing");
+        const row = makeCandidateCRow(
+          collection.id,
+          entry.bggId,
+          entry.name,
+          entry.bggSource?.description ?? "",
+          owner,
+          0.51 + index * 0.01,
+        );
+        const candidateDependency = row.dependencies.find(
+          (dependency) => dependency.gameId === candidateMember,
+        );
+        if (!candidateDependency) throw new Error("candidate dependency missing from test row");
+        if (label === "description") {
+          row.dependencies = row.dependencies.map((dependency) =>
+            dependency.gameId === candidateMember
+              ? { ...candidateDependency, descriptionFingerprint: "a".repeat(64) }
+              : dependency,
+          );
+        } else if (label === "name") {
+          row.dependencies = row.dependencies.map((dependency) =>
+            dependency.gameId === candidateMember
+              ? { ...candidateDependency, nameFingerprint: "b".repeat(64) }
+              : dependency,
+          );
+        } else if (label === "model") row.modelId = "retired-model";
+        else if (label === "rubric") row.rubricVersion = "retired-rubric";
+        else if (label === "policy") row.semanticPolicyId = "retired-policy";
+        cache.upsert(row);
+      }
+
+      const sharedOwner = owners[0];
+      if (!sharedOwner) throw new Error("shared-note fixture missing owner");
+      const sharedCandidateMember = candidateMember;
+      const sharedOwnerMember = encodeOwnedLocalMember(collection.id, "shared-only-member");
+      const [sharedA, sharedB] = [sharedCandidateMember, sharedOwnerMember].sort();
+      const sharedDependencies = buildJevPairDependencies(
+        "SHARED_CD",
+        {
+          gameId: sharedCandidateMember,
+          name: entry.name,
+          description: entry.bggSource?.description ?? "",
+          note: { text: "test-only synthetic note dependency", version: "1" },
+        },
+        {
+          gameId: sharedOwnerMember,
+          name: "Unowned synthetic comparison",
+          description: "Synthetic description",
+          note: { text: "test-only synthetic note dependency", version: "1" },
+        },
+      );
+      const rawDb = new Database(join(directory, "jev-pair-cache.sqlite"));
+      rawDb
+        .query(
+          "INSERT INTO judgments (pair_domain,game_a,game_b,signal,collection_id,consent_epoch,dependency_kind,value,confidence,model_id,rubric_version,question_version,request_schema_version,score_mapping_version,semantic_policy_id,completed_at,dependencies_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          "wishlist-candidate",
+          sharedA,
+          sharedB,
+          "C",
+          collection.id,
+          "synthetic-consent",
+          "SHARED_CD",
+          0.99,
+          null,
+          JEV_JUDGMENT_CONTRACT.modelId,
+          JEV_JUDGMENT_CONTRACT.rubricVersion,
+          JEV_JUDGMENT_CONTRACT.questionVersion,
+          JEV_JUDGMENT_CONTRACT.requestSchemaVersion,
+          JEV_JUDGMENT_CONTRACT.scoreMappingVersion,
+          JEV_JUDGMENT_CONTRACT.semanticPolicyId,
+          NOW,
+          JSON.stringify(sharedDependencies),
+        );
+      rawDb.close();
+
+      const predictionGames = [
+        { game: acquired, score: makeFitnessResult(7, false) },
+        ...owners.map((owner, index) => {
+          const label = labels[index];
+          const score =
+            label === "null"
+              ? null
+              : label === "zero"
+                ? makeFitnessResult(0, false)
+                : label === "veto"
+                  ? { ...makeFitnessResult(5, false), vetoed: true }
+                  : makeFitnessResult(5, false);
+          return { game: owner, score };
+        }),
+      ];
+      const service = createWishlistService({
+        storageService: liveStorage,
+        predictionService: createMockPredictionService(new Map(), predictionGames),
+        gameService,
+        jevPairCache: cache,
+      });
+      await service.finalizeAcquisition(entry.bggId, acquired.id);
+      expect(await liveStorage.loadWishlist()).toHaveLength(0);
+      expect(cache.candidateCOnlyPairs(candidateMember)).toHaveLength(0);
+      expect(
+        cache.lookup({ gameAId: acquired.id, gameBId: sharedOwner.id, signal: "C" }),
+      ).toMatchObject({ value: 0.51 });
+      for (const owner of owners.slice(1)) {
+        expect(cache.lookup({ gameAId: acquired.id, gameBId: owner.id, signal: "C" })).toBeNull();
+      }
+    } finally {
+      cache.close();
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

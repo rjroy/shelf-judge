@@ -4,6 +4,7 @@ import type { AddGameResult, GameWithScore, Game, WishlistEntry } from "@shelf-j
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createWishlistRoutes } from "../src/routes/wishlist";
 import { createGameRoutes } from "../src/routes/games";
+import { WishlistAcquisitionRecoveryError } from "../src/services/wishlist-service.js";
 import type { WishlistService } from "../src/services/wishlist-service";
 import type { GameService } from "../src/services/game-service";
 import type { BggClient } from "../src/services/bgg-client";
@@ -105,6 +106,9 @@ function createMockWishlistService(): WishlistService & { entries: WishlistEntry
       mock.entries.splice(idx, 1);
       return Promise.resolve(true);
     },
+    finalizeAcquisition: () => Promise.resolve(),
+    acquireGame: () => Promise.reject(new Error("not implemented")),
+    reconcileAcquisitions: () => Promise.resolve(0),
   };
   return mock;
 }
@@ -341,6 +345,11 @@ describe("POST /games auto-removal (REQ-WISH-10)", () => {
     const mockGameSvc = createMockGameService({
       addGame: () => Promise.resolve(addResult),
     });
+    wishSvc.acquireGame = async (input) => {
+      const result = await mockGameSvc.addGame(input);
+      await wishSvc.removeByBggId(input.bggId ?? 0);
+      return result;
+    };
 
     const { routes: gameRoutes } = createGameRoutes({
       gameService: mockGameSvc,
@@ -387,6 +396,32 @@ describe("POST /games auto-removal (REQ-WISH-10)", () => {
 
     // Wishlist should be untouched
     expect(wishSvc.entries).toHaveLength(1);
+  });
+
+  test("reports collection-committed recovery as a partial failure", async () => {
+    const wishSvc = createMockWishlistService();
+    const addResult: AddGameResult = { game: makeGame(100, "Committed game"), bggImported: false };
+    wishSvc.acquireGame = () =>
+      Promise.reject(
+        new WishlistAcquisitionRecoveryError(addResult, new Error("cache unavailable")),
+      );
+    const { routes } = createGameRoutes({
+      gameService: createMockGameService(),
+      wishlistService: wishSvc,
+      bggClient: mockBggClient,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
+    });
+    const app = new Hono();
+    app.route("/api", routes);
+
+    const response = await app.request(
+      jsonPost("/api/games", { bggId: 100, name: "Committed game" }),
+    );
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      code: "acquisition_recovery_pending",
+      acquired: { game: { bggId: 100 } },
+    });
   });
 });
 

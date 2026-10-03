@@ -76,6 +76,13 @@ function capture(
   };
 }
 
+function membership(request: WishlistDescriptionSignalCaptureRequest) {
+  return {
+    candidateBggIds: new Set(request.candidateBggIds),
+    eligibleOwnedIds: new Set(request.eligibleOwnedIds),
+  };
+}
+
 function candidateRow(item: WishlistDescriptionPairRequest, value: number): JevPairJudgment {
   const candidateId = encodeWishlistBggMember(collectionId, String(item.candidate.bggId));
   const ownedId = encodeOwnedLocalMember(collectionId, item.ownedGame.id);
@@ -144,9 +151,10 @@ describe("wishlist candidate C-only read proof", () => {
     const row = candidateRow(item, 0);
     const request = capture([item]);
     expect(
-      validateWishlistCandidateCOnlyRow(row, collectionId, item, request.candidateBggIds, [
-        "local-a",
-      ]),
+      validateWishlistCandidateCOnlyRow(row, collectionId, item, {
+        candidateBggIds: new Set(request.candidateBggIds),
+        eligibleOwnedIds: new Set(["local-a"]),
+      }),
     ).toMatchObject({ valid: true, value: 0 });
     expect("ownerNote" in item.ownedGame).toBe(false);
     for (const field of [
@@ -162,8 +170,7 @@ describe("wishlist candidate C-only read proof", () => {
           { ...row, [field]: "stale-provenance" },
           collectionId,
           item,
-          request.candidateBggIds,
-          request.eligibleOwnedIds,
+          membership(request),
         ).valid,
       ).toBe(false);
     }
@@ -172,8 +179,7 @@ describe("wishlist candidate C-only read proof", () => {
         row,
         collectionId,
         pair(103, "local-a", { candidate: "changed candidate prose" }),
-        request.candidateBggIds,
-        request.eligibleOwnedIds,
+        membership(request),
       ).valid,
     ).toBe(false);
     expect(
@@ -181,8 +187,7 @@ describe("wishlist candidate C-only read proof", () => {
         row,
         collectionId,
         { ...item, candidate: { ...item.candidate, name: "Renamed candidate" } },
-        request.candidateBggIds,
-        request.eligibleOwnedIds,
+        membership(request),
       ).valid,
     ).toBe(false);
     expect(
@@ -190,8 +195,7 @@ describe("wishlist candidate C-only read proof", () => {
         row,
         collectionId,
         { ...item, ownedGame: { ...item.ownedGame, name: "Renamed owned game" } },
-        request.candidateBggIds,
-        request.eligibleOwnedIds,
+        membership(request),
       ).valid,
     ).toBe(false);
     expect(
@@ -199,8 +203,7 @@ describe("wishlist candidate C-only read proof", () => {
         row,
         collectionId,
         pair(103, "local-a", { owned: "changed owned prose" }),
-        request.candidateBggIds,
-        request.eligibleOwnedIds,
+        membership(request),
       ).valid,
     ).toBe(false);
     expect(
@@ -208,8 +211,7 @@ describe("wishlist candidate C-only read proof", () => {
         { ...row, pairDomain: "collection" },
         collectionId,
         item,
-        request.candidateBggIds,
-        request.eligibleOwnedIds,
+        membership(request),
       ).valid,
     ).toBe(false);
     expect(
@@ -217,8 +219,7 @@ describe("wishlist candidate C-only read proof", () => {
         { ...row, dependencyKind: "SHARED_CD" },
         collectionId,
         item,
-        request.candidateBggIds,
-        request.eligibleOwnedIds,
+        membership(request),
       ).valid,
     ).toBe(false);
     expect(
@@ -232,10 +233,37 @@ describe("wishlist candidate C-only read proof", () => {
         },
         collectionId,
         item,
-        request.candidateBggIds,
-        request.eligibleOwnedIds,
+        membership(request),
       ).valid,
     ).toBe(false);
+  });
+
+  test("membership proof probes stay constant as the full eligible set grows", () => {
+    const pairs = [pair(105, "local-a"), pair(105, "local-b"), pair(106, "local-a")];
+    const requests = capture(pairs);
+    const candidateBggIds = new Set(requests.candidateBggIds);
+    const eligibleOwnedIds = new Set([
+      ...requests.eligibleOwnedIds,
+      ...Array.from({ length: 122 }, (_, index) => `unrelated-owned-${index}`),
+    ]);
+    const probes = { candidate: 0, owned: 0 };
+
+    for (const item of pairs) {
+      const result = validateWishlistCandidateCOnlyRow(
+        candidateRow(item, 0.5),
+        collectionId,
+        item,
+        {
+          candidateBggIds,
+          eligibleOwnedIds,
+          onProbe: (domain) => probes[domain]++,
+        },
+      );
+      expect(result.valid).toBe(true);
+    }
+
+    expect(eligibleOwnedIds.size).toBe(124);
+    expect(probes).toEqual({ candidate: 3, owned: 3 });
   });
 
   test("source, membership, policy, and cache revisions invalidate currentness without a lookup", async () => {

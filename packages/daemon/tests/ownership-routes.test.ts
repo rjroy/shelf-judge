@@ -584,6 +584,9 @@ describe("wishlist interaction with previously-owned games", () => {
       refresh: () => Promise.reject(new Error("not implemented")),
       refreshAll: () => Promise.reject(new Error("not implemented")),
       removeByBggId: () => Promise.reject(new Error("not implemented")),
+      finalizeAcquisition: () => Promise.reject(new Error("not implemented")),
+      acquireGame: () => Promise.reject(new Error("not implemented")),
+      reconcileAcquisitions: () => Promise.resolve(0),
     };
 
     const app = new Hono();
