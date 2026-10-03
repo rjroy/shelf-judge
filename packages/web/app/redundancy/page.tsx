@@ -255,8 +255,8 @@ export default function RedundancyPage() {
     }
   };
   const [noteTransmissionAuthorized, setNoteTransmissionAuthorized] = useState(false);
-  const [maxProviderAttempts, setMaxProviderAttempts] = useState("100");
-  const [reportedTokenStopThreshold, setReportedTokenStopThreshold] = useState("200000");
+  const [maxProviderAttempts, setMaxProviderAttempts] = useState("1000");
+  const [reportedTokenStopThreshold, setReportedTokenStopThreshold] = useState("2000000");
   const [maxRunDurationMinutes, setMaxRunDurationMinutes] = useState("30");
   const previewRevision = useRef(0);
   const [busy, setBusy] = useState(false);

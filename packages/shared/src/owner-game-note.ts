@@ -32,7 +32,7 @@ export const OwnerGameNoteTextSchema = z
     } else if (codePointCount > OWNER_GAME_NOTE_MAX_CODE_POINTS) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `Note text cannot exceed ${OWNER_GAME_NOTE_MAX_CODE_POINTS} Unicode code points`,
+        message: `Note text cannot exceed ${OWNER_GAME_NOTE_MAX_CODE_POINTS.toLocaleString()} characters`,
       });
     }
     if (/^\p{White_Space}*$/u.test(text)) {

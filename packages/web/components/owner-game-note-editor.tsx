@@ -599,8 +599,7 @@ export function OwnerGameNoteEditor({
             id="owner-note-count"
             className={count > OWNER_GAME_NOTE_MAX_CODE_POINTS ? "field-error" : undefined}
           >
-            {count.toLocaleString()} / {OWNER_GAME_NOTE_MAX_CODE_POINTS.toLocaleString()} code
-            points
+            {count.toLocaleString()} / {OWNER_GAME_NOTE_MAX_CODE_POINTS.toLocaleString()} characters
           </span>
         </div>
         {state.fieldError !== null && (

@@ -105,7 +105,7 @@ describe("Owner game note editor reducer", () => {
 
     const html = renderEditor({ ...present, text: "<script>alert(1)</script>\n😀" });
     expect(html).toContain("Owner note text");
-    expect(html).toContain("27 / 10,000 code points");
+    expect(html).toContain("27 / 10,000 characters");
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(html).not.toContain("<script>");
     expect(html).toContain('aria-describedby="owner-note-help owner-note-count"');
