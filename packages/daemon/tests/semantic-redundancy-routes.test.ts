@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
-import { createInitialSemanticRedundancyStateV10, type Collection } from "@shelf-judge/shared";
+import {
+  createInitialSemanticRedundancyStateV10,
+  DEFAULT_JEV_RUN_BUDGET,
+  type Collection,
+} from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import type { JevStatusResponse } from "../src/services/jev-pair-status";
 import type { createJevStatusService } from "../src/services/jev-status-service";
@@ -388,11 +392,11 @@ describe("semantic redundancy routes", () => {
     expect(wishlistCalls).toHaveLength(2);
     expect(wishlistCalls[0]).toMatchObject({
       selection: undefined,
-      budget: { maxProviderAttempts: 100 },
+      budget: DEFAULT_JEV_RUN_BUDGET,
     });
     expect(wishlistCalls[1]).toMatchObject({
       selection: { kind: "selected", bggIds: [101, 902] },
-      budget: { maxProviderAttempts: 100 },
+      budget: DEFAULT_JEV_RUN_BUDGET,
     });
     const previewOperation = operations.find(
       (operation) => operation.operationId === "shelf.redundancy.get-semantic-run-preview",

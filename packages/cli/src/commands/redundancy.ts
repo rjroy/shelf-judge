@@ -4,6 +4,7 @@ import type {
   JevWishlistCandidateSelection,
   RedundancySettings,
 } from "@shelf-judge/shared";
+import { DEFAULT_JEV_RUN_BUDGET } from "@shelf-judge/shared";
 import type { DaemonClient } from "../client.js";
 import { responseError } from "../errors.js";
 import type { OutputOptions } from "../output.js";
@@ -364,7 +365,11 @@ export async function redundancySemanticRun(
   args: string[],
   opts: OutputOptions,
 ): Promise<string> {
-  const defaults = { maxAttempts: 100, reportedTokenStop: 200_000, maxDurationMinutes: 30 };
+  const defaults = {
+    maxAttempts: DEFAULT_JEV_RUN_BUDGET.maxProviderAttempts,
+    reportedTokenStop: DEFAULT_JEV_RUN_BUDGET.reportedTokenStopThreshold,
+    maxDurationMinutes: DEFAULT_JEV_RUN_BUDGET.maxRunDurationMs / 60_000,
+  };
   const bounds = {
     maxAttempts: 75_000,
     reportedTokenStop: Number.MAX_SAFE_INTEGER,

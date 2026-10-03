@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { Collection, GameWithScore } from "@shelf-judge/shared";
-import { createInitialSemanticRedundancyStateV10 } from "@shelf-judge/shared";
+import {
+  createInitialSemanticRedundancyStateV10,
+  DEFAULT_JEV_RUN_BUDGET,
+} from "@shelf-judge/shared";
 import { JevRunController } from "../../src/services/jev-run-controller.js";
 import { JevRunService, type JevRunCapture } from "../../src/services/jev-run-service.js";
 import type { PreparedWishlistRun } from "../../src/services/wishlist-run-preparation.js";
@@ -370,10 +373,10 @@ describe("JevRunController", () => {
       scoringEffect: "integrated-fitness",
       limits: {
         maxEligiblePairs: h.runService.effectiveLimits.maxEligiblePairs,
-        maxProviderAttempts: JEV_GATEWAY_LIMITS.maxRequestsPerInstance,
+        maxProviderAttempts: DEFAULT_JEV_RUN_BUDGET.maxProviderAttempts,
         maxRetriesPerEvaluation: JEV_GATEWAY_LIMITS.maxRetriesPerEvaluation,
         maxRunDurationMs: h.runService.effectiveLimits.maxRunDurationMs,
-        reportedTokenStopThreshold: JEV_GATEWAY_LIMITS.maxReportedTokensPerInstance,
+        reportedTokenStopThreshold: DEFAULT_JEV_RUN_BUDGET.reportedTokenStopThreshold,
         reportedTokenThresholdIsBilledCeiling: false,
       },
     });

@@ -129,9 +129,9 @@ describe("semantic redundancy CLI consent boundary", () => {
       retentionCaveat: "Provider retention applies.",
       limits: {
         maxEligiblePairs: 25_000,
-        maxProviderAttempts: 100,
+        maxProviderAttempts: 1_000,
         maxRunDurationMs: 30 * 60_000,
-        reportedTokenStopThreshold: 200_000,
+        reportedTokenStopThreshold: 2_000_000,
         reportedTokenThresholdIsBilledCeiling: false,
       },
       withinPairLimit: true,
@@ -167,15 +167,15 @@ describe("semantic redundancy CLI consent boundary", () => {
       console.log = originalLog;
     }
     expect(output).toContain("Run accepted");
-    expect(outputEvents[0]).toContain("100 provider attempts");
+    expect(outputEvents[0]).toContain("1,000 provider attempts");
     expect(requestedPaths).toEqual([
-      "/api/redundancy/semantic/run-preview?maxProviderAttempts=100&reportedTokenStopThreshold=200000&maxRunDurationMs=1800000",
+      "/api/redundancy/semantic/run-preview?maxProviderAttempts=1000&reportedTokenStopThreshold=2000000&maxRunDurationMs=1800000",
     ]);
     expect(outputEvents[0]).toContain("Note transmission is off by default");
     expect(outputEvents[1]).toBe("POST");
     expect(outputEvents[0]).toContain("not a billing cap");
     expect(outputEvents[0]).toContain("Application stop limits");
-    expect(outputEvents[0]).toContain("200,000 tokens");
+    expect(outputEvents[0]).toContain("2,000,000 tokens");
     // The preview is the only GET made; the mock has no manifest or page route.
     expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
     expect(calls.find((call) => call.method === "POST")?.body).toEqual({
@@ -455,7 +455,9 @@ describe("semantic redundancy CLI consent boundary", () => {
     } finally {
       console.log = originalLog;
     }
-    expect(calls[0]?.path).toContain("?maxProviderAttempts=100&reportedTokenStopThreshold=200000");
+    expect(calls[0]?.path).toContain(
+      "?maxProviderAttempts=1000&reportedTokenStopThreshold=2000000",
+    );
     expect(calls[0]?.path).toContain("&scope=wishlist");
     expect(calls[0]?.path).not.toContain("bggId=");
     expect(consoleOutput[0]).toContain("Wishlist entries: 5; selected: 5; unselected: 0");

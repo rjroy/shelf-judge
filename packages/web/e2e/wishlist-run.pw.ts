@@ -36,12 +36,14 @@ async function wishlistFixture(
   replacementRunId?: string,
   projectionScenario = false,
   delayInitialProjection = false,
+  holdFirstPreview = false,
 ) {
   const calls: Array<{ url: string; method: string; body?: unknown }> = [];
   let active = activeInitially;
   let currentEntries = entries.map((entry) => ({ ...entry }));
   const factualRefreshedIds = new Set<string>();
   let projectionRequestCount = 0;
+  let previewRequestCount = 0;
   await page.route("**/api/daemon/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -112,8 +114,14 @@ async function wishlistFixture(
           : { state: "none" },
       };
     else if (url.pathname.endsWith("/run-preview")) {
+      previewRequestCount += 1;
       const selected = url.searchParams.getAll("bggId").map(Number);
       const candidates = selected.length ? selected.length : entries.length;
+      const maxProviderAttempts = Number(url.searchParams.get("maxProviderAttempts") ?? 1000);
+      const reportedTokenStopThreshold = Number(
+        url.searchParams.get("reportedTokenStopThreshold") ?? 2_000_000,
+      );
+      const maxRunDurationMs = Number(url.searchParams.get("maxRunDurationMs") ?? 1_800_000);
       data = {
         requestId: "preview-1",
         precondition: "frozen-source-1",
@@ -130,10 +138,10 @@ async function wishlistFixture(
         retentionCaveat: "The provider may retain submitted descriptions.",
         limits: {
           maxEligiblePairs: 500,
-          maxProviderAttempts: 30,
+          maxProviderAttempts,
           maxRetriesPerEvaluation: 1,
-          maxRunDurationMs: 60000,
-          reportedTokenStopThreshold: 5000,
+          maxRunDurationMs,
+          reportedTokenStopThreshold,
           reportedTokenThresholdIsBilledCeiling: false,
         },
         withinPairLimit: true,
@@ -155,6 +163,23 @@ async function wishlistFixture(
         selection: selected.length ? { kind: "selected", bggIds: selected } : { kind: "all" },
         unavailableCandidateBggIds: [],
       };
+      if (holdFirstPreview && previewRequestCount === 1) {
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              const target = window as typeof window & {
+                __wishlistPreviewPending?: boolean;
+                __releaseWishlistPreview?: () => void;
+              };
+              target.__wishlistPreviewPending = true;
+              target.__releaseWishlistPreview = () => {
+                target.__wishlistPreviewPending = false;
+                target.__releaseWishlistPreview = undefined;
+                resolve();
+              };
+            }),
+        );
+      }
     } else if (url.pathname.endsWith("/semantic/run") && request.method() === "POST") {
       if (rejectStart) {
         status = 412;
@@ -196,7 +221,23 @@ test("prepares and starts an all-candidate wishlist run only after disclosure, t
   await expect(page.getByRole("heading", { name: "Review before starting" })).toBeVisible();
   await expect(page.getByText(/3 description comparisons may be sent/)).toBeVisible();
   expect(calls.filter((call) => call.url.includes("run-preview"))).toHaveLength(1);
-  expect(calls.find((call) => call.url.includes("run-preview"))?.url).toContain("scope=wishlist");
+  const previewUrl = new URL(
+    calls.find((call) => call.url.includes("run-preview"))!.url,
+    "http://localhost",
+  );
+  expect(previewUrl.searchParams.get("scope")).toBe("wishlist");
+  expect(previewUrl.searchParams.get("maxProviderAttempts")).toBe("1000");
+  expect(previewUrl.searchParams.get("reportedTokenStopThreshold")).toBe("2000000");
+  expect(previewUrl.searchParams.get("maxRunDurationMs")).toBe("1800000");
+  await expect(page.getByRole("group", { name: "Review before starting" })).toContainText(
+    "1,000 attempts",
+  );
+  await expect(page.getByRole("group", { name: "Review before starting" })).toContainText(
+    "2,000,000 reported tokens (not a billing ceiling)",
+  );
+  await expect(page.getByRole("group", { name: "Review before starting" })).toContainText(
+    "30 minutes",
+  );
   expect(calls.some((call) => call.url.endsWith("/semantic/run"))).toBe(false);
   await page.getByRole("button", { name: "Authorize and start" }).click();
   const start = calls.find((call) => call.url.endsWith("/semantic/run"));
@@ -208,6 +249,83 @@ test("prepares and starts an all-candidate wishlist run only after disclosure, t
   await expect(page.getByText(/Wishlist run in progress/)).toBeVisible();
   await page.getByRole("button", { name: "Cancel run" }).click();
   expect(calls.some((call) => call.url.endsWith("/semantic/cancel"))).toBe(true);
+});
+
+test("edited wishlist budgets reach preview and old disclosure is discarded before reprepare", async ({
+  page,
+}) => {
+  const calls = await wishlistFixture(page);
+  await page.goto("/wishlist");
+  await page.getByRole("button", { name: "Prepare comparison" }).click();
+  await expect(page.getByRole("heading", { name: "Review before starting" })).toBeVisible();
+  await page.getByLabel("Maximum HTTP attempts").fill("800");
+  await expect(page.getByRole("heading", { name: "Review before starting" })).toHaveCount(0);
+  expect(calls.some((call) => call.url.endsWith("/semantic/run"))).toBe(false);
+
+  await page.getByLabel("Reported-token stop threshold").fill("100000");
+  await page.getByLabel("Maximum run duration in minutes").fill("20");
+  await page.getByRole("button", { name: "Prepare comparison" }).click();
+  const disclosure = page.getByRole("group", { name: "Review before starting" });
+  await expect(disclosure).toContainText("800 attempts");
+  await expect(disclosure).toContainText("100,000 reported tokens (not a billing ceiling)");
+  await expect(disclosure).toContainText("20 minutes");
+  const previewUrl = new URL(
+    [...calls].reverse().find((call) => call.url.includes("run-preview"))!.url,
+    "http://localhost",
+  );
+  expect(previewUrl.searchParams.get("maxProviderAttempts")).toBe("800");
+  expect(previewUrl.searchParams.get("reportedTokenStopThreshold")).toBe("100000");
+  expect(previewUrl.searchParams.get("maxRunDurationMs")).toBe("1200000");
+
+  await page.getByRole("button", { name: "Authorize and start" }).click();
+  expect(calls.find((call) => call.url.endsWith("/semantic/run"))?.body).toEqual({
+    requestId: "preview-1",
+    precondition: "frozen-source-1",
+    noteTransmissionAuthorized: false,
+  });
+});
+
+test("invalid wishlist budgets are explained and block preview requests", async ({ page }) => {
+  const calls = await wishlistFixture(page);
+  await page.goto("/wishlist");
+  await page.getByLabel("Maximum HTTP attempts").fill("75001");
+  await expect(page.locator("p#wishlist-run-limits-error")).toContainText(
+    "HTTP attempts cannot exceed 75,000",
+  );
+  await expect(page.getByRole("button", { name: "Prepare comparison" })).toBeDisabled();
+  await page.getByLabel("Maximum HTTP attempts").fill("1000");
+  await page.getByLabel("Reported-token stop threshold").fill("9007199254740992");
+  await expect(page.locator("p#wishlist-run-limits-error")).toContainText(
+    "positive, safe whole-number",
+  );
+  expect(calls.filter((call) => call.url.includes("run-preview"))).toHaveLength(0);
+  expect(calls.some((call) => call.url.endsWith("/semantic/run"))).toBe(false);
+});
+
+test("an in-flight preview cannot restore authorization after budget edits", async ({ page }) => {
+  const calls = await wishlistFixture(page, false, false, undefined, false, false, true);
+  await page.goto("/wishlist");
+  await page.getByRole("button", { name: "Prepare comparison" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as typeof window & { __wishlistPreviewPending?: boolean })
+            .__wishlistPreviewPending,
+      ),
+    )
+    .toBe(true);
+  await page.getByLabel("Maximum HTTP attempts").fill("900");
+  await page.evaluate(() => {
+    const target = window as typeof window & { __releaseWishlistPreview?: () => void };
+    target.__releaseWishlistPreview?.();
+  });
+  await expect(page.getByRole("button", { name: "Prepare comparison" })).toBeEnabled();
+  await expect(page.getByRole("heading", { name: "Review before starting" })).toHaveCount(0);
+  expect(calls.some((call) => call.url.endsWith("/semantic/run"))).toBe(false);
+  await page.getByRole("button", { name: "Prepare comparison" }).click();
+  await expect(page.getByRole("heading", { name: "Review before starting" })).toBeVisible();
+  expect(calls.filter((call) => call.url.includes("run-preview"))).toHaveLength(2);
 });
 
 test("selected candidates are repeated in preparation query and require a fresh explicit start", async ({

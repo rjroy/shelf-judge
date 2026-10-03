@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { DEFAULT_JEV_RUN_BUDGET } from "@shelf-judge/shared";
 import type { RedundancySettings } from "@shelf-judge/shared";
 
 type Weights = { factual: number; description: number; ownerNote: number };
@@ -255,9 +256,15 @@ export default function RedundancyPage() {
     }
   };
   const [noteTransmissionAuthorized, setNoteTransmissionAuthorized] = useState(false);
-  const [maxProviderAttempts, setMaxProviderAttempts] = useState("1000");
-  const [reportedTokenStopThreshold, setReportedTokenStopThreshold] = useState("2000000");
-  const [maxRunDurationMinutes, setMaxRunDurationMinutes] = useState("30");
+  const [maxProviderAttempts, setMaxProviderAttempts] = useState(
+    String(DEFAULT_JEV_RUN_BUDGET.maxProviderAttempts),
+  );
+  const [reportedTokenStopThreshold, setReportedTokenStopThreshold] = useState(
+    String(DEFAULT_JEV_RUN_BUDGET.reportedTokenStopThreshold),
+  );
+  const [maxRunDurationMinutes, setMaxRunDurationMinutes] = useState(
+    String(DEFAULT_JEV_RUN_BUDGET.maxRunDurationMs / 60_000),
+  );
   const previewRevision = useRef(0);
   const [busy, setBusy] = useState(false);
   const [factualSaving, setFactualSaving] = useState(false);

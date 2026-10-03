@@ -5,6 +5,7 @@ import {
   saveWishlistSortField,
   sortEntries,
   SORT_OPTIONS,
+  validateWishlistRunBudget,
 } from "@/app/wishlist/page";
 
 function entry(
@@ -132,5 +133,23 @@ describe("wishlist sort preference", () => {
       ),
     ).not.toThrow();
     expect(() => saveWishlistSortField(null, "name")).not.toThrow();
+  });
+});
+
+describe("wishlist run budget validation", () => {
+  test("converts valid per-run values and enforces whole-number limits", () => {
+    expect(validateWishlistRunBudget("1000", "2000000", "30")).toEqual({
+      budget: {
+        maxProviderAttempts: 1000,
+        reportedTokenStopThreshold: 2_000_000,
+        maxRunDurationMs: 1_800_000,
+      },
+      error: null,
+    });
+    expect(validateWishlistRunBudget("75001", "2000000", "30").error).toContain(
+      "cannot exceed 75,000",
+    );
+    expect(validateWishlistRunBudget("10", "0", "30").error).toContain("positive, safe");
+    expect(validateWishlistRunBudget("10", "1000", "721").error).toContain("12 hours");
   });
 });

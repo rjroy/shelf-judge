@@ -252,6 +252,9 @@ export type {
   AttentionCandidateArtifactIdentity,
 } from "./attention-candidate-artifact";
 
+export { DEFAULT_JEV_RUN_BUDGET } from "./jev-run-budget";
+export type { JevRunBudget } from "./jev-run-budget";
+
 export { SemanticScoringInputProofSchema } from "./semantic-scoring-input-proof";
 
 export {

@@ -11,6 +11,7 @@ import type {
 import {
   createInitialEntityMetadata,
   createInitialSemanticRedundancyStateV10,
+  DEFAULT_JEV_RUN_BUDGET,
 } from "@shelf-judge/shared";
 import { JevRunService, type JevRunCapture } from "../../src/services/jev-run-service.js";
 import { planJevRunScope } from "../../src/services/jev-run-scope.js";
@@ -396,8 +397,8 @@ describe("JevRunService attempt barriers", () => {
     expect(startEvents[0]?.fields).toMatchObject({
       trigger: "owner-explicit",
       authorizedSignalScope: "no",
-      maxProviderAttempts: 100,
-      reportedTokenStopThreshold: 200_000,
+      maxProviderAttempts: DEFAULT_JEV_RUN_BUDGET.maxProviderAttempts,
+      reportedTokenStopThreshold: DEFAULT_JEV_RUN_BUDGET.reportedTokenStopThreshold,
       maxRunDurationMs: 1_800_000,
       eligiblePairs: null,
     });

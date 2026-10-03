@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { DEFAULT_JEV_RUN_BUDGET } from "@shelf-judge/shared";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type {
@@ -20,6 +21,45 @@ import { relativeDate } from "@/lib/date-utils";
 type SortField = "addedAt" | "predictedScore" | "redundancy" | "name";
 const WISHLIST_SORT_STORAGE_KEY = "shelf-judge:wishlist-sort";
 const DEFAULT_SORT_FIELD: SortField = "addedAt";
+
+type WishlistRunBudget = {
+  maxProviderAttempts: number;
+  reportedTokenStopThreshold: number;
+  maxRunDurationMs: number;
+};
+
+function positiveSafeInteger(value: string): number | null {
+  if (!/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function validateWishlistRunBudget(
+  attemptsText: string,
+  tokenThresholdText: string,
+  durationMinutesText: string,
+): { budget: WishlistRunBudget | null; error: string | null } {
+  const attempts = positiveSafeInteger(attemptsText);
+  const tokenThreshold = positiveSafeInteger(tokenThresholdText);
+  const durationMinutes = positiveSafeInteger(durationMinutesText);
+  if (attempts === null)
+    return { budget: null, error: "Enter a positive whole number of HTTP attempts." };
+  if (attempts > 75_000) return { budget: null, error: "HTTP attempts cannot exceed 75,000." };
+  if (tokenThreshold === null)
+    return { budget: null, error: "Enter a positive, safe whole-number reported-token threshold." };
+  if (durationMinutes === null)
+    return { budget: null, error: "Enter a whole-number run duration from 1 to 720 minutes." };
+  if (durationMinutes > 720)
+    return { budget: null, error: "Run duration cannot exceed 12 hours (720 minutes)." };
+  return {
+    budget: {
+      maxProviderAttempts: attempts,
+      reportedTokenStopThreshold: tokenThreshold,
+      maxRunDurationMs: durationMinutes * 60_000,
+    },
+    error: null,
+  };
+}
 
 export const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "addedAt", label: "Date Added" },
@@ -399,12 +439,22 @@ export default function WishlistPage() {
     new Map(),
   );
   const [runMode, setRunMode] = useState<"all" | "selected">("all");
+  const [maxProviderAttempts, setMaxProviderAttempts] = useState(
+    String(DEFAULT_JEV_RUN_BUDGET.maxProviderAttempts),
+  );
+  const [reportedTokenStopThreshold, setReportedTokenStopThreshold] = useState(
+    String(DEFAULT_JEV_RUN_BUDGET.reportedTokenStopThreshold),
+  );
+  const [maxRunDurationMinutes, setMaxRunDurationMinutes] = useState(
+    String(DEFAULT_JEV_RUN_BUDGET.maxRunDurationMs / 60_000),
+  );
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [runBusy, setRunBusy] = useState(false);
   const [preview, setPreview] = useState<JevRunPreview | null>(null);
   const [runMessage, setRunMessage] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
+  const previewRevision = useRef(0);
   const [progress, setProgress] = useState<{
     state: string;
     pairCount: number;
@@ -417,6 +467,11 @@ export default function WishlistPage() {
   const refreshProjectionAfterWishlistRun = useRef(false);
   const runStatusVersion = useRef(0);
   const projectionRevision = useRef(0);
+  const { budget: selectedRunBudget, error: runBudgetError } = validateWishlistRunBudget(
+    maxProviderAttempts,
+    reportedTokenStopThreshold,
+    maxRunDurationMinutes,
+  );
 
   function invalidateWishlistProjections(bggIds: readonly number[]): number {
     const revision = ++projectionRevision.current;
@@ -508,16 +563,28 @@ export default function WishlistPage() {
   }, []);
 
   function invalidatePreview() {
+    previewRevision.current += 1;
     setPreview(null);
     setRunError(null);
   }
   async function prepareRun() {
+    if (!selectedRunBudget) {
+      setRunError(runBudgetError);
+      return;
+    }
+    const revision = ++previewRevision.current;
     setRunBusy(true);
     setRunError(null);
     setRunMessage(null);
     setPreview(null);
     try {
       const params = new URLSearchParams({ scope: "wishlist" });
+      params.set("maxProviderAttempts", String(selectedRunBudget.maxProviderAttempts));
+      params.set(
+        "reportedTokenStopThreshold",
+        String(selectedRunBudget.reportedTokenStopThreshold),
+      );
+      params.set("maxRunDurationMs", String(selectedRunBudget.maxRunDurationMs));
       if (runMode === "selected") {
         for (const id of [...new Set(selectedIds)]) params.append("bggId", String(id));
       }
@@ -530,9 +597,11 @@ export default function WishlistPage() {
             ? "Wishlist changed during preparation. Prepare a new preview."
             : "Could not prepare run details.",
         );
-      setPreview((await response.json()) as JevRunPreview);
+      const result = (await response.json()) as JevRunPreview;
+      if (revision === previewRevision.current) setPreview(result);
     } catch (cause) {
-      setRunError(cause instanceof Error ? cause.message : "Could not prepare run details.");
+      if (revision === previewRevision.current)
+        setRunError(cause instanceof Error ? cause.message : "Could not prepare run details.");
     } finally {
       setRunBusy(false);
     }
@@ -901,6 +970,77 @@ export default function WishlistPage() {
                   Compare selected wishlist games with eligible games in your collection. Owner
                   notes are not included.
                 </p>
+                <fieldset
+                  className="redundancy-run-limits"
+                  aria-describedby="wishlist-run-limits-help"
+                >
+                  <legend>Limits for this run</legend>
+                  <p id="wishlist-run-limits-help">
+                    Retries count toward the HTTP attempt limit. These limits apply only to this
+                    run.
+                  </p>
+                  <div className="redundancy-run-limit-grid">
+                    <label>
+                      Maximum HTTP attempts
+                      <input
+                        aria-label="Maximum HTTP attempts"
+                        aria-invalid={Boolean(runBudgetError)}
+                        aria-describedby={runBudgetError ? "wishlist-run-limits-error" : undefined}
+                        type="number"
+                        min="1"
+                        max="75000"
+                        step="1"
+                        value={maxProviderAttempts}
+                        onChange={(event) => {
+                          invalidatePreview();
+                          setMaxProviderAttempts(event.target.value);
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Stop after this many reported tokens
+                      <input
+                        aria-label="Reported-token stop threshold"
+                        aria-invalid={Boolean(runBudgetError)}
+                        aria-describedby={runBudgetError ? "wishlist-run-limits-error" : undefined}
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={reportedTokenStopThreshold}
+                        onChange={(event) => {
+                          invalidatePreview();
+                          setReportedTokenStopThreshold(event.target.value);
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Maximum run duration (minutes)
+                      <input
+                        aria-label="Maximum run duration in minutes"
+                        aria-invalid={Boolean(runBudgetError)}
+                        aria-describedby={runBudgetError ? "wishlist-run-limits-error" : undefined}
+                        type="number"
+                        min="1"
+                        max="720"
+                        step="1"
+                        value={maxRunDurationMinutes}
+                        onChange={(event) => {
+                          invalidatePreview();
+                          setMaxRunDurationMinutes(event.target.value);
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {runBudgetError && (
+                    <p
+                      id="wishlist-run-limits-error"
+                      className="redundancy-inline-guidance"
+                      role="alert"
+                    >
+                      {runBudgetError}
+                    </p>
+                  )}
+                </fieldset>
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                   <label>
                     <input
@@ -933,7 +1073,10 @@ export default function WishlistPage() {
                     className="btn btn-primary btn-sm"
                     onClick={() => void prepareRun()}
                     disabled={
-                      runBusy || !!runId || (runMode === "selected" && selectedIds.length === 0)
+                      runBusy ||
+                      !!runId ||
+                      !selectedRunBudget ||
+                      (runMode === "selected" && selectedIds.length === 0)
                     }
                   >
                     {runBusy ? "Preparing…" : "Prepare comparison"}
@@ -1033,7 +1176,7 @@ export default function WishlistPage() {
                     </p>
                     <p>
                       Provider: {preview.provider} · Model: {preview.modelId} · Budget: up to{" "}
-                      {preview.limits.maxProviderAttempts} attempts ·{" "}
+                      {preview.limits.maxProviderAttempts.toLocaleString()} attempts ·{" "}
                       {preview.limits.reportedTokenStopThreshold.toLocaleString()} reported tokens
                       (not a billing ceiling) · up to{" "}
                       {Math.ceil(preview.limits.maxRunDurationMs / 60_000)} minutes
@@ -1047,7 +1190,7 @@ export default function WishlistPage() {
                     <button
                       className="btn btn-primary btn-sm"
                       onClick={() => void startRun()}
-                      disabled={runBusy}
+                      disabled={runBusy || !selectedRunBudget}
                     >
                       Authorize and start
                     </button>{" "}

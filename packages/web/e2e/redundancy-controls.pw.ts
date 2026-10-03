@@ -340,6 +340,7 @@ test("selected run limits bind the preview and changing them clears it", async (
   await page.goto("/redundancy");
   await expect(page.getByLabel("Maximum HTTP attempts")).toHaveValue("1000");
   await expect(page.getByLabel("Reported-token stop threshold")).toHaveValue("2000000");
+  await expect(page.getByLabel("Maximum run duration in minutes")).toHaveValue("30");
   const touchTargetHeight = await page
     .getByLabel("Maximum HTTP attempts")
     .evaluate((input) => getComputedStyle(input).minHeight);
@@ -384,6 +385,7 @@ test("default run limits are sent to the preview", async ({ page }) => {
   );
   expect(previewCall?.url).toContain("maxProviderAttempts=1000");
   expect(previewCall?.url).toContain("reportedTokenStopThreshold=2000000");
+  expect(previewCall?.url).toContain("maxRunDurationMs=1800000");
 });
 
 test("changing a similarity weight invalidates the saved-settings preview without a provider call", async ({
