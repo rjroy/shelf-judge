@@ -15,7 +15,7 @@ import type { CollectionSnapshot } from "@shelf-judge/shared";
 
 interface CollectionSnapshotBoundaryProps {
   readonly showPreviouslyOwned: boolean;
-  readonly missingDimensionsOnly: boolean;
+  readonly dimensionStatus: "all" | "with" | "missing";
   readonly collectionContext?: string;
   readonly collectionOrigin?: string;
   readonly collectionReturnAttempt: boolean;
@@ -144,7 +144,7 @@ export function CollectionSnapshotBoundary(props: CollectionSnapshotBoundaryProp
           <CollectionTable
             {...tableData}
             showPreviouslyOwned={props.showPreviouslyOwned}
-            missingDimensionsOnly={props.missingDimensionsOnly}
+            dimensionStatus={props.dimensionStatus}
             collectionContext={props.collectionContext}
             collectionOrigin={props.collectionOrigin}
             collectionReturnAttempt={props.collectionReturnAttempt}

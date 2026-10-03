@@ -24,7 +24,7 @@ interface StoredContext {
   version: 1;
   key: string;
   entries: Array<{ id: string; name: string }>;
-  collectionScope: { showPreviouslyOwned: boolean; missingDimensionsOnly: boolean };
+  collectionScope: { showPreviouslyOwned: boolean; dimensionStatus: "all" | "with" | "missing" };
   projection: {
     sort: { field: string; direction: "asc" | "desc" };
     filters: {
@@ -168,7 +168,7 @@ function seededContext(overrides: Partial<StoredContext> = {}): StoredContext {
       { id: "game-1", name: "Atlas Equal" },
       { id: "game-2", name: "Borealis" },
     ],
-    collectionScope: { showPreviouslyOwned: false, missingDimensionsOnly: false },
+    collectionScope: { showPreviouslyOwned: false, dimensionStatus: "all" },
     projection: {
       sort: { field: "name", direction: "asc" },
       filters: { search: "", ratedStatus: "all", playedStatus: "all", playerCount: null },
@@ -557,6 +557,39 @@ test.describe("detail persistence and fallback", () => {
 });
 
 test.describe("contextual Collection return", () => {
+  test("With dimensions scope traverses filtered neighbors and restores its URL on breadcrumb return", async ({
+    page,
+  }) => {
+    await page.goto("/collection?dimensions=with");
+    await waitForHydratedRows(page, ["game-3", "game-7"]);
+    await page.getByRole("button", { name: /Filters/ }).click();
+    await page
+      .locator(".filter-group")
+      .filter({ hasText: "Owned Status" })
+      .getByRole("button", { name: "+ Prev Owned", exact: true })
+      .click();
+    await expect(page).toHaveURL("/collection?ownership=all&dimensions=with");
+    await waitForHydratedRows(page, ["game-3", "game-7"]);
+
+    await page.locator("#collection-game-game-3").click();
+    await expect(page.getByText("No previous game", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: /Next game: Zephyr Mutable Target/ }).click();
+    await expect(page.getByRole("link", { name: "Previous game: Cinder Equal" })).toBeVisible();
+    await expect(page.getByText("No next game", { exact: true })).toBeVisible();
+
+    const breadcrumb = page
+      .locator(".topbar .breadcrumb")
+      .getByRole("link", { name: "Collection" });
+    await expect(breadcrumb).toHaveAttribute("href", /ownership=all.*dimensions=with/);
+    await breadcrumb.click();
+    await expect(page).toHaveURL(
+      "/collection?ownership=all&dimensions=with#collection-game-game-3",
+    );
+    await expect(page.locator("#collection-game-game-3")).toBeFocused();
+    await expect(page.locator(".game-row[id]")).toHaveCount(2);
+    await expect(page.locator(".chip-missing-dimensions")).toContainText("With dimensions");
+  });
+
   test("restores and persists scope and controls, cleans transport, and focuses the origin", async ({
     page,
   }) => {
@@ -592,6 +625,7 @@ test.describe("contextual Collection return", () => {
         ratedStatus: "rated",
         playedStatus: "unplayed",
         playerCount: 2,
+        ownerNoteStatus: "all",
       }),
     });
   });

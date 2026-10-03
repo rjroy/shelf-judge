@@ -71,7 +71,7 @@ export function canRestoreCollectionProjection(
 ): boolean {
   if (
     context.collectionScope.showPreviouslyOwned !== capabilities.scope.showPreviouslyOwned ||
-    context.collectionScope.missingDimensionsOnly !== capabilities.scope.missingDimensionsOnly
+    context.collectionScope.dimensionStatus !== capabilities.scope.dimensionStatus
   ) {
     return false;
   }
@@ -209,7 +209,7 @@ interface CollectionTableProps {
   isIntegratedRedundancy: boolean;
   previouslyOwnedCount: number;
   showPreviouslyOwned: boolean;
-  missingDimensionsOnly: boolean;
+  dimensionStatus: "all" | "with" | "missing";
   capacity: ShelfCapacityResult | null;
   collectionContext?: string;
   collectionOrigin?: string;
@@ -246,7 +246,7 @@ export function CollectionTable({
   isIntegratedRedundancy,
   previouslyOwnedCount,
   showPreviouslyOwned,
-  missingDimensionsOnly,
+  dimensionStatus,
   capacity,
   collectionContext,
   collectionOrigin,
@@ -402,7 +402,7 @@ export function CollectionTable({
       collectionOrigin: collectionOrigin ?? null,
       collectionReturnAttempt,
       showPreviouslyOwned,
-      missingDimensionsOnly,
+      dimensionStatus,
     });
     if (hydratedScopeRef.current === hydrationScope) return;
 
@@ -434,7 +434,7 @@ export function CollectionTable({
           );
           if (
             canRestoreCollectionProjection(context, {
-              scope: { showPreviouslyOwned, missingDimensionsOnly },
+              scope: { showPreviouslyOwned, dimensionStatus },
               availableSortFields: restoredSortFields,
               predictionSourceAvailable: predictedGames !== null,
               nicheSourceAvailable: nicheGames !== null,
@@ -514,7 +514,7 @@ export function CollectionTable({
     games,
     hasTournamentData,
     isIntegratedRedundancy,
-    missingDimensionsOnly,
+    dimensionStatus,
     nicheGames,
     predictedCount,
     predictedGames,
@@ -573,8 +573,8 @@ export function CollectionTable({
 
   const clearAllCollectionFilters = useCallback(() => {
     clearAllFilters();
-    if (showPreviouslyOwned || missingDimensionsOnly) router.push("/collection");
-  }, [clearAllFilters, missingDimensionsOnly, router, showPreviouslyOwned]);
+    if (showPreviouslyOwned || dimensionStatus !== "all") router.push("/collection");
+  }, [clearAllFilters, dimensionStatus, router, showPreviouslyOwned]);
 
   const handlePlayerCountChange = useCallback(
     (value: string) => {
@@ -600,10 +600,14 @@ export function CollectionTable({
   );
   const filtered = useMemo(
     () =>
-      missingDimensionsOnly
-        ? after_ownership.filter((g) => g.game.boxDimensions === null)
-        : after_ownership,
-    [after_ownership, missingDimensionsOnly],
+      dimensionStatus === "all"
+        ? after_ownership
+        : after_ownership.filter((g) =>
+            dimensionStatus === "with"
+              ? g.game.boxDimensions !== null
+              : g.game.boxDimensions === null,
+          ),
+    [after_ownership, dimensionStatus],
   );
   const { withValue, withoutValue } = useMemo(
     () => sortGames(filtered, sort.field, sort.direction, tournamentStats, axes),
@@ -616,7 +620,7 @@ export function CollectionTable({
   const navigationFingerprintInput = useMemo<CollectionNavigationFingerprintInput>(
     () => ({
       entries: navigationEntries,
-      collectionScope: { showPreviouslyOwned, missingDimensionsOnly },
+      collectionScope: { showPreviouslyOwned, dimensionStatus },
       projection: {
         sort,
         filters,
@@ -628,7 +632,7 @@ export function CollectionTable({
     }),
     [
       filters,
-      missingDimensionsOnly,
+      dimensionStatus,
       navigationEntries,
       nicheViewMode,
       nichesOn,
@@ -672,20 +676,27 @@ export function CollectionTable({
 
   // URL-driven filters (ownership and dimensions) navigate to trigger server re-fetch.
   // Preserve whichever filter isn't being toggled so they can coexist.
-  const buildCollectionUrl = useCallback((nextOwnership: boolean, nextMissing: boolean) => {
-    const parts: string[] = [];
-    if (nextOwnership) parts.push("ownership=all");
-    if (nextMissing) parts.push("dimensions=missing");
-    return parts.length > 0 ? `/collection?${parts.join("&")}` : "/collection";
-  }, []);
+  const buildCollectionUrl = useCallback(
+    (nextOwnership: boolean, nextDimensionStatus: "all" | "with" | "missing") => {
+      const parts: string[] = [];
+      if (nextOwnership) parts.push("ownership=all");
+      if (nextDimensionStatus !== "all")
+        parts.push(`dimensions=${nextDimensionStatus === "missing" ? "missing" : "with"}`);
+      return parts.length > 0 ? `/collection?${parts.join("&")}` : "/collection";
+    },
+    [],
+  );
 
   const toggleOwnership = useCallback(() => {
-    router.push(buildCollectionUrl(!showPreviouslyOwned, missingDimensionsOnly));
-  }, [showPreviouslyOwned, missingDimensionsOnly, router, buildCollectionUrl]);
+    router.push(buildCollectionUrl(!showPreviouslyOwned, dimensionStatus));
+  }, [showPreviouslyOwned, dimensionStatus, router, buildCollectionUrl]);
 
-  const clearMissingDimensions = useCallback(() => {
-    router.push(buildCollectionUrl(showPreviouslyOwned, false));
-  }, [showPreviouslyOwned, router, buildCollectionUrl]);
+  const setDimensionStatus = useCallback(
+    (nextStatus: "all" | "with" | "missing") => {
+      router.push(buildCollectionUrl(showPreviouslyOwned, nextStatus));
+    },
+    [showPreviouslyOwned, router, buildCollectionUrl],
+  );
 
   // Filter chip state
   const hasSearch = filters.search !== "";
@@ -699,7 +710,7 @@ export function CollectionTable({
     (hasPlayerCount ? 1 : 0) +
     (hasOwnerNoteFilter ? 1 : 0) +
     (showPreviouslyOwned ? 1 : 0) +
-    (missingDimensionsOnly ? 1 : 0);
+    (dimensionStatus !== "all" ? 1 : 0);
   const hasAnyFilter =
     hasSearch ||
     hasRatedFilter ||
@@ -707,7 +718,7 @@ export function CollectionTable({
     hasPlayerCount ||
     hasOwnerNoteFilter ||
     showPreviouslyOwned ||
-    missingDimensionsOnly;
+    dimensionStatus !== "all";
   const hiddenCount =
     (usePredictions && predictedGames ? predictedGames.length : totalGames) - filtered.length;
 
@@ -932,6 +943,32 @@ export function CollectionTable({
               </div>
             </div>
             <div className="filter-group">
+              <div className="filter-group-label" id="dimensions-filter-label">
+                Dimensions
+              </div>
+              <div
+                className="filter-group-controls"
+                role="group"
+                aria-labelledby="dimensions-filter-label"
+              >
+                {(["all", "with", "missing"] as const).map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    aria-pressed={dimensionStatus === status}
+                    className={`seg-btn${dimensionStatus === status ? " active" : ""}`}
+                    onClick={() => setDimensionStatus(status)}
+                  >
+                    {status === "all"
+                      ? "All"
+                      : status === "with"
+                        ? "With dimensions"
+                        : "Without dimensions"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="filter-group">
               <div className="filter-group-label" id="owner-note-filter-label">
                 Owner note
               </div>
@@ -1060,10 +1097,14 @@ export function CollectionTable({
                 </button>
               </span>
             )}
-            {missingDimensionsOnly && (
+            {dimensionStatus !== "all" && (
               <span className="filter-chip chip-missing-dimensions">
-                Missing dimensions{" "}
-                <button className="chip-x" onClick={clearMissingDimensions}>
+                {dimensionStatus === "with" ? "With dimensions" : "Without dimensions"}{" "}
+                <button
+                  className="chip-x"
+                  aria-label="Remove dimensions filter"
+                  onClick={() => setDimensionStatus("all")}
+                >
                   &times;
                 </button>
               </span>
@@ -1074,13 +1115,13 @@ export function CollectionTable({
               (hasPlayerCount ? 1 : 0) +
               (hasOwnerNoteFilter ? 1 : 0) +
               (showPreviouslyOwned ? 1 : 0) +
-              (missingDimensionsOnly ? 1 : 0) >=
+              (dimensionStatus !== "all" ? 1 : 0) >=
               1 && (
               <button
                 className="clear-all-link"
                 onClick={() => {
                   clearAllFilters();
-                  if (showPreviouslyOwned || missingDimensionsOnly) {
+                  if (showPreviouslyOwned || dimensionStatus !== "all") {
                     router.push("/collection");
                   }
                 }}

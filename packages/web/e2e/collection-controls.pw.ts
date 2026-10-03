@@ -96,6 +96,72 @@ test("owner-note filters combine, persist, clear, and fit on mobile", async ({ p
   );
 });
 
+test("dimension filters select canonical URL scopes and combine with ownership and search", async ({
+  page,
+}) => {
+  await page.goto("/collection");
+  const filters = page.getByRole("button", { name: /Filters/ });
+  await filters.click();
+  const group = page.getByRole("group", { name: "Dimensions" });
+
+  await group.getByRole("button", { name: "With dimensions", exact: true }).click();
+  await expect(page).toHaveURL("/collection?dimensions=with");
+  await expect(page.locator(".game-row[id]")).toHaveCount(2);
+  await expect(page.locator("#collection-game-game-3")).toBeVisible();
+  await expect(page.locator("#collection-game-game-7")).toBeVisible();
+  await expect(page.locator(".filter-chip")).toContainText("With dimensions");
+
+  await group.getByRole("button", { name: "Without dimensions", exact: true }).click();
+  await expect(page).toHaveURL("/collection?dimensions=missing");
+  await expect(page.locator(".game-row[id]")).toHaveCount(3);
+  await expect(page.locator("#collection-game-game-1")).toBeVisible();
+  await expect(page.locator("#collection-game-game-2")).toBeVisible();
+  await expect(page.locator("#collection-game-game-6")).toBeVisible();
+  await expect(page.locator(".filter-chip")).toContainText("Without dimensions");
+
+  await page.goto("/collection?ownership=all&dimensions=missing");
+  await expect(page.locator(".game-row[id]")).toHaveCount(4);
+  if ((await filters.getAttribute("aria-expanded")) !== "true") await filters.click();
+  await group.getByRole("button", { name: "With dimensions", exact: true }).click();
+  await expect(page).toHaveURL("/collection?ownership=all&dimensions=with");
+  await expect(page.locator(".game-row[id]")).toHaveCount(2);
+  await page
+    .locator(".filter-group")
+    .filter({ hasText: "Owned Status" })
+    .getByRole("button", { name: "Owned only", exact: true })
+    .click();
+  await expect(page).toHaveURL("/collection?dimensions=with");
+  await expect(page.locator(".game-row[id]")).toHaveCount(2);
+  await page
+    .locator(".filter-group")
+    .filter({ hasText: "Owned Status" })
+    .getByRole("button", { name: "+ Prev Owned", exact: true })
+    .click();
+  await expect(page).toHaveURL("/collection?ownership=all&dimensions=with");
+  await page
+    .locator(".filter-group")
+    .filter({ hasText: "Owned Status" })
+    .getByRole("button", { name: "Owned only", exact: true })
+    .click();
+  await expect(page).toHaveURL("/collection?dimensions=with");
+  await expect(page.locator(".game-row[id]")).toHaveCount(2);
+  await page.getByRole("textbox", { name: "Search games by name" }).fill("Atlas");
+  await expect(page.locator(".game-row[id]")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "No games match these filters" })).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(page).toHaveURL("/collection");
+  await expect(page.locator(".game-row[id]")).toHaveCount(5);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  if ((await filters.getAttribute("aria-expanded")) !== "true") await filters.click();
+  await expect(
+    group.getByRole("button", { name: "Without dimensions", exact: true }),
+  ).toBeVisible();
+  expect(await page.locator("html").evaluate((element) => element.scrollWidth)).toBe(
+    await page.evaluate(() => window.innerWidth),
+  );
+});
+
 test("collection rows keep scores and penalty without similarity readiness labels on desktop and mobile", async ({
   page,
 }) => {
