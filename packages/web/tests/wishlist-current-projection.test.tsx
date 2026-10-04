@@ -47,9 +47,15 @@ const prediction: FitnessResult = {
       referenceGames: null,
     },
   ],
-  vetoed: false,
-  vetoedBy: null,
-  hypotheticalScore: null,
+  vetoed: true,
+  vetoedBy: {
+    axisId: "synthetic-axis",
+    axisName: "Synthetic axis",
+    threshold: 1,
+    direction: "below",
+    rawValue: 0,
+  },
+  hypotheticalScore: 4.5,
   predictionMeta: {
     readinessStage: 1,
     confidence: "weak",
@@ -80,11 +86,19 @@ describe("isolated current wishlist projection", () => {
     const row = toCurrentWishlistRow(envelope());
     expect(row?.prediction?.score).toBe(0);
     expect(row?.predictionAvailable).toBe(true);
-    const html = renderToString(<WishlistCurrentProjectionCard row={row!} />);
+    const html = renderToString(
+      <WishlistCurrentProjectionCard
+        row={row!}
+        onRemove={() => {}}
+        onRefresh={async () => {}}
+        onAddToCollection={async () => {}}
+      />,
+    ).replaceAll("<!-- -->", "");
     expect(html).toContain("Current prediction");
     expect(row?.prediction?.breakdown[0]?.axisName).toBe("Synthetic axis");
     expect(html).toContain("Per-axis breakdown");
     expect(html).toContain("0.0");
+    expect(html).toContain("Vetoed");
     expect(html).not.toContain("9.8");
   });
 
@@ -112,6 +126,46 @@ describe("isolated current wishlist projection", () => {
     ).toBeNull();
   });
 
+  test("displays the supplied current adjustment without applying its penalty again", () => {
+    const row = toCurrentWishlistRow(
+      envelope({
+        redundancy: {
+          source: "current",
+          orderingScore: 7.1,
+          adjustment: {
+            originalScore: 8.4,
+            adjustedScore: 7.1,
+            penalty: 1.3,
+            nicheRank: 1,
+            nicheSize: 2,
+            nicheNeighbors: [
+              {
+                gameId: "synthetic-owned",
+                gameName: "Synthetic owned game",
+                similarity: 0.91,
+                fitnessScore: 8,
+                isPredicted: false,
+              },
+            ],
+          },
+        },
+      }),
+    );
+    const html = renderToString(
+      <WishlistCurrentProjectionCard
+        row={row!}
+        onRemove={() => {}}
+        onRefresh={async () => {}}
+        onAddToCollection={async () => {}}
+      />,
+    ).replaceAll("<!-- -->", "");
+    expect(html).toContain("With redundancy:");
+    expect(html).toContain("7.1");
+    expect(html).toContain("-1.3");
+    expect(html).toContain("Synthetic owned game");
+    expect(html).not.toContain("5.8");
+  });
+
   test("uses provided adjusted/base ordering scores once and leaves unavailable rows last", () => {
     const high = toCurrentWishlistRow(
       envelope({
@@ -134,6 +188,32 @@ describe("isolated current wishlist projection", () => {
       },
       redundancy: { source: "unavailable", adjustment: null, orderingScore: null },
     })!;
+    const zeroScore = toCurrentWishlistRow(
+      envelope({
+        prediction: {
+          availability: "available",
+          source: "current",
+          result: prediction,
+          predictionUnavailable: null,
+        },
+      }),
+    )!;
+    const elevatedScore = toCurrentWishlistRow(
+      envelope({
+        prediction: {
+          availability: "available",
+          source: "current",
+          result: {
+            ...prediction,
+            score: 8,
+            vetoed: false,
+            vetoedBy: null,
+            hypotheticalScore: null,
+          },
+          predictionUnavailable: null,
+        },
+      }),
+    )!;
     expect(sortCurrentWishlistRows([low, unavailable, high]).map((r) => r.redundancyScore)).toEqual(
       [8, 3, null],
     );
@@ -146,5 +226,15 @@ describe("isolated current wishlist projection", () => {
     expect(sortCurrentWishlistRows([unavailable, low, high], "desc", "addedAt").at(-1)).toBe(
       unavailable,
     );
+    expect(
+      sortCurrentWishlistRows([unavailable, zeroScore, elevatedScore], "asc", "score").map(
+        (row) => row.prediction?.score ?? null,
+      ),
+    ).toEqual([0, 8, null]);
+    expect(
+      sortCurrentWishlistRows([unavailable, zeroScore, elevatedScore], "desc", "score").map(
+        (row) => row.prediction?.score ?? null,
+      ),
+    ).toEqual([8, 0, null]);
   });
 });

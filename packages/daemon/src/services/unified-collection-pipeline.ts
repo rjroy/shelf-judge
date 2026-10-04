@@ -15,6 +15,7 @@ import {
 import type { JevPairCache } from "./jev-pair-cache-service.js";
 import type { StagedSimilarityCapture } from "./staged-similarity-capture.js";
 import { createPreparedSimilarity } from "./prepared-similarity.js";
+import type { PreparedSimilarityObserver } from "./prepared-similarity.js";
 import {
   prepareStagedSimilarityScope,
   type StagedAxisPairInput,
@@ -25,21 +26,29 @@ import {
   type StagedPredictionTarget,
   type StagedPredictionReadiness,
   type StagedActualAxisContext,
+  type StagedSimilarityCalculation,
 } from "./staged-similarity-scope.js";
 import { createFitnessService } from "./fitness-service.js";
 import { computeUnifiedPrediction, unifiedConfidenceRank } from "./unified-prediction.js";
 import type { StagedSimilarityPair } from "./prepared-similarity.js";
+import type { SemanticScoringInputProofV2 } from "../../../shared/src/semantic-scoring-input-proof-v2.js";
 
 export interface UnifiedCollectionPipelineOptions {
   readonly capture: StagedSimilarityCapture;
   readonly cache: Pick<JevPairCache, "available" | "mutationRevision" | "lookup">;
   readonly request: StagedPredictionRequest;
   readonly budget: StagedRunBudget;
-  readonly authorizationReader: StagedRunAuthorizationReader;
+  readonly authorizationReader?: StagedRunAuthorizationReader;
+  /** Ordinary current projections do not mint a run execution authorization. */
+  readonly calculationOnly?: boolean;
   /** Penalty policy only; it never gates unified prediction or the S table. */
   readonly redundancySettings: RedundancySettings;
   /** Local operation counters for deterministic performance tests; no persistent telemetry. */
   readonly observer?: UnifiedCollectionPipelineObserver;
+  /** Exact collection members whose current fitness is requested. Omission computes all. */
+  readonly fitnessCollectionIds?: ReadonlySet<string>;
+  readonly fitnessService?: ReturnType<typeof createFitnessService>;
+  readonly preparedObserver?: PreparedSimilarityObserver;
 }
 
 export interface UnifiedCollectionPipelineObserver {
@@ -53,9 +62,20 @@ export interface UnifiedCollectionPipelineResult {
   readonly run: FrozenStagedSimilarityRun;
   /** Current pre-redundancy fitness, keyed by local collection game identity. */
   readonly fitness: ReadonlyMap<string, FitnessResult>;
+  readonly actualFitness: ReadonlyMap<string, FitnessResult | null>;
   /** The common S table on the exact frozen authorized pair set. */
   readonly pairSimilarities: ReadonlyMap<string, number | null>;
   readonly redundancyAdjustments: ReadonlyMap<string, RedundancyAdjustment>;
+  readonly proof: SemanticScoringInputProofV2;
+}
+
+export interface UnifiedCollectionCalculation {
+  readonly calculation: StagedSimilarityCalculation;
+  readonly fitness: ReadonlyMap<string, FitnessResult>;
+  readonly actualFitness: ReadonlyMap<string, FitnessResult | null>;
+  readonly pairSimilarities: ReadonlyMap<string, number | null>;
+  readonly redundancyAdjustments: ReadonlyMap<string, RedundancyAdjustment>;
+  readonly proof: SemanticScoringInputProofV2;
 }
 
 function rounded(value: number): number {
@@ -216,11 +236,15 @@ export interface UnifiedFitnessBatchOptions {
   readonly axisPairs: readonly StagedAxisPairInput[];
   readonly readiness: StagedPredictionReadiness;
   readonly includeOwnedPredictionTargets?: boolean;
+  /** Restrict ordinary target projections to requested target members. */
+  readonly collectionFitnessIds?: ReadonlySet<string>;
   readonly observer?: UnifiedCollectionPipelineObserver;
+  readonly fitnessService?: ReturnType<typeof createFitnessService>;
 }
 
 /** Reuse the one estimator and fitness assembler for collection and wishlist scopes. */
 export function computeUnifiedFitnessBatch(options: UnifiedFitnessBatchOptions): {
+  readonly actualFitness: ReadonlyMap<string, FitnessResult | null>;
   readonly collectionFitness: ReadonlyMap<string, FitnessResult | null>;
   readonly targetFitness: ReadonlyMap<string, FitnessResult | null>;
 } {
@@ -290,14 +314,17 @@ export function computeUnifiedFitnessBatch(options: UnifiedFitnessBatchOptions):
     );
   }
 
-  const fitnessService = createFitnessService();
+  const fitnessService = options.fitnessService ?? createFitnessService();
+  const actualFitness = new Map<string, FitnessResult | null>();
   const collectionFitness = new Map<string, FitnessResult | null>();
   for (const game of capture.sources.collection.games) {
+    if (options.collectionFitnessIds && !options.collectionFitnessIds.has(game.id)) continue;
     const actual = fitnessService.calculateScore(
       game,
       [...capture.sources.collection.axes],
       capture.sources.tournament,
     );
+    actualFitness.set(game.id, actual);
     const predictions = predictionsByTarget.get(game.id);
     collectionFitness.set(
       game.id,
@@ -348,24 +375,41 @@ export function computeUnifiedFitnessBatch(options: UnifiedFitnessBatchOptions):
         : actual,
     );
   }
-  return { collectionFitness, targetFitness };
+  return { actualFitness, collectionFitness, targetFitness };
 }
 
 /** Run actual cache-only P → unified prediction/current fitness → R scope staging. */
 export function prepareUnifiedCollectionPipeline(
-  options: UnifiedCollectionPipelineOptions,
+  options: UnifiedCollectionPipelineOptions & { readonly calculationOnly: true },
+):
+  | { readonly ok: true; readonly value: UnifiedCollectionCalculation }
+  | { readonly ok: false; readonly reason: string };
+export function prepareUnifiedCollectionPipeline(
+  options: UnifiedCollectionPipelineOptions & { readonly calculationOnly?: false },
 ):
   | { readonly ok: true; readonly value: UnifiedCollectionPipelineResult }
+  | { readonly ok: false; readonly reason: string };
+export function prepareUnifiedCollectionPipeline(options: UnifiedCollectionPipelineOptions):
+  | {
+      readonly ok: true;
+      readonly value: UnifiedCollectionCalculation | UnifiedCollectionPipelineResult;
+    }
   | { readonly ok: false; readonly reason: string } {
   const { capture } = options;
-  const prepared = createPreparedSimilarity({ capture, cache: options.cache });
+  const prepared = createPreparedSimilarity({
+    capture,
+    cache: options.cache,
+    observer: options.preparedObserver,
+  });
   const fitness = new Map<string, FitnessResult>();
+  const actualFitness = new Map<string, FitnessResult | null>();
   const scope = prepareStagedSimilarityScope({
     capture,
     prepared,
     request: options.request,
     budget: options.budget,
     authorizationReader: options.authorizationReader,
+    calculationOnly: options.calculationOnly ?? false,
     evaluateFitness(input) {
       const batch = computeUnifiedFitnessBatch({
         capture,
@@ -374,9 +418,14 @@ export function prepareUnifiedCollectionPipeline(
         targets: input.targets,
         axisPairs: input.axisPairs,
         readiness: input.readiness,
+        collectionFitnessIds: options.fitnessCollectionIds,
+        includeOwnedPredictionTargets:
+          options.fitnessCollectionIds === undefined || options.redundancySettings.enabled,
+        fitnessService: options.fitnessService,
         observer: options.observer,
       });
       for (const [id, result] of batch.collectionFitness) if (result) fitness.set(id, result);
+      for (const [id, result] of batch.actualFitness) actualFitness.set(id, result);
       return new Map(
         capture.sources.collection.games.map((game) => {
           const current = fitness.get(game.id);
@@ -389,8 +438,9 @@ export function prepareUnifiedCollectionPipeline(
     },
   });
   if (!scope.ok) return scope;
+  const staged = "run" in scope ? scope.run : scope.calculation;
   const pairSimilarities = new Map<string, number | null>();
-  for (const entry of scope.run.authorizedPairs)
+  for (const entry of staged.authorizedPairs)
     pairSimilarities.set(entry.key, prepared.similarity(entry.pair));
   const redundancyAdjustments = new Map<string, RedundancyAdjustment>();
   if (options.redundancySettings.enabled) {
@@ -401,12 +451,12 @@ export function prepareUnifiedCollectionPipeline(
     // display string there. Derive endpoint membership from the typed pair instead
     // of parsing that string (local IDs may themselves contain commas).
     const eligibleIds = new Set(
-      scope.run.redundancyPairs.flatMap((entry) =>
+      staged.redundancyPairs.flatMap((entry) =>
         entry.pair.domain === "collection" ? [entry.pair.gameAId, entry.pair.gameBId] : [],
       ),
     );
     const neighborsByGame = new Map<string, Array<{ id: string; similarity: number }>>();
-    for (const entry of scope.run.redundancyPairs) {
+    for (const entry of staged.redundancyPairs) {
       if (entry.pair.domain !== "collection") continue;
       const similarity = pairSimilarities.get(entry.key);
       if (
@@ -482,12 +532,22 @@ export function prepareUnifiedCollectionPipeline(
   }
   // Keep source/policy and cache-proof currentness checks adjacent to acceptance.
   // The synchronous adapter has no await point between this fence and return.
-  if (!scope.run.isAuthorized() || !scope.run.isCalculationCurrent()) {
+  if (
+    ("run" in scope && (!scope.run.isAuthorized() || !scope.run.isCalculationCurrent())) ||
+    ("calculation" in scope && !scope.calculation.prepared.isCurrent())
+  ) {
     return { ok: false, reason: "source-or-cache-changed-before-publication" };
   }
   return {
     ok: true,
-    value: Object.freeze({ run: scope.run, fitness, pairSimilarities, redundancyAdjustments }),
+    value: Object.freeze({
+      ...("run" in scope ? { run: scope.run } : { calculation: scope.calculation }),
+      fitness,
+      actualFitness,
+      pairSimilarities,
+      redundancyAdjustments,
+      proof: staged.proof,
+    }),
   };
 }
 

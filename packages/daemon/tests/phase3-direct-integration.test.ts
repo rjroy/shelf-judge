@@ -391,6 +391,7 @@ describe("Phase 3 direct integration evidence", () => {
     affectedGame.latestPlayCountCheck = null;
     await context.storageService.saveCollection({
       ...collection,
+      revision: collection.revision + 1,
       attentionDispositions: [],
       commandReceipts: [],
     });
@@ -629,17 +630,24 @@ describe("Phase 3 direct integration evidence", () => {
       }),
     ).toMatchObject({ ok: true });
     const withIntention = await loadSource();
-    const compatibilitySource = {
-      ...withIntention,
-      collection: { ...withIntention.collection, attentionDispositions: [] },
-    };
+    const proposed = await context.unifiedScoringService.prepareProposedCollection({
+      prior: withIntention.collection,
+      proposed: { ...withIntention.collection, attentionDispositions: [] },
+    });
+    const proposedEvaluation = await oracle.evaluateProposedCollection?.(
+      withIntention,
+      proposed,
+      at,
+      [underused.gameId],
+    );
+    if (!proposedEvaluation) throw new Error("Proposed candidate evaluation is unavailable");
+    const acceptedProposed = await proposedEvaluation.accept(() => proposedEvaluation.evaluations);
+    if (!acceptedProposed) throw new Error("Proposed candidate evaluation became stale");
     expect(
-      (await oracle.evaluate(compatibilitySource, at)).evaluations.find(
-        (evaluation) => evaluation.gameId === underused.gameId,
-      )?.winner?.ruleId,
+      acceptedProposed.find((evaluation) => evaluation.gameId === underused.gameId)?.winner?.ruleId,
     ).toBe("explicit-intention");
     expect(
-      await oracle.evaluateStoredRules(compatibilitySource, at, [
+      await oracle.evaluateStoredRules(withIntention, at, [
         { gameId: underused.gameId, ruleId: "underused-purchase" },
       ]),
     ).toEqual(storedBefore);
@@ -1113,11 +1121,20 @@ describe("Phase 3 direct integration evidence", () => {
         events.push(`stored-rule:${calls}`);
         if (calls === 1) throw new Error("winner oracle unavailable");
         const source = await loadSource();
-        return realOracle.evaluateStoredRules(
-          { ...source, collection: { ...source.collection, attentionDispositions: [] } },
+        const proposal = await ctx.unifiedScoringService.prepareProposedCollection({
+          prior: source.collection,
+          proposed: { ...source.collection, attentionDispositions: [] },
+        });
+        const evaluation = await realOracle.evaluateStoredRulesForProposedCollection?.(
+          source,
+          proposal,
           now,
           requested,
         );
+        if (!evaluation) throw new Error("Proposed stored-rule scoring is unavailable");
+        const matches = await evaluation.accept(() => evaluation.matches);
+        if (!matches) throw new Error("Proposed stored-rule scoring became stale");
+        return matches;
       },
       maintainCandidates: async (impact) => {
         await ctx.attentionCandidateService.maintain(impact);

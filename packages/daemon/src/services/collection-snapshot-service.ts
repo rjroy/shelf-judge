@@ -12,6 +12,7 @@ import {
   type PredictionSettings,
   type RedundancySettings,
   type TournamentData,
+  type SemanticScoringInputProof,
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import type { GameService } from "./game-service.js";
@@ -54,7 +55,14 @@ export interface CollectionSnapshotBuildResult {
   evaluatedAtMs: number;
   expiresAtMs: number | null;
   /** Internal writer evidence only; never part of the public snapshot JSON. */
-  semanticRead?: { status: "not-used" } | ({ status: "verified" } & JevPairReadProofFence);
+  semanticRead?:
+    | { status: "not-used" }
+    | ({ status: "verified" } & JevPairReadProofFence)
+    | {
+        status: "unified-v2";
+        proof: SemanticScoringInputProof;
+        isCurrent(): boolean;
+      };
 }
 
 interface CapturedInputs {
@@ -351,6 +359,7 @@ export function createCollectionSnapshotService(
       let predicted: GameWithScore[] | undefined;
       if (prepared) {
         try {
+          if (prepared.listActualGames) ordinary = prepared.listActualGames();
           predicted = prepared.listGames(ordinaryScores);
           for (const entry of predicted) {
             if (entry.score !== null) FitnessResultResponseSchema.parse(entry.score);
@@ -387,12 +396,27 @@ export function createCollectionSnapshotService(
 
       let ordinaryDisplay = ordinary;
       let predictedDisplay = predicted;
-      let semanticRead: CollectionSnapshotBuildResult["semanticRead"] = { status: "not-used" };
+      const unifiedCalculated = prepared?.semanticScoringInputProof !== undefined;
+      let semanticRead: CollectionSnapshotBuildResult["semanticRead"] =
+        prepared?.semanticScoringInputProof
+          ? {
+              status: "unified-v2",
+              proof: prepared.semanticScoringInputProof,
+              isCurrent: () => prepared?.isCurrent?.() ?? false,
+            }
+          : { status: "not-used" };
       let snapshotSimilarityStatus = input.redundancySimilarityStatus;
+      if (unifiedCalculated && input.redundancySettings?.enabled)
+        snapshotSimilarityStatus = "factual";
       let redundancyMode: "off" | "annotation" | "integrated" = input.redundancySettings?.enabled
         ? input.redundancySettings.stage
         : "off";
-      if (input.redundancySettings?.enabled && predicted && input.predictionSettings) {
+      if (
+        input.redundancySettings?.enabled &&
+        predicted &&
+        input.predictionSettings &&
+        !unifiedCalculated
+      ) {
         try {
           const semanticConfigured =
             input.collection.semanticRedundancy?.settings.enabled === true &&
@@ -652,6 +676,10 @@ export function createCollectionSnapshotService(
             .map((entry) => entry.score?.score ?? null),
         ),
       });
+      if (prepared?.isCurrent && !prepared.isCurrent())
+        throw new CollectionSnapshotUnavailableError(
+          "Unified scoring inputs changed before snapshot publication",
+        );
       await stillCurrent(input.token, input.sourceVector);
       return {
         snapshot,

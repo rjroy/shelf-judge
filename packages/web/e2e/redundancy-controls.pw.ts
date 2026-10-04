@@ -406,6 +406,19 @@ test("changing a similarity weight invalidates the saved-settings preview withou
   expect(calls.filter((call) => call.url.includes("/run-preview"))).toHaveLength(1);
 });
 
+test("shared prediction and redundancy weights stay available when redundancy is off", async ({
+  page,
+}) => {
+  await installDaemon(page);
+  await page.goto("/redundancy");
+  await page.getByRole("checkbox", { name: "Enable redundancy scoring" }).uncheck();
+  await expect(
+    page.getByText("These shared weights affect both prediction and redundancy."),
+  ).toBeVisible();
+  await expect(page.getByLabel("BoardGameGeek descriptions weight")).toBeVisible();
+  await expect(page.getByLabel("Your game notes weight")).toBeVisible();
+});
+
 test("an in-flight preview cannot restore limits after an edit", async ({ page }) => {
   await installDaemon(page);
   await page.goto("/redundancy?delay-preview=1");

@@ -59,6 +59,9 @@ import {
   type AttentionCandidateService,
 } from "../../src/services/attention-candidate-service.js";
 import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
+import { createUnifiedScoringService } from "../../src/services/unified-scoring-service.js";
+import type { UnifiedScoringService } from "../../src/services/unified-scoring-service.js";
+import type { PreparedSimilarityObserver } from "../../src/services/prepared-similarity.js";
 import {
   createAttentionCandidateMaintenanceRecovery,
   createAttentionDispositionGlobalMaintenance,
@@ -87,6 +90,7 @@ export interface TestAppContext<TFileOps extends FileOps = MockFileOps> {
   profileService: ProfileService;
   predictionService: PredictionService;
   displayedFitnessService: DisplayedFitnessService;
+  unifiedScoringService: UnifiedScoringService;
   intentionService: IntentionService;
   ownerGameNoteService: OwnerGameNoteService;
   attentionCandidateService: AttentionCandidateService;
@@ -117,6 +121,8 @@ export interface TestAppOptions<TFileOps extends FileOps = MockFileOps> {
   semanticRedundancyStateService?: SemanticRedundancyStateService;
   /** Opt-in production semantic read wiring for SQLite-backed integration tests. */
   jevPairCache?: JevPairCache;
+  /** Test instrumentation for proving mutation branches that must skip scoring. */
+  preparedObserver?: PreparedSimilarityObserver;
 }
 
 export function createTestPurchaseUtilizationService(
@@ -189,6 +195,14 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
         : null,
   });
   const fitnessService = createFitnessService();
+  const jevPairCache = options?.jevPairCache ?? null;
+  const unifiedScoringService = createUnifiedScoringService({
+    storageService,
+    cache: jevPairCache,
+    fitnessService,
+    coordinator: profileSourceCoordinatorFor(storageService),
+    ...(options?.preparedObserver ? { preparedObserver: options.preparedObserver } : {}),
+  });
   const bggClient = options?.bggClient;
 
   const axisService = createAxisService({ storageService, collectionMutationService });
@@ -219,15 +233,17 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     tournamentService,
     bggClient,
     afterSourceSave: maintainCandidateSource,
+    unifiedScoringService,
   });
-  const resolveSemanticRead = options?.jevPairCache
-    ? createJevProductionSemanticRead(options.jevPairCache)
+  const resolveSemanticRead = jevPairCache
+    ? createJevProductionSemanticRead(jevPairCache)
     : undefined;
   const displayedFitnessService = createDisplayedFitnessService({
     gameService,
     predictionService,
     storageService,
     resolveSemanticRead,
+    unifiedScoringService,
   });
   attentionCandidateService = createAttentionCandidateService({
     coordinator: profileSourceCoordinatorFor(storageService),
@@ -245,14 +261,23 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     storedRuleMatches: async (dispositions) => {
       if (options?.storedRuleMatches !== undefined) return options.storedRuleMatches(dispositions);
       const source = await dispositionSource();
-      return dispositionOracle.evaluateStoredRules(
-        { ...source, collection: { ...source.collection, attentionDispositions: [] } },
+      const proposal = await unifiedScoringService.prepareProposedCollection({
+        prior: source.collection,
+        proposed: { ...source.collection, attentionDispositions: [] },
+      });
+      const evaluation = await dispositionOracle.evaluateStoredRulesForProposedCollection?.(
+        source,
+        proposal,
         options?.now?.() ?? "2026-01-01T00:00:00.000Z",
         dispositions.map((disposition) => ({
           gameId: disposition.gameId,
           ruleId: disposition.ruleId,
         })),
       );
+      if (!evaluation) throw new Error("Proposed stored-rule evaluation is unavailable");
+      const matches = await evaluation.accept(() => evaluation.matches);
+      if (!matches) throw new Error("Proposed stored-rule scoring became stale");
+      return matches;
     },
     maintainCandidates: async (impact) => {
       await attentionCandidateService?.maintain(impact);
@@ -302,18 +327,31 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
       },
     },
   });
-  collectionMutationService.setDispositionWinners(async (_prior, collection, _context, gameIds) => {
+  collectionMutationService.setDispositionWinners(async (prior, collection, _context, gameIds) => {
     const source = await dispositionSource();
-    return dispositionOracle.evaluateStoredRules(
-      {
-        ...source,
-        collection: { ...collection, attentionDispositions: [] },
-      },
+    const proposal = await unifiedScoringService.prepareProposedCollection({
+      prior,
+      proposed: collection,
+    });
+    const storedRules = collection.attentionDispositions
+      .filter((disposition) => gameIds.includes(disposition.gameId))
+      .map((disposition) => ({ gameId: disposition.gameId, ruleId: disposition.ruleId }));
+    if (storedRules.length === 0) {
+      return { winners: [], assertBaseCurrent: () => proposal.assertBaseCurrent() };
+    }
+    const evaluation = await dispositionOracle.evaluateStoredRulesForProposedCollection?.(
+      source,
+      proposal,
       options?.now?.() ?? "2026-01-01T00:00:00.000Z",
-      collection.attentionDispositions
-        .filter((disposition) => gameIds.includes(disposition.gameId))
-        .map((disposition) => ({ gameId: disposition.gameId, ruleId: disposition.ruleId })),
+      storedRules,
     );
+    if (!evaluation) throw new Error("Proposed stored-rule evaluation is unavailable");
+    const accepted = await evaluation.accept(() => ({
+      winners: evaluation.matches,
+      assertBaseCurrent: () => evaluation.assertBaseCurrent(),
+    }));
+    if (!accepted) throw new Error("Proposed stored-rule scoring became stale");
+    return accepted;
   });
   const intentionService =
     options?.intentionService ??
@@ -372,6 +410,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     tournamentService,
     profileService,
     predictionService,
+    unifiedScoringService,
     displayedFitnessService,
     intentionService,
     attentionDispositionService,
@@ -398,6 +437,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     profileService,
     predictionService,
     displayedFitnessService,
+    unifiedScoringService,
     intentionService,
     ownerGameNoteService,
     attentionCandidateService: attentionCandidateService,

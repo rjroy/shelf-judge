@@ -20,17 +20,31 @@ import type {
   StagedPredictionReadiness,
   StagedRunAuthorizationReader,
   StagedRunBudget,
+  StagedSimilarityCalculation,
+  FrozenStagedSimilarityRun,
+  StagedScopePair,
 } from "./staged-similarity-scope.js";
+import type { SemanticScoringInputProofV2 } from "../../../shared/src/semantic-scoring-input-proof-v2.js";
 import {
   deriveStagedActualAxisContext,
   prepareStagedSimilarityScope,
 } from "./staged-similarity-scope.js";
 import { createPreparedSimilarity } from "./prepared-similarity.js";
+import type { PreparedSimilarityObserver } from "./prepared-similarity.js";
 
 export interface UnifiedWishlistProjectionObserver {
   onSourceCapture?(): void;
   onWishlistPairDemand?(candidateBggId: number, ownedGameId: string): void;
   onWishlistPairResolved?(candidateBggId: number, ownedGameId: string): void;
+  onCalculation?(calculation: {
+    readonly scope: StagedSimilarityCalculation | FrozenStagedSimilarityRun;
+    readonly proof: SemanticScoringInputProofV2;
+    readonly pairSimilarities: ReadonlyMap<string, number | null>;
+    readonly calculationDependencyPairs: readonly StagedScopePair[];
+    readonly collectionFitness: ReadonlyMap<string, FitnessResult | null>;
+    readonly actualFitness: ReadonlyMap<string, FitnessResult | null>;
+    readonly results: readonly WishlistEntryReadResultV2[];
+  }): void;
 }
 
 export interface UnifiedWishlistProjectionOptions {
@@ -38,9 +52,12 @@ export interface UnifiedWishlistProjectionOptions {
   readonly cache: Pick<JevPairCache, "available" | "mutationRevision" | "lookup">;
   readonly entries: readonly WishlistEntry[];
   readonly budget: StagedRunBudget;
-  readonly authorizationReader: StagedRunAuthorizationReader;
+  readonly authorizationReader?: StagedRunAuthorizationReader;
+  /** Ordinary current reads avoid creating the one-use execution authority used by Run. */
+  readonly calculationOnly?: boolean;
   readonly redundancySettings: RedundancySettings;
   readonly observer?: UnifiedWishlistProjectionObserver;
+  readonly preparedObserver?: PreparedSimilarityObserver;
 }
 
 function deepFreeze<T>(value: T): T {
@@ -121,6 +138,22 @@ function unavailableRedundancy(): WishlistRedundancyProjectionV2 {
   return Object.freeze({ source: "unavailable", adjustment: null, orderingScore: null });
 }
 
+/** Safe V2 DTOs for a source capture that could not be established at all. */
+export function unavailableUnifiedWishlistProjection(
+  entries: readonly WishlistEntry[],
+): readonly WishlistEntryReadResultV2[] {
+  return Object.freeze(
+    entries.map((entry) => {
+      const prediction = stageUnavailable("source-unavailable", entry, null);
+      return validateWishlistEntryReadResultV2({
+        entry: projectLegacyEntry(entry, prediction, unavailableRedundancy()),
+        prediction,
+        redundancy: unavailableRedundancy(),
+      });
+    }),
+  );
+}
+
 function baseRedundancy(score: number): WishlistRedundancyProjectionV2 {
   return Object.freeze({ source: "base-prediction", adjustment: null, orderingScore: score });
 }
@@ -189,9 +222,14 @@ export function computeUnifiedWishlistProjection(
       }),
     );
   }
-  const prepared = createPreparedSimilarity({ capture, cache: options.cache });
+  const prepared = createPreparedSimilarity({
+    capture,
+    cache: options.cache,
+    observer: options.preparedObserver,
+  });
   const targetFitness = new Map<string, FitnessResult | null>();
   let collectionFitness = new Map<string, FitnessResult | null>();
+  let actualFitness = new Map<string, FitnessResult | null>();
   const request = {
     scope: "wishlist" as const,
     selectedBggIds: [...entriesByBggId.keys()].sort((left, right) => left - right),
@@ -202,6 +240,7 @@ export function computeUnifiedWishlistProjection(
     request,
     budget: options.budget,
     authorizationReader: options.authorizationReader,
+    calculationOnly: options.calculationOnly ?? false,
     includeOwnedPredictionDependenciesForWishlist: true,
     evaluateFitness(input) {
       const batch = computeUnifiedFitnessBatch({
@@ -217,6 +256,7 @@ export function computeUnifiedWishlistProjection(
         includeOwnedPredictionTargets: true,
       });
       collectionFitness = new Map(batch.collectionFitness);
+      actualFitness = new Map(batch.actualFitness);
       for (const [id, result] of batch.targetFitness) targetFitness.set(id, result);
       return new Map(
         capture.sources.collection.games.map((game) => {
@@ -242,8 +282,10 @@ export function computeUnifiedWishlistProjection(
     );
   }
 
+  const staged = "run" in scope ? scope.run : scope.calculation;
+
   const similarities = new Map<string, number | null>();
-  for (const authorized of scope.run.authorizedPairs) {
+  for (const authorized of staged.authorizedPairs) {
     similarities.set(authorized.key, prepared.similarity(authorized.pair));
   }
 
@@ -266,13 +308,13 @@ export function computeUnifiedWishlistProjection(
   });
 
   const predictionUnavailable =
-    scope.run.readiness.stage === 0
+    staged.readiness.stage === 0
       ? {
           reason: "stage-0" as const,
-          ratedGameCount: scope.run.readiness.ratedGameCount,
+          ratedGameCount: staged.readiness.ratedGameCount,
           gamesNeeded: Math.max(
             0,
-            scope.run.readiness.stageThresholds[0] - scope.run.readiness.ratedGameCount,
+            staged.readiness.stageThresholds[0] - staged.readiness.ratedGameCount,
           ),
         }
       : null;
@@ -280,9 +322,10 @@ export function computeUnifiedWishlistProjection(
   const results = options.entries.map((entry) => {
     const targetId = `wishlist:${entry.bggId}`;
     const result = targetFitness.get(targetId) ?? null;
-    const unavailableTarget = scope.run.disclosure.unavailableTargetIds.includes(
-      String(entry.bggId),
-    );
+    const unavailableTarget =
+      "disclosure" in staged
+        ? staged.disclosure.unavailableTargetIds.includes(String(entry.bggId))
+        : staged.unavailableTargetIds.includes(String(entry.bggId));
     const prediction: CurrentPredictionProjectionV2 = result
       ? Object.freeze({
           availability: "available",
@@ -336,13 +379,17 @@ export function computeUnifiedWishlistProjection(
     });
   });
 
-  if (!scope.run.isAuthorized() || !scope.run.isCalculationCurrent()) {
+  if (
+    ("run" in scope && !scope.run.isAuthorized()) ||
+    ("run" in scope && !scope.run.isCalculationCurrent()) ||
+    ("calculation" in scope && !scope.calculation.prepared.isCurrent())
+  ) {
     return Object.freeze(
       options.entries.map((entry) => {
         const prediction = stageUnavailable(
           "source-changed-before-publication",
           entry,
-          scope.run.readiness,
+          staged.readiness,
         );
         return validateWishlistEntryReadResultV2({
           entry: projectLegacyEntry(entry, prediction, unavailableRedundancy()),
@@ -352,5 +399,15 @@ export function computeUnifiedWishlistProjection(
       }),
     );
   }
+  options.observer?.onCalculation?.({
+    scope: staged,
+    proof: staged.proof,
+    pairSimilarities: similarities,
+    calculationDependencyPairs:
+      "calculationDependencyPairs" in staged ? staged.calculationDependencyPairs : [],
+    collectionFitness,
+    actualFitness,
+    results,
+  });
   return Object.freeze(results.map((result) => deepFreeze(result)));
 }

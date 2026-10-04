@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { CollectionV10, DurableGame, GameWithScore } from "@shelf-judge/shared";
 import {
   createJevRunCollectionLookup,
+  createJevRunScopeFromExactPairs,
   jevRunPairSourcesChanged,
   planJevRunScope,
   type JevRunPair,
@@ -57,6 +58,35 @@ function firstPair(scope: JevRunScope): JevRunPair | undefined {
 }
 
 describe("Jev run scope planner", () => {
+  test("frozen explicit run scope iterates and looks up only authorized pairs", () => {
+    const games = [game("a", { description: "a" }), game("b", { description: "b" }), game("c")];
+    const source = collection(games);
+    const scope = createJevRunScopeFromExactPairs(source, [
+      {
+        gameAId: "a",
+        gameBId: "b",
+        descriptionSignalRequired: true,
+        ownerNoteSignalRequired: false,
+      },
+      {
+        gameAId: "a",
+        gameBId: "c",
+        descriptionSignalRequired: false,
+        ownerNoteSignalRequired: false,
+      },
+    ]);
+
+    expect(scope.totalEligiblePairs).toBe(2);
+    expect([...scope.pairs()].map(({ gameAId, gameBId }) => [gameAId, gameBId])).toEqual([
+      ["a", "b"],
+      ["a", "c"],
+    ]);
+    expect(scope.pairForIds("a", "b")?.descriptionSignalRequired).toBe(true);
+    expect(scope.pairForIds("a", "c")).toBeDefined();
+    expect(scope.pairForIds("b", "c")).toBeUndefined();
+    expect(scope.pairForIds("c", "a")).toBeDefined();
+  });
+
   test("keeps 19,900 unordered pairs lazy for 200 eligible games", () => {
     const games = Array.from({ length: 200 }, (_, i) =>
       game(`g${String(i).padStart(3, "0")}`, { description: "desc", note: "note" }),

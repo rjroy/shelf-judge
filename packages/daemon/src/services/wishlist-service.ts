@@ -2,26 +2,25 @@ import { v4 as uuidv4 } from "uuid";
 import {
   toErrorMessage,
   type WishlistEntry,
+  type WishlistEntryView,
   type WishlistBreakdownEntry,
   type NicheImpact,
   type RedundancyAdjustment,
   type WishlistBggSourceSnapshot,
-  type WishlistEntryReadResult,
   type AddGameInput,
   type AddGameResult,
   WishlistBggSourceSnapshotSchema,
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
-import type { PredictionService, PredictedGameResult } from "./prediction-service.js";
+import type {
+  PredictionService,
+  PredictedBggCandidateResult,
+  PredictedGameResult,
+} from "./prediction-service.js";
 import type { GameService } from "./game-service.js";
 import { computeNicheImpact } from "./niche-engine.js";
 import { computeRedundancyPreview } from "./redundancy-preview.js";
-import {
-  computeWishlistRedundancyReadResults,
-  savedWishlistRedundancyReadResults,
-  WishlistRedundancyCaptureChangedError,
-  type WishlistDescriptionSignalResolver,
-} from "./wishlist-redundancy-scoring.js";
+import { type WishlistDescriptionSignalResolver } from "./wishlist-redundancy-scoring.js";
 import {
   advanceWishlistMutationGeneration,
   canonicalSha256,
@@ -32,14 +31,19 @@ import type { JevPairCache, JevPairKey } from "./jev-pair-cache-service.js";
 import { encodeWishlistBggMember, parseWishlistCandidateMember } from "./jev-pair-identity.js";
 import { validateWishlistCandidateCOnlyRow } from "./wishlist-candidate-read-proof.js";
 import { createLogger } from "./logger.js";
+import type { UnifiedScoringService } from "./unified-scoring-service.js";
+import type { WishlistEntryReadResultV2 } from "../../../shared/src/wishlist-current-projection-v2.js";
+import { createUnifiedScoringService } from "./unified-scoring-service.js";
+import { createFitnessService } from "./fitness-service.js";
+import { unavailableUnifiedWishlistProjection } from "./unified-wishlist-projection.js";
 
 export interface WishlistService {
-  list(): Promise<WishlistEntry[]>;
-  listWithCurrentRedundancy(): Promise<WishlistEntryReadResult[]>;
-  add(bggId: number): Promise<WishlistEntry>;
+  list(): Promise<WishlistEntryView[]>;
+  listWithCurrentRedundancy(): Promise<WishlistEntryReadResultV2[]>;
+  add(bggId: number): Promise<WishlistEntryView>;
   remove(id: string): Promise<void>;
   clear(): Promise<number>;
-  refresh(id: string): Promise<WishlistEntry>;
+  refresh(id: string): Promise<WishlistEntryView>;
   refreshAll(): Promise<{ refreshed: number; errors: string[] }>;
   removeByBggId(bggId: number): Promise<boolean>;
   /** Finalize an already committed collection acquisition; never used for ordinary removal. */
@@ -51,6 +55,7 @@ export interface WishlistService {
 export interface WishlistServiceDeps {
   storageService: StorageService;
   predictionService: PredictionService;
+  unifiedScoringService?: UnifiedScoringService;
   gameService: GameService;
   resolveWishlistDescriptionSignal?: WishlistDescriptionSignalResolver;
   coordinator?: ProfileSourceCoordinator;
@@ -75,14 +80,14 @@ export class WishlistAcquisitionRecoveryError extends Error {
 
 function buildEntry(
   bggId: number,
-  result: PredictedGameResult,
+  result: PredictedBggCandidateResult,
   nicheImpact: NicheImpact,
   redundancyPreview: RedundancyAdjustment | null,
 ): WishlistEntry {
-  const isUnavailable = result.predictionUnavailable !== null;
+  const isUnavailable = result.predictionUnavailable !== null || result.score === null;
 
   let predictedBreakdown: WishlistBreakdownEntry[] | null = null;
-  if (!isUnavailable && result.score.breakdown) {
+  if (!isUnavailable && result.score?.breakdown) {
     predictedBreakdown = result.score.breakdown.flatMap((breakdown) =>
       breakdown.effectiveRating === null
         ? []
@@ -125,8 +130,8 @@ function buildEntry(
     name: scoringInput?.primaryName ?? result.game.name,
     yearPublished: scoringInput?.yearPublished ?? result.game.yearPublished,
     thumbnailUrl: result.game.imageUrl,
-    predictedScore: isUnavailable ? null : result.score.score,
-    predictionConfidence: isUnavailable ? null : (result.score.predictionMeta?.confidence ?? null),
+    predictedScore: isUnavailable ? null : (result.score?.score ?? null),
+    predictionConfidence: isUnavailable ? null : (result.score?.predictionMeta?.confidence ?? null),
     predictedBreakdown,
     nicheImpact: nicheImpact.wouldJoin.length > 0 ? nicheImpact : null,
     redundancyPreview,
@@ -136,11 +141,21 @@ function buildEntry(
 }
 
 function computeNicheImpactForResult(
-  result: PredictedGameResult,
+  result: PredictedGameResult | PredictedBggCandidateResult,
   allGames: Awaited<ReturnType<PredictionService["listGamesWithPredictions"]>>,
   nicheSettings: Awaited<ReturnType<StorageService["loadNicheSettings"]>>,
 ): NicheImpact {
+  if (!result.score) return { wouldJoin: [] };
   return computeNicheImpact(allGames, result.game, result.score, nicheSettings);
+}
+
+async function predictWishlistCandidate(
+  predictionService: PredictionService,
+  bggId: number,
+): Promise<PredictedGameResult | PredictedBggCandidateResult> {
+  return predictionService.predictBggGameForWishlist
+    ? predictionService.predictBggGameForWishlist(bggId)
+    : predictionService.predictBggGame(bggId);
 }
 
 function ownedBggIds(
@@ -164,6 +179,13 @@ function excludeOwnedWishlistEntries(
 
 export function createWishlistService(deps: WishlistServiceDeps): WishlistService {
   const { storageService, predictionService } = deps;
+  const unifiedScoringService =
+    deps.unifiedScoringService ??
+    createUnifiedScoringService({
+      storageService,
+      cache: deps.jevPairCache ?? null,
+      fitnessService: createFitnessService(),
+    });
   const coordinator = deps.coordinator ?? profileSourceCoordinatorFor(storageService);
   const logger = createLogger("wishlist-acquisition");
 
@@ -180,98 +202,50 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
     );
   }
 
-  async function loadReadCapture() {
-    const [entries, collection, redundancySettings, predictionSettings, tournamentData] =
-      await Promise.all([
+  async function readCurrentProjection(): Promise<WishlistEntryReadResultV2[]> {
+    // The scoring factory captures all persisted inputs and candidate facts as one private source
+    // frame. Retry only a bounded number of times when the publication fence reports staleness.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const frame = await unifiedScoringService.capture({ includeWishlist: true });
+        const owned = ownedBggIds(frame.sources.collection);
+        const selectedBggIds = frame.wishlistEntries
+          .filter((entry) => !owned.has(entry.bggId))
+          .map((entry) => entry.bggId);
+        const calculation = unifiedScoringService.calculate(
+          frame,
+          { scope: "wishlist", selectedBggIds },
+          { includeRedundancy: true },
+        );
+        const published = await unifiedScoringService.publishCurrent(
+          calculation,
+          () => calculation.wishlistResults,
+        );
+        if (published) return [...published];
+      } catch {
+        break;
+      }
+    }
+    const entries = await coordinator.runExclusive(async () => {
+      const [wishlist, collection] = await Promise.all([
         storageService.loadWishlist(),
         storageService.loadCollection(),
-        storageService.loadRedundancySettings(),
-        storageService.loadPredictionSettings(),
-        storageService.loadTournament(),
       ]);
-    return { entries, collection, redundancySettings, predictionSettings, tournamentData };
-  }
-
-  function readCaptureIdentity(capture: Awaited<ReturnType<typeof loadReadCapture>>): string {
-    return canonicalSha256(capture);
+      return excludeOwnedWishlistEntries(wishlist, collection);
+    });
+    return [...unavailableUnifiedWishlistProjection(entries)];
   }
 
   return {
-    async list(): Promise<WishlistEntry[]> {
-      return coordinator.runExclusive(async () => {
-        const [entries, collection] = await Promise.all([
-          storageService.loadWishlist(),
-          storageService.loadCollection(),
-        ]);
-        return excludeOwnedWishlistEntries(entries, collection);
-      });
+    async list(): Promise<WishlistEntryView[]> {
+      return (await readCurrentProjection()).map(({ entry }) => entry);
     },
 
-    async listWithCurrentRedundancy(): Promise<WishlistEntryReadResult[]> {
-      if (!predictionService.listGamesWithPredictionsFromSnapshot) {
-        throw new Error("Snapshot scoring is required for a coherent wishlist comparison capture");
-      }
-      for (let attempt = 0; attempt < 2; attempt++) {
-        let capture: Awaited<ReturnType<typeof loadReadCapture>>;
-        try {
-          capture = await coordinator.runExclusive(loadReadCapture);
-        } catch {
-          break;
-        }
-        let identity: string;
-        try {
-          identity = readCaptureIdentity(capture);
-        } catch {
-          break;
-        }
-        const scoredGames = await predictionService.listGamesWithPredictionsFromSnapshot(
-          capture.collection,
-          capture.tournamentData,
-          capture.predictionSettings,
-        );
-        try {
-          return await computeWishlistRedundancyReadResults({
-            entries: excludeOwnedWishlistEntries(capture.entries, capture.collection),
-            collection: capture.collection,
-            scoredGames,
-            redundancySettings: capture.redundancySettings,
-            resolveDescriptionSignal: deps.resolveWishlistDescriptionSignal,
-            async validateCaptureBeforePublish(request, usedDescriptionSignal) {
-              return coordinator.runExclusive(async () => {
-                try {
-                  const current = await loadReadCapture();
-                  if (readCaptureIdentity(current) !== identity) return "source-changed";
-                  if (request === null || !usedDescriptionSignal) return "current";
-                  return deps.resolveWishlistDescriptionSignal?.isCurrent?.(request)
-                    ? "current"
-                    : "cache-changed";
-                } catch {
-                  return "source-changed";
-                }
-              });
-            },
-          });
-        } catch (error) {
-          if (!(error instanceof WishlistRedundancyCaptureChangedError)) throw error;
-        }
-      }
-
-      const fallbackEntries = await coordinator.runExclusive(async () => {
-        try {
-          const [entries, collection] = await Promise.all([
-            storageService.loadWishlist(),
-            storageService.loadCollection(),
-          ]);
-          return excludeOwnedWishlistEntries(entries, collection);
-        } catch {
-          // Without current ownership authority, saved entries cannot be safely disclosed.
-          return [];
-        }
-      });
-      return savedWishlistRedundancyReadResults(fallbackEntries);
+    async listWithCurrentRedundancy(): Promise<WishlistEntryReadResultV2[]> {
+      return readCurrentProjection();
     },
 
-    async add(bggId: number): Promise<WishlistEntry> {
+    async add(bggId: number): Promise<WishlistEntryView> {
       const wishlist = await storageService.loadWishlist();
       if (wishlist.some((e) => e.bggId === bggId)) {
         throw new Error("This game is already on your wishlist");
@@ -282,7 +256,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
         throw new Error("This game is already in your collection");
       }
 
-      const result = await predictionService.predictBggGame(bggId);
+      const result = await predictWishlistCandidate(predictionService, bggId);
       if (result.bggVerification?.status === "existing-local-unverified") {
         throw new Error(
           `BGG Thing verification failed (${result.bggVerification.failure}) for ${bggId}`,
@@ -296,7 +270,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
       ]);
       const nicheImpact = computeNicheImpactForResult(result, allGames, nicheSettings);
       const redundancyPreview =
-        result.predictionUnavailable === null
+        result.predictionUnavailable === null && result.score !== null
           ? computeRedundancyPreview(
               { game: result.game, score: result.score },
               collection,
@@ -319,7 +293,11 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
         currentWishlist.push(entry);
         await storageService.saveWishlist(currentWishlist);
       });
-      return entry;
+      const projected = (await readCurrentProjection()).find(
+        (result) => result.entry.bggId === bggId,
+      );
+      if (!projected) throw new Error("Added wishlist entry has no current projection");
+      return projected.entry;
     },
 
     async remove(id: string): Promise<void> {
@@ -346,7 +324,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
       });
     },
 
-    async refresh(id: string): Promise<WishlistEntry> {
+    async refresh(id: string): Promise<WishlistEntryView> {
       const wishlist = await storageService.loadWishlist();
       const index = wishlist.findIndex((e) => e.id === id);
       if (index === -1) {
@@ -354,7 +332,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
       }
 
       const existing = wishlist[index];
-      const result = await predictionService.predictBggGame(existing.bggId);
+      const result = await predictWishlistCandidate(predictionService, existing.bggId);
       if (result.bggVerification?.status === "existing-local-unverified") {
         throw new Error(
           `BGG Thing verification failed (${result.bggVerification.failure}) for ${existing.bggId}`,
@@ -371,7 +349,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
       const nicheImpact = computeNicheImpactForResult(result, allGames, nicheSettings);
 
       const redundancyPreview =
-        result.predictionUnavailable === null
+        result.predictionUnavailable === null && result.score !== null
           ? computeRedundancyPreview(
               { game: result.game, score: result.score },
               collection,
@@ -385,7 +363,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
       updated.id = existing.id;
       updated.addedAt = existing.addedAt;
 
-      return coordinator.runExclusive(async () => {
+      await coordinator.runExclusive(async () => {
         const current = await storageService.loadWishlist();
         const currentIndex = current.findIndex((entry) => entry.id === existing.id);
         if (currentIndex < 0) throw new Error(`Wishlist entry not found: ${existing.id}`);
@@ -399,6 +377,9 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
         await storageService.saveWishlist(current);
         return updated;
       });
+      const projected = (await readCurrentProjection()).find((result) => result.entry.id === id);
+      if (!projected) throw new Error("Refreshed wishlist entry has no current projection");
+      return projected.entry;
     },
 
     async refreshAll(): Promise<{ refreshed: number; errors: string[] }> {
@@ -420,7 +401,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
       for (let i = 0; i < wishlist.length; i++) {
         const existing = wishlist[i];
         try {
-          const result = await predictionService.predictBggGame(existing.bggId);
+          const result = await predictWishlistCandidate(predictionService, existing.bggId);
           if (result.bggVerification?.status === "existing-local-unverified") {
             throw new Error(
               `BGG Thing verification failed (${result.bggVerification.failure}) for ${existing.bggId}`,
@@ -429,7 +410,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
           const nicheImpact = computeNicheImpactForResult(result, allGames, nicheSettings);
 
           const redundancyPreview =
-            result.predictionUnavailable === null
+            result.predictionUnavailable === null && result.score !== null
               ? computeRedundancyPreview(
                   { game: result.game, score: result.score },
                   collection,

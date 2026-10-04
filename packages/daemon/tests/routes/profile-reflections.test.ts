@@ -18,6 +18,7 @@ import {
 import { Hono } from "hono";
 import { Compile } from "typebox/compile";
 import { createProfileReflectionRoutes } from "../../src/routes/profile-reflections.js";
+import { createReflectionProjectionSnapshotService } from "../../src/services/reflection-evidence-projections.js";
 import {
   REFLECTION_DISCOVERY_SCHEMAS,
   REFLECTION_RUNTIME_VALIDATION_AUTHORITY,
@@ -32,7 +33,7 @@ import type {
   ReflectionCurrentSources,
   ReflectionStateService,
 } from "../../src/services/reflection-state-service.js";
-import { createTestApp, jsonRequest } from "../helpers/test-app.js";
+import { createMockBggClient, createTestApp, jsonRequest } from "../helpers/test-app.js";
 
 const NOW = "2026-09-01T12:00:00.000Z";
 const CAPABILITY = "a".repeat(64);
@@ -810,8 +811,115 @@ describe("Profile Reflection routes", () => {
 });
 
 describe("production-equivalent passive composition", () => {
+  test("cold capture hydrates before loading inputs and matches a warm capture", async () => {
+    const context = createTestApp();
+    const sourceVector = context.storageService.sourceVector?.bind(context.storageService);
+    const hydrateSourceVector = context.storageService.hydrateSourceVector?.bind(
+      context.storageService,
+    );
+    if (!sourceVector || !hydrateSourceVector)
+      throw new Error("Test storage lacks source-vector support");
+    const before = sourceVector();
+    expect(before.available).toBe(false);
+    expect(before.unavailableSources).toContain("startup");
+    const hydrate = hydrateSourceVector.bind(context.storageService);
+    let hydrateCalls = 0;
+    context.storageService.hydrateSourceVector = async () => {
+      hydrateCalls += 1;
+      return hydrate();
+    };
+    const service = createReflectionProjectionSnapshotService({
+      storageService: context.storageService,
+      displayedFitnessService: context.displayedFitnessService,
+      now: () => NOW,
+    });
+    const coldCapture = await service.capture();
+    const after = sourceVector();
+    // Diagnostic evidence intentionally records only the availability markers and token.
+    expect(after.available).toBe(true);
+    expect(after.unavailableSources).not.toContain("startup");
+    expect(after.changeToken).toBeGreaterThan(before.changeToken);
+    expect(hydrateCalls).toBe(1);
+    const warmCapture = await service.capture();
+    expect(warmCapture.snapshotFingerprint).toBe(coldCapture.snapshotFingerprint);
+    expect(hydrateCalls).toBe(1);
+  });
+
+  test("startup hydration failure cannot produce a reflection snapshot", async () => {
+    const context = createTestApp();
+    const sourceVector = context.storageService.sourceVector?.bind(context.storageService);
+    if (!sourceVector) throw new Error("Test storage lacks source-vector support");
+    context.storageService.hydrateSourceVector = () =>
+      Promise.reject(new Error("synthetic source initialization failure"));
+    const service = createReflectionProjectionSnapshotService({
+      storageService: context.storageService,
+      displayedFitnessService: context.displayedFitnessService,
+    });
+    let message = "";
+    try {
+      await service.capture();
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toBe("synthetic source initialization failure");
+    expect(sourceVector().unavailableSources).toContain("startup");
+  });
+
+  test("same-revision private collection changes after capture are rejected", async () => {
+    const context = createTestApp();
+    await context.storageService.hydrateSourceVector?.();
+    await context.gameService.addGame({ name: "Private snapshot fence" });
+    const service = createReflectionProjectionSnapshotService({
+      storageService: context.storageService,
+      displayedFitnessService: {
+        async listGamesFromSnapshot(snapshot, options) {
+          const current = await context.storageService.loadCollection();
+          const changed = {
+            ...current,
+            games: current.games.map((game) => ({ ...game, name: `${game.name} changed` })),
+          };
+          await context.storageService.saveCollection(changed);
+          return context.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+        listGames: (options) => context.displayedFitnessService.listGames(options),
+      },
+    });
+    let message = "";
+    try {
+      await service.capture();
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain(
+      "Displayed fitness snapshot differs from current capture: collection",
+    );
+  });
+
   test("startup, cache-miss reads, ordinary profile reads, and source mutations invoke no model work", async () => {
     let modelCalls = 0;
+    const bggCalls = { getGame: 0, getGames: 0, search: 0, collection: 0, plays: 0 };
+    const bggClient = createMockBggClient({
+      getGame: () => {
+        bggCalls.getGame += 1;
+        return Promise.reject(new Error("Passive reads must not hydrate BGG data"));
+      },
+      getGames: () => {
+        bggCalls.getGames += 1;
+        return Promise.reject(new Error("Passive reads must not hydrate BGG data"));
+      },
+      searchGames: () => {
+        bggCalls.search += 1;
+        return Promise.reject(new Error("Passive reads must not hydrate BGG data"));
+      },
+      getUserCollection: () => {
+        bggCalls.collection += 1;
+        return Promise.reject(new Error("Passive reads must not hydrate BGG data"));
+      },
+      getPlayCount: () => {
+        bggCalls.plays += 1;
+        return Promise.reject(new Error("Passive reads must not hydrate BGG data"));
+      },
+    });
     const provider: GroundedAnalysisProvider = {
       configurationStatus: CONFIGURATION,
       analyze() {
@@ -819,7 +927,7 @@ describe("production-equivalent passive composition", () => {
         return Promise.reject(new Error("Passive operations must not invoke the model"));
       },
     };
-    const context = createTestApp({ groundedAnalysisProvider: provider });
+    const context = createTestApp({ groundedAnalysisProvider: provider, bggClient });
     expect(modelCalls).toBe(0);
     expect((await jsonRequest(context.app, "GET", "/api/profile/reflections")).status).toBe(200);
     expect((await jsonRequest(context.app, "GET", "/api/profile")).status).toBe(200);
@@ -830,6 +938,7 @@ describe("production-equivalent passive composition", () => {
       text: "A source mutation must remain passive.",
     });
     expect(modelCalls).toBe(0);
+    expect(bggCalls).toEqual({ getGame: 0, getGames: 0, search: 0, collection: 0, plays: 0 });
   });
 });
 

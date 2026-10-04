@@ -105,5 +105,13 @@ describe("wishlist current projection v2 contracts", () => {
         redundancy: { source: "base-prediction", adjustment: null, orderingScore: 0 },
       }).success,
     ).toBe(true);
+    expect(
+      CurrentPredictionProjectionSchemaV2.safeParse({
+        availability: "available",
+        source: "current",
+        result: { ...result, privateField: "must stay rejected" },
+        predictionUnavailable: null,
+      }).success,
+    ).toBe(false);
   });
 });

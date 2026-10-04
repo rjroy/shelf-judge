@@ -38,6 +38,11 @@ export interface StagedSimilarityCapture {
   isSourceCurrent(): boolean;
 }
 
+export interface ProposedStagedSimilarityCapture extends StagedSimilarityCapture {
+  readonly kind: "proposed-collection";
+  readonly baselineIdentity: string;
+}
+
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
     for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
@@ -45,6 +50,8 @@ function deepFreeze<T>(value: T): T {
   }
   return value;
 }
+
+const immutableDurableIdentityCache = new WeakMap<object, string>();
 
 function validSimilaritySettings(settings: SimilaritySettings): boolean {
   const weights = [
@@ -111,9 +118,13 @@ function sourceVectorIsCoherent(sources: StagedSimilaritySources): boolean {
 }
 
 function durableSourcesIdentity(sources: StagedSimilaritySources): string {
+  if (Object.isFrozen(sources)) {
+    const cached = immutableDurableIdentityCache.get(sources);
+    if (cached) return cached;
+  }
   const collection = sources.collection;
   const semantic = collection.semanticRedundancy;
-  return canonicalSha256({
+  const identityValue = {
     domain: "staged-unified-similarity-source-v2",
     algorithmVersion: "unified-jaccard-manhattan-jev-v1",
     factualContext: {
@@ -171,7 +182,12 @@ function durableSourcesIdentity(sources: StagedSimilaritySources): string {
         name: candidate.name,
         bggSource: candidate.bggSource,
       })),
-  });
+  };
+  // Collection-axis optionals can be represented as explicit `undefined` by an
+  // in-memory mutation candidate even though the durable schema omits them.
+  const identity = canonicalSha256(JSON.parse(JSON.stringify(identityValue)) as unknown);
+  if (Object.isFrozen(sources)) immutableDurableIdentityCache.set(sources, identity);
+  return identity;
 }
 
 function sameLiveFence(left: SourceVector, right: SourceVector): boolean {
@@ -236,4 +252,65 @@ export function captureStagedSimilaritySources(
     },
   };
   return Object.freeze(capture);
+}
+
+/**
+ * Captures a private uncommitted collection proposal while retaining the persisted source as
+ * its authority fence. This capability is not a current-source publication or run token.
+ */
+export function captureProposedStagedSimilaritySources(
+  proposedInput: StagedSimilaritySources,
+  baselineInput: StagedSimilaritySources,
+  reader: StagedSimilaritySourceReader,
+): ProposedStagedSimilarityCapture {
+  if (
+    !proposedInput.collection?.id ||
+    !Array.isArray(proposedInput.collection.games) ||
+    !Array.isArray(proposedInput.collection.axes) ||
+    !validSimilaritySettings(proposedInput.similaritySettings) ||
+    !sourceVectorIsCoherent(proposedInput) ||
+    !sourceVectorIsCoherent(baselineInput) ||
+    proposedInput.collection.id !== baselineInput.collection.id ||
+    proposedInput.collection.schemaVersion !== baselineInput.collection.schemaVersion ||
+    proposedInput.collection.revision !== baselineInput.collection.revision ||
+    proposedInput.sourceVector.processEpoch !== baselineInput.sourceVector.processEpoch ||
+    proposedInput.sourceVector.changeToken !== baselineInput.sourceVector.changeToken ||
+    proposedInput.sourceVector.available !== baselineInput.sourceVector.available ||
+    proposedInput.sourceVector.tournamentRevision !==
+      baselineInput.sourceVector.tournamentRevision ||
+    proposedInput.sourceVector.predictionSettingsRevision !==
+      baselineInput.sourceVector.predictionSettingsRevision ||
+    proposedInput.sourceVector.redundancyWeightsFingerprint !==
+      baselineInput.sourceVector.redundancyWeightsFingerprint
+  ) {
+    throw new TypeError("Proposed similarity sources do not match the captured baseline fence");
+  }
+  const sources = deepFreeze(structuredClone(proposedInput));
+  const baseline = deepFreeze(structuredClone(baselineInput));
+  const baselineIdentity = durableSourcesIdentity(baseline);
+  const durableIdentity = durableSourcesIdentity(sources);
+  const currentBaseline = (): StagedSimilaritySources | null => {
+    try {
+      const current = reader.readCurrent();
+      if (
+        !current ||
+        !sourceVectorIsCoherent(current) ||
+        durableSourcesIdentity(current) !== baselineIdentity ||
+        !sameLiveFence(baseline.sourceVector, current.sourceVector)
+      )
+        return null;
+      return current;
+    } catch {
+      return null;
+    }
+  };
+  if (!currentBaseline())
+    throw new TypeError("Proposed similarity baseline is not current with authoritative storage");
+  return Object.freeze({
+    kind: "proposed-collection" as const,
+    sources,
+    durableIdentity,
+    baselineIdentity,
+    isSourceCurrent: () => currentBaseline() !== null,
+  });
 }

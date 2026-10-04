@@ -28,7 +28,7 @@ import {
   type DisplayedGameFitness,
 } from "./displayed-fitness-service.js";
 import { computeCollectionProfile } from "./collection-profile-engine.js";
-import { projectProfileCollectionSource } from "./game-projection.js";
+import { projectProfileCollectionSource, projectPublicGame } from "./game-projection.js";
 import { createGroundedEvidenceRegistry } from "./grounded-analysis/evidence-registry.js";
 import type {
   GroundedEvidenceSnapshot,
@@ -428,6 +428,7 @@ export interface ReflectionProjectionSnapshotServiceDeps {
     | "loadRedundancySettings"
     | "loadShelfConfig"
     | "sourceVector"
+    | "hydrateSourceVector"
   >;
   displayedFitnessService: DisplayedFitnessService;
   now?: () => string;
@@ -926,9 +927,15 @@ export function buildReflectionProjectionSnapshot(
   if (displayedById.size !== collection.games.length) {
     throw new Error("Displayed fitness snapshot must contain every collection game exactly once");
   }
+  const publicGames = new Map(collection.games.map((game) => [game.id, projectPublicGame(game)]));
   for (const game of collection.games) {
     const displayed = displayedById.get(game.id);
-    if (displayed === undefined || canonicalSha256(displayed.game) !== canonicalSha256(game)) {
+    const publicGame = publicGames.get(game.id);
+    if (
+      displayed === undefined ||
+      publicGame === undefined ||
+      canonicalSha256(projectPublicGame(displayed.game)) !== canonicalSha256(publicGame)
+    ) {
       throw new Error(`Displayed fitness game does not match collection snapshot for ${game.id}`);
     }
   }
@@ -1038,6 +1045,22 @@ export function createReflectionProjectionSnapshotService(
   return {
     capture() {
       return coordinator.runExclusive(async () => {
+        const beforeInputs = deps.storageService.sourceVector?.() ?? unavailableSourceVector();
+        if (
+          beforeInputs.unavailableSources.some(
+            (source) => source === "startup" || source === "startup-hydration",
+          )
+        ) {
+          if (!deps.storageService.hydrateSourceVector)
+            throw new Error("Reflection source-vector startup hydration is unavailable");
+          const hydrated = await deps.storageService.hydrateSourceVector();
+          if (
+            hydrated.unavailableSources.some(
+              (source) => source === "startup" || source === "startup-hydration",
+            )
+          )
+            throw new Error("Reflection source-vector startup hydration is incomplete");
+        }
         // Collection load may migrate storage, so capture dependent sources afterward.
         const durableCollection = await deps.storageService.loadCollection();
         const [config, tournament, predictionSettings, redundancySettings, shelfConfiguration] =

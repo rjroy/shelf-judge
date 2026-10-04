@@ -1,47 +1,24 @@
 // Wishlist commands: list, add, remove, clear, refresh
-import type {
-  RedundancyAdjustment,
-  WishlistEntry,
-  WishlistEntryReadResult,
-} from "@shelf-judge/shared";
+import type { WishlistEntry } from "@shelf-judge/shared";
+import type { WishlistEntryReadResultV2 } from "../../../shared/src/wishlist-current-projection-v2.js";
 import type { DaemonClient } from "../client.js";
 import type { OutputOptions } from "../output.js";
-import { formatTable, formatScore, printOutput } from "../output.js";
-
-// Keep this boundary tolerant while older daemons omit the optional preview.
-type WishlistEntryWithPreview = WishlistEntry & {
-  redundancyPreview?: RedundancyAdjustment | null;
-};
+import { formatScore, printOutput } from "../output.js";
+import { formatWishlistCurrentProjectionList } from "./wishlist-current-projection.js";
 
 export async function wishlistList(
   client: DaemonClient,
   _args: string[],
   opts: OutputOptions,
 ): Promise<string> {
-  const { ok, data } = await client.get<WishlistEntryReadResult[]>("/api/wishlist/redundancy");
+  const { ok, data } = await client.get<WishlistEntryReadResultV2[]>("/api/wishlist/redundancy");
 
   if (!ok) {
     const err = data as unknown as { error: string };
     throw new Error(err.error ?? "Failed to load wishlist redundancy projection");
   }
 
-  if (opts.json) return printOutput(data, opts);
-
-  if (data.length === 0) {
-    return "Wishlist is empty.";
-  }
-
-  return formatTable(
-    ["Name", "Year", "Score", "Confidence", "Redundancy", "Added"],
-    data.map(({ entry, redundancy }) => [
-      entry.name,
-      entry.yearPublished != null ? String(entry.yearPublished) : "---",
-      formatScore(entry.predictedScore),
-      entry.predictionConfidence ?? "---",
-      formatWishlistRedundancyProjection(redundancy),
-      new Date(entry.addedAt).toLocaleDateString(),
-    ]),
-  );
+  return formatWishlistCurrentProjectionList(data, opts);
 }
 
 export async function wishlistAdd(
@@ -59,7 +36,7 @@ export async function wishlistAdd(
     throw new Error(`Invalid BGG ID: "${bggIdStr}"`);
   }
 
-  const { ok, data } = await client.post<{ entry: WishlistEntryWithPreview }>("/api/wishlist", {
+  const { ok, data } = await client.post<{ entry: WishlistEntry }>("/api/wishlist", {
     bggId,
   });
 
@@ -68,15 +45,9 @@ export async function wishlistAdd(
     throw new Error(err.error ?? "Failed to add to wishlist");
   }
 
-  if (opts.json) return printOutput({ ...data.entry, redundancyPreviewMode: "factual-only" }, opts);
-
-  const score =
-    data.entry.predictedScore != null
-      ? `predicted: ${data.entry.predictedScore.toFixed(1)}`
-      : "no prediction";
-
-  const preview = `Factual-only preview.\n${formatWishlistRedundancyDetail(data.entry.redundancyPreview)}`;
-  return [`Added ${data.entry.name} (${score})`, preview].filter(Boolean).join("\n");
+  if (opts.json) return printOutput(data.entry, opts);
+  const score = data.entry.predictedScore;
+  return `Added ${data.entry.name}.\nCurrent prediction ${score == null ? "unavailable" : `available: ${formatScore(score)}`}.`;
 }
 
 export async function wishlistRemove(
@@ -146,23 +117,16 @@ export async function wishlistRefresh(
 
   if (id) {
     // Refresh single entry
-    const { ok, data } = await client.post<{ entry: WishlistEntryWithPreview }>(
-      `/api/wishlist/${id}/refresh`,
-    );
+    const { ok, data } = await client.post<{ entry: WishlistEntry }>(`/api/wishlist/${id}/refresh`);
 
     if (!ok) {
       const err = data as unknown as { error: string };
       throw new Error(err.error ?? "Failed to refresh wishlist entry");
     }
 
-    if (opts.json)
-      return printOutput({ ...data.entry, redundancyPreviewMode: "factual-only" }, opts);
-
-    const score =
-      data.entry.predictedScore != null ? data.entry.predictedScore.toFixed(1) : "no prediction";
-
-    const preview = `Factual-only preview.\n${formatWishlistRedundancyDetail(data.entry.redundancyPreview)}`;
-    return [`Refreshed ${data.entry.name}: ${score}`, preview].filter(Boolean).join("\n");
+    if (opts.json) return printOutput(data.entry, opts);
+    const score = data.entry.predictedScore;
+    return `Refreshed ${data.entry.name}.\nCurrent prediction ${score == null ? "unavailable" : `available: ${formatScore(score)}`}.`;
   }
 
   // Refresh all
@@ -182,33 +146,6 @@ export async function wishlistRefresh(
     msg += ` (${data.errors.length} ${data.errors.length === 1 ? "error" : "errors"})`;
   }
   return msg;
-}
-
-function formatWishlistRedundancyProjection(
-  redundancy: WishlistEntryReadResult["redundancy"],
-): string {
-  const score = formatScore(redundancy.orderingScore);
-  const adjustment = redundancy.adjustment;
-  if (!adjustment)
-    return redundancy.orderingScore == null ? "---" : `${score} (${redundancy.source})`;
-  const neighbors = adjustment.nicheNeighbors.slice(0, 3).map((neighbor) => neighbor.gameName);
-  const similar =
-    neighbors.length > 0 ? `; similar: ${neighbors.join(", ")}` : "; no similar games";
-  return `${score} (${redundancy.source}; -${adjustment.penalty.toFixed(1)})${similar}`;
-}
-
-function formatWishlistRedundancyDetail(adj: RedundancyAdjustment | null | undefined): string {
-  if (!adj) return "";
-  const lines = [
-    `  Adjusted score: ${formatScore(adj.adjustedScore)} (redundancy penalty: -${adj.penalty.toFixed(1)})`,
-  ];
-  const neighbors = adj.nicheNeighbors.slice(0, 3);
-  lines.push(
-    neighbors.length > 0
-      ? `  Top similar collection games: ${neighbors.map((neighbor) => neighbor.gameName).join(", ")}`
-      : "  No similar collection games.",
-  );
-  return lines.join("\n");
 }
 
 function readLine(): Promise<string> {

@@ -72,10 +72,12 @@ export async function calculateBggFitnessPreview(
           snapshot.settings,
         )
       : await predictionService.listGamesWithPredictions();
-  const nicheImpact = computeNicheImpact(allGames, result.game, result.score, nicheSettings);
+  const nicheImpact = result.score
+    ? computeNicheImpact(allGames, result.game, result.score, nicheSettings)
+    : { wouldJoin: [] };
   let redundancyPreview: RedundancyAdjustment | null = null;
   if (storageService && redundancySettings) {
-    if (redundancySettings.enabled && result.predictionUnavailable === null) {
+    if (redundancySettings.enabled && result.predictionUnavailable === null && result.score) {
       const [collection, tournamentData] = snapshot
         ? [snapshot.collection, snapshot.tournamentData]
         : await Promise.all([storageService.loadCollection(), storageService.loadTournament()]);

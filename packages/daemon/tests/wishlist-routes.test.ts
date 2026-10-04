@@ -163,11 +163,18 @@ describe("wishlist routes", () => {
         projectionCalls++;
         return Promise.resolve([
           {
-            entry,
+            entry: { ...entry, bggSource: undefined } as never,
+            prediction: {
+              availability: "unavailable" as const,
+              source: "current" as const,
+              result: null,
+              reason: "missing-source" as const,
+              predictionUnavailable: null,
+            },
             redundancy: {
-              source: "saved-factual" as const,
-              adjustment: entry.redundancyPreview,
-              orderingScore: entry.redundancyPreview?.adjustedScore ?? entry.predictedScore,
+              source: "unavailable" as const,
+              adjustment: null,
+              orderingScore: null,
             },
           },
         ]);
@@ -179,7 +186,8 @@ describe("wishlist routes", () => {
       expect(body).toMatchObject([
         {
           entry: { id: "e1", bggId: 100, name: "Projected Game" },
-          redundancy: { source: "saved-factual", orderingScore: 7.5 },
+          prediction: { availability: "unavailable", reason: "missing-source" },
+          redundancy: { source: "unavailable", orderingScore: null },
         },
       ]);
       expect(JSON.stringify(body)).not.toContain("private persisted BGG prose");

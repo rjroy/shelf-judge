@@ -139,7 +139,14 @@ export interface CollectionMutationServiceDeps {
     accepted: Collection,
     context: CollectionMutationContext,
     affectedGameIds: readonly string[],
-  ) => Promise<readonly AttentionDispositionWinner[]>;
+  ) => Promise<
+    | readonly AttentionDispositionWinner[]
+    | {
+        readonly winners: readonly AttentionDispositionWinner[];
+        /** Private proposed evaluation fence, refreshed immediately before save. */
+        assertBaseCurrent(): Promise<boolean>;
+      }
+  >;
   /** Optional production wiring for purging persisted D-derived display caches. */
   semanticDisplayArtifactContext?: CollectionArtifactContext;
   /** Daemon-local SQLite cache; absent in isolated/test callers that do not own it. */
@@ -280,6 +287,7 @@ export function createCollectionMutationService(
         logger.log("collection mutation attempt", fields);
 
         let decision: CollectionMutationDecision<Value>;
+        let dispositionBaseFence: (() => Promise<boolean>) | undefined;
         const candidate = structuredClone(current);
         try {
           decision = await mutation(candidate);
@@ -317,7 +325,27 @@ export function createCollectionMutationService(
               impact?.kind === "global"
                 ? candidate.attentionDispositions.map((disposition) => disposition.gameId)
                 : (impact?.gameIds ?? []);
-            const winners = await dispositionWinners(current, candidate, context, affectedGameIds);
+            const resolution = await dispositionWinners(
+              current,
+              candidate,
+              context,
+              affectedGameIds,
+            );
+            const winners = Array.isArray(resolution)
+              ? resolution
+              : (
+                  resolution as {
+                    readonly winners: readonly AttentionDispositionWinner[];
+                    assertBaseCurrent(): Promise<boolean>;
+                  }
+                ).winners;
+            if (!Array.isArray(resolution)) {
+              const fencedResolution = resolution as {
+                readonly winners: readonly AttentionDispositionWinner[];
+                assertBaseCurrent(): Promise<boolean>;
+              };
+              dispositionBaseFence = () => fencedResolution.assertBaseCurrent();
+            }
             clearIncompatibleAttentionDispositions(
               current,
               candidate,
@@ -493,6 +521,16 @@ export function createCollectionMutationService(
             await compensate({ ...fields, after }, decision.onPersistenceFailure, error);
             throw error;
           }
+        }
+        if (dispositionBaseFence && !(await dispositionBaseFence())) {
+          const error = new Error("Proposed disposition scoring baseline changed before save");
+          logger.error("collection mutation source-only guard failed", {
+            ...fields,
+            after,
+            outcome: "stale-proposed-baseline",
+          });
+          await compensate({ ...fields, after }, decision.onPersistenceFailure, error);
+          throw error;
         }
         logger.log("collection mutation persistence attempt", { ...fields, after });
         let persistenceResponseFailed = false;

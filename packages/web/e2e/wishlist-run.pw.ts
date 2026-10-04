@@ -8,7 +8,7 @@ const entries = [
     yearPublished: 2020,
     thumbnailUrl: null,
     predictedScore: 7.2,
-    predictionConfidence: "medium",
+    predictionConfidence: "moderate",
     predictedBreakdown: null,
     nicheImpact: null,
     redundancyPreview: null,
@@ -21,13 +21,64 @@ const entries = [
     yearPublished: 2021,
     thumbnailUrl: null,
     predictedScore: 6.8,
-    predictionConfidence: "low",
+    predictionConfidence: "weak",
     predictedBreakdown: null,
     nicheImpact: null,
     redundancyPreview: null,
     addedAt: "2026-01-02T00:00:00.000Z",
   },
 ];
+
+function prediction(entry: (typeof entries)[number], score = entry.predictedScore ?? 0) {
+  return {
+    score,
+    ratedAxisCount: 1,
+    totalAxisCount: 1,
+    breakdown: [
+      {
+        axisId: "fixture-axis",
+        axisName: "Fixture axis",
+        weight: 1,
+        contribution: score,
+        source: "predicted",
+        derivedField: null,
+        sourceValue: null,
+        scoringRawValue: null,
+        effectiveRating: score,
+        preferenceShape: "higher-is-better",
+        curveAffected: false,
+        unit: null,
+        provenance: null,
+        configurationSummary: null,
+        overridden: false,
+        overrideValue: null,
+        predictionConfidence: "moderate",
+        referenceGames: null,
+      },
+    ],
+    vetoed: score === 0,
+    vetoedBy:
+      score === 0
+        ? {
+            axisId: "fixture-axis",
+            axisName: "Fixture axis",
+            threshold: 1,
+            direction: "below",
+            rawValue: 0,
+          }
+        : null,
+    hypotheticalScore: score === 0 ? 4.5 : null,
+    predictionMeta: {
+      readinessStage: 2,
+      confidence: "moderate",
+      predictedAxisCount: 1,
+      actualAxisCount: 0,
+      referenceGameCount: 1,
+      coveragePercent: 1,
+    },
+    redundancyAdjustment: null,
+  };
+}
 
 async function wishlistFixture(
   page: Page,
@@ -37,6 +88,9 @@ async function wishlistFixture(
   projectionScenario = false,
   delayInitialProjection = false,
   holdFirstPreview = false,
+  cacheResultChangesAfterRun = false,
+  missingAndZeroScenario = false,
+  projectionScoreAfterVisibility?: number,
 ) {
   const calls: Array<{ url: string; method: string; body?: unknown }> = [];
   let active = activeInitially;
@@ -44,6 +98,8 @@ async function wishlistFixture(
   const factualRefreshedIds = new Set<string>();
   let projectionRequestCount = 0;
   let previewRequestCount = 0;
+  let cachedRunCompleted = false;
+  let runStatusReadsAfterStart = 0;
   await page.route("**/api/daemon/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -76,23 +132,52 @@ async function wishlistFixture(
     } else if (url.pathname === "/api/daemon/wishlist/redundancy") {
       projectionRequestCount += 1;
       responseDelayMs = delayInitialProjection && projectionRequestCount === 1 ? 800 : 0;
-      data = currentEntries.map((entry, index) => ({
-        entry,
-        redundancy: {
-          source:
-            projectionScenario && !factualRefreshedIds.has(entry.id)
-              ? "current"
-              : "base-prediction",
-          adjustment: null,
-          orderingScore:
-            projectionScenario && !factualRefreshedIds.has(entry.id)
-              ? index === 0
-                ? 10
-                : 8
-              : entry.predictedScore,
-        },
-      }));
-    } else if (url.pathname.endsWith("/refresh-progress"))
+      data = currentEntries.map((entry, index) => {
+        const currentScore = missingAndZeroScenario
+          ? 0
+          : cacheResultChangesAfterRun && cachedRunCompleted
+            ? index === 0
+              ? 9.1
+              : 8.9
+            : projectionScoreAfterVisibility && projectionRequestCount > 1
+              ? projectionScoreAfterVisibility
+              : (entry.predictedScore ?? 0);
+        const unavailable = missingAndZeroScenario && index === 0;
+        const currentComparison = projectionScenario && !factualRefreshedIds.has(entry.id);
+        return {
+          entry,
+          prediction: unavailable
+            ? {
+                availability: "unavailable",
+                source: "current",
+                result: null,
+                reason: "missing-source",
+                predictionUnavailable: null,
+              }
+            : {
+                availability: "available",
+                source: "current",
+                result: prediction(entry, currentScore),
+                predictionUnavailable: null,
+              },
+          redundancy: {
+            source: unavailable ? "unavailable" : currentComparison ? "current" : "base-prediction",
+            adjustment: null,
+            orderingScore: unavailable
+              ? null
+              : currentComparison
+                ? index === 0
+                  ? 10
+                  : 8
+                : currentScore,
+          },
+        };
+      });
+    } else if (url.pathname.endsWith("/refresh-progress")) {
+      if (active && cacheResultChangesAfterRun) {
+        runStatusReadsAfterStart += 1;
+        if (runStatusReadsAfterStart > 1) active = false;
+      }
       data = {
         coverageMeasurement: "not-measured",
         activity: active
@@ -113,7 +198,7 @@ async function wishlistFixture(
             }
           : { state: "none" },
       };
-    else if (url.pathname.endsWith("/run-preview")) {
+    } else if (url.pathname.endsWith("/run-preview")) {
       previewRequestCount += 1;
       const selected = url.searchParams.getAll("bggId").map(Number);
       const candidates = selected.length ? selected.length : entries.length;
@@ -186,6 +271,7 @@ async function wishlistFixture(
         data = { error: "Run precondition failed" };
       } else {
         active = true;
+        if (cacheResultChangesAfterRun) cachedRunCompleted = true;
         data = { state: "running", runId: "wishlist-run" };
       }
     } else if (url.pathname.endsWith("/semantic/cancel")) {
@@ -397,16 +483,10 @@ test("an earlier projection response cannot restore scores from before factual r
   await expect(page.getByRole("heading", { name: "Compare wishlist descriptions" })).toBeVisible();
   const candidateOne = page.locator(".wishlist-card").filter({ hasText: "Sample Garden" });
   await candidateOne.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(
-    candidateOne.getByText("Base prediction; no redundancy adjustment is available."),
-  ).toBeVisible();
+  await expect(candidateOne.getByText("Base prediction: 2.0")).toBeVisible();
   await firstProjection;
-  await expect(
-    candidateOne.getByText("Base prediction; no redundancy adjustment is available."),
-  ).toBeVisible();
-  await expect(
-    candidateOne.getByText(/Current comparison · blended available signals/),
-  ).toHaveCount(0);
+  await expect(candidateOne.getByText("Base prediction: 2.0")).toBeVisible();
+  await expect(candidateOne.getByText(/Current comparison score/)).toHaveCount(0);
   expect(calls.filter((call) => call.url.includes("run-preview"))).toHaveLength(0);
   expect(calls.filter((call) => call.url.endsWith("/semantic/run"))).toHaveLength(0);
 });
@@ -419,7 +499,7 @@ test("single and bulk factual refresh replace stale projections without starting
   const candidateOne = page.locator(".wishlist-card").filter({ hasText: "Sample Garden" });
   const candidateTwo = page.locator(".wishlist-card").filter({ hasText: "Sample Harbor" });
   await expect(
-    candidateOne.getByText(/Current comparison · blended available signals/),
+    candidateOne.getByText("Current comparison; no adjustment is available."),
   ).toBeVisible();
   await page.getByRole("button", { name: "Sort Date Added" }).click();
   await page.getByRole("button", { name: "With Redundancy" }).click();
@@ -427,28 +507,88 @@ test("single and bulk factual refresh replace stale projections without starting
   await expect(cards.nth(0)).toContainText("Sample Garden");
 
   await candidateOne.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(
-    candidateOne.getByText("Base prediction; no redundancy adjustment is available."),
-  ).toBeVisible();
-  await expect(
-    candidateOne.getByText(/Current comparison · blended available signals/),
-  ).toHaveCount(0);
+  await expect(candidateOne.getByText("Base prediction: 2.0")).toBeVisible();
+  await expect(candidateOne.getByText(/Current comparison score/)).toHaveCount(0);
   cards = page.locator(".wishlist-card .wc-name");
   await expect(cards.nth(0)).toContainText("Sample Harbor");
   await expect(
-    candidateTwo.getByText(/Current comparison · blended available signals/),
+    candidateTwo.getByText("Current comparison; no adjustment is available."),
   ).toBeVisible();
 
   await page.getByRole("button", { name: "Refresh All" }).click();
-  await expect(
-    candidateTwo.getByText("Base prediction; no redundancy adjustment is available."),
-  ).toBeVisible();
-  await expect(
-    candidateTwo.getByText(/Current comparison · blended available signals/),
-  ).toHaveCount(0);
+  await expect(candidateTwo.getByText("Base prediction: 3.0")).toBeVisible();
+  await expect(candidateTwo.getByText(/Current comparison score/)).toHaveCount(0);
   cards = page.locator(".wishlist-card .wc-name");
   await expect(cards.nth(0)).toContainText("Sample Harbor");
   expect(calls.filter((call) => call.url.includes("run-preview"))).toHaveLength(0);
   expect(calls.filter((call) => call.url.endsWith("/semantic/run"))).toHaveLength(0);
   expect(calls.filter((call) => call.url === "/api/daemon/wishlist/redundancy")).toHaveLength(3);
+});
+
+test("an explicit run refreshes the current score and its breakdown together", async ({ page }) => {
+  const calls = await wishlistFixture(page, false, false, undefined, false, false, false, true);
+  await page.goto("/wishlist");
+  const garden = page.locator(".wishlist-card").filter({ hasText: "Sample Garden" });
+  await expect(garden.locator(".wc-score")).toHaveText("7.2");
+  await page.getByRole("button", { name: "Prepare comparison" }).click();
+  await page.getByRole("button", { name: "Authorize and start" }).click();
+  await page.getByRole("button", { name: "Refresh status" }).click();
+  await expect(garden.locator(".wc-score")).toHaveText("9.1");
+  await garden.getByRole("button", { name: /Per-axis breakdown/ }).click();
+  await expect(garden.locator(".wc-breakdown")).toContainText("9.1");
+  expect(calls.filter((call) => call.url === "/api/daemon/wishlist/redundancy")).toHaveLength(2);
+});
+
+test("returning to the wishlist reloads projections and rejects an older in-flight result", async ({
+  page,
+}) => {
+  const calls = await wishlistFixture(
+    page,
+    false,
+    false,
+    undefined,
+    false,
+    true,
+    false,
+    false,
+    false,
+    8.4,
+  );
+  const delayedRead = page.waitForResponse(
+    (response) => response.headers()["x-e2e-projection"] === "delayed-initial",
+  );
+  await page.goto("/wishlist");
+  await expect
+    .poll(() => calls.filter((call) => call.url === "/api/daemon/wishlist/redundancy").length)
+    .toBe(1);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  const garden = page.locator(".wishlist-card").filter({ hasText: "Sample Garden" });
+  await expect(garden.locator(".wc-score")).toHaveText("8.4");
+  await delayedRead;
+  await expect(garden.locator(".wc-score")).toHaveText("8.4");
+  expect(calls.filter((call) => call.url === "/api/daemon/wishlist/redundancy")).toHaveLength(2);
+});
+
+test("legacy saved scores do not replace an unavailable current score; zero sorts as available", async ({
+  page,
+}) => {
+  await wishlistFixture(page, false, false, undefined, false, false, false, false, true);
+  await page.goto("/wishlist");
+  const garden = page.locator(".wishlist-card").filter({ hasText: "Sample Garden" });
+  const harbor = page.locator(".wishlist-card").filter({ hasText: "Sample Harbor" });
+  await expect(garden.getByText("Current prediction unavailable", { exact: true })).toBeVisible();
+  await expect(garden.getByText("Refresh factual details to calculate it.")).toBeVisible();
+  await expect(garden.locator(".wc-score")).toHaveCount(0);
+  await expect(harbor.locator(".wc-score")).toHaveText("0.0");
+  await expect(harbor.getByText("Vetoed")).toBeVisible();
+  await page.getByRole("button", { name: "Sort Date Added" }).click();
+  await page.getByRole("button", { name: "Predicted Score" }).click();
+  const cards = page.locator(".wishlist-card");
+  await expect(cards.nth(0)).toContainText("Sample Harbor");
+  await expect(cards.nth(1)).toContainText("Sample Garden");
 });

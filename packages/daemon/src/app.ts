@@ -23,6 +23,7 @@ import { createShelfRoutes } from "./routes/shelf.js";
 import { createCollectionRoutes } from "./routes/collection.js";
 import { createWishlistService } from "./services/wishlist-service.js";
 import type { WishlistService } from "./services/wishlist-service.js";
+import type { UnifiedScoringService } from "./services/unified-scoring-service.js";
 import { createShelfService } from "./services/shelf-service.js";
 import { createCapacityService } from "./services/capacity-service.js";
 import type { TournamentService } from "./services/tournament-service.js";
@@ -101,6 +102,7 @@ export interface AppDeps {
     impact: import("./services/attention-candidate-service.js").AttentionMutationImpact,
   ) => Promise<void>;
   wishlistService?: WishlistService;
+  unifiedScoringService: UnifiedScoringService;
 }
 
 export interface AppResult {
@@ -129,6 +131,7 @@ export function createApp(deps: AppDeps): AppResult {
     ownerGameNoteService,
     groundedAnalysisProvider,
     reflectionRuntime,
+    unifiedScoringService,
     bggClient,
     onShutdown,
   } = deps;
@@ -139,6 +142,7 @@ export function createApp(deps: AppDeps): AppResult {
     createWishlistService({
       storageService,
       predictionService,
+      unifiedScoringService,
       gameService,
       coordinator: deps.profileSourceCoordinator,
       jevPairCache: deps.jevPairCache,

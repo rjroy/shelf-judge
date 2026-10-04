@@ -11,6 +11,7 @@ import type {
   PredictionUnavailable,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
+import { CollectionProfileCollectionSourceSchema, CollectionSchema } from "@shelf-judge/shared";
 import { isEnabledScoringAxis } from "@shelf-judge/shared";
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service";
@@ -38,6 +39,31 @@ import type { ReferenceGameCandidate, ClusterMembership } from "./prediction-eng
 import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 import type { AttentionMutationImpact } from "./attention-candidate-service.js";
 import { canonicalSuggestedPlayerPoll } from "./suggested-player-poll.js";
+import type { UnifiedScoringService } from "./unified-scoring-service.js";
+import { isBggDataStale } from "./game-service.js";
+import type { StagedPredictionRequest } from "./staged-similarity-scope.js";
+import { projectProfileCollectionSource } from "./game-projection.js";
+import { canonicalSha256 } from "./profile-source-coordinator.js";
+
+function sameSnapshotPredictionSources(
+  frame: import("./unified-scoring-service.js").UnifiedSourceFrame,
+  collection: CollectionProfileCollectionSource,
+  tournamentData: TournamentData,
+  settings: PredictionSettings,
+): boolean {
+  const capturedProjection = CollectionProfileCollectionSourceSchema.parse(
+    projectProfileCollectionSource(frame.sources.collection),
+  );
+  const suppliedProjection =
+    "semanticRedundancy" in collection
+      ? projectProfileCollectionSource(CollectionSchema.parse(collection))
+      : CollectionProfileCollectionSourceSchema.parse(collection);
+  return (
+    canonicalSha256(capturedProjection) === canonicalSha256(suppliedProjection) &&
+    canonicalSha256(frame.sources.tournament) === canonicalSha256(tournamentData) &&
+    canonicalSha256(frame.sources.predictionSettings) === canonicalSha256(settings)
+  );
+}
 
 export interface PredictedGameResult {
   game: Game;
@@ -69,6 +95,11 @@ export interface PredictedGameResult {
     | { status: "existing-local-unverified"; failure: string };
 }
 
+export interface PredictedBggCandidateResult extends Omit<PredictedGameResult, "score"> {
+  /** Null means verified candidate facts exist but current scoring has no factual contribution. */
+  score: FitnessResult | null;
+}
+
 export interface PredictionSnapshot {
   collection: Collection;
   settings: PredictionSettings;
@@ -81,6 +112,11 @@ export interface PreparedPredictionList {
     ordinaryScores?: ReadonlyMap<string, FitnessResult | null>,
     targetGameIds?: readonly string[],
   ): GameWithScore[];
+  /** Unified frame's actual-only baseline, already adjusted from the same S context. */
+  listActualGames?(): GameWithScore[];
+  /** V2 proof and live guard for durable snapshot publication. */
+  semanticScoringInputProof?: import("@shelf-judge/shared").SemanticScoringInputProof;
+  isCurrent?(): boolean;
 }
 
 function contentVersion(value: unknown): string {
@@ -99,6 +135,17 @@ export interface PredictionService {
       snapshot?: PredictionSnapshot;
     },
   ): Promise<PredictedGameResult>;
+  /** Explicit wishlist acquisition may persist verified facts even when scoring is unavailable. */
+  predictBggGameForWishlist?(
+    bggId: number,
+    options?: {
+      signal?: AbortSignal;
+      verifiedFact?: BoardgameFactResult;
+      verifiedScoringInput?: BoardgameScoringInput;
+      attemptBudget?: BggRequestAttemptBudget;
+      snapshot?: PredictionSnapshot;
+    },
+  ): Promise<PredictedBggCandidateResult>;
   getReadiness(): Promise<PredictionReadiness>;
   listGamesWithPredictions(targetGameIds?: readonly string[]): Promise<GameWithScore[]>;
   listGamesWithPredictionsFromSnapshot?(
@@ -123,12 +170,50 @@ export interface PredictionServiceDeps {
   bggClient?: BggClient;
   now?: () => string;
   afterSourceSave?: (impact: AttentionMutationImpact) => Promise<void>;
+  /** Production scoring authority. Legacy estimator is retained only for isolated test callers. */
+  unifiedScoringService?: UnifiedScoringService;
 }
 
 export function createPredictionService(deps: PredictionServiceDeps): PredictionService {
   const { storageService, fitnessService, bggClient } = deps;
+  const unifiedScoringService = deps.unifiedScoringService;
   const profileSourceCoordinator = profileSourceCoordinatorFor(storageService);
   const now = deps.now ?? (() => new Date().toISOString());
+
+  async function calculateUnifiedCollection(
+    request: StagedPredictionRequest,
+    includeRedundancy = false,
+  ) {
+    if (!unifiedScoringService) throw new Error("Unified scoring is not configured");
+    const frame = await unifiedScoringService.capture();
+    const calculation = unifiedScoringService.calculate(frame, request, { includeRedundancy });
+    const published = await unifiedScoringService.publishCurrent(calculation, () => {
+      const games = frame.sources.collection.games;
+      const scores =
+        request.scope === "predict-game"
+          ? calculation.targetFitness
+          : calculation.collectionFitness;
+      return games
+        .filter((game) => {
+          if (game.ownership === "previously-owned") return false;
+          if (request.scope === "predict-game") return game.id === request.gameId;
+          if (request.scope === "collection-targets") return request.targetIds.includes(game.id);
+          return true;
+        })
+        .map((game) => ({
+          game,
+          score: scores.get(game.id) ?? null,
+          bggDataStale: isBggDataStale(game),
+        }))
+        .sort((left, right) => {
+          if (left.score !== null && right.score !== null)
+            return right.score.score - left.score.score;
+          return left.score === null ? (right.score === null ? 0 : 1) : -1;
+        });
+    });
+    if (published === null) throw new Error("Unified scoring source changed before publication");
+    return { frame, calculation, games: published };
+  }
 
   async function loadPredictionContext(snapshot?: {
     collection: CollectionProfileCollectionSource;
@@ -288,6 +373,30 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
 
   return {
     async predictGame(gameId: string): Promise<PredictedGameResult> {
+      if (unifiedScoringService) {
+        const { calculation, games } = await calculateUnifiedCollection({
+          scope: "predict-game",
+          gameId,
+        });
+        const entry = games[0];
+        if (!entry) throw new Error(`Game not found or not eligible for prediction: ${gameId}`);
+        if (!entry.game.bggData)
+          throw new Error(
+            `Game "${entry.game.name}" has no BGG data; prediction requires BGG data.`,
+          );
+        if (!entry.score)
+          throw new Error(`Current prediction is unavailable for game "${entry.game.name}"`);
+        const predictionUnavailable: PredictionUnavailable | null =
+          calculation.readiness.stage === 0
+            ? {
+                reason: "stage-0",
+                ratedGameCount: calculation.readiness.ratedGameCount,
+                gamesNeeded:
+                  calculation.readiness.stageThresholds[0] - calculation.readiness.ratedGameCount,
+              }
+            : null;
+        return { game: entry.game, score: entry.score, predictionUnavailable };
+      }
       const ctx = await loadPredictionContext();
       const game = ctx.games.find((g) => g.id === gameId);
       if (!game) throw new Error(`Game not found: ${gameId}`);
@@ -323,7 +432,13 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       return { game, score: fitnessResult, predictionUnavailable };
     },
 
-    async predictBggGame(
+    async predictBggGame(bggId, options = {}): Promise<PredictedGameResult> {
+      const result = await this.predictBggGameForWishlist!(bggId, options);
+      if (!result.score) throw new Error(`Current BGG prediction unavailable for ${bggId}`);
+      return result as PredictedGameResult;
+    },
+
+    async predictBggGameForWishlist(
       bggId: number,
       options: {
         signal?: AbortSignal;
@@ -332,7 +447,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         attemptBudget?: BggRequestAttemptBudget;
         snapshot?: PredictionSnapshot;
       } = {},
-    ): Promise<PredictedGameResult> {
+    ): Promise<PredictedBggCandidateResult> {
       if (!bggClient && !options.verifiedFact && !options.verifiedScoringInput) {
         throw new Error("BGG integration is not configured. Cannot predict games by BGG ID.");
       }
@@ -445,6 +560,41 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       };
       if (matches[0]) {
         const game = matches[0];
+        if (unifiedScoringService) {
+          const { games, calculation } = await calculateUnifiedCollection({
+            scope: "predict-game",
+            gameId: game.id,
+          });
+          const current = games[0]?.score;
+          if (!current) throw new Error("Current local prediction is unavailable");
+          return {
+            game,
+            score: current,
+            predictionUnavailable:
+              calculation.readiness.stage === 0
+                ? {
+                    reason: "stage-0",
+                    ratedGameCount: calculation.readiness.ratedGameCount,
+                    gamesNeeded:
+                      calculation.readiness.stageThresholds[0] -
+                      calculation.readiness.ratedGameCount,
+                  }
+                : null,
+            previewIdentity,
+            ...(verificationFailure
+              ? {
+                  bggVerification: {
+                    status: "existing-local-unverified" as const,
+                    failure: verificationFailure,
+                  },
+                }
+              : {
+                  verifiedFact: fact,
+                  verifiedScoringInput: scoringInput,
+                  bggVerification: { status: "verified" as const },
+                }),
+          };
+        }
         const score = fitnessService.calculateScore(game, ctx.axes, ctx.tournamentData);
         if (verificationFailure) {
           if (!score) throw new Error("Existing local score is unavailable");
@@ -572,6 +722,53 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         updatedAt: observedAt,
       };
 
+      if (unifiedScoringService) {
+        if (verificationFailure || !fact)
+          throw new Error(`Unified BGG prediction requires verified scoring inputs for ${bggId}`);
+        const candidate = {
+          bggId,
+          name: fact.primaryName,
+          bggSource: {
+            observedAt: scoringInput?.observedAt ?? fact.observedAt,
+            description: scoringInput?.description ?? null,
+            mechanics: (scoringInput?.mechanics ?? fact.mechanics).map((item) => item.name),
+            categories: (scoringInput?.categories ?? []).map((item) => item.name),
+            weight: scoringInput?.weight ?? null,
+            communityRating: scoringInput?.communityRating ?? null,
+            minPlayers: scoringInput?.minPlayers ?? null,
+            maxPlayers: scoringInput?.maxPlayers ?? null,
+            bestPlayers: scoringInput?.bestPlayers ?? null,
+            playingTime: scoringInput?.playingTime ?? null,
+          },
+        };
+        const frame = await unifiedScoringService.capture({
+          includeWishlist: true,
+          candidateSources: [candidate],
+        });
+        const calculation = unifiedScoringService.calculate(
+          frame,
+          { scope: "wishlist", selectedBggIds: [bggId] },
+          { includeRedundancy: true },
+        );
+        const current = await unifiedScoringService.publishCurrent(calculation, () =>
+          calculation.wishlistResults.find((item) => item.entry.bggId === bggId),
+        );
+        if (!current) throw new Error("Unified BGG scoring source changed before publication");
+        const prediction = current.prediction;
+        return {
+          game: tempGame,
+          score: prediction.availability === "available" ? prediction.result : null,
+          predictionUnavailable:
+            prediction.availability === "available"
+              ? prediction.predictionUnavailable
+              : prediction.predictionUnavailable,
+          previewIdentity,
+          verifiedFact: fact,
+          verifiedScoringInput: scoringInput,
+          bggVerification: { status: "verified" },
+        };
+      }
+
       // Encode the temporary game using the collection's vocabulary and ranges
       const resolved = getVectorAxisValues(tempGame, ctx.vectorAxes, null);
       const fv = encodeGame(tempGame, ctx.vocabulary, ctx.vectorAxes, resolved, ctx.ranges);
@@ -671,6 +868,15 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
     },
 
     async listGamesWithPredictions(targetGameIds): Promise<GameWithScore[]> {
+      if (unifiedScoringService) {
+        return (
+          await calculateUnifiedCollection(
+            targetGameIds === undefined
+              ? { scope: "collection-all" }
+              : { scope: "collection-targets", targetIds: targetGameIds },
+          )
+        ).games;
+      }
       const ctx = await loadPredictionContext();
       return listGamesWithPredictionsFromContext(ctx, targetGameIds);
     },
@@ -681,11 +887,71 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       settings,
       targetGameIds,
     ) {
+      if (unifiedScoringService) {
+        const frame = await unifiedScoringService.capture();
+        if (!sameSnapshotPredictionSources(frame, collection, tournamentData, settings))
+          throw new Error("Snapshot prediction sources do not match the current private capture");
+        const calculation = unifiedScoringService.calculate(
+          frame,
+          targetGameIds === undefined
+            ? { scope: "collection-all" }
+            : { scope: "collection-targets", targetIds: targetGameIds },
+          { includeRedundancy: false },
+        );
+        const published = await unifiedScoringService.publishCurrent(calculation, () => {
+          const targetSet = targetGameIds ? new Set(targetGameIds) : null;
+          return frame.sources.collection.games
+            .filter(
+              (game) =>
+                game.ownership !== "previously-owned" && (!targetSet || targetSet.has(game.id)),
+            )
+            .map((game) => ({
+              game,
+              score: calculation.collectionFitness.get(game.id) ?? null,
+              bggDataStale: isBggDataStale(game),
+            }));
+        });
+        if (published === null) throw new Error("Snapshot prediction source changed");
+        return published;
+      }
       const ctx = await loadPredictionContext({ collection, tournamentData, settings });
       return listGamesWithPredictionsFromContext(ctx, targetGameIds);
     },
 
     async preparePredictionListFromSnapshot(collection, tournamentData, settings) {
+      if (unifiedScoringService) {
+        const frame = await unifiedScoringService.capture();
+        if (!sameSnapshotPredictionSources(frame, collection, tournamentData, settings))
+          throw new Error("Snapshot prediction sources do not match the current private capture");
+        const calculation = unifiedScoringService.calculate(
+          frame,
+          { scope: "collection-all" },
+          { includeRedundancy: true },
+        );
+        const accepted = await unifiedScoringService.publishCurrent(calculation, () => true);
+        if (!accepted) throw new Error("Snapshot prediction source changed before preparation");
+        const entriesFor = (scores: ReadonlyMap<string, FitnessResult | null>) =>
+          frame.sources.collection.games.map((game) => {
+            const score = scores.get(game.id) ?? null;
+            if (score === null) return { game, score, bggDataStale: isBggDataStale(game) };
+            const current = structuredClone(score);
+            const adjustment = calculation.redundancyAdjustments.get(game.id) ?? null;
+            current.redundancyAdjustment = adjustment;
+            current.redundancySimilarityInfo = {
+              status: calculation.redundancySimilarityStatus(game.id),
+              generationId: null,
+            };
+            if (adjustment && frame.redundancySettings.stage === "integrated")
+              current.score = adjustment.adjustedScore;
+            return { game, score: current, bggDataStale: isBggDataStale(game) };
+          });
+        return {
+          listGames: () => entriesFor(calculation.collectionFitness),
+          listActualGames: () => entriesFor(calculation.actualFitness),
+          semanticScoringInputProof: calculation.proof,
+          isCurrent: () => calculation.isCurrent(),
+        };
+      }
       const ctx = await loadPredictionContext({ collection, tournamentData, settings });
       return {
         listGames: (ordinaryScores, targetGameIds) =>

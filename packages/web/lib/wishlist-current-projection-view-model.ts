@@ -1,4 +1,4 @@
-import type { FitnessResult } from "@shelf-judge/shared";
+import type { FitnessResult, RedundancyAdjustment } from "@shelf-judge/shared";
 import {
   validateWishlistEntryReadResultV2,
   type WishlistEntryReadResultV2,
@@ -13,7 +13,24 @@ export type CurrentWishlistRow = {
   redundancyScore: number | null;
   redundancyAdjusted: boolean;
   redundancySource: "current" | "base-prediction" | "unavailable";
+  redundancyAdjustment: RedundancyAdjustment | null;
 };
+
+export function unavailableCurrentWishlistRow(
+  entry: WishlistEntryView,
+  message = "Current prediction unavailable.",
+): CurrentWishlistRow {
+  return {
+    entry,
+    prediction: null,
+    predictionAvailable: false,
+    unavailableMessage: message,
+    redundancyScore: null,
+    redundancyAdjusted: false,
+    redundancySource: "unavailable",
+    redundancyAdjustment: null,
+  };
+}
 
 /** Convert only the explicit v2 current-result envelope; never revive saved derived values. */
 export function toCurrentWishlistRow(result: unknown): CurrentWishlistRow | null {
@@ -46,6 +63,7 @@ export function toCurrentWishlistRow(result: unknown): CurrentWishlistRow | null
     redundancyAdjusted:
       projection.redundancy.source === "current" && projection.redundancy.adjustment !== null,
     redundancySource: projection.redundancy.source,
+    redundancyAdjustment: projection.redundancy.adjustment,
   };
 }
 

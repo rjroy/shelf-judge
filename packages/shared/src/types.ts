@@ -638,14 +638,7 @@ export interface AttentionCandidateEvaluation {
 }
 
 export type SemanticScoringInputProof =
-  | { version: 1; mode: "disabled" | "factual-only"; identity: string }
-  | {
-      version: 1;
-      mode: "semantic";
-      status: "ready" | "partial" | "factual" | "not-ready";
-      coverageVersion: number;
-      identity: string;
-    };
+  import("./semantic-scoring-input-proof-v2").SemanticScoringInputProofV2;
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
@@ -1818,7 +1811,7 @@ export type JevRunScopeDisclosure =
       unavailableCandidateCount: number;
       /** Current collection-scored, positive, non-vetoed owned games only. */
       eligibleOwnedGameCount: number;
-      /** Cartesian candidate/eligible-owned comparison pairs in the frozen scope. */
+      /** Exact deduplicated wishlist P∪R pairs frozen for this run (not a cartesian expansion). */
       comparisonPairCount: number;
       /** Pairs served from current validated candidate-domain C_ONLY cache rows. */
       cachedHitPairCount: number;

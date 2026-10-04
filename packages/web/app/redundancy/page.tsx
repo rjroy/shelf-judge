@@ -706,7 +706,7 @@ export default function RedundancyPage() {
                 }}
               />
             </label>
-            <h3>Factual similarity weights</h3>
+            <h3>Redundancy factual weights</h3>
             <p className="loading-text">
               Binary controls whether mechanics and categories match; continuous compares weight and
               player-count values. Both are factual signals.
@@ -782,11 +782,13 @@ export default function RedundancyPage() {
           <section aria-labelledby="semantic-heading" className="redundancy-step">
             <h2 id="semantic-heading">Similarity preferences</h2>
             <p>
-              Similarity preferences tune how cached JEV comparisons are used. A separate run
-              prepares any new comparisons; note text is sent only with permission in that run.
+              These shared weights affect both prediction and redundancy. A separate run prepares
+              any new comparisons; note text is sent only with permission in that run.
             </p>
             <label className="redundancy-setting-row">
-              <span className="redundancy-setting-label">Use semantic comparisons in scoring</span>
+              <span className="redundancy-setting-label">
+                Use cached description and note comparisons
+              </span>
               <input
                 type="checkbox"
                 disabled={busy}
@@ -798,7 +800,10 @@ export default function RedundancyPage() {
                 }}
               />
             </label>
-            <p className="loading-text">Turning this off keeps semantic results out of scoring.</p>
+            <p className="loading-text">
+              Turning this off keeps description and note comparisons out of prediction and
+              redundancy. It does not change factual scoring.
+            </p>
             {(
               [
                 ["factual", "Game facts (mechanics, categories, weight, players)"],

@@ -165,6 +165,16 @@ export interface PreparedSimilarityOptions {
   observer?: PreparedSimilarityObserver;
 }
 
+interface PreparedFactualContext {
+  readonly vocabulary: ReturnType<typeof buildVocabulary>;
+  readonly ranges: ReturnType<typeof computeContinuousRanges>;
+  readonly vectorBySource: Map<string, FeatureVector>;
+  readonly collectionById: ReadonlyMap<string, DurableGame>;
+  readonly candidateByBggId: ReadonlyMap<number, StagedWishlistCandidateSource>;
+}
+
+const factualContextByCapture = new WeakMap<StagedSimilarityCapture, PreparedFactualContext>();
+
 /**
  * One immutable, source-authorized, cache-only resolver for demanded pair evidence.
  * It never enumerates the cache or derives pair eligibility from predicted fitness.
@@ -173,25 +183,33 @@ export function createPreparedSimilarity(options: PreparedSimilarityOptions) {
   const { capture, cache, observer } = options;
   const sources = capture.sources;
   const collection = sources.collection;
-  const collectionById = new Map(collection.games.map((game) => [game.id, game]));
-  if (collectionById.size !== collection.games.length) {
-    throw new TypeError("Captured collection contains duplicate local game IDs");
-  }
-  const candidateByBggId = new Map<number, StagedWishlistCandidateSource>();
-  for (const candidate of sources.wishlistCandidates ?? []) {
-    observer?.onWishlistCandidateIndexed?.(candidate.bggId);
-    if (candidateByBggId.has(candidate.bggId)) {
-      throw new TypeError("Captured wishlist candidates contain duplicate BGG IDs");
+  let factualContext = factualContextByCapture.get(capture);
+  if (!factualContext) {
+    const collectionById = new Map(collection.games.map((game) => [game.id, game]));
+    if (collectionById.size !== collection.games.length) {
+      throw new TypeError("Captured collection contains duplicate local game IDs");
     }
-    candidateByBggId.set(candidate.bggId, candidate);
+    const candidateByBggId = new Map<number, StagedWishlistCandidateSource>();
+    for (const candidate of sources.wishlistCandidates ?? []) {
+      observer?.onWishlistCandidateIndexed?.(candidate.bggId);
+      if (candidateByBggId.has(candidate.bggId)) {
+        throw new TypeError("Captured wishlist candidates contain duplicate BGG IDs");
+      }
+      candidateByBggId.set(candidate.bggId, candidate);
+    }
+    observer?.onWishlistCandidateIndexBuilt?.(candidateByBggId.size);
+    const factualGames = collection.games.filter((game) => game.bggData).map(factualGame);
+    factualContext = {
+      vocabulary: buildVocabulary(factualGames),
+      ranges: computeContinuousRanges(factualGames),
+      vectorBySource: new Map<string, FeatureVector>(),
+      collectionById,
+      candidateByBggId,
+    };
+    factualContextByCapture.set(capture, factualContext);
+    observer?.onFactualContextBuilt?.();
   }
-  observer?.onWishlistCandidateIndexBuilt?.(candidateByBggId.size);
-
-  const factualGames = collection.games.map(factualGame);
-  const vocabulary = buildVocabulary(factualGames);
-  const ranges = computeContinuousRanges(factualGames);
-  observer?.onFactualContextBuilt?.();
-  const vectorBySource = new Map<string, FeatureVector>();
+  const { vocabulary, ranges, vectorBySource, collectionById, candidateByBggId } = factualContext;
   const pairResults = new Map<string, ResolvedPair>();
   const examined = new Map<
     string,
@@ -205,6 +223,7 @@ export function createPreparedSimilarity(options: PreparedSimilarityOptions) {
 
   let cacheRevision: number | null = null;
   let cacheWasReadable = false;
+  let cacheLookupAttempted = false;
   let cacheFenceKind: "unavailable" | "unrevisioned" | "revisioned" = "unavailable";
   try {
     if (cache.available) {
@@ -357,6 +376,7 @@ export function createPreparedSimilarity(options: PreparedSimilarityOptions) {
     };
     let row: JevPairJudgment | null;
     try {
+      cacheLookupAttempted = true;
       observer?.onCachePointRead?.(pair.identity.key, signal);
       row = cache.lookup(key);
     } catch {
@@ -512,6 +532,7 @@ export function createPreparedSimilarity(options: PreparedSimilarityOptions) {
       if (cacheFenceKind === "unavailable") return !cache.available;
       if (!cache.available) return false;
       if (cacheFenceKind === "unrevisioned") {
+        if (cacheLookupAttempted) return false;
         try {
           return cache.mutationRevision() === null;
         } catch {

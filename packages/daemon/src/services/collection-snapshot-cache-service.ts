@@ -355,6 +355,7 @@ export function createCollectionSnapshotCacheService(
           if (
             completed.semanticEnabled &&
             completed.semanticRead?.status !== "verified" &&
+            completed.semanticRead?.status !== "unified-v2" &&
             hasReadySemanticData(completed.decision.body)
           ) {
             throw new CollectionSnapshotUnavailableError(
@@ -363,12 +364,16 @@ export function createCollectionSnapshotCacheService(
           }
           if (
             completed.semanticEnabled &&
-            completed.semanticRead?.status === "verified" &&
+            (completed.semanticRead?.status === "verified" ||
+              completed.semanticRead?.status === "unified-v2") &&
             !completed.semanticRead.isCurrent()
           ) {
             logger.warn("collection snapshot semantic result superseded", {
               outcome: "retry",
-              proofStatus: completed.semanticRead.proof.status,
+              proofStatus:
+                completed.semanticRead.status === "verified"
+                  ? completed.semanticRead.proof.status
+                  : "unified-v2",
               currentChangeToken: current?.changeToken ?? null,
             });
             return null;

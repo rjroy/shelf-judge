@@ -4,19 +4,14 @@ import { useState, useEffect, useRef } from "react";
 import { DEFAULT_JEV_RUN_BUDGET } from "@shelf-judge/shared";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type {
-  WishlistEntry,
-  WishlistEntryReadResult,
-  WishlistRedundancyProjection,
-  JevRunPreview,
-  JevWishlistRunPreview,
-  WishlistBreakdownEntry,
-  PredictionConfidence,
-  NicheImpact,
-  NicheImpactEntry,
-  RedundancyAdjustment,
-} from "@shelf-judge/shared";
-import { relativeDate } from "@/lib/date-utils";
+import type { WishlistEntry, JevRunPreview, JevWishlistRunPreview } from "@shelf-judge/shared";
+import { WishlistCurrentProjectionCard } from "@/components/wishlist-current-projection";
+import {
+  sortCurrentWishlistRows,
+  toCurrentWishlistRow,
+  unavailableCurrentWishlistRow,
+  type CurrentWishlistRow,
+} from "@/lib/wishlist-current-projection-view-model";
 
 type SortField = "addedAt" | "predictedScore" | "redundancy" | "name";
 const WISHLIST_SORT_STORAGE_KEY = "shelf-judge:wishlist-sort";
@@ -92,338 +87,8 @@ export function saveWishlistSortField(
   }
 }
 
-export function sortEntries(
-  entries: WishlistEntry[],
-  field: SortField,
-  projections: ReadonlyMap<number, WishlistRedundancyProjection> = new Map(),
-): WishlistEntry[] {
-  const sorted = [...entries];
-  switch (field) {
-    case "addedAt":
-      sorted.sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime());
-      break;
-    case "predictedScore":
-      sorted.sort((a, b) => {
-        if (a.predictedScore === null && b.predictedScore === null) return 0;
-        if (a.predictedScore === null) return 1;
-        if (b.predictedScore === null) return -1;
-        return b.predictedScore - a.predictedScore;
-      });
-      break;
-    case "redundancy":
-      sorted.sort((a, b) => {
-        const aProjection = projections.get(a.bggId);
-        const bProjection = projections.get(b.bggId);
-        const aScore =
-          a.predictedScore === null
-            ? null
-            : aProjection
-              ? aProjection.orderingScore
-              : (a.redundancyPreview?.adjustedScore ?? a.predictedScore);
-        const bScore =
-          b.predictedScore === null
-            ? null
-            : bProjection
-              ? bProjection.orderingScore
-              : (b.redundancyPreview?.adjustedScore ?? b.predictedScore);
-        if (aScore == null && bScore == null) return 0;
-        if (aScore == null) return 1;
-        if (bScore == null) return -1;
-        return bScore - aScore;
-      });
-      break;
-    case "name":
-      sorted.sort((a, b) => a.name.localeCompare(b.name));
-      break;
-  }
-  return sorted;
-}
-
-function ordinal(n: number): string {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] || s[v] || s[0]);
-}
-
 function isWishlistPreview(preview: JevRunPreview | null): preview is JevWishlistRunPreview {
   return preview !== null && "scope" in preview && preview.scope.scope === "wishlist";
-}
-
-function ConfidenceBadge({ confidence }: { confidence: PredictionConfidence }) {
-  return <span className={`confidence-badge confidence-${confidence}`}>{confidence}</span>;
-}
-
-function ConfBadgeSm({ confidence }: { confidence: PredictionConfidence }) {
-  return <span className={`conf-badge-sm ${confidence}`}>{confidence}</span>;
-}
-
-function NicheImpactPanel({ nicheImpact }: { nicheImpact: NicheImpact }) {
-  if (!nicheImpact.wouldJoin || nicheImpact.wouldJoin.length === 0) return null;
-
-  return (
-    <div className="wc-niche">
-      <div className="wc-niche-inner">
-        <div className="wc-niche-title">Niche Impact</div>
-        {nicheImpact.wouldJoin.map((entry: NicheImpactEntry) => (
-          <div key={`${entry.type}:${entry.name}`} className="wc-niche-entry">
-            <span className={`niche-type-badge niche-type-${entry.type}`}>{entry.type}</span>
-            {entry.currentSize === 0 ? (
-              <>
-                Would be your 1st <strong>{entry.name}</strong> game
-              </>
-            ) : entry.projectedRank === 1 ? (
-              <>
-                Would be your best <strong>{entry.name}</strong> game
-              </>
-            ) : (
-              <>
-                Would be your {ordinal(entry.currentSize + 1)} <strong>{entry.name}</strong> game,
-                ranked #{entry.projectedRank}
-              </>
-            )}
-            {entry.currentChampion && (
-              <div
-                style={{
-                  marginTop: 4,
-                  paddingTop: 6,
-                  borderTop: "1px solid var(--niche-border)",
-                  color: "var(--niche-accent)",
-                  fontSize: 11,
-                }}
-              >
-                Current best: {entry.currentChampion.gameName} (
-                {entry.currentChampion.fitnessScore.toFixed(1)})
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-export function WishlistRedundancyPreview({
-  preview,
-  predictionAvailable,
-  source = "saved-factual",
-}: {
-  preview: RedundancyAdjustment | null | undefined;
-  predictionAvailable: boolean;
-  source?: WishlistRedundancyProjection["source"];
-}) {
-  if (!predictionAvailable) return null;
-  if (!preview) {
-    return (
-      <div
-        className="preview-redundancy"
-        aria-label={
-          source === "current"
-            ? "Current wishlist redundancy comparison"
-            : "Wishlist redundancy adjustment"
-        }
-      >
-        <div className="preview-redundancy-title">Redundancy</div>
-        <p className="preview-redundancy-provenance">
-          {source === "base-prediction"
-            ? "Base prediction; no redundancy adjustment is available."
-            : source === "current"
-              ? "Current comparison is unavailable; no adjustment is shown."
-              : "Saved wishlist previews use factual data only; no adjustment is available."}
-        </p>
-      </div>
-    );
-  }
-  return (
-    <div className="preview-redundancy" aria-label="Redundancy adjustment">
-      <div className="preview-redundancy-title">Redundancy</div>
-      <p className="preview-redundancy-provenance">
-        {source === "current"
-          ? "Current comparison using factual and description signals where available."
-          : "Saved wishlist preview uses factual data only."}
-      </p>
-      <div className="preview-redundancy-score">
-        With redundancy: <strong>{preview.adjustedScore.toFixed(1)}</strong>
-        {preview.penalty > 0 && (
-          <span className="preview-redundancy-penalty"> (-{preview.penalty.toFixed(1)})</span>
-        )}
-      </div>
-      {preview.nicheNeighbors.length > 0 ? (
-        <div className="preview-redundancy-neighbors">
-          {preview.nicheNeighbors.slice(0, 3).map((neighbor) => (
-            <div key={neighbor.gameId} className="preview-redundancy-neighbor">
-              <span className="preview-redundancy-neighbor-name">{neighbor.gameName}</span>
-              <span className="preview-redundancy-neighbor-sim">
-                {(neighbor.similarity * 100).toFixed(0)}%
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="preview-redundancy-empty">No similar games in collection.</div>
-      )}
-    </div>
-  );
-}
-
-function WishlistCard({
-  entry,
-  redundancy,
-  onRemove,
-  onRefresh,
-  onAddToCollection,
-}: {
-  entry: WishlistEntry;
-  redundancy?: WishlistRedundancyProjection;
-  onRemove: (id: string) => void;
-  onRefresh: (id: string) => Promise<void>;
-  onAddToCollection: (entry: WishlistEntry) => Promise<void>;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [addingToCollection, setAddingToCollection] = useState(false);
-
-  const hasBreakdown = entry.predictedBreakdown && entry.predictedBreakdown.length > 0;
-  const hasPrediction = entry.predictedScore !== null;
-  const redundancyPreview = entry.redundancyPreview;
-
-  return (
-    <div className="wishlist-card">
-      <div className="wc-main wc-main--compact-thumb">
-        <div className="wc-thumb">
-          {entry.thumbnailUrl ? <img src={entry.thumbnailUrl} alt={entry.name} /> : null}
-        </div>
-
-        <div className="wc-info">
-          <div className="wc-name">
-            <a
-              href={`https://boardgamegeek.com/boardgame/${entry.bggId}`}
-              className="game-link"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {entry.name}
-            </a>
-          </div>
-          {entry.yearPublished && <div className="wc-year">{entry.yearPublished}</div>}
-          <div className="wc-score-row">
-            {hasPrediction ? (
-              <>
-                <span className="wc-score-prefix">~</span>
-                <span className="wc-score">{entry.predictedScore!.toFixed(1)}</span>
-                {entry.predictionConfidence && (
-                  <ConfidenceBadge confidence={entry.predictionConfidence} />
-                )}
-              </>
-            ) : (
-              <span className="wc-no-prediction">
-                No prediction — not enough rated games at time of save
-              </span>
-            )}
-          </div>
-          <WishlistRedundancyPreview
-            preview={
-              redundancy
-                ? redundancy.source === "base-prediction"
-                  ? null
-                  : redundancy.adjustment
-                : redundancyPreview
-            }
-            predictionAvailable={hasPrediction}
-            source={redundancy?.source ?? (redundancyPreview ? "saved-factual" : "base-prediction")}
-          />
-          {redundancy?.source === "current" && (
-            <span className="wc-added">Current comparison · blended available signals</span>
-          )}
-          {redundancy?.source === "base-prediction" && (
-            <span className="wc-added">No redundancy adjustment available</span>
-          )}
-          <div className="wc-added">
-            Added {relativeDate(entry.addedAt)}
-            {!hasPrediction && (
-              <>
-                {" "}
-                &middot;{" "}
-                <button
-                  className="wishlist-refresh-link"
-                  onClick={() => {
-                    setRefreshing(true);
-                    void onRefresh(entry.id).finally(() => setRefreshing(false));
-                  }}
-                >
-                  Refresh to check again
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="wc-actions">
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={() => {
-              setAddingToCollection(true);
-              void onAddToCollection(entry).finally(() => setAddingToCollection(false));
-            }}
-            disabled={addingToCollection}
-          >
-            {addingToCollection ? "Adding..." : "Add to Collection"}
-          </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => {
-              setRefreshing(true);
-              void onRefresh(entry.id).finally(() => setRefreshing(false));
-            }}
-            disabled={refreshing}
-          >
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M13.65 2.35A8 8 0 102 13.65M13.65 2.35V6h-3.6M2 13.65V10h3.6" />
-            </svg>
-            {refreshing ? "..." : "Refresh"}
-          </button>
-          <button className="btn btn-danger-ghost btn-xs" onClick={() => onRemove(entry.id)}>
-            Remove
-          </button>
-        </div>
-      </div>
-
-      {/* Expand section */}
-      {hasPrediction && hasBreakdown ? (
-        <div className="wc-expand">
-          <button className="wc-expand-toggle" onClick={() => setExpanded(!expanded)}>
-            <span className={`wc-expand-caret${expanded ? " open" : ""}`}>{"\u25B6"}</span>
-            <span>Per-axis breakdown</span>
-            <span style={{ color: "var(--predict-accent)", fontSize: 11, marginLeft: 4 }}>
-              {entry.predictedBreakdown!.length} axes
-            </span>
-          </button>
-
-          {expanded && (
-            <>
-              <div className="wc-breakdown">
-                {entry.predictedBreakdown!.map((axis: WishlistBreakdownEntry) => (
-                  <div key={axis.axisName} className="wc-breakdown-row">
-                    <span className="wc-axis-name">{axis.axisName}</span>
-                    <span className="wc-axis-rating">{axis.rating.toFixed(1)}</span>
-                    <ConfBadgeSm confidence={axis.confidence} />
-                  </div>
-                ))}
-              </div>
-
-              {entry.nicheImpact && <NicheImpactPanel nicheImpact={entry.nicheImpact} />}
-            </>
-          )}
-        </div>
-      ) : !hasPrediction ? (
-        <div className="wc-expand">
-          <div className="wc-no-pred-panel">
-            Prediction was unavailable at Stage 0. Click Refresh to run a new prediction with your
-            current collection.
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 export default function WishlistPage() {
@@ -435,9 +100,7 @@ export default function WishlistPage() {
   const [sortPreferenceLoaded, setSortPreferenceLoaded] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const [projections, setProjections] = useState<Map<number, WishlistRedundancyProjection>>(
-    new Map(),
-  );
+  const [projections, setProjections] = useState<Map<number, CurrentWishlistRow>>(new Map());
   const [runMode, setRunMode] = useState<"all" | "selected">("all");
   const [maxProviderAttempts, setMaxProviderAttempts] = useState(
     String(DEFAULT_JEV_RUN_BUDGET.maxProviderAttempts),
@@ -473,19 +136,28 @@ export default function WishlistPage() {
     maxRunDurationMinutes,
   );
 
-  function invalidateWishlistProjections(bggIds: readonly number[]): number {
+  function invalidateWishlistProjections(): number {
     const revision = ++projectionRevision.current;
-    const invalidated = new Set(bggIds);
-    setProjections((current) => new Map([...current].filter(([bggId]) => !invalidated.has(bggId))));
+    // Collection changes can alter every current score and rank.
+    setProjections(new Map());
     return revision;
   }
 
   async function reloadWishlistProjections(revision = projectionRevision.current) {
     const response = await fetch("/api/daemon/wishlist/redundancy", { cache: "no-store" });
     if (!response.ok) throw new Error("Current comparison could not be refreshed");
-    const results = (await response.json()) as WishlistEntryReadResult[];
+    const results: unknown = await response.json();
     if (revision !== projectionRevision.current) return;
-    setProjections(new Map(results.map(({ entry, redundancy }) => [entry.bggId, redundancy])));
+    if (!Array.isArray(results)) {
+      setProjections(new Map());
+      throw new Error("Current wishlist results are unavailable");
+    }
+    const next = new Map<number, CurrentWishlistRow>();
+    for (const result of results) {
+      const row = toCurrentWishlistRow(result);
+      if (row) next.set(row.entry.bggId, row);
+    }
+    if (revision === projectionRevision.current) setProjections(next);
   }
 
   async function refreshWishlistProjectionAfterRun() {
@@ -514,9 +186,21 @@ export default function WishlistPage() {
     if (loading) return;
     const revision = projectionRevision.current;
     void reloadWishlistProjections(revision).catch(() => {
-      /* Saved factual previews remain usable when current comparison is unavailable. */
+      /* Entries remain visible, but no stored score is used without a valid current projection. */
     });
   }, [loading]);
+
+  useEffect(() => {
+    const refreshVisibleProjection = () => {
+      if (document.visibilityState !== "visible" || loading) return;
+      const revision = invalidateWishlistProjections();
+      void reloadWishlistProjections(revision).catch(() => {
+        /* Keep entries visible without presenting an older score after settings may have changed. */
+      });
+    };
+    document.addEventListener("visibilitychange", refreshVisibleProjection);
+    return () => document.removeEventListener("visibilitychange", refreshVisibleProjection);
+  }, [entries, loading]);
 
   useEffect(() => {
     let alive = true;
@@ -740,44 +424,45 @@ export default function WishlistPage() {
   }
 
   async function handleRefresh(id: string) {
+    const revision = invalidateWishlistProjections();
     try {
       const res = await fetch(`/api/daemon/wishlist/${id}/refresh`, { method: "POST" });
       if (!res.ok) {
         setError("Failed to refresh entry");
+        void reloadWishlistProjections(revision).catch(() => {});
         return;
       }
       const { entry } = (await res.json()) as { entry: WishlistEntry };
       setEntries((prev) => prev.map((e) => (e.id === id ? entry : e)));
-      const revision = invalidateWishlistProjections([entry.bggId]);
-      void reloadWishlistProjections(revision).catch(() => {
-        /* The refreshed entry remains available through its saved factual/base values. */
-      });
+      void reloadWishlistProjections(revision).catch(() => {});
     } catch {
       setError("Failed to refresh entry");
+      void reloadWishlistProjections(revision).catch(() => {});
     }
   }
 
   async function handleRefreshAll() {
     setRefreshingAll(true);
     setError(null);
+    const revision = invalidateWishlistProjections();
     try {
       const res = await fetch("/api/daemon/wishlist/refresh", { method: "POST" });
       if (!res.ok) {
         setError("Failed to refresh wishlist");
+        void reloadWishlistProjections(revision).catch(() => {});
         return;
       }
       const { refreshed, errors } = (await res.json()) as {
         refreshed: number;
         errors: string[];
       };
-      const revision = invalidateWishlistProjections(entries.map(({ bggId }) => bggId));
       // Refetch full list to get updated data
       const listRes = await fetch("/api/daemon/wishlist");
       if (listRes.ok) {
         setEntries((await listRes.json()) as WishlistEntry[]);
       }
       void reloadWishlistProjections(revision).catch(() => {
-        /* Refreshed entries fall back to their saved factual/base values. */
+        /* Entries remain visible with an unavailable current-result message. */
       });
       if (errors.length > 0) {
         setError(
@@ -786,18 +471,19 @@ export default function WishlistPage() {
       }
     } catch {
       setError("Failed to refresh wishlist");
+      void reloadWishlistProjections(revision).catch(() => {});
     } finally {
       setRefreshingAll(false);
     }
   }
 
-  async function handleAddToCollection(entry: WishlistEntry) {
+  async function handleAddToCollection(bggId: number) {
     setError(null);
     try {
       const res = await fetch("/api/daemon/games", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bggId: entry.bggId }),
+        body: JSON.stringify({ bggId }),
       });
       if (res.status === 409) {
         const data = (await res.json()) as { error?: string };
@@ -813,7 +499,7 @@ export default function WishlistPage() {
       }
       const { game } = (await res.json()) as { game: { id: string } };
       // Entry auto-removed by REQ-WISH-10, update local state
-      setEntries((prev) => prev.filter((e) => e.id !== entry.id));
+      setEntries((prev) => prev.filter((e) => e.bggId !== bggId));
       router.push(`/games/${game.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add game");
@@ -832,7 +518,22 @@ export default function WishlistPage() {
     }
   }
 
-  const sorted = sortEntries(entries, sortField, projections);
+  const sorted = sortCurrentWishlistRows(
+    entries.map(
+      (entry) =>
+        projections.get(entry.bggId) ??
+        unavailableCurrentWishlistRow(
+          entry,
+          "Current prediction unavailable. Refresh factual details to calculate it.",
+        ),
+    ),
+    "desc",
+    sortField === "predictedScore"
+      ? "score"
+      : sortField === "redundancy"
+        ? "redundancy"
+        : sortField,
+  );
   const activeSortLabel = SORT_OPTIONS.find((o) => o.value === sortField)?.label ?? "Date Added";
 
   if (loading) {
@@ -1206,14 +907,11 @@ export default function WishlistPage() {
                   </div>
                 )}
               </section>
-              {sorted.map((entry) => (
-                <WishlistCard
-                  key={entry.id}
-                  entry={entry}
-                  redundancy={projections.get(entry.bggId)}
-                  onRemove={(id) => {
-                    void handleRemove(id);
-                  }}
+              {sorted.map((row) => (
+                <WishlistCurrentProjectionCard
+                  key={row.entry.id}
+                  row={row}
+                  onRemove={(id) => void handleRemove(id)}
                   onRefresh={handleRefresh}
                   onAddToCollection={handleAddToCollection}
                 />

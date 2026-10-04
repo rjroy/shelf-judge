@@ -86,7 +86,7 @@ describe("ProfileService", () => {
     if (!persisted) throw new Error("Expected proof-bearing Profile cache");
     expect(
       persisted.publicationIdentity.attentionCandidates.identity.semanticScoringInputProof.mode,
-    ).toBe("disabled");
+    ).toBe("unified-similarity");
     const repeated = await service.getProfile();
     expect(repeated).toEqual(first);
     expect(computations).toBe(1);

@@ -14,6 +14,7 @@ import {
   ProfileDataSchema,
   CURRENT_PROFILE_CONTRACT_VERSION,
   CURRENT_PROFILE_ALGORITHM_VERSION,
+  SIMILARITY_ALGORITHM_VERSION,
   intentionMutationResultMatchesCommand,
   type IntentionCommand,
   CollectionProfileEntityClassResultSchema,
@@ -1424,9 +1425,12 @@ describe("collection profile attention contract", () => {
             predictionSettingsHash: "b".repeat(64),
             redundancySettingsHash: "c".repeat(64),
             semanticScoringInputProof: {
-              version: 1,
-              mode: "factual-only",
+              version: 2,
+              mode: "unified-similarity",
+              algorithmVersion: SIMILARITY_ALGORITHM_VERSION,
               identity: "e".repeat(64),
+              demandedPairsIdentity: "f".repeat(64),
+              examinedComponentsIdentity: "0".repeat(64),
             },
             calculationVersion: 1,
             ruleCatalogVersion: 1,
@@ -1446,6 +1450,25 @@ describe("collection profile attention contract", () => {
     };
     expect(ProfileDataSchema.safeParse(cache).success).toBe(true);
     const candidateIdentity = cache.publicationIdentity.attentionCandidates.identity;
+    expect(
+      ProfileDataSchema.safeParse({
+        ...cache,
+        publicationIdentity: {
+          ...cache.publicationIdentity,
+          attentionCandidates: {
+            ...cache.publicationIdentity.attentionCandidates,
+            identity: {
+              ...candidateIdentity,
+              semanticScoringInputProof: {
+                version: 1,
+                mode: "factual-only",
+                identity: "e".repeat(64),
+              },
+            },
+          },
+        },
+      }).success,
+    ).toBe(false);
     expect(
       ProfileDataSchema.safeParse({
         ...cache,

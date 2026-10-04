@@ -3,6 +3,7 @@ import {
   SemanticScoringInputProofV2Schema,
   SIMILARITY_ALGORITHM_VERSION,
 } from "../src/semantic-scoring-input-proof-v2.js";
+import { SemanticScoringInputProofSchema as ActiveProofSchema } from "../src/semantic-scoring-input-proof.js";
 
 const digest = "a".repeat(64);
 
@@ -39,6 +40,13 @@ describe("staged semantic scoring proof v2", () => {
     expect(SemanticScoringInputProofV2Schema.safeParse({ ...base, version: 1 }).success).toBe(
       false,
     );
+    expect(
+      ActiveProofSchema.safeParse({
+        version: 1,
+        mode: "factual-only",
+        identity: digest,
+      }).success,
+    ).toBe(false);
     expect(
       SemanticScoringInputProofV2Schema.safeParse({ ...base, privateNote: "secret" }).success,
     ).toBe(false);

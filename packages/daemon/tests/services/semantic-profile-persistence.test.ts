@@ -138,20 +138,20 @@ describe("semantic Profile persistence", () => {
       expect(candidate).not.toBeNull();
       expect(cache.getActivation()).toBeNull();
       expect(candidate?.identity.semanticScoringInputProof).toMatchObject({
-        mode: "semantic",
-        status: "partial",
+        version: 2,
+        mode: "unified-similarity",
+        algorithmVersion: "unified-jaccard-manhattan-jev-v1",
       });
       const persistedProfile = JSON.parse(profileJson) as {
         publicationIdentity: {
           attentionCandidates: {
-            identity: { semanticScoringInputProof: { status?: string } };
+            identity: { semanticScoringInputProof: { version?: number; mode?: string } };
           };
         };
       };
       expect(
-        persistedProfile.publicationIdentity.attentionCandidates.identity.semanticScoringInputProof
-          .status,
-      ).toBe("partial");
+        persistedProfile.publicationIdentity.attentionCandidates.identity.semanticScoringInputProof,
+      ).toMatchObject({ version: 2, mode: "unified-similarity" });
       expect(candidateJson).not.toContain("SAFE DESCRIPTION");
       expect(profileJson).not.toContain("SAFE DESCRIPTION");
       expect(candidateJson).not.toContain("PRIVATE NOTE CANARY");
@@ -252,16 +252,20 @@ describe("semantic Profile persistence", () => {
       expect(await readFile(profilePath, "utf8")).not.toBe(beforeEmptyDb);
       expect(cache.lookup({ gameAId: a.id, gameBId: b.id, signal: "C" })).toBeNull();
 
-      // Persist a semantic artifact, then prove a closed handle cannot reuse it.
+      // Persist a semantic artifact, then prove a closed handle does not reuse its
+      // cache-derived proof; coherent factual scoring remains available.
       cache.upsert(semanticRow(collection, a, b));
       await app.profileService.getProfile();
       const beforeClosed = await readFile(profilePath, "utf8");
       cache.close();
       const closedRead = await app.profileService.getProfile();
-      expect(closedRead.status).toBe("unavailable");
-      expect(await readFile(profilePath, "utf8")).toBe(beforeClosed);
+      expect(closedRead.status).toBe("available");
+      const afterClosed = await readFile(profilePath, "utf8");
+      expect(afterClosed).not.toBe(beforeClosed);
+      expect(afterClosed).not.toContain('"value":0.65');
 
-      // Likewise, unavailable cache storage must fail closed against old derived artifacts.
+      // A cache that cannot open must likewise avoid old semantic artifacts while
+      // permitting the same coherent factual-only projection.
       const blockedPath = join(root, "cache-is-a-file");
       await Bun.write(blockedPath, "not a directory");
       cache = await createJevPairCache(blockedPath);
@@ -276,7 +280,7 @@ describe("semantic Profile persistence", () => {
       });
       const beforeUnavailable = await readFile(profilePath, "utf8");
       const unavailableRead = await app.profileService.getProfile();
-      expect(unavailableRead.status).toBe("unavailable");
+      expect(unavailableRead.status).toBe("available");
       expect(await readFile(profilePath, "utf8")).toBe(beforeUnavailable);
     } finally {
       cache.close();

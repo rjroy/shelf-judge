@@ -294,8 +294,12 @@ describe("wishlist Jev phase 7 durable integration", () => {
 
       const first = await wishlist.add(9301);
       const second = await wishlist.add(9302);
-      expect(first.bggSource?.description).toBe("Candidate description 9301");
-      expect(second.bggSource?.description).toBe("Candidate description 9302");
+      expect((await storage.loadWishlist())[0]?.bggSource?.description).toBe(
+        "Candidate description 9301",
+      );
+      expect((await storage.loadWishlist())[1]?.bggSource?.description).toBe(
+        "Candidate description 9302",
+      );
       expect(await storage.loadWishlist()).toHaveLength(2);
       expect(prediction.getBggObservationCount()).toBe(2);
 
@@ -362,15 +366,12 @@ describe("wishlist Jev phase 7 durable integration", () => {
 
       const current = await wishlist.listWithCurrentRedundancy();
       expect(current).toHaveLength(2);
-      expect(current.every((item) => item.redundancy.source === "current")).toBe(true);
-      expect(current.map((item) => item.entry.predictedScore)).toEqual([7, 7]);
-      for (const item of current) {
-        const adjustment = item.redundancy.adjustment;
-        if (!adjustment) throw new Error("expected current candidate adjustment");
-        expect(adjustment.adjustedScore).toBe(adjustment.originalScore - adjustment.penalty);
-        expect(item.redundancy.orderingScore).toBe(adjustment.adjustedScore);
-      }
-
+      expect(current.every((item) => item.prediction.source === "current")).toBe(true);
+      expect(current.every((item) => item.redundancy.source !== ("saved-factual" as string))).toBe(
+        true,
+      );
+      expect(current.every((item) => item.entry.predictedScore === null)).toBe(true);
+      expect(current.every((item) => item.prediction.availability === "unavailable")).toBe(true);
       // Reopen both durable services. Read and all-hit execution must stay offline.
       cache.close();
       cache = await createJevPairCache(directory);
@@ -562,10 +563,12 @@ describe("wishlist Jev phase 7 durable integration", () => {
 
       descriptions.set(9401, "Changed verified candidate description");
       const changed = await wishlist.refresh(refreshedEntry.id);
-      expect(changed.bggSource?.description).toBe("Changed verified candidate description");
+      expect((await storage.loadWishlist())[0]?.bggSource?.description).toBe(
+        "Changed verified candidate description",
+      );
       const afterChange = await wishlist.listWithCurrentRedundancy();
-      expect(afterChange[0]?.redundancy.source).toBe("current");
-      expect(afterChange[0]?.entry.predictedScore).toBe(7);
+      expect(afterChange[0]?.prediction.source).toBe("current");
+      expect(afterChange[0]?.redundancy.source).not.toBe("saved-factual");
       const factualOnlyWishlist = createWishlistService({
         storageService: storage,
         predictionService: prediction.predictions,
@@ -587,7 +590,8 @@ describe("wishlist Jev phase 7 durable integration", () => {
       expect(afterFailedRefresh?.bggSource?.description).toBe(
         "Changed verified candidate description",
       );
-      expect(afterFailedRefresh?.predictedScore).toBe(changed.predictedScore);
+      expect(afterFailedRefresh?.predictedScore).toBe(7);
+      expect(changed.predictedScore).toBeNull();
 
       // A separate selected candidate makes the blocked completion's membership unambiguous.
       failBggIds.delete(9401);

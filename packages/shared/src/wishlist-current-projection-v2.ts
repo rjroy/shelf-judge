@@ -5,7 +5,7 @@ import type {
   RedundancyAdjustment,
   WishlistEntryView,
 } from "./types.js";
-import { FitnessResultResponseSchema } from "./validation.js";
+import { FitnessResultResponseSchema } from "./fitness-result-response-schema";
 
 const finite = z.number().finite();
 const confidence = z.enum(["actual", "strong", "moderate", "weak", "insufficient"]);

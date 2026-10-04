@@ -208,6 +208,7 @@ export function createGameDetailSnapshotService(collectionReader: {
   loadRedundancySettings?(): Promise<RedundancySettings>;
   loadNicheSettings?(): Promise<NicheSettings>;
   sourceVector?(): SourceVector;
+  hydrateSourceVector?(): Promise<SourceVector>;
 }): GameDetailSnapshotService {
   const coordinator = profileSourceCoordinatorFor(collectionReader);
   return {
@@ -235,7 +236,9 @@ export function createGameDetailSnapshotService(collectionReader: {
           return createGameDetailSnapshot(collection, gameId);
         }
         const sourceVector =
-          collectionReader.sourceVector?.() ?? unavailableSourceVector(collection);
+          (await collectionReader.hydrateSourceVector?.()) ??
+          collectionReader.sourceVector?.() ??
+          unavailableSourceVector(collection);
         return createGameDetailSnapshot(collection, gameId, {
           tournament,
           predictionSettings,

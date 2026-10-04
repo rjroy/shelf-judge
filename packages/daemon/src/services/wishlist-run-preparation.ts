@@ -6,6 +6,7 @@ import {
   type WishlistEntry,
 } from "@shelf-judge/shared";
 import type { JevPairCache } from "./jev-pair-cache-service.js";
+import type { FrozenStagedSimilarityRun } from "./staged-similarity-scope.js";
 import { encodeOwnedLocalMember, encodeWishlistBggMember } from "./jev-pair-identity.js";
 import type { GameService } from "./game-service.js";
 import type { JevRunCapture } from "./jev-run-service.js";
@@ -27,7 +28,7 @@ export type FrozenWishlistRunPair = Readonly<{
   ownedGameId: string;
   gameAId: string;
   gameBId: string;
-  state: "cached-hit" | "sendable-miss";
+  state: "cached-hit" | "sendable-miss" | "unavailable";
   cachedValue: number | null;
 }>;
 
@@ -44,6 +45,8 @@ export interface PreparedWishlistRun {
   readonly cacheRevision: number | null;
   readonly wishlistMutationGeneration: string;
   readonly identity: string;
+  /** Present only for the production unified execution path; this authorizes exact frozen U0. */
+  readonly unifiedRun?: FrozenStagedSimilarityRun;
   /** Live wishlist/collection authority fence, deliberately independent of cache revision. */
   isSourceCurrent(): Promise<boolean>;
   isCurrent(): Promise<boolean>;
@@ -68,6 +71,8 @@ export type WishlistRunPreparationStorage = Pick<
 >;
 
 export interface WishlistRunPreparationService {
+  /** Explicit-run preparation may hydrate missing selected compact facts before scoring. */
+  hydrateSources?(selection?: JevWishlistCandidateSelection): Promise<void>;
   prepare(selection?: JevWishlistCandidateSelection): Promise<PreparedWishlistRun>;
 }
 
@@ -159,6 +164,7 @@ export function createWishlistRunPreparationService(options: {
   }
 
   return {
+    hydrateSources: hydrateMissingSources,
     async prepare(requestedSelection): Promise<PreparedWishlistRun> {
       const selection = normalizeSelection(requestedSelection);
       await hydrateMissingSources(selection);

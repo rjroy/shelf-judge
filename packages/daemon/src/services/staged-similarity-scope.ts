@@ -8,6 +8,7 @@ import type { Axis, DurableGame } from "@shelf-judge/shared";
 import { normalizeElo, shouldDisplayRanking } from "./elo-engine.js";
 import type { StagedSimilarityCapture } from "./staged-similarity-capture.js";
 import type { StagedSimilarityPair } from "./prepared-similarity.js";
+import type { SemanticScoringInputProofV2 } from "../../../shared/src/semantic-scoring-input-proof-v2.js";
 import type { createPreparedSimilarity } from "./prepared-similarity.js";
 
 type PreparedSimilarity = ReturnType<typeof createPreparedSimilarity>;
@@ -102,7 +103,9 @@ export interface StagedSimilarityScopeOptions {
   readonly prepared: PreparedSimilarity;
   readonly request: StagedPredictionRequest;
   readonly budget: StagedRunBudget;
-  readonly authorizationReader: StagedRunAuthorizationReader;
+  readonly authorizationReader?: StagedRunAuthorizationReader;
+  /** Ordinary current reads plan/resolve pairs without minting a one-use execution token. */
+  readonly calculationOnly?: boolean;
   readonly evaluateFitness: InjectedFitness;
   /** Wishlist calculation needs owned-target evidence to derive R, without authorizing collection P. */
   readonly includeOwnedPredictionDependenciesForWishlist?: boolean;
@@ -146,6 +149,27 @@ export interface StagedScopeDisclosure {
 export type StagedSimilarityScopeResult =
   | { readonly ok: true; readonly run: FrozenStagedSimilarityRun }
   | { readonly ok: false; readonly reason: string };
+export type StagedSimilarityCalculationResult =
+  | { readonly ok: true; readonly calculation: StagedSimilarityCalculation }
+  | { readonly ok: false; readonly reason: string };
+type AnyStagedSimilarityScopeResult =
+  | StagedSimilarityScopeResult
+  | StagedSimilarityCalculationResult;
+
+/** Cache-resolved calculation scope for ordinary reads; contains no execution authorization. */
+export interface StagedSimilarityCalculation {
+  readonly targets: readonly StagedPredictionTarget[];
+  readonly unavailableTargetIds: readonly string[];
+  readonly actualContext: StagedActualAxisContext;
+  readonly readiness: StagedPredictionReadiness;
+  readonly predictionPairs: readonly StagedScopePair[];
+  readonly calculationDependencyPairs: readonly StagedScopePair[];
+  readonly redundancyPairs: readonly StagedScopePair[];
+  readonly authorizedPairs: readonly StagedScopePair[];
+  readonly fitness: ReadonlyMap<string, InjectedFitnessResult>;
+  readonly prepared: PreparedSimilarity;
+  readonly proof: SemanticScoringInputProofV2;
+}
 
 export interface FrozenStagedSimilarityRun {
   readonly targets: readonly StagedPredictionTarget[];
@@ -155,6 +179,7 @@ export interface FrozenStagedSimilarityRun {
   readonly redundancyPairs: readonly StagedScopePair[];
   readonly authorizedPairs: readonly StagedScopePair[];
   readonly disclosure: StagedScopeDisclosure;
+  readonly proof: SemanticScoringInputProofV2;
   readonly isAuthorized: () => boolean;
   /** Resolver/cache proof freshness is intentionally separate from scope authorization. */
   readonly isCalculationCurrent: () => boolean;
@@ -436,44 +461,67 @@ function freezeRequest(request: StagedPredictionRequest): StagedPredictionReques
 
 /** Derive P, resolve P cache-only, run an injected fitness seam, derive R, then seal U0. */
 export function prepareStagedSimilarityScope(
+  options: StagedSimilarityScopeOptions & { readonly calculationOnly: true },
+): StagedSimilarityCalculationResult;
+export function prepareStagedSimilarityScope(
+  options: StagedSimilarityScopeOptions & { readonly calculationOnly?: false },
+): StagedSimilarityScopeResult;
+export function prepareStagedSimilarityScope(
+  options: StagedSimilarityScopeOptions & { readonly calculationOnly: boolean },
+): AnyStagedSimilarityScopeResult;
+export function prepareStagedSimilarityScope(
   options: StagedSimilarityScopeOptions,
-): StagedSimilarityScopeResult {
+): AnyStagedSimilarityScopeResult {
   const { capture, prepared, evaluateFitness, authorizationReader } = options;
+  const calculationOnly = options.calculationOnly === true;
   validateBudget(options.budget);
   const budget = Object.freeze({ ...options.budget });
   if (!capture.isSourceCurrent()) return { ok: false, reason: "source-not-current" };
-  if (!authorizationReader || typeof authorizationReader.readCurrent !== "function") {
+  if (
+    !calculationOnly &&
+    (!authorizationReader || typeof authorizationReader.readCurrent !== "function")
+  ) {
     return { ok: false, reason: "authorization-reader-unavailable" };
   }
   let initialAuthorization: StagedRunAuthorizationState | null;
-  try {
-    initialAuthorization = authorizationReader.readCurrent();
-  } catch {
+  if (calculationOnly) {
     initialAuthorization = null;
+  } else {
+    try {
+      initialAuthorization = authorizationReader?.readCurrent() ?? null;
+    } catch {
+      initialAuthorization = null;
+    }
   }
   if (
-    !initialAuthorization ||
-    !Number.isSafeInteger(initialAuthorization.mutationGeneration) ||
-    initialAuthorization.mutationGeneration < 0 ||
-    !initialAuthorization.policyIdentity ||
-    !initialAuthorization.selectionIdentity ||
-    !initialAuthorization.budgetIdentity
+    !calculationOnly &&
+    (!initialAuthorization ||
+      !Number.isSafeInteger(initialAuthorization.mutationGeneration) ||
+      initialAuthorization.mutationGeneration < 0 ||
+      !initialAuthorization.policyIdentity ||
+      !initialAuthorization.selectionIdentity ||
+      !initialAuthorization.budgetIdentity)
   ) {
     return { ok: false, reason: "authorization-state-unavailable" };
   }
-  const frozenAuthorizationState: StagedRunAuthorizationState = Object.freeze({
-    mutationGeneration: initialAuthorization.mutationGeneration,
-    policyIdentity: initialAuthorization.policyIdentity,
-    selectionIdentity: initialAuthorization.selectionIdentity,
-    budgetIdentity: initialAuthorization.budgetIdentity,
-  });
+  const frozenAuthorizationState = initialAuthorization
+    ? Object.freeze({
+        mutationGeneration: initialAuthorization.mutationGeneration,
+        policyIdentity: initialAuthorization.policyIdentity,
+        selectionIdentity: initialAuthorization.selectionIdentity,
+        budgetIdentity: initialAuthorization.budgetIdentity,
+      })
+    : null;
 
   const request = freezeRequest(options.request);
   const requestIdentity = stagedRunSelectionIdentity(request);
-  if (frozenAuthorizationState.selectionIdentity !== requestIdentity) {
+  if (frozenAuthorizationState && frozenAuthorizationState.selectionIdentity !== requestIdentity) {
     return { ok: false, reason: "selection-identity-mismatch" };
   }
-  if (frozenAuthorizationState.budgetIdentity !== stagedRunBudgetIdentity(budget)) {
+  if (
+    frozenAuthorizationState &&
+    frozenAuthorizationState.budgetIdentity !== stagedRunBudgetIdentity(budget)
+  ) {
     return { ok: false, reason: "budget-identity-mismatch" };
   }
   const collection = capture.sources.collection;
@@ -728,8 +776,29 @@ export function prepareStagedSimilarityScope(
     }
   }
   const authorizedPairs = freezePairMap(authorizedMap);
-  prepared.sealProof();
+  const proof = prepared.sealProof();
   if (!prepared.isCurrent()) return { ok: false, reason: "cache-or-source-changed-during-preview" };
+  if (calculationOnly) {
+    return {
+      ok: true,
+      calculation: Object.freeze({
+        targets: Object.freeze([...targets]),
+        unavailableTargetIds: Object.freeze(sortedUnique(unavailableTargetIds.map(String))),
+        actualContext,
+        readiness,
+        predictionPairs: pPairs,
+        calculationDependencyPairs,
+        redundancyPairs: rPairs,
+        authorizedPairs,
+        fitness: new Map(injected),
+        prepared,
+        proof,
+      }),
+    };
+  }
+  if (!frozenAuthorizationState || !authorizationReader) {
+    return { ok: false, reason: "authorization-state-unavailable" };
+  }
   const initialAuthKey = stableKey(frozenAuthorizationState);
   const frozenAuthorizationIdentity = stableKey({
     source: capture.durableIdentity,
@@ -804,6 +873,7 @@ export function prepareStagedSimilarityScope(
     redundancyPairs: rPairs,
     authorizedPairs,
     disclosure,
+    proof,
     isAuthorized,
     isCalculationCurrent: () => prepared.isCurrent(),
     assertAuthorized(): void {

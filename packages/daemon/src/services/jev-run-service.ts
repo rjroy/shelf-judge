@@ -29,6 +29,7 @@ import {
 } from "./jev-run-budget.js";
 import { createLogger, type Logger } from "./logger.js";
 import type { PreparedWishlistRun, FrozenWishlistRunPair } from "./wishlist-run-preparation.js";
+import type { PreparedUnifiedRun } from "./unified-jev-run-preparation.js";
 import {
   validateWishlistCandidateCOnlyRow,
   type WishlistCandidateMembershipIndex,
@@ -96,11 +97,13 @@ export interface JevPreparedRunInput {
   noteTransmissionAuthorized: boolean;
   providerBudget?: Readonly<JevRunBudget>;
   wishlistPreparation?: never;
+  unifiedPreparation?: PreparedUnifiedRun;
 }
 
 export interface JevPreparedWishlistRunInput {
   scopeKind: "wishlist";
   wishlistPreparation: PreparedWishlistRun;
+  unifiedPreparation?: PreparedUnifiedRun;
   noteTransmissionAuthorized: false;
   providerBudget?: Readonly<JevRunBudget>;
 }
@@ -115,6 +118,7 @@ type PreparedRunData =
       scope: JevRunScope;
       noteTransmissionAuthorized: boolean;
       providerBudget: Readonly<JevRunBudget>;
+      unifiedPreparation?: PreparedUnifiedRun;
     }
   | {
       scopeKind: "wishlist";
@@ -122,6 +126,7 @@ type PreparedRunData =
       capture: JevRunCapture;
       noteTransmissionAuthorized: false;
       providerBudget: Readonly<JevRunBudget>;
+      unifiedPreparation?: PreparedUnifiedRun;
     };
 
 export interface JevRunEffectiveLimits {
@@ -190,10 +195,17 @@ export class JevRunService {
     return runOutsideProfileSourceCoordinator(async () => {
       try {
         if (input.scopeKind === "wishlist") {
+          const unifiedPreparation = input.unifiedPreparation;
           if (
             input.noteTransmissionAuthorized !== false ||
             input.wishlistPreparation.scope !== "wishlist" ||
             !(await input.wishlistPreparation.isCurrent()) ||
+            (unifiedPreparation !== undefined &&
+              (unifiedPreparation.scopeKind !== "wishlist" ||
+                unifiedPreparation.wishlistPreparation !== input.wishlistPreparation ||
+                unifiedPreparation.capture !== input.wishlistPreparation.capture ||
+                !unifiedPreparation.isAuthorized() ||
+                !(await unifiedPreparation.isSourceCurrent()))) ||
             input.wishlistPreparation.pairs.length > this.maxPairs
           )
             return null;
@@ -209,6 +221,7 @@ export class JevRunService {
             capture: input.wishlistPreparation.capture,
             noteTransmissionAuthorized: false,
             providerBudget: Object.freeze({ ...providerBudget }),
+            ...(unifiedPreparation ? { unifiedPreparation } : {}),
           });
           return reservation as ValidatedPreparedJevRun;
         }
@@ -219,20 +232,36 @@ export class JevRunService {
           maxRunDurationMs: this.maxRunMs,
         };
         if (!isValidJevRunBudget(providerBudget)) return null;
-        const planned = this.planScope(capture.collection, capture.predictionCapture);
-        if (
-          !planned.ok ||
-          planned.scope.totalEligiblePairs > this.maxPairs ||
-          !(await this.scopeMatchesCapture(input.scope, planned.scope))
-        )
-          return null;
+        let scope: JevRunScope;
+        if (input.unifiedPreparation) {
+          if (
+            input.unifiedPreparation.scopeKind !== "collection" ||
+            input.unifiedPreparation.capture !== input.capture ||
+            input.unifiedPreparation.collectionScope !== input.scope ||
+            !input.unifiedPreparation.isAuthorized() ||
+            !(await input.unifiedPreparation.isSourceCurrent())
+          )
+            return null;
+          scope = input.scope;
+        } else {
+          const planned = this.planScope(capture.collection, capture.predictionCapture);
+          if (
+            !planned.ok ||
+            planned.scope.totalEligiblePairs > this.maxPairs ||
+            !(await this.scopeMatchesCapture(input.scope, planned.scope))
+          )
+            return null;
+          scope = planned.scope;
+        }
+        if (scope.totalEligiblePairs > this.maxPairs) return null;
         const reservation = Object.freeze({});
         this.preparedRuns.set(reservation, {
           scopeKind: "collection",
           capture,
-          scope: planned.scope,
+          scope,
           noteTransmissionAuthorized: input.noteTransmissionAuthorized,
           providerBudget: Object.freeze({ ...providerBudget }),
+          ...(input.unifiedPreparation ? { unifiedPreparation: input.unifiedPreparation } : {}),
         });
         return reservation as ValidatedPreparedJevRun;
       } catch {
@@ -247,6 +276,7 @@ export class JevRunService {
     const prepared = this.preparedRuns.get(key);
     if (!prepared) throw new Error("Prepared Jev reservation is invalid or already consumed");
     if (activeRuns.has(this.options.storageService)) throw new Error("A Jev run is already active");
+    prepared.unifiedPreparation?.beginExecution();
     this.preparedRuns.delete(key);
     return this.reserveRun(prepared.noteTransmissionAuthorized, prepared);
   }
@@ -405,6 +435,7 @@ export class JevRunService {
     let progress = control.progress;
     let capture: JevRunCapture;
     let originalScope: JevRunScope;
+    const unifiedPreparation = prepared?.unifiedPreparation;
     let terminalStopReason: JevRunStopReason | undefined;
     try {
       if (prepared) {
@@ -466,6 +497,7 @@ export class JevRunService {
               latestScope = scope;
             },
             getLatestScope: () => latestScope,
+            ...(unifiedPreparation ? { unifiedPreparation } : {}),
             pair: bound.pair,
             ready: bound.ready,
             attempt,
@@ -477,7 +509,11 @@ export class JevRunService {
       for (const originalPair of originalScope.pairs()) {
         if (!this.runCanContinue(control) || this.stopped(controller, startedAt)) break;
         const previousCapture = latestCapture;
-        const currentCapture = await this.refreshForCurrentVector(previousCapture, control);
+        const currentCapture = await this.refreshForCurrentVector(
+          previousCapture,
+          control,
+          unifiedPreparation,
+        );
         if (!this.runCanContinue(control)) return control.progress;
         const captureChanged =
           currentCapture.sourceVectorIdentity !== previousCapture.sourceVectorIdentity;
@@ -567,6 +603,7 @@ export class JevRunService {
               latestScope = scope;
             },
             getLatestScope: () => latestScope,
+            ...(unifiedPreparation ? { unifiedPreparation } : {}),
             getProgress: () => progress,
             setProgress: (next) => {
               progress = next;
@@ -768,6 +805,11 @@ export class JevRunService {
           continue;
         }
         // A cache hit present in the frozen disclosure was not authorized for transmission.
+        if (pair.state === "unavailable") {
+          progress = this.persistOutcome(progress, { completedPairs: 1 });
+          control.progress = progress;
+          continue;
+        }
         if (pair.state !== "sendable-miss") {
           progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
           control.progress = progress;
@@ -938,7 +980,19 @@ export class JevRunService {
   private async refreshForCurrentVector(
     capture: JevRunCapture,
     control?: RunControl,
+    unifiedPreparation?: PreparedUnifiedRun,
   ): Promise<JevRunCapture> {
+    if (unifiedPreparation) {
+      if (control && !this.runCanContinue(control)) throw new Error("Jev run stopped");
+      const current = await this.options.readCurrent();
+      if (
+        current.sourceVectorIdentity !== capture.sourceVectorIdentity ||
+        current.policyIdentity !== capture.policyIdentity ||
+        !(await unifiedPreparation.isSourceCurrent())
+      )
+        throw new Error("Frozen unified run sources changed");
+      return capture;
+    }
     for (let attempt = 0; attempt < 3; attempt++) {
       const current = await this.options.readCurrent();
       if (control && !this.runCanContinue(control)) throw new Error("Jev run stopped");
@@ -1015,6 +1069,7 @@ export class JevRunService {
     pair: JevRunPair;
     ready: ReadyAdmission;
     attempt: JevAttemptAdmission;
+    unifiedPreparation?: PreparedUnifiedRun;
   }): Promise<JevDispatchReceipt> {
     for (let refresh = 0; refresh < 3; refresh++) {
       if (
@@ -1023,7 +1078,11 @@ export class JevRunService {
       )
         throw new Error("Jev run stopped");
       // A coherent eligibility refresh is required independently for every initial/retry attempt.
-      const refreshed = await this.refreshForCurrentVector(input.getLatest(), input.control);
+      const refreshed = await this.refreshForCurrentVector(
+        input.getLatest(),
+        input.control,
+        input.unifiedPreparation,
+      );
       const freshScopeResult =
         refreshed === input.getLatest()
           ? { ok: true as const, scope: input.getLatestScope() }
@@ -1205,12 +1264,14 @@ export class JevRunService {
     setProgress: (progress: JevRunProgress) => void;
     onStorageFailure: () => void;
     control: RunControl;
+    unifiedPreparation?: PreparedUnifiedRun;
   }): Promise<boolean> {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (!this.runCanContinue(input.control)) return false;
       const checkpointCapture = await this.refreshForCurrentVector(
         input.getLatest(),
         input.control,
+        input.unifiedPreparation,
       );
       if (!this.runCanContinue(input.control)) return false;
       const checkpointPlan =

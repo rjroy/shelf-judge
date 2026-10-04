@@ -7,9 +7,9 @@ export interface WishlistRoutesDeps {
   wishlistService: WishlistService;
 }
 
-function publicEntry(entry: WishlistEntry): WishlistEntryView {
+function publicEntry(entry: WishlistEntry | WishlistEntryView): WishlistEntryView {
   const view = { ...entry };
-  delete view.bggSource;
+  delete (view as Partial<WishlistEntry>).bggSource;
   return view;
 }
 
@@ -35,8 +35,9 @@ export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
     try {
       const results = await wishlistService.listWithCurrentRedundancy();
       return c.json(
-        results.map(({ entry, redundancy }) => ({
+        results.map(({ entry, prediction, redundancy }) => ({
           entry: publicEntry(entry as WishlistEntry),
+          prediction,
           redundancy,
         })),
       );
@@ -141,7 +142,7 @@ export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
       operationId: "shelf.wishlist.list-redundancy-projection",
       name: "list-redundancy-projection",
       description:
-        "List safe wishlist entries with a separate current/saved/base redundancy projection; source text is omitted",
+        "List safe wishlist entries with strict current V2 prediction and redundancy projections; source text is omitted",
       invocation: { method: "GET", path: "/api/wishlist/redundancy" },
       response: {
         body: {
@@ -156,15 +157,19 @@ export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
               redundancy: {
                 type: "object",
                 properties: {
-                  source: { enum: ["current", "saved-factual", "base-prediction"] },
+                  source: { enum: ["current", "base-prediction", "unavailable"] },
                   adjustment: { type: ["object", "null"] },
                   orderingScore: { type: ["number", "null"] },
                 },
                 required: ["source", "adjustment", "orderingScore"],
                 additionalProperties: false,
               },
+              prediction: {
+                type: "object",
+                description: "Strict current V2 prediction projection; never saved history.",
+              },
             },
-            required: ["entry", "redundancy"],
+            required: ["entry", "prediction", "redundancy"],
             additionalProperties: false,
           },
         },

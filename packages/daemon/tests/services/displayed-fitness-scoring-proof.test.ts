@@ -69,7 +69,7 @@ test("inactive private scoring proof is durable and performs no prediction or se
   });
 
   const proof = await service.getScoringInputFromSnapshot(snapshot);
-  expect(proof.semanticScoringInputProof.mode).toBe("disabled");
+  expect(proof.semanticScoringInputProof.mode).toBe("unified-similarity");
   expect(proof.semanticScoringInputProof.identity).toMatch(/^[a-f0-9]{64}$/);
   expect(proof.isCurrent()).toBe(true);
 

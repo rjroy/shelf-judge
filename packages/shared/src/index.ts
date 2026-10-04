@@ -231,6 +231,8 @@ export type {
   ShelfCapacityResult,
 } from "./types";
 
+export * from "./wishlist-current-projection-v2";
+
 export {
   NotNowAttentionCommandSchema,
   IntentionalAttentionCommandSchema,
@@ -255,7 +257,12 @@ export type {
 export { DEFAULT_JEV_RUN_BUDGET } from "./jev-run-budget";
 export type { JevRunBudget } from "./jev-run-budget";
 
-export { SemanticScoringInputProofSchema } from "./semantic-scoring-input-proof";
+export {
+  SemanticScoringInputProofSchema,
+  SemanticScoringInputProofV2Schema,
+  SIMILARITY_ALGORITHM_VERSION,
+} from "./semantic-scoring-input-proof";
+export type { SemanticScoringInputProofV2 } from "./semantic-scoring-input-proof";
 
 export {
   DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
