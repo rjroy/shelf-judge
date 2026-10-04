@@ -277,7 +277,6 @@ async function installDaemon(page: Page) {
               ownerNotes: new URL(location.href).searchParams.get("scope") !== "C",
             },
             scoringEffect: "annotation-only",
-            retentionCaveat: "Retention duration is unspecified.",
             limits: {
               maxEligiblePairs: 100,
               maxProviderAttempts: Number(url.searchParams.get("maxProviderAttempts") ?? 1000),
@@ -386,6 +385,9 @@ test("selected run limits bind the preview and changing them clears it", async (
   await expect(preview).toContainText("1,200 HTTP attempts");
   await expect(preview).toContainText("90 minutes");
   await expect(preview).toContainText("245,000 reported tokens");
+  await expect(preview).toContainText("TypeSafe");
+  await expect(preview).toContainText("allow owner notes to be sent to TypeSafe");
+  await expect(preview).not.toContainText(/retention|may retain|unspecified/i);
   const previewCall = await page.evaluate(() =>
     (
       window as typeof window & { __redundancyCalls: Array<{ url: string }> }
@@ -571,7 +573,7 @@ test("note consent is opt-in and declining still runs without note text", async 
   const preview = page.getByRole("region", { name: "Before you run" });
   await expect(preview).toContainText("TypeSafe");
   await expect(preview).toContainText("2 game pairs");
-  await expect(preview).toContainText("unknown");
+  await expect(preview).not.toContainText(/retention|may retain|unspecified/i);
   await expect(preview).toContainText("1,000 HTTP attempts");
   await expect(preview).toContainText(/note-based results may remain incomplete/i);
   const callsBefore = await page.evaluate(

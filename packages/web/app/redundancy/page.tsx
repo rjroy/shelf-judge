@@ -30,7 +30,6 @@ type Preview = {
   providerConfigured: boolean;
   signalScope: { description: boolean; ownerNotes: boolean };
   scoringEffect: "integrated-fitness" | "annotation-only";
-  retentionCaveat: string;
   limits: {
     maxEligiblePairs: number;
     maxProviderAttempts: number;
@@ -1032,7 +1031,6 @@ export default function RedundancyPage() {
                         ? ". Note text is sent only if you allow it below; without permission, note-based results may remain incomplete"
                         : ". Owner notes are in scope, but this source does not permit transmitting them; note-based results may remain incomplete"
                       : ". No owner-note text will be sent in this run"}
-                    . Provider retention is unknown: {preview.retentionCaveat}
                   </p>
                   <p>
                     Up to {preview.limits.maxProviderAttempts.toLocaleString()} HTTP attempts,

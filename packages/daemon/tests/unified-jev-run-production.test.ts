@@ -226,6 +226,19 @@ describe("production unified Jev run preparation", () => {
       // Their exact deduplicated union is four pairs, not the three-pair R-only collection universe.
       expect(collectionPreview.body.pairCount).toBe(4);
       expect(collectionPreview.body.descriptionBearingPairCount).toBe(4);
+      expect(collectionPreview.body).toMatchObject({
+        provider: "TypeSafe",
+        noteTransmissionPermitted: false,
+      });
+      expect(collectionPreview.body.limits.maxProviderAttempts).toBeGreaterThan(0);
+      expect(collectionPreview.body).not.toHaveProperty("retentionCaveat");
+      expect(JSON.stringify(collectionPreview.body)).not.toMatch(/retention/i);
+      expect(JSON.stringify(collectionPreview.body)).not.toContain(
+        "TypeSafe's default retention duration is unspecified",
+      );
+      expect(JSON.stringify(collectionPreview.body)).not.toContain(
+        "do not promise provider-side erasure",
+      );
       const exactHitSources = [collection.games[0], collection.games[1]];
       if (!exactHitSources[0] || !exactHitSources[1]) throw new Error("Run source fixture missing");
       const [hitA, hitB] = exactHitSources.sort((a, b) => a.id.localeCompare(b.id));
@@ -268,6 +281,20 @@ describe("production unified Jev run preparation", () => {
       expect(wishlistPreview.body.scope.comparisonPairCount).toBe(3);
       expect(wishlistPreview.body.scope.sendablePairCount).toBe(3);
       expect(wishlistPreview.body.noteBearingPairCount).toBe(0);
+      expect(wishlistPreview.body).toMatchObject({
+        provider: "TypeSafe",
+        noteTransmissionPermitted: false,
+        signalScope: { ownerNotes: false },
+      });
+      expect(wishlistPreview.body.limits.maxProviderAttempts).toBeGreaterThan(0);
+      expect(wishlistPreview.body).not.toHaveProperty("retentionCaveat");
+      expect(JSON.stringify(wishlistPreview.body)).not.toMatch(/retention/i);
+      expect(JSON.stringify(wishlistPreview.body)).not.toContain(
+        "TypeSafe's default retention duration is unspecified",
+      );
+      expect(JSON.stringify(wishlistPreview.body)).not.toContain(
+        "do not promise provider-side erasure",
+      );
       const deniedNotes = await controller.start({
         requestId: wishlistPreview.body.requestId,
         precondition: wishlistPreview.body.precondition,

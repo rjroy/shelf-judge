@@ -171,7 +171,6 @@ describe("wishlist semantic run argument dispatch", () => {
       noteTransmissionPermitted: false,
       providerConfigured: true,
       scoringEffect: "annotation-only",
-      retentionCaveat: "Retention applies.",
       limits: {
         maxEligiblePairs: 25_000,
         maxProviderAttempts: 100,

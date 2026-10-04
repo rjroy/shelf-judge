@@ -741,7 +741,6 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
               additionalProperties: false,
             },
             scoringEffect: { enum: ["integrated-fitness", "annotation-only"] },
-            retentionCaveat: { type: "string" },
             limits: {
               type: "object",
               properties: {
@@ -835,7 +834,6 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
             "providerConfigured",
             "signalScope",
             "scoringEffect",
-            "retentionCaveat",
             "limits",
             "withinPairLimit",
             "expiresAt",

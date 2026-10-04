@@ -235,7 +235,6 @@ describe("semantic redundancy routes", () => {
             providerConfigured: false,
             signalScope: { description: true, ownerNotes: false },
             scoringEffect: "annotation-only",
-            retentionCaveat: "Provider retention may apply.",
             limits: { maxEligiblePairs: 25_000, maxProviderAttempts: 100 },
             withinPairLimit: true,
             expiresAt: "2026-01-01T00:00:00.000Z",
@@ -261,7 +260,22 @@ describe("semantic redundancy routes", () => {
     expect(preview.status).toBe(200);
     expect(preview.headers.get("Cache-Control")).toBe("no-store");
     expect(preview.headers.get("ETag")).toBeNull();
-    expect(await preview.json()).toMatchObject({ pairCount: 1, providerConfigured: false });
+    const previewBody = (await preview.json()) as Record<string, unknown>;
+    expect(previewBody).toMatchObject({
+      provider: "TypeSafe",
+      modelId: "jev-test",
+      pairCount: 1,
+      providerConfigured: false,
+      noteTransmissionPermitted: false,
+      signalScope: { description: true, ownerNotes: false },
+      limits: { maxProviderAttempts: 100 },
+    });
+    expect(previewBody).not.toHaveProperty("retentionCaveat");
+    expect(JSON.stringify(previewBody)).not.toMatch(/retention/i);
+    expect(JSON.stringify(previewBody)).not.toContain(
+      "TypeSafe's default retention duration is unspecified",
+    );
+    expect(JSON.stringify(previewBody)).not.toContain("do not promise provider-side erasure");
 
     const malformed = await app.request(
       "/api/redundancy/semantic/run",
@@ -411,6 +425,9 @@ describe("semantic redundancy routes", () => {
         (parameter) => parameter.name === "bggId" && parameter.in === "query",
       ),
     ).toBe(true);
+    const previewProperties = previewOperation?.response?.body.properties;
+    expect(previewProperties).not.toHaveProperty("retentionCaveat");
+    expect(previewOperation?.response?.body.required).not.toContain("retentionCaveat");
     const startOperation = operations.find(
       (operation) => operation.operationId === "shelf.redundancy.start-semantic-run",
     );

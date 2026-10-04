@@ -287,7 +287,6 @@ function formatRunPreview(preview: JevRunPreview): string {
     `Provider configured: ${preview.providerConfigured ? "yes" : "no"}`,
     `Application stop limits: ${preview.limits.maxProviderAttempts.toLocaleString()} provider attempts; ${Math.round(preview.limits.maxRunDurationMs / 60_000)} minutes; ${preview.limits.maxEligiblePairs.toLocaleString()} eligible pairs`,
     `Provider-reported usage stop threshold: ${tokenThreshold} tokens (reported usage is not a billing cap)`,
-    `Retention: ${preview.retentionCaveat}`,
     `Preview expires: ${preview.expiresAt}`,
     preview.withinPairLimit
       ? "Scope is within the pair limit."

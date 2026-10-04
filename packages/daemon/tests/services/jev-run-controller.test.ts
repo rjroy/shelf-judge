@@ -298,7 +298,17 @@ describe("JevRunController", () => {
     expect(preview.body).toMatchObject({
       scope: { scope: "wishlist", selectedCandidateCount: 1, sendablePairCount: 1 },
       selection: { kind: "selected", bggIds: [501] },
+      provider: "TypeSafe",
+      noteTransmissionPermitted: false,
+      signalScope: { description: true, ownerNotes: false },
     });
+    expect(preview.body.limits.maxProviderAttempts).toBeGreaterThan(0);
+    expect(preview.body).not.toHaveProperty("retentionCaveat");
+    expect(JSON.stringify(preview.body)).not.toMatch(/retention/i);
+    expect(JSON.stringify(preview.body)).not.toContain(
+      "TypeSafe's default retention duration is unspecified",
+    );
+    expect(JSON.stringify(preview.body)).not.toContain("do not promise provider-side erasure");
 
     const startInput = {
       requestId: preview.body.requestId,
@@ -334,6 +344,18 @@ describe("JevRunController", () => {
     expect(preview.status).toBe(200);
     if (preview.status !== 200) throw new Error("Expected budget preview");
     expect(preview.body.limits).toMatchObject(selected);
+    expect(preview.body).toMatchObject({
+      provider: "TypeSafe",
+      modelId: JEV_MODEL_ID,
+      noteTransmissionPermitted: true,
+      signalScope: { description: true, ownerNotes: false },
+    });
+    expect(preview.body).not.toHaveProperty("retentionCaveat");
+    expect(JSON.stringify(preview.body)).not.toMatch(/retention/i);
+    expect(JSON.stringify(preview.body)).not.toContain(
+      "TypeSafe's default retention duration is unspecified",
+    );
+    expect(JSON.stringify(preview.body)).not.toContain("do not promise provider-side erasure");
     const started = await h.controller.start({
       requestId: preview.body.requestId,
       precondition: preview.body.precondition,

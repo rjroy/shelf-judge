@@ -922,7 +922,6 @@ export default function WishlistPage() {
                       (not a billing ceiling) · up to{" "}
                       {Math.ceil(preview.limits.maxRunDurationMs / 60_000)} minutes
                     </p>
-                    <p>{preview.retentionCaveat}</p>
                     {preview.scope.sendablePairCount === 0 && (
                       <p>
                         No provider requests are expected; this run can use current cached results.

@@ -1833,7 +1833,6 @@ export interface JevRunPreviewBase {
   providerConfigured: boolean;
   signalScope: { description: boolean; ownerNotes: boolean };
   scoringEffect: "integrated-fitness" | "annotation-only";
-  retentionCaveat: string;
   limits: {
     maxEligiblePairs: number;
     maxProviderAttempts: number;

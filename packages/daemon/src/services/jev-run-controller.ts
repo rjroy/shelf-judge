@@ -22,12 +22,7 @@ import {
   type JevRunScope,
 } from "./jev-run-scope.js";
 import { prepareJevRunPair } from "./jev-run-pair.js";
-import {
-  JEV_GATEWAY_LIMITS,
-  JEV_MODEL_ID,
-  JEV_RETENTION_CAVEAT,
-  isJevGatewayConfigured,
-} from "./jev/jev-gateway.js";
+import { JEV_GATEWAY_LIMITS, JEV_MODEL_ID, isJevGatewayConfigured } from "./jev/jev-gateway.js";
 import {
   canonicalSha256,
   profileSourceCoordinatorFor,
@@ -197,7 +192,6 @@ export class JevRunController {
           (semantic.weights.description > 0 || semantic.weights.ownerNote > 0)
             ? "integrated-fitness"
             : "annotation-only",
-        retentionCaveat: JEV_RETENTION_CAVEAT,
         limits: {
           maxEligiblePairs: limits.run.maxEligiblePairs,
           maxProviderAttempts: providerBudget.maxProviderAttempts,
@@ -301,7 +295,6 @@ export class JevRunController {
         authority.redundancySettings.stage === "integrated" && semantic.weights.description > 0
           ? "integrated-fitness"
           : "annotation-only",
-      retentionCaveat: JEV_RETENTION_CAVEAT,
       limits: {
         maxEligiblePairs: limits.run.maxEligiblePairs,
         maxProviderAttempts: providerBudget.maxProviderAttempts,
@@ -752,7 +745,6 @@ export class JevRunController {
           (semantic.weights.description > 0 || semantic.weights.ownerNote > 0)
             ? "integrated-fitness"
             : "annotation-only",
-        retentionCaveat: JEV_RETENTION_CAVEAT,
         limits: {
           maxEligiblePairs: limits.run.maxEligiblePairs,
           maxProviderAttempts: providerBudget.maxProviderAttempts,
@@ -857,7 +849,6 @@ export class JevRunController {
           authority.redundancySettings.stage === "integrated" && semantic.weights.description > 0
             ? "integrated-fitness"
             : "annotation-only",
-        retentionCaveat: JEV_RETENTION_CAVEAT,
         limits: {
           maxEligiblePairs: limits.run.maxEligiblePairs,
           maxProviderAttempts: providerBudget.maxProviderAttempts,

@@ -357,7 +357,6 @@ async function wishlistFixture(
         providerConfigured: true,
         signalScope: { description: true, ownerNotes: false },
         scoringEffect: "integrated-fitness",
-        retentionCaveat: "The provider may retain submitted descriptions.",
         limits: {
           maxEligiblePairs: 500,
           maxProviderAttempts,
@@ -464,6 +463,10 @@ test("prepares and starts an all-candidate wishlist run only after disclosure, t
   await page.getByRole("button", { name: "Prepare comparison" }).click();
   await expect(page.getByRole("heading", { name: "Review before starting" })).toBeVisible();
   await expect(page.getByText(/3 description comparisons may be sent/)).toBeVisible();
+  const disclosure = page.getByRole("group", { name: "Review before starting" });
+  await expect(disclosure).toContainText("Provider: TypeSafe · Model: fixture-model");
+  await expect(disclosure).toContainText("3 description comparisons may be sent");
+  await expect(disclosure).not.toContainText(/retention|may retain|unspecified/i);
   expect(calls.filter((call) => call.url.includes("run-preview"))).toHaveLength(1);
   const previewUrl = new URL(
     calls.find((call) => call.url.includes("run-preview"))!.url,
@@ -473,15 +476,9 @@ test("prepares and starts an all-candidate wishlist run only after disclosure, t
   expect(previewUrl.searchParams.get("maxProviderAttempts")).toBe("1000");
   expect(previewUrl.searchParams.get("reportedTokenStopThreshold")).toBe("2000000");
   expect(previewUrl.searchParams.get("maxRunDurationMs")).toBe("1800000");
-  await expect(page.getByRole("group", { name: "Review before starting" })).toContainText(
-    "1,000 attempts",
-  );
-  await expect(page.getByRole("group", { name: "Review before starting" })).toContainText(
-    "2,000,000 reported tokens (not a billing ceiling)",
-  );
-  await expect(page.getByRole("group", { name: "Review before starting" })).toContainText(
-    "30 minutes",
-  );
+  await expect(disclosure).toContainText("1,000 attempts");
+  await expect(disclosure).toContainText("2,000,000 reported tokens (not a billing ceiling)");
+  await expect(disclosure).toContainText("30 minutes");
   expect(calls.some((call) => call.url.endsWith("/semantic/run"))).toBe(false);
   await page.getByRole("button", { name: "Authorize and start" }).click();
   const start = calls.find((call) => call.url.endsWith("/semantic/run"));

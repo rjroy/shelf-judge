@@ -126,7 +126,6 @@ describe("semantic redundancy CLI consent boundary", () => {
       noteTransmissionPermitted: true,
       providerConfigured: true,
       scoringEffect: "integrated-fitness",
-      retentionCaveat: "Provider retention applies.",
       limits: {
         maxEligiblePairs: 25_000,
         maxProviderAttempts: 1_000,
@@ -168,14 +167,20 @@ describe("semantic redundancy CLI consent boundary", () => {
     }
     expect(output).toContain("Run accepted");
     expect(outputEvents[0]).toContain("1,000 provider attempts");
+    expect(outputEvents[0]).toContain("Provider/model: TypeSafe / model-safe");
+    expect(outputEvents[0]).toContain("Pairs with descriptions: 6; pairs with notes: 2");
     expect(requestedPaths).toEqual([
       "/api/redundancy/semantic/run-preview?maxProviderAttempts=1000&reportedTokenStopThreshold=2000000&maxRunDurationMs=1800000",
     ]);
     expect(outputEvents[0]).toContain("Note transmission is off by default");
+    expect(outputEvents[0]).toContain("Note transmission permission available: yes");
     expect(outputEvents[1]).toBe("POST");
     expect(outputEvents[0]).toContain("not a billing cap");
     expect(outputEvents[0]).toContain("Application stop limits");
     expect(outputEvents[0]).toContain("2,000,000 tokens");
+    expect(outputEvents[0]).not.toMatch(/retention/i);
+    expect(outputEvents[0]).not.toContain("TypeSafe's default retention duration is unspecified");
+    expect(outputEvents[0]).not.toContain("do not promise provider-side erasure");
     // The preview is the only GET made; the mock has no manifest or page route.
     expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
     expect(calls.find((call) => call.method === "POST")?.body).toEqual({
@@ -199,7 +204,6 @@ describe("semantic redundancy CLI consent boundary", () => {
       noteTransmissionPermitted: false,
       providerConfigured: true,
       scoringEffect: "annotation-only",
-      retentionCaveat: "Retention applies.",
       limits: {
         maxEligiblePairs: 25_000,
         maxProviderAttempts: 100,
@@ -249,7 +253,6 @@ describe("semantic redundancy CLI consent boundary", () => {
       noteTransmissionPermitted: false,
       providerConfigured: true,
       scoringEffect: "annotation-only",
-      retentionCaveat: "Retention applies.",
       limits: {
         maxEligiblePairs: 25_000,
         maxProviderAttempts: 250,
@@ -348,7 +351,6 @@ describe("semantic redundancy CLI consent boundary", () => {
       noteTransmissionPermitted: false,
       providerConfigured: false,
       scoringEffect: "annotation-only",
-      retentionCaveat: "Retention applies.",
       limits: {
         maxEligiblePairs: 25_000,
         maxProviderAttempts: 100,
@@ -400,7 +402,6 @@ describe("semantic redundancy CLI consent boundary", () => {
       noteTransmissionPermitted: false,
       providerConfigured: true,
       scoringEffect: "annotation-only",
-      retentionCaveat: "Provider retention applies.",
       limits: {
         maxEligiblePairs: 25_000,
         maxProviderAttempts: 100,
@@ -468,7 +469,11 @@ describe("semantic redundancy CLI consent boundary", () => {
       "Eligible owned games: 2; comparison pairs: 6; valid C_ONLY cache hits: 2; sendable pairs: 3",
     );
     expect(consoleOutput[0]).toContain("descriptions only");
+    expect(consoleOutput[0]).toContain("Provider/model: TypeSafe / model-safe");
+    expect(consoleOutput[0]).toContain("Application stop limits");
     expect(consoleOutput[0]).not.toContain("authorize-notes");
+    expect(consoleOutput[0]).not.toMatch(/retention/i);
+    expect(consoleOutput[0]).not.toContain("TypeSafe's default retention duration is unspecified");
     expect(calls[1]?.body).toEqual({
       requestId: "wishlist-request",
       precondition: "wishlist-token",
@@ -492,7 +497,6 @@ describe("semantic redundancy CLI consent boundary", () => {
       noteTransmissionPermitted: false,
       providerConfigured: true,
       scoringEffect: "annotation-only" as const,
-      retentionCaveat: "Retention applies.",
       limits: {
         maxEligiblePairs: 25_000,
         maxProviderAttempts: 100,
@@ -623,7 +627,6 @@ describe("semantic redundancy CLI consent boundary", () => {
                 noteTransmissionPermitted: false,
                 providerConfigured: true,
                 scoringEffect: "annotation-only",
-                retentionCaveat: "Retention applies.",
                 limits: {
                   maxEligiblePairs: 25_000,
                   maxProviderAttempts: 100,
