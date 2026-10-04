@@ -231,6 +231,7 @@ describe("Jev run production composition", () => {
     let hydrationCalls = 0;
     let transportCalls = 0;
     let lastBody = "";
+    const firstTransport = deferred<Response>();
     process.env.TYPESAFE_API_KEY = "integration-fake-key";
     try {
       const worker = createJevRunWorker({
@@ -240,6 +241,7 @@ describe("Jev run production composition", () => {
         fetch: (_url, init) => {
           transportCalls++;
           lastBody = typeof init?.body === "string" ? init.body : "";
+          if (transportCalls === 1) return firstTransport.promise;
           return Promise.resolve(gatewayResponse());
         },
       });
@@ -320,6 +322,12 @@ describe("Jev run production composition", () => {
         }),
       );
       expect(start.status).toBe(202);
+      const started = (await start.json()) as { runId: string };
+      const liveProgress = await request("/api/redundancy/semantic/refresh-progress");
+      expect(await liveProgress.json()).toMatchObject({
+        activity: { state: "active", runId: started.runId, scope: "wishlist" },
+      });
+      firstTransport.resolve(gatewayResponse());
       const progress = await waitForWishlistProgress(request);
       expect(progress).toMatchObject({
         progress: {
@@ -421,6 +429,10 @@ describe("Jev run production composition", () => {
         storageService: sources.storage,
         jevStatusService: statusService!,
         jevRunController: controller!,
+        jevRefreshProgressService: createJevRefreshProgressService({
+          cache,
+          activeRun: () => controller!.activeRun(),
+        }),
       });
       const app = new Hono();
       app.route("/api", routes);
@@ -535,7 +547,12 @@ describe("Jev run production composition", () => {
       expect(transportCalls).toBe(1);
       expect(await (await request("/api/redundancy/semantic/active-run")).json()).toEqual({
         runId: run.runId,
+        scope: "collection",
       });
+      expect(
+        await (await request("/api/redundancy/semantic/refresh-progress")).json(),
+      ).toMatchObject({ activity: { state: "active", runId: run.runId, scope: "collection" } });
+      expect(transportCalls).toBe(1);
 
       const canceled = await request("/api/redundancy/semantic/cancel", json({ runId: run.runId }));
       expect(canceled.status).toBe(202);

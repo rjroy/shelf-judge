@@ -7,6 +7,15 @@ import Link from "next/link";
 import type { WishlistEntry, JevRunPreview, JevWishlistRunPreview } from "@shelf-judge/shared";
 import { WishlistCurrentProjectionCard } from "@/components/wishlist-current-projection";
 import {
+  activityLabel,
+  progressBelongsToActivity,
+  readDisplayRunProgress,
+  readRunStatusSnapshot,
+  runProgressSummary,
+  type LiveActivity,
+  type RunProgressSnapshot,
+} from "@/lib/live-run-status";
+import {
   sortCurrentWishlistRows,
   toCurrentWishlistRow,
   unavailableCurrentWishlistRow,
@@ -116,19 +125,13 @@ export default function WishlistPage() {
   const [preview, setPreview] = useState<JevRunPreview | null>(null);
   const [runMessage, setRunMessage] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
-  const [runId, setRunId] = useState<string | null>(null);
   const previewRevision = useRef(0);
-  const [progress, setProgress] = useState<{
-    state: string;
-    pairCount: number;
-    completedPairs: number;
-    cacheHits: number;
-    cacheMisses: number;
-    failedPairs: number;
-  } | null>(null);
-  const [wishlistRunId, setWishlistRunId] = useState<string | null>(null);
-  const refreshProjectionAfterWishlistRun = useRef(false);
+  const [liveActivity, setLiveActivity] = useState<LiveActivity>({ state: "unavailable" });
+  const liveActivityRef = useRef<LiveActivity>({ state: "unavailable" });
+  const [savedProgress, setSavedProgress] = useState<RunProgressSnapshot>({ state: "unavailable" });
   const runStatusVersion = useRef(0);
+  const observedWishlistRunId = useRef<string | null>(null);
+  const completedWishlistRuns = useRef(new Set<string>());
   const projectionRevision = useRef(0);
   const { budget: selectedRunBudget, error: runBudgetError } = validateWishlistRunBudget(
     maxProviderAttempts,
@@ -160,15 +163,30 @@ export default function WishlistPage() {
     if (revision === projectionRevision.current) setProjections(next);
   }
 
-  async function refreshWishlistProjectionAfterRun() {
-    if (!refreshProjectionAfterWishlistRun.current) return;
-    refreshProjectionAfterWishlistRun.current = false;
-    try {
-      await reloadWishlistProjections();
-    } catch (error) {
-      refreshProjectionAfterWishlistRun.current = true;
-      throw error;
+  function refreshWishlistProjectionAfterRun(runId: string) {
+    if (completedWishlistRuns.current.has(runId)) return;
+    completedWishlistRuns.current.add(runId);
+    const revision = invalidateWishlistProjections();
+    void reloadWishlistProjections(revision).catch(() => {});
+  }
+
+  function applyRunStatus(payload: unknown, version: number) {
+    if (version !== runStatusVersion.current) return false;
+    const status = readRunStatusSnapshot(payload);
+    liveActivityRef.current = status.activity;
+    setLiveActivity(status.activity);
+    setSavedProgress(status.progress);
+    if (status.activity.state === "active") {
+      observedWishlistRunId.current =
+        status.activity.scope === "wishlist" ? status.activity.runId : null;
+    } else if (status.activity.state === "idle") {
+      const completedRunId = observedWishlistRunId.current;
+      observedWishlistRunId.current = null;
+      if (completedRunId) refreshWishlistProjectionAfterRun(completedRunId);
+    } else {
+      observedWishlistRunId.current = null;
     }
+    return true;
   }
 
   useEffect(() => {
@@ -208,32 +226,22 @@ export default function WishlistPage() {
     const poll = async () => {
       if (pending) return;
       pending = true;
-      const requestVersion = runStatusVersion.current;
+      const requestVersion = ++runStatusVersion.current;
       try {
         const response = await fetch("/api/daemon/redundancy/semantic/refresh-progress", {
           cache: "no-store",
         });
         if (!response.ok) throw new Error("Run status is unavailable");
-        const data = (await response.json()) as {
-          activity: { state: string; runId?: string };
-          progress:
-            | { state: string; relation?: string; value?: typeof progress }
-            | { state: string };
-        };
-        if (requestVersion !== runStatusVersion.current) return;
         if (!alive) return;
-        if (data.activity.state === "active" && data.activity.runId) {
-          setRunId(data.activity.runId);
-          setWishlistRunId((current) => (current === data.activity.runId ? current : null));
-        } else {
-          setRunId(null);
-          setWishlistRunId(null);
-          if (alive) await refreshWishlistProjectionAfterRun();
-        }
-        if (data.progress.state === "saved" && "value" in data.progress && data.progress.value)
-          setProgress(data.progress.value);
+        applyRunStatus(await response.json(), requestVersion);
       } catch {
-        if (alive) setRunError("Run status could not be loaded. Try refreshing status.");
+        if (alive && requestVersion === runStatusVersion.current) {
+          setLiveActivity({ state: "unavailable" });
+          liveActivityRef.current = { state: "unavailable" };
+          setSavedProgress({ state: "unavailable" });
+          observedWishlistRunId.current = null;
+          setRunError("Run status could not be loaded. Try refreshing status.");
+        }
       } finally {
         pending = false;
       }
@@ -295,6 +303,7 @@ export default function WishlistPage() {
     setRunBusy(true);
     setRunError(null);
     setRunMessage(null);
+    const actionVersion = ++runStatusVersion.current;
     try {
       const response = await fetch("/api/daemon/redundancy/semantic/run", {
         method: "POST",
@@ -314,10 +323,19 @@ export default function WishlistPage() {
         );
       }
       const result = (await response.json()) as { runId: string };
-      runStatusVersion.current += 1;
-      setRunId(result.runId);
-      setWishlistRunId(result.runId);
-      refreshProjectionAfterWishlistRun.current = true;
+      if (actionVersion !== runStatusVersion.current) {
+        setPreview(null);
+        await refreshRunStatus();
+        return;
+      }
+      const localActivity: LiveActivity = {
+        state: "active",
+        runId: result.runId,
+        scope: "wishlist",
+      };
+      liveActivityRef.current = localActivity;
+      setLiveActivity(localActivity);
+      observedWishlistRunId.current = result.runId;
       setPreview(null);
       setRunMessage(
         preview.scope.sendablePairCount === 0
@@ -332,12 +350,11 @@ export default function WishlistPage() {
     }
   }
   async function cancelRun() {
-    if (
-      !runId ||
-      runId !== wishlistRunId ||
-      !window.confirm("Request cancellation of this wishlist comparison run?")
-    )
-      return;
+    if (!window.confirm("Request cancellation of this wishlist comparison run?")) return;
+    const current = liveActivityRef.current;
+    if (current.state !== "active" || current.scope !== "wishlist") return;
+    const runId = current.runId;
+    ++runStatusVersion.current;
     setRunBusy(true);
     try {
       const response = await fetch("/api/daemon/redundancy/semantic/cancel", {
@@ -355,27 +372,21 @@ export default function WishlistPage() {
     }
   }
   async function refreshRunStatus() {
+    const requestVersion = ++runStatusVersion.current;
     try {
       const response = await fetch("/api/daemon/redundancy/semantic/refresh-progress", {
         cache: "no-store",
       });
       if (!response.ok) throw new Error();
-      const data = (await response.json()) as {
-        activity: { state: string; runId?: string };
-        progress: { state: string; value?: typeof progress } | { state: string };
-      };
-      if (data.activity.state === "active") {
-        setRunId(data.activity.runId ?? null);
-        setWishlistRunId((current) => (current === data.activity.runId ? current : null));
-      } else {
-        setRunId(null);
-        setWishlistRunId(null);
-        await refreshWishlistProjectionAfterRun();
-      }
-      if (data.progress.state === "saved" && "value" in data.progress && data.progress.value)
-        setProgress(data.progress.value);
+      applyRunStatus(await response.json(), requestVersion);
     } catch {
-      setRunError("Run status could not be loaded. Try again.");
+      if (requestVersion === runStatusVersion.current) {
+        setLiveActivity({ state: "unavailable" });
+        liveActivityRef.current = { state: "unavailable" };
+        setSavedProgress({ state: "unavailable" });
+        observedWishlistRunId.current = null;
+        setRunError("Run status could not be loaded. Try again.");
+      }
     }
   }
 
@@ -535,6 +546,24 @@ export default function WishlistPage() {
         : sortField,
   );
   const activeSortLabel = SORT_OPTIONS.find((o) => o.value === sortField)?.label ?? "Date Added";
+  const currentWishlistRun = liveActivity.state === "active" && liveActivity.scope === "wishlist";
+  const currentRunProgress =
+    liveActivity.state === "active" &&
+    progressBelongsToActivity(
+      liveActivity,
+      savedProgress.state === "saved" ? savedProgress.relation : undefined,
+      savedProgress.state === "saved" ? savedProgress.scope : undefined,
+    )
+      ? runProgressSummary(savedProgress.state === "saved" ? savedProgress.value : null)
+      : null;
+  const progress =
+    liveActivity.state === "idle" &&
+    savedProgress.state === "saved" &&
+    savedProgress.relation === "historical"
+      ? readDisplayRunProgress(savedProgress.value)
+      : null;
+  const runId = currentWishlistRun && liveActivity.state === "active" ? liveActivity.runId : null;
+  const wishlistRunId = runId;
 
   if (loading) {
     return (
@@ -775,14 +804,14 @@ export default function WishlistPage() {
                     onClick={() => void prepareRun()}
                     disabled={
                       runBusy ||
-                      !!runId ||
+                      liveActivity.state !== "idle" ||
                       !selectedRunBudget ||
                       (runMode === "selected" && selectedIds.length === 0)
                     }
                   >
                     {runBusy ? "Preparing…" : "Prepare comparison"}
                   </button>
-                  {runId && runId === wishlistRunId && (
+                  {currentWishlistRun && (
                     <button
                       className="btn btn-ghost btn-sm"
                       onClick={() => void cancelRun()}
@@ -836,11 +865,22 @@ export default function WishlistPage() {
                   </p>
                 )}
                 {runMessage && <p role="status">{runMessage}</p>}
-                {runId && runId !== wishlistRunId && (
+                {liveActivity.state === "active" && (
                   <p role="status">
-                    A redundancy run is active. Its scope is not available here; no wishlist
-                    candidate counts are shown.
+                    {activityLabel(liveActivity, "wishlist")}{" "}
+                    {currentWishlistRun ? currentRunProgress : null}
                   </p>
+                )}
+                {liveActivity.state === "unavailable" && (
+                  <p role="status">
+                    Live run status is unavailable; cancellation is not available.
+                  </p>
+                )}
+                {savedProgress.state === "saved" && savedProgress.relation === "unknown" && (
+                  <p role="status">Saved progress is available, but its run scope is unknown.</p>
+                )}
+                {savedProgress.state === "unavailable" && liveActivity.state !== "unavailable" && (
+                  <p role="status">Run progress is unavailable.</p>
                 )}
                 {progress && (
                   <p role="status">

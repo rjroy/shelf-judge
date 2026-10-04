@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_JEV_RUN_BUDGET } from "@shelf-judge/shared";
 import type { RedundancySettings } from "@shelf-judge/shared";
+import {
+  activityLabel,
+  progressBelongsToActivity,
+  readRunStatusSnapshot,
+  type LiveActivity,
+  type RunProgressSnapshot,
+} from "@/lib/live-run-status";
 
 type Weights = { factual: number; description: number; ownerNote: number };
 type Semantic = {
@@ -59,22 +66,29 @@ type Refresh = {
       | "provider-unconfigured";
   };
 };
-type ActiveRun = { runId: string } | null;
 type CheapStatus = {
-  activity: { state: "active"; runId: string } | { state: "idle" } | { state: "unavailable" };
+  activity: LiveActivity;
   progress:
-    | {
-        state: "saved";
-        relation: "active-run" | "historical" | "unknown";
-        value: Refresh["progress"];
-      }
-    | { state: "none" }
-    | { state: "unavailable" };
+    | (Extract<RunProgressSnapshot, { state: "saved" }> & { value: Refresh["progress"] })
+    | Extract<RunProgressSnapshot, { state: "none" | "unavailable" }>;
 };
 
-const readCheapStatus = () =>
-  request<CheapStatus>("/api/daemon/redundancy/semantic/refresh-progress");
+const readCheapStatus = async (): Promise<CheapStatus> => {
+  const payload = await request<unknown>("/api/daemon/redundancy/semantic/refresh-progress");
+  const snapshot = readRunStatusSnapshot(payload);
+  return {
+    activity: snapshot.activity,
+    progress:
+      snapshot.progress.state === "saved"
+        ? { ...snapshot.progress, value: snapshot.progress.value as Refresh["progress"] }
+        : snapshot.progress,
+  };
+};
 const readFullStatus = () => request<Refresh>("/api/daemon/redundancy/semantic/refresh-status");
+
+function unknownActivityStatus(): CheapStatus {
+  return { activity: { state: "unavailable" }, progress: { state: "unavailable" } };
+}
 
 const statusCopy: Record<string, string> = {
   ready: "Ready",
@@ -194,8 +208,20 @@ export default function RedundancyPage() {
   const [migrationNotice, setMigrationNotice] = useState<string>();
   const [preview, setPreview] = useState<Preview | null>(null);
   const [refresh, setRefresh] = useState<Refresh | null>(null);
-  const [activeRun, setActiveRun] = useState<ActiveRun>(null);
+  const [activeRun, setActiveRun] = useState<Extract<LiveActivity, { state: "active" }> | null>(
+    null,
+  );
+  const activeRunRef = useRef<Extract<LiveActivity, { state: "active" }> | null>(null);
   const [cheap, setCheap] = useState<CheapStatus | null>(null);
+  const activityRequestVersion = useRef(0);
+  const loseActivityAuthority = () => {
+    activityUnavailable.current = true;
+    wasActive.current = false;
+    activeRunRef.current = null;
+    setActiveRun(null);
+    setCheap(unknownActivityStatus());
+    invalidateCoverage();
+  };
   const statusGeneration = useRef(0);
   const wasActive = useRef(false);
   const activityUnavailable = useRef(false);
@@ -232,27 +258,50 @@ export default function RedundancyPage() {
     statusGeneration.current += 1;
     setRefresh(null);
   };
-  const applyCheapStatus = async (latest: CheapStatus) => {
+  const applyCheapStatus = async (latest: CheapStatus, requestVersion?: number) => {
+    if (requestVersion !== undefined && requestVersion !== activityRequestVersion.current) return;
     setCheap(latest);
     if (latest.activity.state === "active") {
       activityUnavailable.current = false;
       wasActive.current = true;
-      setActiveRun({ runId: latest.activity.runId });
+      activeRunRef.current = latest.activity;
+      setActiveRun(latest.activity);
       invalidateCoverage();
       return;
     }
     if (latest.activity.state === "unavailable") {
       activityUnavailable.current = true;
       wasActive.current = false;
+      activeRunRef.current = null;
+      setActiveRun(null);
       invalidateCoverage();
       return;
     }
     const shouldMeasure = wasActive.current || activityUnavailable.current;
     activityUnavailable.current = false;
+    activeRunRef.current = null;
     setActiveRun(null);
     if (shouldMeasure) {
       wasActive.current = false;
       await measureCoverage();
+    }
+  };
+  const refreshCurrentActivityStatus = async () => {
+    const requestVersion = ++activityRequestVersion.current;
+    try {
+      const latest = await readCheapStatus();
+      if (requestVersion !== activityRequestVersion.current) return false;
+      await applyCheapStatus(latest, requestVersion);
+      if (!coverageError.current) setStatusError(undefined);
+      return requestVersion === activityRequestVersion.current;
+    } catch (cause) {
+      if (requestVersion === activityRequestVersion.current) {
+        loseActivityAuthority();
+        setStatusError(
+          cause instanceof Error ? cause.message : "Refresh status could not be loaded.",
+        );
+      }
+      return false;
     }
   };
   const [noteTransmissionAuthorized, setNoteTransmissionAuthorized] = useState(false);
@@ -284,10 +333,14 @@ export default function RedundancyPage() {
   );
 
   const reload = useCallback(async () => {
+    const requestVersion = ++activityRequestVersion.current;
     const [data, status] = await Promise.all([
       request<SettingsResponse>("/api/daemon/redundancy/settings"),
       readCheapStatus().catch((cause: unknown) => {
-        setStatusError(cause instanceof Error ? cause.message : "Could not load refresh status.");
+        if (requestVersion === activityRequestVersion.current) {
+          loseActivityAuthority();
+          setStatusError(cause instanceof Error ? cause.message : "Could not load refresh status.");
+        }
         return null;
       }),
     ]);
@@ -296,11 +349,13 @@ export default function RedundancyPage() {
     setSemantic(data.semantic);
     setSavedSemantic(data.semantic.settings);
     setMigrationNotice(data.migrationNotice);
-    if (status) {
-      if (status.activity.state === "active") await applyCheapStatus(status);
-      else if (status.activity.state === "unavailable") await applyCheapStatus(status);
+    if (status && requestVersion === activityRequestVersion.current) {
+      if (status.activity.state === "active") await applyCheapStatus(status, requestVersion);
+      else if (status.activity.state === "unavailable")
+        await applyCheapStatus(status, requestVersion);
       else {
         setCheap(status);
+        activeRunRef.current = null;
         setActiveRun(null);
         wasActive.current = false;
         activityUnavailable.current = false;
@@ -319,17 +374,17 @@ export default function RedundancyPage() {
     const poll = async () => {
       if (inFlight) return;
       inFlight = true;
+      const requestVersion = ++activityRequestVersion.current;
       try {
         const latest = await readCheapStatus();
         if (!alive) return;
-        await applyCheapStatus(latest);
+        if (requestVersion !== activityRequestVersion.current) return;
+        await applyCheapStatus(latest, requestVersion);
         if (!alive) return;
         if (!coverageError.current) setStatusError(undefined);
       } catch (e) {
-        if (alive) {
-          activityUnavailable.current = true;
-          wasActive.current = false;
-          invalidateCoverage();
+        if (alive && requestVersion === activityRequestVersion.current) {
+          if (requestVersion === activityRequestVersion.current) loseActivityAuthority();
           setStatusError(
             e instanceof Error ? e.message : "Refresh status could not be loaded; retrying.",
           );
@@ -444,6 +499,7 @@ export default function RedundancyPage() {
   };
   const start = async () => {
     if (!preview) return;
+    const actionVersion = ++activityRequestVersion.current;
     setBusy(true);
     setRunError(undefined);
     setMessage(undefined);
@@ -461,28 +517,24 @@ export default function RedundancyPage() {
               : false,
         }),
       );
-      setActiveRun({ runId: result.runId });
+      if (actionVersion !== activityRequestVersion.current) {
+        setPreview(null);
+        await refreshCurrentActivityStatus();
+        return;
+      }
+      const localActivity: Extract<LiveActivity, { state: "active" }> = {
+        state: "active",
+        runId: result.runId,
+        scope: "collection",
+      };
+      activeRunRef.current = localActivity;
+      setActiveRun(localActivity);
       wasActive.current = true;
       activityUnavailable.current = false;
       invalidateCoverage();
       setMessage("Run started. Uncached comparisons may now be sent to the provider.");
       setPreview(null);
-      try {
-        const status = await readCheapStatus();
-        if (status.activity.state === "unavailable") {
-          wasActive.current = true;
-          setActiveRun({ runId: result.runId });
-          invalidateCoverage();
-          setCheap(status);
-        } else await applyCheapStatus(status);
-        if (!coverageError.current) setStatusError(undefined);
-      } catch (cause) {
-        setStatusError(
-          cause instanceof Error
-            ? `The run started, but status could not be refreshed: ${cause.message}`
-            : "The run started, but status could not be refreshed.",
-        );
-      }
+      await refreshCurrentActivityStatus();
     } catch (e) {
       const reason = e instanceof Error ? e.message : "Refresh was not started";
       if (reason.toLowerCase().includes("precondition")) {
@@ -495,23 +547,17 @@ export default function RedundancyPage() {
       setBusy(false);
     }
   };
-  const cancel = async (runId: string) => {
+  const cancel = async () => {
+    const currentRun = activeRunRef.current;
+    if (!currentRun || currentRun.scope !== "collection") return;
+    const runId = currentRun.runId;
+    ++activityRequestVersion.current;
     setBusy(true);
     setRunError(undefined);
     try {
       await request("/api/daemon/redundancy/semantic/cancel", json({ runId }));
       setMessage("Cancellation requested for this run.");
-      try {
-        const afterCancel = await readCheapStatus();
-        await applyCheapStatus(afterCancel);
-        if (!coverageError.current) setStatusError(undefined);
-      } catch (cause) {
-        setStatusError(
-          cause instanceof Error
-            ? `Cancellation was requested, but status could not be refreshed: ${cause.message}`
-            : "Cancellation was requested, but status could not be refreshed.",
-        );
-      }
+      await refreshCurrentActivityStatus();
     } catch (e) {
       setRunError(e instanceof Error ? e.message : "Could not cancel refresh");
     } finally {
@@ -1050,20 +1096,20 @@ export default function RedundancyPage() {
                   className="btn btn-secondary"
                   disabled={busy}
                   onClick={() =>
-                    void readCheapStatus()
-                      .then((latest) => {
-                        return applyCheapStatus(latest);
-                      })
-                      .catch((e: unknown) =>
-                        (() => {
-                          activityUnavailable.current = true;
-                          wasActive.current = false;
-                          invalidateCoverage();
-                          setStatusError(
-                            e instanceof Error ? e.message : "Could not reload progress.",
-                          );
-                        })(),
-                      )
+                    void (async () => {
+                      const requestVersion = ++activityRequestVersion.current;
+                      try {
+                        const latest = await readCheapStatus();
+                        await applyCheapStatus(latest, requestVersion);
+                        if (!coverageError.current) setStatusError(undefined);
+                      } catch (e) {
+                        if (requestVersion !== activityRequestVersion.current) return;
+                        loseActivityAuthority();
+                        setStatusError(
+                          e instanceof Error ? e.message : "Could not reload progress.",
+                        );
+                      }
+                    })()
                   }
                 >
                   Refresh progress
@@ -1105,11 +1151,18 @@ export default function RedundancyPage() {
                 )}
                 {activeRun && (
                   <p role="status">
-                    {cheap?.progress.state === "saved" &&
-                    cheap.progress.relation === "active-run" &&
+                    {activityLabel(activeRun, "collection")}{" "}
+                    {progressBelongsToActivity(
+                      activeRun,
+                      cheap?.progress.state === "saved" ? cheap.progress.relation : undefined,
+                      cheap?.progress.state === "saved" ? cheap.progress.scope : undefined,
+                    ) &&
+                    cheap?.progress.state === "saved" &&
                     cheap.progress.value
-                      ? `Refresh is running. ${progressCopy(cheap.progress.value)}`
-                      : "Run progress is not available yet."}
+                      ? progressCopy(cheap.progress.value)
+                      : activeRun.scope === "collection" && cheap?.activity.state === "active"
+                        ? "Run progress is not available yet."
+                        : null}
                   </p>
                 )}
                 {!activeRun &&
@@ -1118,9 +1171,9 @@ export default function RedundancyPage() {
                   cheap.progress.value && (
                     <p role="status">
                       {cheap.activity.state === "unavailable"
-                        ? "Activity status unavailable; saved run:"
-                        : "Last saved run:"}{" "}
-                      {progressCopy(cheap.progress.value)}
+                        ? "Activity status unavailable; saved progress from the "
+                        : "Last saved "}
+                      {cheap.progress.scope ?? "unscoped"} run: {progressCopy(cheap.progress.value)}
                     </p>
                   )}
                 {cheap?.activity.state === "unavailable" && (
@@ -1137,11 +1190,11 @@ export default function RedundancyPage() {
                 {cheap?.progress.state === "none" && cheap.activity.state === "idle" && (
                   <p role="status">No saved run progress.</p>
                 )}
-                {activeRun && (
+                {activeRun?.scope === "collection" && (
                   <button
                     className="btn btn-secondary"
                     disabled={busy}
-                    onClick={() => void cancel(activeRun.runId)}
+                    onClick={() => void cancel()}
                   >
                     Cancel live run
                   </button>

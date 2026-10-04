@@ -101,6 +101,10 @@ export class JevRunController {
   private readonly authorizations = new Map<string, AuthorizationRecord>();
   private readonly receipts = new Map<string, Receipt>();
   private activeHandle: JevRunHandle | null = null;
+  private activeRunScope: {
+    handle: JevRunHandle;
+    scope: "collection" | "wishlist";
+  } | null = null;
 
   constructor(
     private readonly options: {
@@ -382,10 +386,12 @@ export class JevRunController {
     return { status: 200, body: { state: "cancellation-requested" } };
   }
 
-  /** Returns only the process-local live run ID; durable progress is not run authority. */
-  activeRun(): { runId: string } | null {
+  /** Returns process-local live run identity; durable progress is not run authority. */
+  activeRun(): { runId: string; scope?: "collection" | "wishlist" } | null {
     const active = this.activeHandle;
-    return active ? { runId: active.runId } : null;
+    if (!active) return null;
+    const scope = this.activeRunScope?.handle === active ? this.activeRunScope.scope : undefined;
+    return { runId: active.runId, ...(scope ? { scope } : {}) };
   }
 
   private async startPrepared(input: {
@@ -448,6 +454,7 @@ export class JevRunController {
           const handle = this.options.runService.reserveValidatedPreparedRun(validated);
           authorization.consumed = true;
           this.activeHandle = handle;
+          this.activeRunScope = { handle, scope: authorization.scopeKind };
           const receipt = this.receipts.get(input.requestId);
           if (receipt) {
             receipt.state = "active";
@@ -455,7 +462,10 @@ export class JevRunController {
           }
           void handle.completion
             .finally(() => {
-              if (this.activeHandle === handle) this.activeHandle = null;
+              if (this.activeHandle === handle) {
+                this.activeHandle = null;
+                if (this.activeRunScope?.handle === handle) this.activeRunScope = null;
+              }
               if (receipt && this.receipts.get(input.requestId) === receipt) {
                 receipt.state = "replay";
                 receipt.expiresAtMs = this.now().getTime() + this.receiptTtlMs();
@@ -548,6 +558,7 @@ export class JevRunController {
         const handle = this.options.runService.reserveValidatedPreparedRun(preparedRun);
         authorization.consumed = true;
         this.activeHandle = handle;
+        this.activeRunScope = { handle, scope: authorization.scopeKind };
         const receipt = this.receipts.get(input.requestId);
         if (receipt) {
           receipt.state = "active";
@@ -555,7 +566,10 @@ export class JevRunController {
         }
         void handle.completion
           .finally(() => {
-            if (this.activeHandle === handle) this.activeHandle = null;
+            if (this.activeHandle === handle) {
+              this.activeHandle = null;
+              if (this.activeRunScope?.handle === handle) this.activeRunScope = null;
+            }
             if (receipt && this.receipts.get(input.requestId) === receipt) {
               receipt.state = "replay";
               receipt.expiresAtMs = this.now().getTime() + this.receiptTtlMs();
@@ -638,6 +652,7 @@ export class JevRunController {
         const handle = this.options.runService.reserveValidatedPreparedRun(preparedRun);
         authorization.consumed = true;
         this.activeHandle = handle;
+        this.activeRunScope = { handle, scope: prepared.scopeKind };
         const receipt = this.receipts.get(input.requestId);
         if (receipt) {
           receipt.state = "active";
@@ -645,7 +660,10 @@ export class JevRunController {
         }
         void handle.completion
           .finally(() => {
-            if (this.activeHandle === handle) this.activeHandle = null;
+            if (this.activeHandle === handle) {
+              this.activeHandle = null;
+              if (this.activeRunScope?.handle === handle) this.activeRunScope = null;
+            }
             if (receipt && this.receipts.get(input.requestId) === receipt) {
               receipt.state = "replay";
               receipt.expiresAtMs = this.now().getTime() + this.receiptTtlMs();

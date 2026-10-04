@@ -27,8 +27,9 @@ describe("redundancy run controls", () => {
     expect(page).not.toContain("acknowledge-and-start");
     expect(page).not.toContain("Complete disclosed game-pair manifest");
     expect(page).toContain("noteTransmissionAuthorized:");
-    expect(page).toContain("setActiveRun({ runId: result.runId })");
-    expect(page).toContain("cancel(activeRun.runId)");
+    expect(page).toContain("runId: result.runId");
+    expect(page).toContain("activeRunRef.current = localActivity");
+    expect(page).toContain("const currentRun = activeRunRef.current");
     expect(page).toContain(
       "disabled={busy || !preview.withinPairLimit || preview.pairCount === 0}",
     );

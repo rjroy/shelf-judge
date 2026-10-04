@@ -29,6 +29,13 @@ const entries = [
   },
 ];
 
+type WishlistCalls = Array<{ url: string; method: string; body?: unknown }> & {
+  waitForHeldStatus(read: number): Promise<void>;
+  releaseHeldStatus(read: number): void;
+  waitForHeldStart(): Promise<void>;
+  releaseHeldStart(): void;
+};
+
 function prediction(entry: (typeof entries)[number], score = entry.predictedScore ?? 0) {
   return {
     score,
@@ -91,8 +98,28 @@ async function wishlistFixture(
   cacheResultChangesAfterRun = false,
   missingAndZeroScenario = false,
   projectionScoreAfterVisibility?: number,
+  activeScope: "collection" | "wishlist" | null = "wishlist",
+  progressRelation: "active-run" | "historical" | "unknown" = "active-run",
+  progressScope: "collection" | "wishlist" | null = activeScope,
+  statusSequence?: readonly ({ runId: string; scope: "collection" | "wishlist" | null } | null)[],
+  holdSecondStatus = false,
+  statusFailureAt?: number,
+  holdStartResponse = false,
 ) {
-  const calls: Array<{ url: string; method: string; body?: unknown }> = [];
+  const calls = [] as unknown as WishlistCalls;
+  const heldStatus = new Map<number, { entered: Promise<void>; release: () => void }>();
+  let heldStart: { entered: Promise<void>; release: () => void } | null = null;
+  calls.waitForHeldStatus = async (read) => {
+    const hold = heldStatus.get(read);
+    if (!hold) throw new Error(`Status read ${read} was not held`);
+    await hold.entered;
+  };
+  calls.releaseHeldStatus = (read) => heldStatus.get(read)?.release();
+  calls.waitForHeldStart = async () => {
+    if (!heldStart) throw new Error("Start response was not held");
+    await heldStart.entered;
+  };
+  calls.releaseHeldStart = () => heldStart?.release();
   let active = activeInitially;
   let currentEntries = entries.map((entry) => ({ ...entry }));
   const factualRefreshedIds = new Set<string>();
@@ -100,6 +127,7 @@ async function wishlistFixture(
   let previewRequestCount = 0;
   let cachedRunCompleted = false;
   let runStatusReadsAfterStart = 0;
+  let runStatusReadCount = 0;
   await page.route("**/api/daemon/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -174,20 +202,31 @@ async function wishlistFixture(
         };
       });
     } else if (url.pathname.endsWith("/refresh-progress")) {
+      runStatusReadCount += 1;
       if (active && cacheResultChangesAfterRun) {
         runStatusReadsAfterStart += 1;
         if (runStatusReadsAfterStart > 1) active = false;
       }
+      const selectedStatus = statusSequence
+        ? statusSequence[Math.min(runStatusReadCount - 1, statusSequence.length - 1)]
+        : active
+          ? { runId: replacementRunId ?? "wishlist-run", scope: activeScope }
+          : null;
       data = {
         coverageMeasurement: "not-measured",
-        activity: active
-          ? { state: "active", runId: replacementRunId ?? "wishlist-run" }
+        activity: selectedStatus
+          ? {
+              state: "active",
+              runId: selectedStatus.runId,
+              ...(selectedStatus.scope ? { scope: selectedStatus.scope } : {}),
+            }
           : { state: "idle" },
-        progress: active
+        progress: selectedStatus
           ? {
               state: "saved",
-              relation: "active-run",
+              relation: progressRelation,
               value: {
+                ...(progressScope ? { scope: progressScope } : {}),
                 state: "last-known-running",
                 pairCount: 3,
                 completedPairs: 1,
@@ -198,6 +237,23 @@ async function wishlistFixture(
             }
           : { state: "none" },
       };
+      if (statusFailureAt === runStatusReadCount) {
+        status = 503;
+        data = { error: "Status temporarily unavailable" };
+      }
+      if (holdSecondStatus && runStatusReadCount === 2) {
+        let announceEntered!: () => void;
+        let release!: () => void;
+        const entered = new Promise<void>((resolve) => {
+          announceEntered = resolve;
+        });
+        const pending = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        heldStatus.set(runStatusReadCount, { entered, release });
+        announceEntered();
+        await pending;
+      }
     } else if (url.pathname.endsWith("/run-preview")) {
       previewRequestCount += 1;
       const selected = url.searchParams.getAll("bggId").map(Number);
@@ -278,6 +334,27 @@ async function wishlistFixture(
       active = false;
       data = { state: "cancelled", runId: "wishlist-run" };
     }
+    if (statusFailureAt === runStatusReadCount && url.pathname.endsWith("/refresh-progress")) {
+      status = 503;
+      data = { error: "Status temporarily unavailable" };
+    }
+    if (
+      holdStartResponse &&
+      url.pathname.endsWith("/semantic/run") &&
+      request.method() === "POST"
+    ) {
+      let announceEntered!: () => void;
+      let release!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        announceEntered = resolve;
+      });
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      heldStart = { entered, release };
+      announceEntered();
+      await pending;
+    }
     if (responseDelayMs > 0)
       await new Promise<void>((resolve) => setTimeout(resolve, responseDelayMs));
     await route.fulfill({
@@ -332,10 +409,217 @@ test("prepares and starts an all-candidate wishlist run only after disclosure, t
     precondition: "frozen-source-1",
     noteTransmissionAuthorized: false,
   });
-  await expect(page.getByText(/Wishlist run in progress/)).toBeVisible();
+  await expect(page.getByText(/Wishlist comparison is running/)).toBeVisible();
   await page.getByRole("button", { name: "Cancel run" }).click();
   expect(calls.some((call) => call.url.endsWith("/semantic/cancel"))).toBe(true);
 });
+
+test("reload restores wishlist activity, matching progress, and exact cancellation authority", async ({
+  page,
+}) => {
+  const calls = await wishlistFixture(page, false, true);
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.goto("/wishlist");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Wishlist comparison is running" }),
+  ).toContainText("1 of 3 pairs");
+  const cancel = page.getByRole("button", { name: "Cancel run" });
+  await expect(cancel).toBeVisible();
+  await cancel.click();
+  expect(calls.find((call) => call.url.endsWith("/semantic/cancel"))?.body).toEqual({
+    runId: "wishlist-run",
+  });
+});
+
+test("a reloaded wishlist run completion refreshes projections exactly once", async ({ page }) => {
+  const calls = await wishlistFixture(
+    page,
+    false,
+    false,
+    undefined,
+    false,
+    false,
+    false,
+    false,
+    false,
+    undefined,
+    "wishlist",
+    "active-run",
+    "wishlist",
+    [{ runId: "restored-wishlist-run", scope: "wishlist" }, null],
+  );
+  await page.goto("/wishlist");
+  await expect(page.getByRole("status")).toContainText("Wishlist comparison is running");
+  const projections = () =>
+    calls.filter((call) => call.url === "/api/daemon/wishlist/redundancy").length;
+  await expect.poll(projections).toBe(1);
+  await page.getByRole("button", { name: "Refresh status" }).click();
+  await expect.poll(projections).toBe(2);
+  await page.getByRole("button", { name: "Refresh status" }).click();
+  await expect.poll(projections).toBe(2);
+});
+
+test("a delayed start receipt cannot replace newer wishlist status authority", async ({ page }) => {
+  const calls = await wishlistFixture(
+    page,
+    false,
+    false,
+    undefined,
+    false,
+    false,
+    false,
+    false,
+    false,
+    undefined,
+    "wishlist",
+    "active-run",
+    "wishlist",
+    [null, { runId: "new-authoritative-run", scope: "wishlist" }],
+    false,
+    undefined,
+    true,
+  );
+  await page.addInitScript(() => {
+    const target = window as typeof window & { __triggerRunStatusPoll?: () => void };
+    const original = window.setInterval.bind(window);
+    window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      if (timeout === 60_000 && typeof handler === "function") {
+        const callback = handler as () => void;
+        target.__triggerRunStatusPoll = () => callback();
+      }
+      return original(handler, timeout, ...args);
+    }) as typeof window.setInterval;
+  });
+  await page.goto("/wishlist");
+  await page.getByRole("button", { name: "Prepare comparison" }).click();
+  await page.getByRole("button", { name: "Authorize and start" }).click();
+  await calls.waitForHeldStart();
+  await page.evaluate(() => {
+    (window as typeof window & { __triggerRunStatusPoll?: () => void }).__triggerRunStatusPoll?.();
+  });
+  await expect(page.getByRole("button", { name: "Cancel run" })).toBeVisible();
+  calls.releaseHeldStart();
+  await expect
+    .poll(() => calls.filter((call) => call.url.endsWith("/refresh-progress")).length)
+    .toBe(3);
+  await expect(page.getByRole("button", { name: "Cancel run" })).toBeEnabled();
+  page.on("dialog", (dialog) => dialog.accept());
+  const cancelRequest = page.waitForRequest(
+    (request) => request.url().endsWith("/semantic/cancel") && request.method() === "POST",
+  );
+  await page.getByRole("button", { name: "Cancel run" }).click();
+  expect((await cancelRequest).postDataJSON()).toEqual({ runId: "new-authoritative-run" });
+  expect(calls.filter((call) => call.url.endsWith("/semantic/cancel"))).toHaveLength(1);
+});
+
+test("collection and legacy active runs remain visible but cannot be cancelled from Wishlist", async ({
+  page,
+}) => {
+  await wishlistFixture(
+    page,
+    false,
+    true,
+    undefined,
+    false,
+    false,
+    false,
+    false,
+    false,
+    undefined,
+    "collection",
+  );
+  await page.goto("/wishlist");
+  await expect(page.getByRole("status")).toContainText("A collection comparison is active");
+  await expect(page.getByRole("button", { name: "Cancel run" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Prepare comparison" })).toBeDisabled();
+});
+
+test("legacy active status remains visible without scoped cancellation authority", async ({
+  page,
+}) => {
+  await wishlistFixture(
+    page,
+    false,
+    true,
+    undefined,
+    false,
+    false,
+    false,
+    false,
+    false,
+    undefined,
+    null,
+  );
+  await page.goto("/wishlist");
+  await expect(page.getByRole("status")).toContainText("scope is unknown");
+  await expect(page.getByRole("button", { name: "Cancel run" })).toHaveCount(0);
+});
+
+test("historical or differently-scoped progress is not attributed to the current wishlist run", async ({
+  page,
+}) => {
+  await wishlistFixture(
+    page,
+    false,
+    true,
+    undefined,
+    false,
+    false,
+    false,
+    false,
+    false,
+    undefined,
+    "wishlist",
+    "historical",
+    "collection",
+  );
+  await page.goto("/wishlist");
+  const status = page.getByRole("status").filter({ hasText: "Wishlist comparison is running" });
+  await expect(status).toBeVisible();
+  await expect(status).not.toContainText("1 of 3 pairs");
+  await expect(status).not.toContainText("Last saved collection run");
+});
+
+for (const olderRequestFails of [false, true])
+  test(`a late older ${olderRequestFails ? "failed" : "successful"} status cannot replace collection activity`, async ({
+    page,
+  }) => {
+    const calls = await wishlistFixture(
+      page,
+      false,
+      true,
+      undefined,
+      false,
+      false,
+      false,
+      false,
+      false,
+      undefined,
+      "wishlist",
+      "active-run",
+      "wishlist",
+      [
+        { runId: "old-wishlist-run", scope: "wishlist" },
+        { runId: "new-collection-run", scope: "collection" },
+      ],
+      true,
+      olderRequestFails ? 2 : undefined,
+    );
+    await page.goto("/wishlist");
+    await expect
+      .poll(() => calls.filter((call) => call.url.endsWith("/refresh-progress")).length)
+      .toBe(1);
+    await page.getByRole("button", { name: "Refresh status" }).click();
+    await calls.waitForHeldStatus(2);
+    await page.getByRole("button", { name: "Refresh status" }).click();
+    await expect(page.getByRole("status")).toContainText("A collection comparison is active");
+    calls.releaseHeldStatus(2);
+    await expect
+      .poll(() => calls.filter((call) => call.url.endsWith("/refresh-progress")).length)
+      .toBe(3);
+    await expect(page.getByRole("status")).toContainText("A collection comparison is active");
+    await expect(page.getByRole("button", { name: "Cancel run" })).toHaveCount(0);
+  });
 
 test("edited wishlist budgets reach preview and old disclosure is discarded before reprepare", async ({
   page,
@@ -449,26 +733,50 @@ test("a stale preview is discarded after 412 and never starts automatically", as
 test("does not label or offer cancellation for an active run with unknown scope", async ({
   page,
 }) => {
-  const calls = await wishlistFixture(page, false, true);
+  const calls = await wishlistFixture(
+    page,
+    false,
+    true,
+    undefined,
+    false,
+    false,
+    false,
+    false,
+    false,
+    undefined,
+    null,
+    "active-run",
+    "wishlist",
+  );
   await page.goto("/wishlist");
-  await expect(
-    page.getByText(/A redundancy run is active\. Its scope is not available here/),
-  ).toBeVisible();
+  await expect(page.getByText(/A comparison is active, but its scope is unknown/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel run" })).toHaveCount(0);
-  await expect(page.getByText(/Redundancy run progress/)).toBeVisible();
+  await expect(page.getByRole("status")).not.toContainText("pairs");
   expect(calls.filter((call) => call.url === "/api/daemon/wishlist/redundancy")).toHaveLength(1);
 });
 
 test("a different active run cannot inherit wishlist cancellation authority", async ({ page }) => {
-  const calls = await wishlistFixture(page, false, false, "collection-run");
+  const calls = await wishlistFixture(
+    page,
+    false,
+    false,
+    "collection-run",
+    false,
+    false,
+    false,
+    false,
+    false,
+    undefined,
+    "collection",
+    "active-run",
+    "collection",
+  );
   await page.goto("/wishlist");
   await page.getByRole("button", { name: "Prepare comparison" }).click();
   await page.getByRole("button", { name: "Authorize and start" }).click();
-  await expect(
-    page.getByText(/A redundancy run is active\. Its scope is not available here/),
-  ).toBeVisible();
+  await expect(page.getByText(/A collection comparison is active/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel run" })).toHaveCount(0);
-  await expect(page.getByText(/Wishlist run in progress/)).toHaveCount(0);
+  await expect(page.getByText(/Wishlist comparison is running/)).toHaveCount(0);
   expect(calls.some((call) => call.url.endsWith("/semantic/cancel"))).toBe(false);
 });
 

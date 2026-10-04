@@ -3276,7 +3276,10 @@ describe("wishlist service", () => {
         };
         const mutationCompletion = controllerInternals.activeHandle?.completion;
         if (!mutationCompletion) throw new Error("Expected active controller completion");
-        expect(mutationController.activeRun()).toEqual({ runId: mutationStarted.body.runId });
+        expect(mutationController.activeRun()).toEqual({
+          runId: mutationStarted.body.runId,
+          scope: "wishlist",
+        });
 
         if (mutation === "remove") await wishlistService.remove(entry.id);
         else await wishlistService.clear();
@@ -3359,7 +3362,10 @@ describe("wishlist service", () => {
       };
       const cancelCompletion = cancelInternals.activeHandle?.completion;
       if (!cancelCompletion) throw new Error("Expected active cancellation completion");
-      expect(cancelController.activeRun()).toEqual({ runId: cancelStarted.body.runId });
+      expect(cancelController.activeRun()).toEqual({
+        runId: cancelStarted.body.runId,
+        scope: "wishlist",
+      });
       expect(cancelController.cancel({ runId: cancelStarted.body.runId })).toEqual({
         status: 200,
         body: { state: "cancellation-requested" },
@@ -3659,7 +3665,7 @@ describe("wishlist service", () => {
       if (started.status !== 200) throw new Error("Expected restart test run admission");
       await providerStarted;
       expect(cache.getRunProgress()).toMatchObject({ state: "running", pairCount: 1 });
-      expect(controller.activeRun()).toEqual({ runId: started.body.runId });
+      expect(controller.activeRun()).toEqual({ runId: started.body.runId, scope: "wishlist" });
 
       expect(controller.cancel({ runId: started.body.runId }).status).toBe(200);
       const active = controller as unknown as {

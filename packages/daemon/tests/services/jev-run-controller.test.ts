@@ -760,8 +760,8 @@ describe("JevRunController", () => {
     if (started.status !== 200) throw new Error("Expected run start");
     await h.started;
 
-    expect(h.controller.activeRun()).toEqual({ runId: started.body.runId });
-    expect(Object.keys(h.controller.activeRun()!)).toEqual(["runId"]);
+    expect(h.controller.activeRun()).toEqual({ runId: started.body.runId, scope: "collection" });
+    expect(Object.keys(h.controller.activeRun()!)).toEqual(["runId", "scope"]);
     expect(h.controller.cancel({ runId: started.body.runId })).toEqual({
       status: 200,
       body: { state: "cancellation-requested" },
