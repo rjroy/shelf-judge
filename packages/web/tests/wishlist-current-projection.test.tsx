@@ -82,6 +82,85 @@ function envelope(overrides: Record<string, unknown> = {}) {
 }
 
 describe("isolated current wishlist projection", () => {
+  test("keeps current Community Rating breakdown on effective rating, not factual inputs", () => {
+    const communityRating = {
+      ...prediction.breakdown[0],
+      axisId: "community-rating",
+      axisName: "Community Rating",
+      source: "derived" as const,
+      derivedField: "communityRating" as const,
+      sourceValue: 8,
+      scoringRawValue: 7,
+      effectiveRating: 6,
+      contribution: 6,
+      predictionConfidence: "actual" as const,
+    };
+    const row = toCurrentWishlistRow(
+      envelope({
+        entry: {
+          ...entry,
+          predictedBreakdown: [{ axisName: "Community Rating", rating: 1, confidence: "actual" }],
+        },
+        prediction: {
+          availability: "available",
+          source: "current",
+          result: { ...prediction, breakdown: [communityRating] },
+          predictionUnavailable: null,
+        },
+      }),
+    )!;
+
+    // Current projection wins over the historical saved breakdown; the axis display value
+    // is the server-provided effective rating, not sourceValue or scoringRawValue.
+    expect(row.prediction?.breakdown[0]?.effectiveRating).toBe(6);
+    expect(row.prediction?.breakdown[0]?.sourceValue).toBe(8);
+    expect(row.prediction?.breakdown[0]?.scoringRawValue).toBe(7);
+    expect(row.entry.predictedBreakdown?.[0]?.rating).toBe(1);
+  });
+
+  test("preserves a missing current effective rating and a genuine zero", () => {
+    const missing = {
+      ...prediction.breakdown[0],
+      axisId: "community-rating",
+      axisName: "Community Rating",
+      source: "derived" as const,
+      derivedField: "communityRating" as const,
+      sourceValue: null,
+      scoringRawValue: null,
+      effectiveRating: null,
+      contribution: null,
+      predictionConfidence: "actual" as const,
+    };
+    const zero = { ...missing, axisId: "zero-axis", axisName: "Zero axis", effectiveRating: 0 };
+    const row = toCurrentWishlistRow(
+      envelope({
+        prediction: {
+          availability: "available",
+          source: "current",
+          result: { ...prediction, breakdown: [missing, zero] },
+          predictionUnavailable: null,
+        },
+      }),
+    )!;
+    expect(row.prediction?.breakdown.map((axis) => axis.effectiveRating)).toEqual([null, 0]);
+    expect(row.prediction?.breakdown[0]?.sourceValue).toBeNull();
+  });
+
+  test("rejects omitted required current rating metadata instead of coercing it", () => {
+    const malformed = envelope({
+      prediction: {
+        availability: "available",
+        source: "current",
+        result: {
+          ...prediction,
+          breakdown: [{ ...prediction.breakdown[0], effectiveRating: undefined }],
+        },
+        predictionUnavailable: null,
+      },
+    });
+    expect(toCurrentWishlistRow(malformed)).toBeNull();
+  });
+
   test("uses one current score and breakdown, including a genuine zero", () => {
     const row = toCurrentWishlistRow(envelope());
     expect(row?.prediction?.score).toBe(0);

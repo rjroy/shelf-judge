@@ -536,6 +536,20 @@ describe("niche tag filtering", () => {
     expect(names).toContain("Hand Management");
   });
 
+  test("private candidate tags preserve niche preview when public BGG data is missing", () => {
+    const candidate = makeGame("private-candidate", "Private Candidate", null);
+    const impact = computeNicheImpact([], candidate, makeScore(7.5), DEFAULT_NICHE_SETTINGS, {
+      mechanics: [{ name: "Worker Placement" }],
+      categories: [{ name: "Strategy" }],
+      families: [{ name: "Euro Games" }],
+    });
+    expect(impact.wouldJoin.map(({ type, name }) => `${type}:${name}`)).toEqual([
+      "family:Euro Games",
+      "category:Strategy",
+      "mechanic:Worker Placement",
+    ]);
+  });
+
   test("empty ignore list produces identical results to no settings parameter", () => {
     const withEmptySettings = computeNichePositions(allGames, { ignoredTags: [] });
     const withDefault = computeNichePositions(allGames);

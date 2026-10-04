@@ -19,6 +19,8 @@ import {
   type StagedSimilarityCapture,
   type StagedSimilaritySources,
   type StagedWishlistCandidateSource,
+  type VerifiedWishlistRefreshOverlay,
+  isVerifiedWishlistRefreshOverlay,
 } from "./staged-similarity-capture.js";
 import type { ProposedStagedSimilarityCapture } from "./staged-similarity-capture.js";
 import { captureSimilaritySettings } from "./unified-similarity.js";
@@ -64,6 +66,11 @@ export interface UnifiedSourceFrame {
   readonly externalEpoch: string;
   readonly wishlistGeneration: string;
   readonly sourceVector: SourceVector;
+}
+
+interface WishlistCandidateBaselines {
+  readonly wishlistIdentity: string;
+  readonly candidates: ReadonlyMap<number, string | null>;
 }
 
 export interface ProposedCollectionInput {
@@ -122,7 +129,7 @@ export type UnifiedScoringRequestOptions = {
 export interface UnifiedScoringService {
   capture(input?: {
     readonly includeWishlist?: boolean;
-    readonly candidateSources?: readonly StagedWishlistCandidateSource[];
+    readonly verifiedRefreshOverlays?: readonly VerifiedWishlistRefreshOverlay[];
   }): Promise<UnifiedSourceFrame>;
   prepareProposedCollection(input: ProposedCollectionInput): Promise<ProposedCollectionEvaluation>;
   calculate(
@@ -271,33 +278,118 @@ function candidateSources(
 
 function selectCandidateSources(
   entries: readonly WishlistEntry[],
-  requested?: readonly StagedWishlistCandidateSource[],
+  overlays: readonly VerifiedWishlistRefreshOverlay[] = [],
 ): readonly StagedWishlistCandidateSource[] {
-  const available = new Map(
-    candidateSources(entries).map((candidate) => [candidate.bggId, candidate]),
+  const overlayById = new Map(
+    overlays.map(({ candidate }) => [candidate.bggId, candidate] as const),
   );
-  if (requested === undefined) return Object.freeze([...available.values()]);
+  const available = new Map(
+    candidateSources(entries)
+      .filter((candidate) => !overlayById.has(candidate.bggId))
+      .map((candidate) => [candidate.bggId, candidate] as const),
+  );
+  for (const [bggId, candidate] of overlayById) available.set(bggId, candidate);
+  return Object.freeze([...available.values()].sort((left, right) => left.bggId - right.bggId));
+}
+
+function wishlistCandidateBaselineIdentity(
+  entries: readonly WishlistEntry[],
+  bggId: number,
+): string | null {
+  const rows = entries
+    .filter((entry) => entry.bggId === bggId)
+    .map((entry) => ({
+      id: entry.id,
+      bggId: entry.bggId,
+      name: entry.name,
+      bggSource: entry.bggSource ?? null,
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  return rows.length === 0 ? null : canonicalSha256(rows);
+}
+
+function wishlistCandidateBaselinesMatch(
+  entries: readonly WishlistEntry[],
+  baselines: WishlistCandidateBaselines,
+): boolean {
+  const wishlistIdentity = canonicalSha256(
+    entries
+      .map((entry) => ({
+        id: entry.id,
+        bggId: entry.bggId,
+        name: entry.name,
+        yearPublished: entry.yearPublished,
+        thumbnailUrl: entry.thumbnailUrl,
+        addedAt: entry.addedAt,
+        bggSource: entry.bggSource ?? null,
+      }))
+      .sort((left, right) => left.bggId - right.bggId || left.id.localeCompare(right.id)),
+  );
+  if (wishlistIdentity !== baselines.wishlistIdentity) return false;
+  for (const [bggId, baseline] of baselines.candidates) {
+    if (wishlistCandidateBaselineIdentity(entries, bggId) !== baseline) return false;
+  }
+  return true;
+}
+
+function verifiedOverlays(
+  overlays: readonly VerifiedWishlistRefreshOverlay[] | undefined,
+): readonly VerifiedWishlistRefreshOverlay[] {
+  if (!overlays) return Object.freeze([]);
   const seen = new Set<number>();
   return Object.freeze(
-    requested
-      .map((candidate) => {
-        if (seen.has(candidate.bggId))
-          throw new TypeError("Duplicate wishlist candidate source ID");
-        seen.add(candidate.bggId);
-        const persisted = available.get(candidate.bggId);
-        if (persisted && canonicalSha256(persisted) !== canonicalSha256(candidate)) {
-          throw new TypeError("Wishlist candidate source is not the captured verified source");
-        }
-        return persisted ?? deepFreeze(structuredClone(candidate));
-      })
-      .sort((left, right) => left.bggId - right.bggId),
+    overlays.map((overlay) => {
+      if (
+        !overlay ||
+        overlay.kind !== "verified-wishlist-refresh-overlay" ||
+        !isVerifiedWishlistRefreshOverlay(overlay)
+      ) {
+        throw new TypeError("Wishlist candidate overlay is not a verified BGG refresh");
+      }
+      const { bggId } = overlay.candidate;
+      if (seen.has(bggId)) throw new TypeError("Duplicate wishlist candidate overlay ID");
+      seen.add(bggId);
+      return overlay;
+    }),
   );
+}
+
+/*
+ * An explicit verified overlay changes scoring facts only; this baseline independently fences
+ * the durable row (or its absence) captured before applying that overlay.
+ */
+function captureWishlistCandidateBaselines(
+  entries: readonly WishlistEntry[],
+  selected: readonly StagedWishlistCandidateSource[],
+): WishlistCandidateBaselines {
+  const wishlistIdentity = canonicalSha256(
+    entries
+      .map((entry) => ({
+        id: entry.id,
+        bggId: entry.bggId,
+        name: entry.name,
+        yearPublished: entry.yearPublished,
+        thumbnailUrl: entry.thumbnailUrl,
+        addedAt: entry.addedAt,
+        bggSource: entry.bggSource ?? null,
+      }))
+      .sort((left, right) => left.bggId - right.bggId || left.id.localeCompare(right.id)),
+  );
+  const candidates = new Map(
+    selected.map(({ bggId }) => [bggId, wishlistCandidateBaselineIdentity(entries, bggId)]),
+  );
+  return { wishlistIdentity, candidates };
 }
 
 function withUnpersistedCandidates(
   entries: readonly WishlistEntry[],
   candidates: readonly StagedWishlistCandidateSource[],
 ): readonly WishlistEntry[] {
+  const byId = new Map(candidates.map((candidate) => [candidate.bggId, candidate]));
+  const refreshed = entries.map((entry) => {
+    const candidate = byId.get(entry.bggId);
+    return candidate ? { ...entry, name: candidate.name, bggSource: candidate.bggSource } : entry;
+  });
   const existingIds = new Set(entries.map((entry) => entry.bggId));
   const additions = candidates.flatMap((candidate) =>
     existingIds.has(candidate.bggId)
@@ -319,7 +411,7 @@ function withUnpersistedCandidates(
           } satisfies WishlistEntry,
         ],
   );
-  return Object.freeze([...entries, ...additions]);
+  return Object.freeze([...refreshed, ...additions]);
 }
 
 export function createUnifiedScoringService(
@@ -333,26 +425,22 @@ export function createUnifiedScoringService(
   const captureFlights = new Map<string, Promise<UnifiedSourceFrame>>();
   const captureFlightLimit = 16;
   const privateCalculationFrames = new WeakMap<UnifiedCalculation, UnifiedSourceFrame>();
+  const privateWishlistCandidateBaselines = new WeakMap<object, WishlistCandidateBaselines>();
 
   async function capture(
     input: {
       readonly includeWishlist?: boolean;
-      readonly candidateSources?: readonly StagedWishlistCandidateSource[];
+      readonly verifiedRefreshOverlays?: readonly VerifiedWishlistRefreshOverlay[];
     } = {},
   ): Promise<UnifiedSourceFrame> {
     if (!options.storageService.loadJevSourceSnapshot || !options.storageService.sourceVector) {
       throw new Error("Unified scoring source snapshot is unavailable");
     }
     const includeWishlist = input.includeWishlist === true;
-    const requestedCandidateSources = input.candidateSources
-      ? deepFreeze(structuredClone([...input.candidateSources]))
-      : undefined;
+    const overlays = verifiedOverlays(input.verifiedRefreshOverlays);
     const flightKey = canonicalSha256({
       includeWishlist,
-      candidateSources:
-        requestedCandidateSources === undefined
-          ? null
-          : [...requestedCandidateSources].sort((left, right) => left.bggId - right.bggId),
+      verifiedRefreshOverlays: overlays.map(({ candidate }) => candidate),
     });
     const existingFlight = captureFlights.get(flightKey);
     if (existingFlight) return existingFlight;
@@ -371,7 +459,11 @@ export function createUnifiedScoringService(
       const wishlistGeneration = wishlistMutationGenerationFor(options.storageService);
       const sourceVector = structuredClone(options.storageService.sourceVector?.());
       if (!sourceVector) throw new Error("Unified scoring source vector is unavailable");
-      const selectedCandidates = selectCandidateSources(wishlistEntries, requestedCandidateSources);
+      const selectedCandidates = selectCandidateSources(wishlistEntries, overlays);
+      const candidateBaselines = captureWishlistCandidateBaselines(
+        wishlistEntries,
+        selectedCandidates,
+      );
       const frameWishlistEntries = withUnpersistedCandidates(wishlistEntries, selectedCandidates);
       const sources = sourceSources(snapshot, sourceVector, wishlistEntries, selectedCandidates);
       const captureToken = Object.freeze({
@@ -397,7 +489,7 @@ export function createUnifiedScoringService(
           return sources;
         },
       });
-      return Object.freeze({
+      const frame: UnifiedSourceFrame = Object.freeze({
         kind: "current" as const,
         sources: captured.sources,
         capture: captured,
@@ -411,6 +503,8 @@ export function createUnifiedScoringService(
         wishlistGeneration,
         sourceVector: captured.sources.sourceVector,
       });
+      if (includeWishlist) privateWishlistCandidateBaselines.set(frame, candidateBaselines);
+      return frame;
     });
     if (captureFlights.size < captureFlightLimit) captureFlights.set(flightKey, work);
     try {
@@ -557,6 +651,10 @@ export function createUnifiedScoringService(
     const memoKey = canonicalSha256({
       frameKind: frame.kind,
       source: frame.capture.durableIdentity,
+      // Wishlist durability is verified outside the source vector. Keep private baseline
+      // membership/content in the memo identity so a fresh capture after an external edit
+      // cannot inherit the previous frame's calculation.
+      wishlistBaseline: privateWishlistCandidateBaselines.get(frame)?.wishlistIdentity ?? null,
       processEpoch: frame.sourceVector.processEpoch,
       changeToken: frame.sourceVector.changeToken,
       wishlistGeneration: frame.wishlistGeneration,
@@ -768,15 +866,10 @@ export function createUnifiedScoringService(
           !sameLiveVector(vector, frame.sourceVector)
         )
           return false;
-        const entries = frame.wishlistCandidateBggIds.length
-          ? await options.storageService.loadWishlist()
-          : [];
-        const selected = new Map(
-          candidateSources(entries).map((candidate) => [candidate.bggId, candidate]),
-        );
-        const candidates = (frame.sources.wishlistCandidates ?? []).map(
-          (candidate) => selected.get(candidate.bggId) ?? candidate,
-        );
+        const baselines = privateWishlistCandidateBaselines.get(frame);
+        const entries = baselines ? await options.storageService.loadWishlist() : [];
+        if (baselines && !wishlistCandidateBaselinesMatch(entries, baselines)) return false;
+        const candidates = frame.sources.wishlistCandidates ?? [];
         return (
           canonicalSha256(sourceSources(snapshot, structuredClone(vector), entries, candidates)) ===
           canonicalSha256(frame.sources)
@@ -802,7 +895,7 @@ export function createUnifiedScoringService(
       try {
         snapshot = await storage.loadJevSourceSnapshot();
         vector = structuredClone(storage.sourceVector());
-        entries = calculation.request.scope === "wishlist" ? await storage.loadWishlist() : [];
+        entries = privateWishlistCandidateBaselines.has(frame) ? await storage.loadWishlist() : [];
       } catch {
         return null;
       }
@@ -814,16 +907,18 @@ export function createUnifiedScoringService(
         !calculation.isCurrent()
       )
         return null;
-      const liveCandidateSources = new Map(
-        candidateSources(entries).map((candidate) => [candidate.bggId, candidate]),
+      const baselines = privateWishlistCandidateBaselines.get(frame);
+      if (
+        privateWishlistCandidateBaselines.has(frame) &&
+        (!baselines || !wishlistCandidateBaselinesMatch(entries, baselines))
+      )
+        return null;
+      const currentSources = sourceSources(
+        snapshot,
+        vector,
+        entries,
+        frame.sources.wishlistCandidates ?? [],
       );
-      const selectedCandidateSourceRows: StagedWishlistCandidateSource[] = [];
-      for (const candidate of frame.sources.wishlistCandidates ?? []) {
-        const persisted = liveCandidateSources.get(candidate.bggId);
-        if (persisted && canonicalSha256(persisted) !== canonicalSha256(candidate)) return null;
-        selectedCandidateSourceRows.push(persisted ?? candidate);
-      }
-      const currentSources = sourceSources(snapshot, vector, entries, selectedCandidateSourceRows);
       if (canonicalSha256(currentSources) !== canonicalSha256(frame.sources)) return null;
       // No await may be introduced between the final live checks and synchronous acceptance.
       return calculation.isCurrent() ? publishSync() : null;

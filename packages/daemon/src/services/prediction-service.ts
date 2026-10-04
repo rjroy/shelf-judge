@@ -34,6 +34,8 @@ import {
   getVectorAxisValues,
 } from "./feature-vector";
 import type { FeatureVector } from "./feature-vector";
+import { projectVerifiedBggCandidate } from "./bgg-candidate-projection.js";
+import type { FactualScoringGame } from "./feature-vector.js";
 import { computePredictedFitness, assessReadiness } from "./prediction-engine";
 import type { ReferenceGameCandidate, ClusterMembership } from "./prediction-engine";
 import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
@@ -44,6 +46,7 @@ import { isBggDataStale } from "./game-service.js";
 import type { StagedPredictionRequest } from "./staged-similarity-scope.js";
 import { projectProfileCollectionSource } from "./game-projection.js";
 import { canonicalSha256 } from "./profile-source-coordinator.js";
+import { createVerifiedWishlistRefreshOverlay } from "./staged-similarity-capture.js";
 
 function sameSnapshotPredictionSources(
   frame: import("./unified-scoring-service.js").UnifiedSourceFrame,
@@ -72,6 +75,14 @@ export interface PredictedGameResult {
   verifiedFact?: BoardgameFactResult;
   /** Complete verified Thing source used by the preview, for daemon persistence consumers. */
   verifiedScoringInput?: BoardgameScoringInput;
+  /** Private daemon-only factual projection; callers must not include it in public responses. */
+  internalCandidateProjection?: FactualScoringGame;
+  /** Private tags for niche preview, kept separate from the public Game projection. */
+  internalCandidateTags?: {
+    mechanics: readonly { name: string }[];
+    categories: readonly { name: string }[];
+    families: readonly { name: string }[];
+  };
   predictionUnavailable: PredictionUnavailable | null;
   bggObservations?: Pick<
     BggGameResult,
@@ -657,19 +668,33 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         };
       }
       if (!fact) throw new Error(`BGG Thing did not verify BGG ID ${bggId}`);
-      const bggData = {
-        communityRating: 0,
-        bayesAverage: 0,
+      const bggData =
+        scoringInput?.communityRating == null
+          ? null
+          : {
+              communityRating: scoringInput.communityRating,
+              bayesAverage: 0,
+              weight: scoringInput?.weight ?? null,
+              numWeightVotes: 0,
+              description: null,
+              mechanics: scoringInput?.mechanics ?? fact.mechanics,
+              categories: scoringInput?.categories ?? [],
+              families: [],
+              subdomains: [],
+              bestPlayerCount: scoringInput?.bestPlayers ?? null,
+              fetchedAt: fact.observedAt,
+            };
+      const privateProjection = projectVerifiedBggCandidate({
+        id: `preview-${bggId}`,
+        communityRating: scoringInput?.communityRating ?? null,
         weight: scoringInput?.weight ?? null,
-        numWeightVotes: 0,
-        description: null,
         mechanics: scoringInput?.mechanics ?? fact.mechanics,
         categories: scoringInput?.categories ?? [],
-        families: [],
-        subdomains: [],
-        bestPlayerCount: null,
-        fetchedAt: fact.observedAt,
-      };
+        minPlayers: scoringInput?.minPlayers ?? null,
+        maxPlayers: scoringInput?.maxPlayers ?? null,
+        bestPlayers: scoringInput?.bestPlayers ?? null,
+        playingTime: scoringInput?.playingTime ?? null,
+      });
       const observedAt = now();
       const tempGame: Game = {
         id: `preview-${bggId}`,
@@ -743,7 +768,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         };
         const frame = await unifiedScoringService.capture({
           includeWishlist: true,
-          candidateSources: [candidate],
+          verifiedRefreshOverlays: [createVerifiedWishlistRefreshOverlay(candidate)],
         });
         const calculation = unifiedScoringService.calculate(
           frame,
@@ -765,24 +790,35 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
           previewIdentity,
           verifiedFact: fact,
           verifiedScoringInput: scoringInput,
+          internalCandidateProjection: privateProjection.factualGame,
+          internalCandidateTags: privateProjection.nicheTags,
           bggVerification: { status: "verified" },
         };
       }
 
       // Encode the temporary game using the collection's vocabulary and ranges
-      const resolved = getVectorAxisValues(tempGame, ctx.vectorAxes, null);
-      const fv = encodeGame(tempGame, ctx.vocabulary, ctx.vectorAxes, resolved, ctx.ranges);
+      const resolved = getVectorAxisValues(privateProjection.factualGame, ctx.vectorAxes, null);
+      const fv = encodeGame(
+        privateProjection.factualGame,
+        ctx.vocabulary,
+        ctx.vectorAxes,
+        resolved,
+        ctx.ranges,
+      );
       const targetVector = fv;
 
-      const { fitnessResult } = computePredictedFitness(
+      const { fitnessResult, actualAxisCount, predictedAxisCount } = computePredictedFitness(
         tempGame,
         ctx.axes,
         ctx.referenceGames,
         targetVector,
         ctx.settings,
         ctx.readinessStage,
-        (g, a) => fitnessService.calculateScore(g, a, ctx.tournamentData),
+        (g, a) =>
+          fitnessService.calculateScore(privateProjection.scoringInput, a, ctx.tournamentData),
       );
+      const candidateScore =
+        actualAxisCount === 0 && predictedAxisCount === 0 ? null : fitnessResult;
 
       // REQ-PRED-22: indicate when personal-axis prediction is unavailable at Stage 0
       let predictionUnavailable: PredictionUnavailable | null = null;
@@ -797,11 +833,13 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
 
       return {
         game: tempGame,
-        score: fitnessResult,
+        score: candidateScore,
         predictionUnavailable,
         previewIdentity,
         verifiedFact: fact,
         verifiedScoringInput: scoringInput,
+        internalCandidateProjection: privateProjection.factualGame,
+        internalCandidateTags: privateProjection.nicheTags,
         bggVerification: { status: "verified" },
       };
     },

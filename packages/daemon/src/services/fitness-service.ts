@@ -14,6 +14,7 @@ import {
   type Game,
   type TournamentData,
 } from "@shelf-judge/shared";
+import type { DerivedAxisGameInput } from "@shelf-judge/shared";
 import { checkVeto, computeHigherIsBetterEffective } from "./curve-engine";
 import { deriveDisplayStats } from "./tournament-service";
 
@@ -25,11 +26,13 @@ const EMPTY_TOURNAMENT: TournamentData = {
 
 export interface FitnessService {
   calculateScore(
-    game: Game,
+    game: FitnessScoringInput,
     axes: Axis[],
     tournamentData?: TournamentData | null,
   ): FitnessResult | null;
 }
+
+export type FitnessScoringInput = DerivedAxisGameInput & Pick<Game, "id" | "ratings">;
 
 function roundToOneDecimal(value: number): number {
   return Math.round(value * 10) / 10;

@@ -479,6 +479,7 @@ export {
 } from "./derived-axis-registry";
 export type {
   DerivedAxisRegistry,
+  DerivedAxisGameInput,
   DerivedAxisTemplateDefaults,
   DerivedFieldDefinition,
   DerivedAxisPayload,

@@ -36,7 +36,10 @@ type WishlistCalls = Array<{ url: string; method: string; body?: unknown }> & {
   releaseHeldStart(): void;
 };
 
-function prediction(entry: (typeof entries)[number], score = entry.predictedScore ?? 0) {
+function prediction(
+  entry: Pick<(typeof entries)[number], "predictedScore">,
+  score = entry.predictedScore ?? 0,
+) {
   return {
     score,
     ratedAxisCount: 1,
@@ -105,6 +108,7 @@ async function wishlistFixture(
   holdSecondStatus = false,
   statusFailureAt?: number,
   holdStartResponse = false,
+  communityRatingScenario = false,
 ) {
   const calls = [] as unknown as WishlistCalls;
   const heldStatus = new Map<number, { entered: Promise<void>; release: () => void }>();
@@ -121,7 +125,56 @@ async function wishlistFixture(
   };
   calls.releaseHeldStart = () => heldStart?.release();
   let active = activeInitially;
-  let currentEntries = entries.map((entry) => ({ ...entry }));
+  let currentEntries: Array<
+    Omit<(typeof entries)[number], "predictedBreakdown"> & { predictedBreakdown: unknown }
+  > = entries.map((entry) => ({ ...entry }));
+  if (communityRatingScenario) {
+    currentEntries = [
+      ...currentEntries,
+      ...[
+        {
+          id: "candidate-3",
+          bggId: 8567,
+          name: "Sample Ridge",
+          rating: 7.5,
+          source: 7.8,
+          raw: 7.6,
+        },
+        {
+          id: "candidate-4",
+          bggId: 8678,
+          name: "Sample Valley",
+          rating: 0,
+          source: null,
+          raw: null,
+        },
+        {
+          id: "candidate-5",
+          bggId: 8789,
+          name: "Sample Missing",
+          rating: null,
+          source: null,
+          raw: null,
+        },
+      ].map(({ id, bggId, name }) => ({
+        id,
+        bggId,
+        name,
+        yearPublished: 2022,
+        thumbnailUrl: null,
+        predictedScore: 1,
+        predictionConfidence: "strong",
+        predictedBreakdown: [{ axisName: "Community Rating", rating: 1, confidence: "actual" }],
+        nicheImpact: null,
+        redundancyPreview: null,
+        addedAt: "2026-01-03T00:00:00.000Z",
+      })),
+    ];
+    currentEntries = currentEntries.map((entry) => ({
+      ...entry,
+      predictedBreakdown: [{ axisName: "Community Rating", rating: 1, confidence: "actual" }],
+    }));
+  }
   const factualRefreshedIds = new Set<string>();
   let projectionRequestCount = 0;
   let previewRequestCount = 0;
@@ -185,7 +238,35 @@ async function wishlistFixture(
             : {
                 availability: "available",
                 source: "current",
-                result: prediction(entry, currentScore),
+                result: communityRatingScenario
+                  ? (() => {
+                      const values = [
+                        { sourceValue: 8, scoringRawValue: 7, effectiveRating: 6 },
+                        { sourceValue: 8.6, scoringRawValue: 8.4, effectiveRating: 8.3 },
+                        { sourceValue: 7.8, scoringRawValue: 7.6, effectiveRating: 7.5 },
+                        { sourceValue: null, scoringRawValue: null, effectiveRating: 0 },
+                        { sourceValue: null, scoringRawValue: null, effectiveRating: null },
+                      ][index];
+                      if (!values)
+                        throw new Error(`Missing Community Rating fixture for row ${index}`);
+                      const rating = values.effectiveRating ?? 0;
+                      return {
+                        ...prediction(entry, rating),
+                        breakdown: [
+                          {
+                            ...prediction(entry, rating).breakdown[0],
+                            axisId: "community-rating",
+                            axisName: "Community Rating",
+                            source: "derived",
+                            derivedField: "communityRating",
+                            ...values,
+                            contribution: values.effectiveRating,
+                            predictionConfidence: "actual",
+                          },
+                        ],
+                      };
+                    })()
+                  : prediction(entry, currentScore),
                 predictionUnavailable: null,
               },
           redundancy: {
@@ -899,4 +980,48 @@ test("legacy saved scores do not replace an unavailable current score; zero sort
   const cards = page.locator(".wishlist-card");
   await expect(cards.nth(0)).toContainText("Sample Harbor");
   await expect(cards.nth(1)).toContainText("Sample Garden");
+});
+
+test("expanded current Community Rating breakdown shows effective values only", async ({
+  page,
+}) => {
+  await wishlistFixture(
+    page,
+    false,
+    false,
+    undefined,
+    false,
+    false,
+    false,
+    false,
+    false,
+    undefined,
+    "wishlist",
+    "active-run",
+    "wishlist",
+    undefined,
+    false,
+    undefined,
+    false,
+    true,
+  );
+  await page.goto("/wishlist");
+
+  const expected = [
+    { name: "Sample Garden", rating: "6", excluded: ["8", "7", "1"] },
+    { name: "Sample Harbor", rating: "8.3", excluded: ["8.6", "8.4", "1"] },
+    { name: "Sample Ridge", rating: "7.5", excluded: ["7.8", "7.6", "1"] },
+    { name: "Sample Valley", rating: "0", excluded: ["1"] },
+    { name: "Sample Missing", rating: "—", excluded: ["1", "0"] },
+  ];
+  for (const item of expected) {
+    const card = page.locator(".wishlist-card").filter({ hasText: item.name });
+    await card.getByRole("button", { name: /Per-axis breakdown/ }).click();
+    const rating = card
+      .locator(".wc-breakdown-row")
+      .filter({ hasText: "Community Rating" })
+      .locator(".wc-axis-rating");
+    await expect(rating).toHaveText(item.rating);
+    for (const excluded of item.excluded) await expect(rating).not.toHaveText(excluded);
+  }
 });

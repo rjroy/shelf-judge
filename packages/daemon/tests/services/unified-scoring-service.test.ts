@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { Axis, Collection, Game } from "@shelf-judge/shared";
+import type { Axis, Collection, Game, WishlistEntry } from "@shelf-judge/shared";
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createFileOps } from "../../src/services/file-ops.js";
 import { createJevPairCache } from "../../src/services/jev-pair-cache-service.js";
@@ -14,8 +14,38 @@ import { createStorageService } from "../../src/services/storage-service.js";
 import { createFitnessService } from "../../src/services/fitness-service.js";
 import { createUnifiedScoringService } from "../../src/services/unified-scoring-service.js";
 import { advanceWishlistMutationGeneration } from "../../src/services/profile-source-coordinator.js";
+import { createVerifiedWishlistRefreshOverlay } from "../../src/services/staged-similarity-capture.js";
 
 const observedAt = "2026-10-04T00:00:00.000Z";
+
+function wishlistEntry(bggId: number, overrides: Partial<WishlistEntry> = {}): WishlistEntry {
+  return {
+    id: `wishlist-${bggId}`,
+    bggId,
+    name: `Wishlist ${bggId}`,
+    yearPublished: 2024,
+    thumbnailUrl: null,
+    predictedScore: null,
+    predictionConfidence: null,
+    predictedBreakdown: null,
+    nicheImpact: null,
+    redundancyPreview: null,
+    addedAt: observedAt,
+    bggSource: {
+      observedAt,
+      description: null,
+      mechanics: ["Draft"],
+      categories: ["Strategy"],
+      weight: 3,
+      communityRating: 7.5,
+      minPlayers: 2,
+      maxPlayers: 4,
+      bestPlayers: 3,
+      playingTime: 90,
+    },
+    ...overrides,
+  };
+}
 
 function axis(): Axis {
   return {
@@ -408,6 +438,326 @@ describe("unified scoring storage composition", () => {
       });
       expect(await staleEvaluation.assertBaseCurrent()).toBe(false);
       expect(await staleEvaluation.accept(staleCalculation, () => true)).toBeNull();
+    } finally {
+      cache.close();
+    }
+  });
+
+  test("fences an ordinary captured wishlist candidate against direct durable edits and removal", async () => {
+    directory = await mkdtemp(join(tmpdir(), "unified-wishlist-direct-edit-"));
+    const storage = createStorageService({
+      dataDir: directory,
+      configPath: join(directory, "config.json"),
+      fileOps: createFileOps(),
+    });
+    const cache = await createJevPairCache(join(directory, "cache"));
+    try {
+      const collection = await storage.loadCollection();
+      collection.axes = [axis()];
+      collection.games = [game("target"), game("rated-1", 2), game("rated-2", 4)];
+      await storage.saveCollection(collection);
+      await storage.saveWishlist([wishlistEntry(93501)]);
+      await storage.savePredictionSettings({
+        ...(await storage.loadPredictionSettings()),
+        stageThresholds: [1, 2, 3],
+      });
+      if (!storage.hydrateSourceVector) throw new Error("Source vector hydration unavailable");
+      await storage.hydrateSourceVector();
+      const service = createUnifiedScoringService({
+        storageService: storage,
+        cache,
+        fitnessService: createFitnessService(),
+      });
+
+      const changedFrame = await service.capture({ includeWishlist: true });
+      const changedCalculation = service.calculate(
+        changedFrame,
+        { scope: "wishlist", selectedBggIds: [93501] },
+        { includeRedundancy: false },
+      );
+      const changed = wishlistEntry(93501, {
+        name: "Edited directly",
+        bggSource: { ...wishlistEntry(93501).bggSource!, communityRating: 8.347 },
+      });
+      await writeFile(join(directory, "wishlist.json"), JSON.stringify([changed]));
+      let publishedChanged = false;
+      expect(
+        await service.publishCurrent(changedCalculation, () => (publishedChanged = true)),
+      ).toBe(null);
+      expect(publishedChanged).toBe(false);
+      expect(await service.isSourceCurrent(changedFrame)).toBe(false);
+
+      const removedFrame = await service.capture({ includeWishlist: true });
+      const removedCalculation = service.calculate(
+        removedFrame,
+        { scope: "wishlist", selectedBggIds: [93501] },
+        { includeRedundancy: false },
+      );
+      await writeFile(join(directory, "wishlist.json"), "[]");
+      expect(await service.isSourceCurrent(removedFrame)).toBe(false);
+      let publishedRemoved = false;
+      expect(
+        await service.publishCurrent(removedCalculation, () => (publishedRemoved = true)),
+      ).toBe(null);
+      expect(publishedRemoved).toBe(false);
+
+      const noFactsRow = wishlistEntry(93504);
+      delete noFactsRow.bggSource;
+      await storage.saveWishlist([wishlistEntry(93501), noFactsRow]);
+      const unrelatedFrame = await service.capture({ includeWishlist: true });
+      const unrelatedCalculation = service.calculate(
+        unrelatedFrame,
+        { scope: "wishlist", selectedBggIds: [93501] },
+        { includeRedundancy: false },
+      );
+      const editedNoFactsRow = { ...noFactsRow, name: "Unrelated row edited directly" };
+      await writeFile(
+        join(directory, "wishlist.json"),
+        JSON.stringify([wishlistEntry(93501), editedNoFactsRow]),
+      );
+      expect(await service.isSourceCurrent(unrelatedFrame)).toBe(false);
+      let unrelatedPublished = false;
+      expect(
+        await service.publishCurrent(unrelatedCalculation, () => (unrelatedPublished = true)),
+      ).toBe(null);
+      expect(unrelatedPublished).toBe(false);
+    } finally {
+      cache.close();
+    }
+  });
+
+  test("memoizes wishlist calculations only within the same private durable baseline", async () => {
+    directory = await mkdtemp(join(tmpdir(), "unified-wishlist-baseline-memo-"));
+    const storage = createStorageService({
+      dataDir: directory,
+      configPath: join(directory, "config.json"),
+      fileOps: createFileOps(),
+    });
+    const cache = await createJevPairCache(join(directory, "cache"));
+    try {
+      const collection = await storage.loadCollection();
+      collection.axes = [axis()];
+      collection.games = [game("target"), game("rated-1", 2), game("rated-2", 4)];
+      const unrelated = wishlistEntry(93511);
+      delete unrelated.bggSource;
+      await storage.saveCollection(collection);
+      await storage.saveWishlist([wishlistEntry(93510), unrelated]);
+      await storage.savePredictionSettings({
+        ...(await storage.loadPredictionSettings()),
+        stageThresholds: [1, 2, 3],
+      });
+      if (!storage.hydrateSourceVector) throw new Error("Source vector hydration unavailable");
+      await storage.hydrateSourceVector();
+
+      let pairDemandCount = 0;
+      const service = createUnifiedScoringService({
+        storageService: storage,
+        cache,
+        fitnessService: createFitnessService(),
+        wishlistObserver: {
+          onSourceCapture() {
+            pairDemandCount += 1;
+          },
+        },
+      });
+      const request = { scope: "wishlist" as const, selectedBggIds: [93510] };
+      const requestOptions = { includeRedundancy: false };
+      const originalFrame = await service.capture({ includeWishlist: true });
+      const originalCalculation = service.calculate(originalFrame, request, requestOptions);
+      const initialPairDemandCount = pairDemandCount;
+      expect(initialPairDemandCount).toBeGreaterThan(0);
+
+      // Simulate a direct durable edit without advancing the in-process wishlist generation.
+      await writeFile(
+        join(directory, "wishlist.json"),
+        JSON.stringify([wishlistEntry(93510), { ...unrelated, name: "Renamed externally" }]),
+      );
+      expect(await service.isSourceCurrent(originalFrame)).toBe(false);
+      let stalePublished = false;
+      expect(
+        await service.publishCurrent(originalCalculation, () => (stalePublished = true)),
+      ).toBeNull();
+      expect(stalePublished).toBe(false);
+
+      const freshFrame = await service.capture({ includeWishlist: true });
+      expect(await service.isSourceCurrent(freshFrame)).toBe(true);
+      const freshCalculation = service.calculate(freshFrame, request, requestOptions);
+      expect(freshCalculation).not.toBe(originalCalculation);
+      expect(pairDemandCount).toBeGreaterThan(initialPairDemandCount);
+      let freshPublishCount = 0;
+      expect(await service.publishCurrent(freshCalculation, () => ++freshPublishCount)).toBe(1);
+      expect(freshPublishCount).toBe(1);
+
+      const postFreshCalculationPairDemandCount = pairDemandCount;
+      expect(service.calculate(freshFrame, request, requestOptions)).toBe(freshCalculation);
+      expect(pairDemandCount).toBe(postFreshCalculationPairDemandCount);
+      let repeatedPublishCount = 0;
+      expect(await service.publishCurrent(freshCalculation, () => ++repeatedPublishCount)).toBe(1);
+      expect(repeatedPublishCount).toBe(1);
+    } finally {
+      cache.close();
+    }
+  });
+
+  test("verified refresh overlays retain and fence their original persisted baseline", async () => {
+    directory = await mkdtemp(join(tmpdir(), "unified-wishlist-refresh-overlay-"));
+    const storage = createStorageService({
+      dataDir: directory,
+      configPath: join(directory, "config.json"),
+      fileOps: createFileOps(),
+    });
+    const cache = await createJevPairCache(join(directory, "cache"));
+    try {
+      const collection = await storage.loadCollection();
+      collection.axes = [axis()];
+      collection.games = [game("target"), game("rated-1", 2), game("rated-2", 4)];
+      await storage.saveCollection(collection);
+      await storage.saveWishlist([wishlistEntry(93502)]);
+      await storage.savePredictionSettings({
+        ...(await storage.loadPredictionSettings()),
+        stageThresholds: [1, 2, 3],
+      });
+      if (!storage.hydrateSourceVector) throw new Error("Source vector hydration unavailable");
+      await storage.hydrateSourceVector();
+      const service = createUnifiedScoringService({
+        storageService: storage,
+        cache,
+        fitnessService: createFitnessService(),
+      });
+      const refreshedSource = {
+        ...wishlistEntry(93502).bggSource!,
+        communityRating: 8.347,
+        observedAt: "2026-10-04T00:01:00.000Z",
+      };
+      const overlay = createVerifiedWishlistRefreshOverlay({
+        bggId: 93502,
+        name: "Verified current name",
+        bggSource: refreshedSource,
+      });
+      const overlayFrame = await service.capture({
+        includeWishlist: true,
+        verifiedRefreshOverlays: [overlay],
+      });
+      expect(overlayFrame.sources.wishlistCandidates?.[0]).toEqual({
+        bggId: 93502,
+        name: "Verified current name",
+        bggSource: refreshedSource,
+      });
+      expect(overlayFrame.wishlistEntries[0]?.bggSource?.communityRating).toBe(8.347);
+      const overlayCalculation = service.calculate(
+        overlayFrame,
+        { scope: "wishlist", selectedBggIds: [93502] },
+        { includeRedundancy: false },
+      );
+      expect(await service.isSourceCurrent(overlayFrame)).toBe(true);
+      expect(
+        await service.publishCurrent(overlayCalculation, () => "published-current-overlay"),
+      ).toBe("published-current-overlay");
+
+      const changedEntry = wishlistEntry(93502, {
+        name: "Edited directly",
+        bggSource: { ...wishlistEntry(93502).bggSource!, weight: 4 },
+      });
+      await writeFile(join(directory, "wishlist.json"), JSON.stringify([changedEntry]));
+      expect(await service.isSourceCurrent(overlayFrame)).toBe(false);
+      let changedOverlayPublished = false;
+      expect(
+        await service.publishCurrent(overlayCalculation, () => (changedOverlayPublished = true)),
+      ).toBe(null);
+      expect(changedOverlayPublished).toBe(false);
+
+      // A newly captured, explicit verified overlay authorizes scoring against the changed
+      // durable baseline; the stale overlay remains fenced, but does not poison future memo use.
+      const recapturedOverlayFrame = await service.capture({
+        includeWishlist: true,
+        verifiedRefreshOverlays: [overlay],
+      });
+      expect(await service.isSourceCurrent(recapturedOverlayFrame)).toBe(true);
+      const recapturedOverlayCalculation = service.calculate(
+        recapturedOverlayFrame,
+        { scope: "wishlist", selectedBggIds: [93502] },
+        { includeRedundancy: false },
+      );
+      expect(recapturedOverlayCalculation).not.toBe(overlayCalculation);
+      let recapturedOverlayPublishCount = 0;
+      expect(
+        await service.publishCurrent(
+          recapturedOverlayCalculation,
+          () => ++recapturedOverlayPublishCount,
+        ),
+      ).toBe(1);
+      expect(recapturedOverlayPublishCount).toBe(1);
+
+      await storage.saveWishlist([wishlistEntry(93502)]);
+      const removedOverlayFrame = await service.capture({
+        includeWishlist: true,
+        verifiedRefreshOverlays: [overlay],
+      });
+      const removedOverlayCalculation = service.calculate(
+        removedOverlayFrame,
+        { scope: "wishlist", selectedBggIds: [93502] },
+        { includeRedundancy: false },
+      );
+      await writeFile(join(directory, "wishlist.json"), "[]");
+      expect(await service.isSourceCurrent(removedOverlayFrame)).toBe(false);
+      let removedOverlayPublished = false;
+      expect(
+        await service.publishCurrent(
+          removedOverlayCalculation,
+          () => (removedOverlayPublished = true),
+        ),
+      ).toBe(null);
+      expect(removedOverlayPublished).toBe(false);
+
+      const absentOverlay = createVerifiedWishlistRefreshOverlay({
+        bggId: 93503,
+        name: "New verified candidate",
+        bggSource: refreshedSource,
+      });
+      const absentFrame = await service.capture({
+        includeWishlist: true,
+        verifiedRefreshOverlays: [absentOverlay],
+      });
+      const absentCalculation = service.calculate(
+        absentFrame,
+        { scope: "wishlist", selectedBggIds: [93503] },
+        { includeRedundancy: false },
+      );
+      expect(await service.isSourceCurrent(absentFrame)).toBe(true);
+      expect(await service.publishCurrent(absentCalculation, () => "published-new-candidate")).toBe(
+        "published-new-candidate",
+      );
+
+      await writeFile(
+        join(directory, "wishlist.json"),
+        JSON.stringify([wishlistEntry(93503, { name: "Inserted after capture" })]),
+      );
+      expect(await service.isSourceCurrent(absentFrame)).toBe(false);
+      let insertedPublished = false;
+      expect(
+        await service.publishCurrent(absentCalculation, () => (insertedPublished = true)),
+      ).toBe(null);
+      expect(insertedPublished).toBe(false);
+
+      // Once the verified source is durably committed, a new ordinary capture uses that exact
+      // persisted source; the old overlay frame remains stale.
+      const committed = wishlistEntry(93503, {
+        name: "New verified candidate",
+        bggSource: refreshedSource,
+      });
+      await storage.saveWishlist([committed]);
+      expect(await service.isSourceCurrent(absentFrame)).toBe(false);
+      const committedFrame = await service.capture({ includeWishlist: true });
+      expect(committedFrame.sources.wishlistCandidates?.[0]?.bggSource).toEqual(refreshedSource);
+      expect(await service.isSourceCurrent(committedFrame)).toBe(true);
+      const committedCalculation = service.calculate(
+        committedFrame,
+        { scope: "wishlist", selectedBggIds: [93503] },
+        { includeRedundancy: false },
+      );
+      expect(
+        await service.publishCurrent(committedCalculation, () => "published-persisted-source"),
+      ).toBe("published-persisted-source");
     } finally {
       cache.close();
     }

@@ -106,13 +106,18 @@ export function getOrderedVectorAxes(axes: readonly Axis[]): VectorAxis[] {
 }
 
 export function getVectorAxisValues(
-  game: Game,
+  game: Game | FactualScoringGame,
   vectorAxes: readonly VectorAxis[],
   tournamentScore: number | null | undefined,
 ): Record<string, number> {
   const values: Record<string, number> = {};
   for (const axis of vectorAxes) {
-    const value = axis.source === "tournament" ? tournamentScore : game.ratings[axis.id];
+    const value =
+      axis.source === "tournament"
+        ? tournamentScore
+        : "ratings" in game
+          ? game.ratings[axis.id]
+          : undefined;
     if (value !== null && value !== undefined && Number.isFinite(value)) {
       values[axis.id] = value;
     }

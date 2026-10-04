@@ -146,7 +146,13 @@ function computeNicheImpactForResult(
   nicheSettings: Awaited<ReturnType<StorageService["loadNicheSettings"]>>,
 ): NicheImpact {
   if (!result.score) return { wouldJoin: [] };
-  return computeNicheImpact(allGames, result.game, result.score, nicheSettings);
+  return computeNicheImpact(
+    allGames,
+    result.game,
+    result.score,
+    nicheSettings,
+    result.internalCandidateTags,
+  );
 }
 
 async function predictWishlistCandidate(
@@ -277,6 +283,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
               tournamentData,
               allGames,
               redundancySettings,
+              result.internalCandidateProjection,
             )
           : null;
 
@@ -356,6 +363,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
               tournamentData,
               allGames,
               redundancySettings,
+              result.internalCandidateProjection,
             )
           : null;
       const updated = buildEntry(existing.bggId, result, nicheImpact, redundancyPreview);
@@ -417,6 +425,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
                   tournamentData,
                   allGames,
                   redundancySettings,
+                  result.internalCandidateProjection,
                 )
               : null;
 

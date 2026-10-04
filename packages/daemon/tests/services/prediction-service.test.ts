@@ -13,6 +13,7 @@ import {
   createInitialEntityMetadata,
   createInitialSemanticRedundancyStateV10,
   SuggestedPlayerPollSchema,
+  GameSchema,
 } from "@shelf-judge/shared";
 import { createPredictionService } from "../../src/services/prediction-service.js";
 import { createFitnessService } from "../../src/services/fitness-service.js";
@@ -824,6 +825,28 @@ describe("prediction-service", () => {
             failures: [],
           });
         },
+        getBoardgameScoringInput: (bggId) => {
+          if (getGameError) return Promise.reject(getGameError);
+          const result = getGameResult ?? makeBggResult("Test Game");
+          return Promise.resolve({
+            bggId,
+            type: "boardgame",
+            primaryName: result.metadata.name,
+            yearPublished: result.metadata.yearPublished,
+            minPlayers: result.metadata.minPlayers,
+            maxPlayers: result.metadata.maxPlayers,
+            bestPlayers: result.bggData.bestPlayerCount,
+            playingTime: result.metadata.playingTime,
+            weight: result.bggData.weight,
+            communityRating: result.bggData.communityRating,
+            description: result.bggData.description,
+            categories: result.bggData.categories,
+            mechanics: result.bggData.mechanics,
+            suggestedPlayerPoll: { state: "absent", buckets: [] },
+            missingFields: [],
+            observedAt: result.metadataObservation?.observedAt ?? now,
+          });
+        },
         getGames: () => Promise.reject(new Error("not implemented")),
         getUserCollection: () => Promise.reject(new Error("not implemented")),
         getPlayCount: () => Promise.reject(new Error("not implemented")),
@@ -1128,7 +1151,7 @@ describe("prediction-service", () => {
           bestPlayers: null,
           playingTime: 60,
           weight: 2.5,
-          communityRating: null,
+          communityRating: 7.9,
           description: null,
           categories: [],
           mechanics: [{ id: 4, name: "Worker Placement" }],
@@ -1169,6 +1192,234 @@ describe("prediction-service", () => {
       expect(collectionCalls).toBe(0);
     });
 
+    test("verified missing community rating stays missing while private facts still score", async () => {
+      const client = createStubBggClient();
+      const collection = buildRatedCollection(6);
+      collection.axes.push({
+        id: "weight",
+        name: "Complexity",
+        description: null,
+        weight: 50,
+        enabled: true,
+        source: "derived",
+        derivedField: "weight",
+        configuration: {},
+        createdAt: now,
+        updatedAt: now,
+      });
+      client.getBoardgameScoringInput = (bggId) =>
+        Promise.resolve({
+          bggId,
+          type: "boardgame",
+          primaryName: "Missing Community Rating",
+          yearPublished: 2024,
+          minPlayers: 2,
+          maxPlayers: 4,
+          bestPlayers: 3,
+          playingTime: 90,
+          weight: 3,
+          communityRating: null,
+          description: null,
+          categories: [{ id: 9, name: "Strategy" }],
+          mechanics: [{ id: 10, name: "Worker Placement" }],
+          suggestedPlayerPoll: { state: "absent", buckets: [] },
+          missingFields: [],
+          observedAt: now,
+        });
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: client,
+      });
+
+      const result = await service.predictBggGameForWishlist!(99999);
+
+      expect(result.game.bggData).toBeNull();
+      expect(GameSchema.safeParse(result.game).success).toBe(true);
+      expect(result.score?.breakdown.find((entry) => entry.axisId === "complexity")).toMatchObject({
+        sourceValue: null,
+        scoringRawValue: null,
+        effectiveRating: null,
+      });
+      expect(result.score?.breakdown.find((entry) => entry.axisId === "weight")).toMatchObject({
+        sourceValue: 3,
+        scoringRawValue: 3,
+        effectiveRating: 5.5,
+      });
+      expect(result.internalCandidateProjection).toMatchObject({
+        bggData: {
+          communityRating: null,
+          weight: 3,
+          mechanics: [{ name: "Worker Placement" }],
+          categories: [{ name: "Strategy" }],
+        },
+        minPlayers: 2,
+        maxPlayers: 4,
+        bestPlayers: 3,
+        playingTime: 90,
+      });
+      expect(JSON.stringify(result.game)).not.toContain("internalCandidateProjection");
+    });
+
+    test("scores distinct verified community ratings from their original raw values", async () => {
+      const client = createStubBggClient();
+      const collection = buildRatedCollection(6);
+      const communityAxis = collection.axes.find((axis) => axis.id === "complexity");
+      if (!communityAxis) throw new Error("Community rating axis fixture missing");
+      collection.axes = collection.axes.map((axis) =>
+        axis.id === communityAxis.id ? { ...axis, preferenceShape: "lower-is-better" } : axis,
+      );
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: client,
+      });
+      for (const communityRating of [7.5, 8.347]) {
+        client.getBoardgameScoringInput = (bggId) =>
+          Promise.resolve({
+            bggId,
+            type: "boardgame",
+            primaryName: "Exact Rating",
+            yearPublished: 2024,
+            minPlayers: 2,
+            maxPlayers: 4,
+            bestPlayers: 3,
+            playingTime: 90,
+            weight: 3,
+            communityRating,
+            description: null,
+            categories: [],
+            mechanics: [],
+            suggestedPlayerPoll: { state: "absent", buckets: [] },
+            missingFields: [],
+            observedAt: now,
+          });
+        const result = await service.predictBggGameForWishlist!(99999);
+        const rating = result.score?.breakdown.find((entry) => entry.axisId === "complexity");
+        expect(rating).toMatchObject({
+          sourceValue: communityRating,
+          scoringRawValue: communityRating,
+          effectiveRating: communityRating === 8.347 ? 2.7 : 3.5,
+        });
+        expect(result.score?.predictionMeta).toMatchObject({
+          actualAxisCount: 1,
+          predictedAxisCount: 1,
+        });
+        expect(result.score?.score).toBeGreaterThan(0);
+      }
+    });
+
+    test("all-null verified scoring facts do not fabricate an actual score", async () => {
+      const client = createStubBggClient();
+      client.getBoardgameScoringInput = (bggId) =>
+        Promise.resolve({
+          bggId,
+          type: "boardgame",
+          primaryName: "No Scoring Facts",
+          yearPublished: null,
+          minPlayers: null,
+          maxPlayers: null,
+          bestPlayers: null,
+          playingTime: null,
+          weight: null,
+          communityRating: null,
+          description: null,
+          categories: [],
+          mechanics: [],
+          suggestedPlayerPoll: { state: "absent", buckets: [] },
+          missingFields: [],
+          observedAt: now,
+        });
+      const result = await createPredictionService({
+        storageService: createStubStorage(buildRatedCollection(0)),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: client,
+      }).predictBggGameForWishlist!(99999);
+      expect(result.score).toBeNull();
+      expect(result.game.bggData).toBeNull();
+    });
+
+    test("verified prediction-only candidates retain the returned estimator score", async () => {
+      const client = createStubBggClient();
+      client.getBoardgameScoringInput = (bggId) =>
+        Promise.resolve({
+          bggId,
+          type: "boardgame",
+          primaryName: "Prediction Only",
+          yearPublished: null,
+          minPlayers: null,
+          maxPlayers: null,
+          bestPlayers: null,
+          playingTime: null,
+          weight: null,
+          communityRating: null,
+          description: null,
+          categories: [],
+          mechanics: [],
+          suggestedPlayerPoll: { state: "absent", buckets: [] },
+          missingFields: [],
+          observedAt: now,
+        });
+      const result = await createPredictionService({
+        storageService: createStubStorage(buildRatedCollection(6)),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: client,
+      }).predictBggGameForWishlist!(99999);
+      expect(result.score).not.toBeNull();
+      expect(result.score?.predictionMeta).toMatchObject({
+        actualAxisCount: 0,
+        predictedAxisCount: 1,
+      });
+      expect(result.score?.score).toBeGreaterThan(0);
+    });
+
+    test("a factual veto remains an available zero-score candidate", async () => {
+      const client = createStubBggClient();
+      const collection = buildRatedCollection(6);
+      const communityAxis = collection.axes.find((axis) => axis.id === "complexity");
+      if (!communityAxis || communityAxis.source !== "derived")
+        throw new Error("Community rating axis fixture missing");
+      collection.axes = collection.axes.map((axis) =>
+        axis.id === communityAxis.id
+          ? { ...axis, veto: { direction: "below", threshold: 8 } }
+          : axis,
+      );
+      client.getBoardgameScoringInput = (bggId) =>
+        Promise.resolve({
+          bggId,
+          type: "boardgame",
+          primaryName: "Vetoed Candidate",
+          yearPublished: 2024,
+          minPlayers: 2,
+          maxPlayers: 4,
+          bestPlayers: 3,
+          playingTime: 90,
+          weight: null,
+          communityRating: 7.5,
+          description: null,
+          categories: [],
+          mechanics: [],
+          suggestedPlayerPoll: { state: "absent", buckets: [] },
+          missingFields: [],
+          observedAt: now,
+        });
+      const result = await createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: client,
+      }).predictBggGameForWishlist!(99999);
+      expect(result.score).toMatchObject({
+        score: 0,
+        vetoed: true,
+        predictionMeta: { actualAxisCount: 1, predictedAxisCount: 1 },
+      });
+    });
+
     test("facts-first and direct previews use the same rich calculation and shared attempt budget", async () => {
       const client = createStubBggClient();
       const scoringInput = {
@@ -1181,7 +1432,7 @@ describe("prediction-service", () => {
         bestPlayers: null,
         playingTime: 75,
         weight: 3.1,
-        communityRating: null,
+        communityRating: 7.9,
         description: null,
         categories: [{ id: 21, name: "Economic" }],
         mechanics: [{ id: 22, name: "Worker Placement" }],
@@ -1342,6 +1593,10 @@ describe("prediction-service", () => {
       existing.name = "Old local title";
       existing.yearPublished = 1990;
       existing.bggData = makeBggData(["Old local mechanic"]);
+      existing.ratings = { theme: 7, complexity: 9 };
+      collection.axes = collection.axes.map((axis) =>
+        axis.id === "complexity" ? { ...axis, veto: { direction: "below", threshold: 8 } } : axis,
+      );
       const client = createStubBggClient();
       const observedAt = "2026-09-25T12:00:00.000Z";
       client.getBoardgameScoringInput = (bggId) =>
@@ -1355,7 +1610,7 @@ describe("prediction-service", () => {
           bestPlayers: null,
           playingTime: 60,
           weight: 2.5,
-          communityRating: null,
+          communityRating: 1,
           description: null,
           categories: [],
           mechanics: [{ id: 7, name: "Verified Thing mechanic" }],
@@ -1381,6 +1636,14 @@ describe("prediction-service", () => {
         mechanics: [{ id: 7, name: "Verified Thing mechanic" }],
         observedAt,
       });
+      expect(preview.score).toMatchObject({ vetoed: false });
+      expect(preview.score.breakdown.find((entry) => entry.axisId === "complexity")).toMatchObject({
+        source: "override",
+        overrideValue: 9,
+        effectiveRating: 9,
+      });
+      expect(preview.internalCandidateProjection).toBeUndefined();
+      expect(preview.internalCandidateTags).toBeUndefined();
     });
 
     test("rejects multiple local matches across primary and additional BGG IDs", async () => {
@@ -1417,14 +1680,14 @@ describe("prediction-service", () => {
       expect(factCalls).toBe(0);
     });
 
-    test("passes a caller-owned HTTP attempt budget to the Thing facts request", async () => {
+    test("passes a caller-owned HTTP attempt budget to the scoring Thing request", async () => {
       let receivedBudget: unknown;
       const client = createStubBggClient();
-      const factClient = client.getBoardgameFacts?.bind(client);
-      if (!factClient) throw new Error("facts method unavailable in test fixture");
-      client.getBoardgameFacts = (ids, signal, budget) => {
+      const scoringClient = client.getBoardgameScoringInput?.bind(client);
+      if (!scoringClient) throw new Error("scoring method unavailable in test fixture");
+      client.getBoardgameScoringInput = (id, signal, budget) => {
         receivedBudget = budget;
-        return factClient(ids, signal, budget);
+        return scoringClient(id, signal, budget);
       };
       const budget = { tryConsume: () => true };
       const service = createPredictionService({
@@ -1439,6 +1702,8 @@ describe("prediction-service", () => {
 
     test("does not preview missing or non-boardgame Thing identities", async () => {
       const client = createStubBggClient();
+      client.getBoardgameScoringInput = () =>
+        Promise.reject(new Error("scoring source unavailable"));
       client.getBoardgameFacts = (ids) =>
         Promise.resolve({
           facts: [],
@@ -1460,6 +1725,8 @@ describe("prediction-service", () => {
       existing.bggId = 73;
       existing.ownership = "previously-owned";
       const client = createStubBggClient();
+      client.getBoardgameScoringInput = () =>
+        Promise.reject(new Error("scoring source unavailable"));
       client.getBoardgameFacts = (ids) =>
         Promise.resolve({
           facts: [],

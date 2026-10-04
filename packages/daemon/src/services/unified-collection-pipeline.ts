@@ -6,7 +6,6 @@ import {
   type Axis,
   type FitnessBreakdownEntry,
   type FitnessResult,
-  type Game,
   type PredictionConfidence,
   type ReferenceGame,
   type RedundancyAdjustment,
@@ -29,6 +28,7 @@ import {
   type StagedSimilarityCalculation,
 } from "./staged-similarity-scope.js";
 import { createFitnessService } from "./fitness-service.js";
+import { projectVerifiedBggCandidate } from "./bgg-candidate-projection.js";
 import { computeUnifiedPrediction, unifiedConfidenceRank } from "./unified-prediction.js";
 import type { StagedSimilarityPair } from "./prepared-similarity.js";
 import type { SemanticScoringInputProofV2 } from "../../../shared/src/semantic-scoring-input-proof-v2.js";
@@ -344,22 +344,22 @@ export function computeUnifiedFitnessBatch(options: UnifiedFitnessBatchOptions):
     // not a collection member: omit personal ratings, tournament labels, owner notes, and all
     // persisted wishlist prediction fields. This object only supplies fields read by the
     // existing derived-axis fitness service.
-    const actual = source
+    const candidateProjection = source
+      ? projectVerifiedBggCandidate({
+          id: target.id,
+          communityRating: source.bggSource.communityRating,
+          weight: source.bggSource.weight,
+          mechanics: source.bggSource.mechanics,
+          categories: source.bggSource.categories,
+          minPlayers: source.bggSource.minPlayers,
+          maxPlayers: source.bggSource.maxPlayers,
+          bestPlayers: source.bggSource.bestPlayers,
+          playingTime: source.bggSource.playingTime,
+        })
+      : null;
+    const actual = candidateProjection
       ? fitnessService.calculateScore(
-          {
-            id: target.id,
-            name: source.name,
-            ratings: {},
-            manualValues: { playingTime: null, playerCount: null },
-            bggData: {
-              communityRating: source.bggSource.communityRating,
-              weight: source.bggSource.weight,
-            },
-            minPlayers: source.bggSource.minPlayers,
-            maxPlayers: source.bggSource.maxPlayers,
-            bestPlayers: source.bggSource.bestPlayers,
-            playingTime: source.bggSource.playingTime,
-          } as unknown as Game,
+          candidateProjection.scoringInput,
           [...capture.sources.collection.axes],
           {
             settings: capture.sources.tournament.settings,

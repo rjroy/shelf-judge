@@ -1,7 +1,7 @@
 import type { RedundancyAdjustment } from "@shelf-judge/shared";
 import type {
   PredictionService,
-  PredictedGameResult,
+  PredictedBggCandidateResult,
   PredictionSnapshot,
 } from "./prediction-service.js";
 import type { StorageService } from "./storage-service.js";
@@ -36,7 +36,7 @@ export async function calculateBggFitnessPreview(
     snapshot?: PredictionSnapshot;
   } = {},
 ): Promise<{
-  result: PredictedGameResult;
+  result: PredictedBggCandidateResult;
   nicheImpact: ReturnType<typeof computeNicheImpact>;
   redundancyPreview: RedundancyAdjustment | null;
 }> {
@@ -58,11 +58,14 @@ export async function calculateBggFitnessPreview(
     storageService ? storageService.loadNicheSettings() : Promise.resolve(undefined),
     storageService ? storageService.loadRedundancySettings() : Promise.resolve(undefined),
   ]);
-  const result = await predictionService.predictBggGame(bggId, {
+  const predictionOptions = {
     ...options,
     snapshot,
     attemptBudget: options.attemptBudget ?? createHttpAttemptBudget(),
-  });
+  };
+  const result = predictionService.predictBggGameForWishlist
+    ? await predictionService.predictBggGameForWishlist(bggId, predictionOptions)
+    : await predictionService.predictBggGame(bggId, predictionOptions);
   options.signal?.throwIfAborted();
   const allGames =
     snapshot && predictionService.listGamesWithPredictionsFromSnapshot
@@ -73,7 +76,13 @@ export async function calculateBggFitnessPreview(
         )
       : await predictionService.listGamesWithPredictions();
   const nicheImpact = result.score
-    ? computeNicheImpact(allGames, result.game, result.score, nicheSettings)
+    ? computeNicheImpact(
+        allGames,
+        result.game,
+        result.score,
+        nicheSettings,
+        result.internalCandidateTags,
+      )
     : { wouldJoin: [] };
   let redundancyPreview: RedundancyAdjustment | null = null;
   if (storageService && redundancySettings) {
@@ -87,6 +96,7 @@ export async function calculateBggFitnessPreview(
         tournamentData,
         allGames,
         redundancySettings,
+        result.internalCandidateProjection,
       );
     }
   }

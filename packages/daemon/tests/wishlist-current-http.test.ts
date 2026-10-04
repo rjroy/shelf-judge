@@ -83,6 +83,21 @@ function personalAxis(): Axis {
     updatedAt: observedAt,
   };
 }
+
+function communityAxis(): Axis {
+  return {
+    id: "community",
+    name: "Community Rating",
+    description: null,
+    weight: 50,
+    enabled: true,
+    source: "derived",
+    derivedField: "communityRating",
+    configuration: {},
+    createdAt: observedAt,
+    updatedAt: observedAt,
+  };
+}
 afterEach(async () =>
   Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))),
 );
@@ -107,7 +122,10 @@ describe("production wishlist current HTTP projection", () => {
     });
     try {
       const collection = await context.storageService.loadCollection();
-      collection.axes = [personalAxis()];
+      collection.axes = [
+        { ...personalAxis(), weight: 100 },
+        { ...communityAxis(), weight: 1 },
+      ];
       collection.games = [
         ratedGame("target"),
         ratedGame("reference-four", 2),
@@ -131,7 +149,7 @@ describe("production wishlist current HTTP projection", () => {
         thumbnailUrl: null,
         predictedScore: 9.5,
         predictionConfidence: "strong",
-        predictedBreakdown: [{ axisName: "Historic", rating: 9.5, confidence: "strong" }],
+        predictedBreakdown: [{ axisName: "Community Rating", rating: 1, confidence: "strong" }],
         nicheImpact: null,
         redundancyPreview: null,
         addedAt: observedAt,
@@ -141,7 +159,7 @@ describe("production wishlist current HTTP projection", () => {
           mechanics: [],
           categories: [],
           weight: null,
-          communityRating: 7,
+          communityRating: 8.347,
           minPlayers: null,
           maxPlayers: null,
           bestPlayers: null,
@@ -195,13 +213,33 @@ describe("production wishlist current HTTP projection", () => {
       const firstResponse = await context.app.request("/api/wishlist/redundancy");
       expect(firstResponse.status).toBe(200);
       const [first] = (await firstResponse.json()) as Array<{
-        entry: { predictedScore: number | null };
+        entry: {
+          predictedScore: number | null;
+          predictedBreakdown: Array<{
+            axisName: string;
+            rating: number;
+            confidence: string;
+          }> | null;
+        };
         prediction: { availability: string; result: { score: number } | null };
       }>;
       if (!first?.prediction.result) throw new Error("Current cached prediction unavailable");
       const firstScore = first.prediction.result.score;
       expect(first.entry.predictedScore).toBe(firstScore);
       expect(firstScore).not.toBe(9.5);
+      expect(first.entry.predictedBreakdown).toContainEqual({
+        axisName: "Community Rating",
+        rating: 8.3,
+        confidence: "actual",
+      });
+      expect(first.entry.predictedBreakdown).not.toContainEqual({
+        axisName: "Community Rating",
+        rating: 1,
+        confidence: "strong",
+      });
+      expect((await context.storageService.loadWishlist())[0]?.bggSource?.communityRating).toBe(
+        8.347,
+      );
 
       for (const row of judgments) {
         cache.upsert({ ...row, value: 0, completedAt: "2026-10-04T00:01:00.000Z" });

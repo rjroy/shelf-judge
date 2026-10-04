@@ -14,6 +14,29 @@ export interface StagedWishlistCandidateSource {
   readonly bggSource: WishlistBggSourceSnapshot;
 }
 
+export interface VerifiedWishlistRefreshOverlay {
+  readonly kind: "verified-wishlist-refresh-overlay";
+  readonly candidate: StagedWishlistCandidateSource;
+}
+
+const verifiedWishlistRefreshOverlays = new WeakSet<object>();
+
+/** Construct the private verified-source overlay only after BGG scoring-input validation. */
+export function createVerifiedWishlistRefreshOverlay(
+  candidate: StagedWishlistCandidateSource,
+): VerifiedWishlistRefreshOverlay {
+  const overlay = Object.freeze({
+    kind: "verified-wishlist-refresh-overlay" as const,
+    candidate: deepFreeze(structuredClone(candidate)),
+  });
+  verifiedWishlistRefreshOverlays.add(overlay);
+  return overlay;
+}
+
+export function isVerifiedWishlistRefreshOverlay(value: VerifiedWishlistRefreshOverlay): boolean {
+  return verifiedWishlistRefreshOverlays.has(value);
+}
+
 /** A private, coherent set of raw inputs. It deliberately contains no predicted results. */
 export interface StagedSimilaritySources {
   readonly collection: Collection;
