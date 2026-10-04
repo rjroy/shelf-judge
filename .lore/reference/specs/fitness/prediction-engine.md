@@ -5,6 +5,7 @@ status: implemented
 tags: [spec, prediction, fitness, similarity, k-nn, confidence]
 modules: [daemon, shared, web, cli]
 related:
+  - .lore/work/design/unified-similarity-prediction-redundancy.md
   - .lore/work/brainstorm/prediction-engine.md
   - .lore/work/brainstorm/collection-profiling.md
   - .lore/work/specs/mvp.md
@@ -19,6 +20,8 @@ req-prefix: PRED
 ---
 
 # Spec: Prediction Engine for Unrated Games
+
+> **Current similarity authority — 2026-10-04:** The approved unified-similarity design and Phase 6 activation supersede the legacy similarity/default and top-K-prefilter clauses below. This reference remains authoritative for prediction estimation, axis-specific eligibility, confidence/readiness and result meaning except where this notice and the **Unified similarity** section explicitly update them. Prediction and redundancy now consume the same factual/semantic pair similarity; collection and wishlist use the same predictor. See [unified similarity design](../../../work/design/unified-similarity-prediction-redundancy.md), [redundancy scoring](redundancy-scoring.md), and [wishlist](../features/wishlist.md). Historical requirements and validation criteria are retained for discoverability, not as current similarity behavior.
 
 ## Overview
 
@@ -50,13 +53,19 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 ### Similarity Computation
 
-- REQ-PRED-5: Prediction neighbor similarity uses the same composite-distance mechanics as collection similarity: binary mechanics/categories use Jaccard distance, continuous factual dimensions use normalized Manhattan distance, and the weighted component distances form a composite distance in [0,1]. Prediction deliberately excludes personal-axis and tournament-axis dimensions from this comparison, even when values exist, so the target's similarity is not conditioned on the rating being predicted or on other axis ratings. With default component weights (binary 0.4, continuous 0.3, axis 0.3), the absent axis component's weight is redistributed proportionally across the factual components: binary weight 4/7 and continuous weight 3/7. Convert distance to similarity as `1 - compositeDistance`, also in [0,1] (1 means identical, 0 maximally distant). A neighbor is eligible only when its similarity is positive and at least the configured minimum: `similarity > 0 && similarity >= minSimilarityThreshold`. Thus a positive similarity exactly at the threshold is eligible, but zero similarity is never eligible, including when the threshold is 0. This differs from profile distance use only in that prediction does not compare axis dimensions.
+- REQ-PRED-5 (legacy similarity; superseded by **Unified similarity**): The former factual-only distance used a default factual ratio of 4:3 (equivalent to 4/7 and 3/7), excluding personal/tournament axes. The active shared pair score includes whichever authorized positive-weight factual/semantic components are available, normalized over those available components. Prediction still excludes personal/tournament axes as features, and zero similarity remains ineligible even at a zero threshold.
+
+### Unified similarity (current)
+
+For factual binary Jaccard distance `J`, normalized factual Manhattan distance `M`, and persisted binary/continuous settings `b` and `c`, factual similarity is `F = 1 - (b*J + c*M)/(b+c)`. The default is `b:c = 4:3`; use every valid stored ratio, not hardcoded normalized defaults. The factual vector context is built from all collection BGG factual records, including previously-owned or axis-ineligible games; personal and tournament ratings never enter the vector, and a candidate is not inserted into its own factual context.
+
+Prediction and redundancy use the same pair score `S`: weighted average over available positive-weight components among factual `F`, description JEV `D`, and owner-note JEV `O`, normalized by the sum of included weights. Missing or unauthorized evidence and its weight are omitted; a valid available zero remains and keeps its weight. If no positive-weight component is available, the result is typed unavailable (`null`), never fabricated numeric zero. Semantic enablement governs semantic use for every consumer; cached owner-note permission governs whether O may be supplied; `RedundancySettings.enabled` controls only whether redundancy penalties are applied and does not disable prediction similarity. Collection and wishlist invoke this same predictor and similarity calculation, but may use different legitimate actual-rated reference sets. Ordinary reads are cache-only and make no inference/provider or BGG-refresh calls. See the [approved design](../../../work/design/unified-similarity-prediction-redundancy.md) for frozen explicit-run scope, proof, privacy and performance invariants.
 
 - REQ-PRED-6: Only games with BGG data and at least one eligible personal or tournament-axis value can be reference games. A game with BGG data but no value on any prediction target is not a useful training example. Derived-axis values are not prediction-reference ratings.
 
 ### k-NN Estimation
 
-- REQ-PRED-7: For each missing personal or tournament axis on a target game, the system selects the k most similar eligible reference games that have a value on that axis (not the k most similar overall, filtered afterward). Default k = 5. A reference must have BGG data and at least one personal or available tournament-axis value; only references with a value on the target axis and positive similarity meeting the configured threshold are considered. The predicted rating is the rating-weighted similarity estimate `sum(similarity * rating^2) / sum(similarity * rating)`. Thus similarity weights each neighbor and the neighbor's rating also weights its influence; all selected ratings are positive, so every selected neighbor has positive weight. Equal reference ratings yield that same rating regardless of their similarities. If fewer than k eligible references remain, all contribute; if none remain—including when all axis-rated references have zero similarity—the axis is insufficient. Tournament is a prediction target and reference source per `.lore/reference/specs/tournament/elo-axis-source.md` REQ-TAXIS-8/17; a missing tournament value may instead be null because the cohort-floor rules there govern whether it is available.
+- REQ-PRED-7: For each target/axis needing prediction, resolve pair evidence to every reference actually rated on that axis before selecting the k most similar eligible references. Do not factual-top-K prefilter requests: cached semantic evidence can change neighbor ordering. Default k = 5. A reference must have BGG data and a positive actual personal or available tournament-axis value; only actual-rated references with positive similarity meeting the configured threshold are eligible. The predicted rating remains `sum(similarity * rating^2) / sum(similarity * rating)`. Equal reference ratings yield that same rating regardless of similarity. Previously-owned games with genuine actual axis ratings may be references where existing axis rules permit; the candidate itself is excluded. If fewer than k eligible references remain, all contribute; if none remain the axis is insufficient. Tournament eligibility remains governed by `.lore/reference/specs/tournament/elo-axis-source.md`.
 
 - REQ-PRED-8: All BGG-derived axes produce "actual" confidence regardless of whether a utility curve is configured. The raw BGG value is resolved and the curve (or default linear map) produces a deterministic effective rating. This is not a prediction; the mapping from BGG data to effective rating is fully defined by the user's curve configuration or the default normalization.
 
@@ -163,7 +172,7 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 ### Data and Storage
 
-- REQ-PRED-36: Prediction results and feature vectors are computed on demand from existing game and BGG data. Prediction results are not cached. The computation is local math over the existing collection. One new persistent file is introduced: `prediction-settings.json` stores `PredictionSettings` (stage thresholds, k, and similarity threshold). This follows the existing storage pattern and is necessary for settings to survive daemon restarts.
+- REQ-PRED-36: Prediction results are computed from current captured game/BGG facts, settings, and currently valid cached JEV pair judgments; reads do not invoke inference. Raw pair judgments are reusable cache evidence, not cached prediction outputs. `prediction-settings.json` continues to store `PredictionSettings` (stage thresholds, k, and similarity threshold); factual binary:continuous similarity weights remain in existing redundancy settings and semantic weights remain collection-owned—there is no duplicate prediction-weight model.
 
 - REQ-PRED-37: If prediction computation becomes a performance concern (measured, not assumed), the feature vector vocabulary and per-game vectors can be cached and invalidated when the collection changes. This is an optimization, not a requirement. Do not build caching infrastructure preemptively.
 
@@ -227,7 +236,7 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 - The fitness formula (`sum(effective_rating * weight) / sum(weights)`) does not change. Prediction produces per-axis ratings with the rating-weighted similarity estimate in REQ-PRED-7, then feeds them into the same fitness aggregation.
 - Prediction is read-only. It does not modify any stored data: no game ratings, no tournament data, no axis configurations.
-- The feature vector module is designed for reuse. Collection profiling and redundancy scoring will consume the same vectors and similarity computations. The module's API should not be prediction-specific.
+- The feature vector module is designed for reuse. Prediction and redundancy share the unified factual/semantic pair similarity and settings; profiling remains a distinct consumer. The module's API should not be prediction-specific.
 - No external services beyond what the system already uses. Prediction is local math over cached BGG data and stored ratings.
 - The tournament axis IS a prediction target (per REQ-TAXIS-17 in `.lore/reference/specs/tournament/elo-axis-source.md`): the prediction engine fills missing tournament axis values for unrated games on the same code path it uses for personal axes. When available, tournament-axis ratings are reference data for that prediction.
 - Single-user constraint holds. No collaborative filtering across users. The prediction uses one user's ratings to predict one user's scores.
