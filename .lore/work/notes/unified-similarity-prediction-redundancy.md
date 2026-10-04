@@ -12,14 +12,14 @@ related: [.lore/work/design/unified-similarity-prediction-redundancy.md]
 
 ## Authorization and execution status
 
-The user approved the linked design and seven-phase plan and authorized implementation. The execution branch is `feat/unified-similarity-prediction-redundancy`; Phase 1 is checkpointed at `c32cb3d5e63328177bcec169507f73a070c24627` from the approved-doc base `084936ca29c17c36b0e652e1173bcdc93209d3e3`, Phase 2 at `027ca1fbd88379f63a090375fccd290082fa3051`, and Phase 3 acceptance is verified with its bead-ID checkpoint being recorded now. Phases 1–3 are accepted; the epic remains in progress. Phase 4 is ready but unclaimed/not started and cannot begin before Phase 3's checkpoint is committed and reconciled. No later phase has started.
+The user approved the linked design and seven-phase plan and authorized implementation. The execution branch is `feat/unified-similarity-prediction-redundancy`; Phase 1 is checkpointed at `c32cb3d5e63328177bcec169507f73a070c24627` from the approved-doc base `084936ca29c17c36b0e652e1173bcdc93209d3e3`, Phase 2 at `027ca1fbd88379f63a090375fccd290082fa3051`, and Phase 3 at `01b159c308c2d849c6a3b8f3ca7da4ee78ac947d`. Phases 1–3 are accepted; the epic remains in progress. Phase 4 is claimed and in progress. No later phase has started.
 
 | Phase | Status | Gate before next phase |
 | --- | --- | --- |
 | 1 — baseline, shared math, settings assembler | Accepted; checkpointed with `shelf-judge-bs1y.1` | Phase 1 checkpoint `c32cb3d5` verified before Phase 2 began |
 | 2 — source capture, cache-only resolver, proof/revocation | Accepted and checkpointed at `027ca1f` | Phase 2 commit reconciled before Phase 3 began |
-| 3 — pair scope and frozen run | Accepted (`shelf-judge-bs1y.3`; checkpointing now) | Phase 3 bead-ID checkpoint committed and reconciled before Phase 4 starts |
-| 4 — staged predictor and real numeric pipeline | Ready, unclaimed; not started | Phase 3 accepted checkpoint committed and terminal handoff verified |
+| 3 — pair scope and frozen run | Accepted and checkpointed with `shelf-judge-bs1y.3` | Phase 3 checkpoint `01b159c3` reconciled before Phase 4 began |
+| 4 — staged predictor and real numeric pipeline | Accepted and checkpointed with `shelf-judge-bs1y.4` | Phase 4 checkpoint verified before Phase 5 may start |
 | 5 — staged wishlist/API/client adapters | Not started | Phase 4 verified checkpoint |
 | 6 — atomic production activation | Not started | Phase 5 verified checkpoint |
 | 7 — integration, performance, authority reconciliation | Not started | Phase 6 verified checkpoint |
@@ -49,13 +49,13 @@ The R1–R13 labels below are the operational obligation map for the approved de
 
 | Obligation | Plan phase | Evidence / status |
 | --- | --- | --- |
-| R1 — one factual formula F and common weighted S; missing versus valid-zero semantics | 1 | `unified-similarity.test.ts`: defaults, non-default ratio, partial normalization, valid zero, all unavailable; current phase in progress |
-| R2 — existing settings are sole weights; semantic enablement/note permission and penalty-toggle separation | 1 | Staged settings-assembly tests and real storage round-trip/reopen; `stored-source-revision.test.ts` baseline covers zero/zero→4:3 and personal-axis stripping; current phase in progress |
-| R3 — prediction and redundancy exact-pair parity; same prediction algorithm | 4, then 6 | Staged shared-predictor numeric parity and activation consumer comparison; not started |
-| R4 — factual context from full collection, no personal-axis/rating leakage | 4 | Real staged collection prediction fixture and axis/reference isolation; not started |
-| R5 — purpose-specific reference pools and exact prediction eligibility | 3–4 | Phase 3 staged exact axis-rated P/R tests in progress; real numeric pipeline remains Phase 4 |
-| R6 — deduplicated, previewed, frozen authorized pair universe | 3 | Phase 3 injected-fitness P∪R/overlap/frozen-scope tests in progress; independent gate pending |
-| R7 — indexed cache-only reads, pair memoization and bounded execution | 2–3, 7 | Phase 2 indexed point reads, candidate indexing/vector dedupe, and stale-cache tests accepted; Phase 3 frozen-scope fixture underway; composed production performance gates remain Phase 7 |
+| R1 — one factual formula F and common weighted S; missing versus valid-zero semantics | 1 | Phase 1 accepted: `unified-similarity.test.ts` covers default/non-default ratios, partial normalization, valid zero and all unavailable |
+| R2 — existing settings are sole weights; semantic enablement/note permission and penalty-toggle separation | 1 | Phase 1 accepted: staged settings assembly and storage round-trip/reopen; baseline covers zero/zero→4:3 and personal-axis stripping |
+| R3 — prediction and redundancy exact-pair parity; same prediction algorithm | 4, then 6 | Phase 4 staged shared predictor/P-R numeric pipeline accepted; production consumer comparison remains Phase 6 |
+| R4 — factual context from full collection, no personal-axis/rating leakage | 4 | Phase 4 staged collection pipeline accepted; production activation remains Phase 6 |
+| R5 — purpose-specific reference pools and exact prediction eligibility | 3–4 | Phase 3 scope and Phase 4 real numeric adapter accepted; production activation remains Phase 6 |
+| R6 — deduplicated, previewed, frozen authorized pair universe | 3 | Phase 3 injected-fitness P∪R/overlap/frozen-scope tests accepted; real predictor pipeline is separately in Phase 4 |
+| R7 — indexed cache-only reads, pair memoization and bounded execution | 2–3, 7 | Phase 2 indexed point reads and vector dedupe plus Phase 3 frozen-scope indexing accepted; composed production performance gates remain Phase 7 |
 | R8 — proof identity/currentness and source publication fence | 2, 6 | Staged V2 identity, every examined component, currentness/read/publication boundary accepted; production acceptance remains Phase 6 |
 | R9 — transitive note-permission revocation and fail-closed publication | 2, 6–7 | Staged SHARED_CD/O=0, indirect wishlist artifact, cleanup-failure/restart, and whole-recompute fixture accepted; real production lifecycle remains Phase 6/7 |
 | R10 — current prediction and redundancy result contracts / wishlist consumers | 5–6 | Staged API/view-model contract, designer-owned view, then atomic client binding; not started |
@@ -142,7 +142,7 @@ Cache calculation freshness remains separate from source/policy/selection author
 
 #### P3-R01 correction record
 
-The reviewer found that a frozen `StagedAxisPairInput` still exposed a mutable nested similarity pair to injected fitness and returned scope consumers. The scope module now uses a readonly nested pair type and creates a cloned, runtime-frozen pair at every P/R/U0 projection boundary; axis-reference records point only to that frozen object. Regression tests attempt mutation inside injected fitness and after preparation for both collection and wishlist pair identities, then confirm pair members, canonical key/resolver association, authorization identity/status, and the all-unavailable `null` similarity remain unchanged. The independent tester accepted the corrected manifest with **44 tests / 416 expectations across 7 files** (including 8 / 101 for the new scope suite); the Bun/TypeScript reviewer accepted Phase 3 and closed P3-R01 with no other findings. Daemon typecheck, scoped ESLint/Prettier, and diff checks passed. This acceptance is for pure scope with injected fitness only, not the real numeric prediction pipeline. The Phase 3 checkpoint is being recorded now; do not start Phase 4 until it is committed and terminally reconciled.
+The reviewer found that a frozen `StagedAxisPairInput` still exposed a mutable nested similarity pair to injected fitness and returned scope consumers. The scope module now uses a readonly nested pair type and creates a cloned, runtime-frozen pair at every P/R/U0 projection boundary; axis-reference records point only to that frozen object. Regression tests attempt mutation inside injected fitness and after preparation for both collection and wishlist pair identities, then confirm pair members, canonical key/resolver association, authorization identity/status, and the all-unavailable `null` similarity remain unchanged. The independent tester accepted the corrected manifest with **44 tests / 416 expectations across 7 files** (including 8 / 101 for the new scope suite); the Bun/TypeScript reviewer accepted Phase 3 and closed P3-R01 with no other findings. Daemon typecheck, scoped ESLint/Prettier, and diff checks passed. This acceptance is for pure scope with injected fitness only, not the real numeric prediction pipeline. Phase 3 was checkpointed and reconciled before Phase 4 began.
 
 #### Phase 3 author source manifest
 
@@ -150,3 +150,46 @@ The reviewer found that a frozen `StagedAxisPairInput` still exposed a mutable n
 | --- | --- |
 | `packages/daemon/src/services/staged-similarity-scope.ts` | `d987312397a2b310261314aa142ef6013be10a3c` |
 | `packages/daemon/tests/services/staged-similarity-scope.test.ts` | `6bcd88fbacece2007118928955c2d1754aab3d6f` |
+
+## Phase 4 staged predictor and collection pipeline (in progress)
+
+Phase 4 adds only the inert `unified-prediction.ts` and `unified-collection-pipeline.ts` modules and their two direct-import test files. Production prediction/redundancy engines, service factories, routes, snapshots, shared exports/proofs, and clients remain untouched. The shared predictor consumes actual per-axis labels plus the staged resolver's one S value per pair, sorts by S, honors the existing minimum-similarity and k settings, and reuses the established weighted estimate/confidence rules. The collection adapter uses Phase 3's exact P request and cache-only PreparedSimilarity, computes current pre-redundancy fitness, passes those real results to the P→R scope evaluator, then derives R and applies a staged penalty calculation only when the separate redundancy toggle is enabled. It retains the exact common S table when prediction and redundancy overlap. No caller activates these modules before Phase 6.
+
+Phase 4 author evidence (not acceptance), with the bounded correction record:
+
+- **P4-T01:** Redundancy eligibility now comes from typed collection pair endpoints in the frozen R pairs, not `targetIds` disclosure strings (which can be joined and can legally contain commas). The enabled-settings SQLite test covers three current owned endpoints: target 7.2 receives a 1.0 penalty (adjusted 6.2), the lower actual member 4 receives 1.0 (adjusted 3), and the higher actual member 8 receives zero. A separate threshold-with-no-neighbors case preserves the current 7.2 score with zero penalty. This catches the prior test gap where default redundancy settings were disabled.
+- **P4-T02:** With actual labels and factual inputs fixed and semantic factual weight set to zero, valid cached C_ONLY zeros produce S=0, no target prediction, and only the one actual-eligible R pair. Updating those SQLite rows to valid C_ONLY ones, then doing a fresh complete run, produces target score 6.0 and three R pairs. The old prepared calculation becomes stale after cache mutation; it is not partially reused. These are actual staged numeric outputs, with no injected fitness seam or provider call.
+- **P4-T03:** The same synthetic capture (factual binary:continuous settings 1:3) is exercised through `collection-targets`, `collection-all`, and `predict-game`; target score, breakdown, and prediction metadata match. The actual-rated previously-owned member appears in P/reference disclosure but not current-owned R eligibility. A collection-domain target and a BGG wishlist candidate with identical factual source and actual reference labels are also resolved through their correctly typed SQLite cache domains and fed to the same `computeUnifiedPrediction`; selected labels, S-driven result and score match. This is staged common-engine evidence only, not Phase 5 wishlist projection/API behavior or production route activation.
+- `unified-prediction.test.ts` additionally covers actual per-axis labels, nullable S, k/minimum filtering, changed S ordering changing the chosen neighbor/score, weak-confidence/current coverage, and the domain-agnostic shared estimator contract. The collection fixture uses the full collection factual source context, with no personal-axis feature contribution or candidate insertion into that context.
+- Initial Phase 4 author pass before the bounded P4-R01–R03 corrections: the approved production/staged regression command passed **213 tests / 1,430 expectations across 9 files** and the two new files passed **6 tests / 46 expectations**. Final post-correction counts are recorded below.
+- Before the bounded P4-R01–R03 corrections, Phase 4 was awaiting independent review. It remains unwired; production proof/publication lifecycle remains a Phase 6 obligation.
+
+### Phase 4 bounded review corrections P4-R01–R03 (author verification; independent gates pending)
+
+- **P4-R01 — fully predicted classification:** The staged collection adapter now follows the established rule exactly: an output is fully predicted only when `predictionMeta?.actualAxisCount === 0`. In the enabled-redundancy pipeline fixture, an actual target at **5** accepts a higher mixed neighbor (`actualAxisCount: 1`) as actual-strength evidence; the mixed neighbor is not labeled fully predicted. In the inverse fixture, a mixed target at **1.5** excludes a higher fully predicted neighbor at **5.8**; that neighbor is marked fully predicted and does not contribute to its penalty. These checks exercise the adapter's real output metadata and penalty path.
+- **P4-R02 — score rounding:** For a target score of **5**, one better neighbor among two, and `maxPenalty: 2.25`, the raw penalty is **1.125**, the separately displayed penalty is **1.13**, and the adjusted score is **3.88** (subtract raw, then round adjusted score), not 3.87.
+- **P4-R03 — indexed axis-pair workload:** The staged adapter indexes demanded pairs once by target, then visits only each target's slice. The deterministic 24-target × 3-reference fixture reports one index build, **72** indexed pairs, **24** target lookups, **72** related pairs total, and **72** consumed pairs. It does not rescan 72 demands for each of the 24 targets. Counters are an optional local test observer, not persisted telemetry.
+- Final Phase 4 author regression command (the nine approved production/staged files) passed **216 tests / 1,475 expectations across 9 files**. The two direct staged suites passed **9 tests / 91 expectations across 2 files**. `bun run typecheck`, scoped ESLint on the four staged TypeScript files, Prettier check on those files and this note, and `git diff --check` passed after the final author edits. No production bindings or old expected outputs were changed.
+- Independent verification accepted the four-file Phase 4 manifest: **216 tests / 1,475 expectations across 9 files**, including **18 tests / 203 expectations** from upstream pure-scope and real-cache suites; the new staged suites contributed **9 tests / 91 expectations**. The reviewer explicitly accepted Phase 4 and closed P4-R01–R03 with no material issues; root TypeScript, scoped lint, formatting, and diff checks passed. Acceptance is for the real staged numeric P→cache-only S→shared predictor/current fitness→R pipeline, not live production wiring or lifecycle integration.
+- The accepted criterion includes the mixed-authority rule (`predictionMeta.actualAxisCount === 0` means fully predicted), raw penalty subtraction before rounding (score 5, raw 1.125 → adjusted 3.88; displayed penalty 1.13), and indexed workload (24 targets, 72 indexed and consumed pairs, 24 target lookups). Earlier T01–T03 evidence remains accepted: cached semantic evidence changed target fitness from unavailable to 6 and eligible R from 1 to 3; 1:3 settings produced parity across candidate/full/requested/predict-game staged paths.
+- The staged Phase 4 modules remain unwired. This acceptance does not claim production prediction/redundancy activation or production lifecycle integration. Phase 5 has not started.
+
+#### Phase 4 author source manifest (in-progress handoff)
+
+| File | SHA-1 Git blob |
+| --- | --- |
+| `packages/daemon/src/services/unified-prediction.ts` | `a18f41a05685d3d6417c5a7deb6a3be53a704381` |
+| `packages/daemon/src/services/unified-collection-pipeline.ts` | `a9a81d39ee960fe60d29c083075fc01a04077eb2` |
+| `packages/daemon/tests/services/unified-prediction.test.ts` | `552ab7bc4172e158cc6aff782739b135352a2d48` |
+| `packages/daemon/tests/services/unified-collection-pipeline.test.ts` | `9c989252682d949e89b636d45a48e9f9e58c3e0e` |
+
+SHA-256 and pre-staging working-tree/index record for the four accepted new source/test files:
+
+| File | SHA-256 | Porcelain before staging | Index entry before staging |
+| --- | --- | --- | --- |
+| `packages/daemon/src/services/unified-prediction.ts` | `779a448b9aa311cc4820f6dd5f8edc9a9a71ac30000e39f7802b7dcad1a2004d` | `??` | absent |
+| `packages/daemon/src/services/unified-collection-pipeline.ts` | `51d7e7188c0a236b3982732ddb7d362e220d034d18da222ec960be267e83989e` | `??` | absent |
+| `packages/daemon/tests/services/unified-prediction.test.ts` | `5897b5975968bf101da70139cf16fdee8ee529490123c2d13823099b575d751e` | `??` | absent |
+| `packages/daemon/tests/services/unified-collection-pipeline.test.ts` | `0d9863e289f7abbd282fb5e3a55df25396639e597a17f911f21db6e45ef63740` | `??` | absent |
+
+The implementation manifest covers only these four accepted new staged files; the progress note is intentionally updated for checkpoint evidence and is not self-hashed. The worktree also retains unrelated pre-existing `.beads/issues.jsonl` modifications. No Phase 5 work has begun.
