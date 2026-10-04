@@ -51,6 +51,13 @@ export interface StagedPredictionReadiness {
   readonly stageThresholds: readonly [number, number, number];
 }
 
+export interface StagedActualAxisContext {
+  readonly axes: readonly Axis[];
+  readonly references: readonly StagedRatedReference[];
+  readonly ratingValues: ReadonlyMap<string, ReadonlyMap<string, number>>;
+  readonly readiness: StagedPredictionReadiness;
+}
+
 export interface StagedPredictionTarget {
   readonly id: string;
   readonly kind: "collection" | "wishlist";
@@ -73,11 +80,16 @@ export interface InjectedFitnessResult {
 
 export interface InjectedFitnessInput {
   readonly targets: readonly StagedPredictionTarget[];
+  readonly actualAxisContext: StagedActualAxisContext;
   readonly actualReferences: readonly StagedRatedReference[];
   readonly readiness: StagedPredictionReadiness;
+  /** Prediction demands within the caller-authorized P set. */
   readonly axisPairs: readonly StagedAxisPairInput[];
   /** Scores are the cache-only pair values resolved for P; null remains unavailable. */
   readonly pairSimilarities: ReadonlyMap<string, number | null>;
+  /** Cache-only owned-fitness inputs used to derive wishlist R; never run-authorized P. */
+  readonly calculationDependencyPairs: readonly StagedScopePair[];
+  readonly calculationDependencySimilarities: ReadonlyMap<string, number | null>;
 }
 
 /** A deterministic scope-only seam. It is not the production prediction algorithm. */
@@ -92,6 +104,8 @@ export interface StagedSimilarityScopeOptions {
   readonly budget: StagedRunBudget;
   readonly authorizationReader: StagedRunAuthorizationReader;
   readonly evaluateFitness: InjectedFitness;
+  /** Wishlist calculation needs owned-target evidence to derive R, without authorizing collection P. */
+  readonly includeOwnedPredictionDependenciesForWishlist?: boolean;
   readonly observer?: StagedSimilarityScopeObserver;
 }
 
@@ -224,6 +238,40 @@ function actualReferences(
     }
   }
   return { references: Object.freeze(references), values };
+}
+
+/** One actual-label/readiness derivation shared by scope planning and unavailable projections. */
+export function deriveStagedActualAxisContext(
+  capture: StagedSimilarityCapture,
+): StagedActualAxisContext | null {
+  const axes = Object.freeze(
+    capture.sources.collection.axes
+      .filter(isEnabledScoringAxis)
+      .filter((axis) => axis.source === "personal" || axis.source === "tournament"),
+  );
+  const { references, values } = actualReferences(capture, axes);
+  const thresholds = capture.sources.predictionSettings.stageThresholds;
+  if (
+    !Array.isArray(thresholds) ||
+    thresholds.length !== 3 ||
+    thresholds.some((threshold) => !Number.isSafeInteger(threshold) || threshold < 1)
+  ) {
+    return null;
+  }
+  const ratedGameCount = references.length;
+  const readiness: StagedPredictionReadiness = Object.freeze({
+    ratedGameCount,
+    stage:
+      ratedGameCount >= thresholds[2]
+        ? 3
+        : ratedGameCount >= thresholds[1]
+          ? 2
+          : ratedGameCount >= thresholds[0]
+            ? 1
+            : 0,
+    stageThresholds: Object.freeze([thresholds[0], thresholds[1], thresholds[2]] as const),
+  });
+  return Object.freeze({ axes, references, ratingValues: values, readiness });
 }
 
 function pairKey(pair: StagedSimilarityPair): string {
@@ -429,12 +477,11 @@ export function prepareStagedSimilarityScope(
     return { ok: false, reason: "budget-identity-mismatch" };
   }
   const collection = capture.sources.collection;
-  const axes = collection.axes
-    .filter(isEnabledScoringAxis)
-    .filter((axis) => axis.source === "personal" || axis.source === "tournament");
   const gameById = new Map(collection.games.map((game) => [game.id, game]));
   if (gameById.size !== collection.games.length) return { ok: false, reason: "duplicate-game-id" };
-  const { references, values: ratingValues } = actualReferences(capture, axes);
+  const actualContext = deriveStagedActualAxisContext(capture);
+  if (!actualContext) return { ok: false, reason: "prediction-readiness-settings-invalid" };
+  const { axes, references, ratingValues, readiness } = actualContext;
   const referenceIdsByAxis = new Map<string, string[]>();
   let axisReferenceMembershipCount = 0;
   for (const reference of references) {
@@ -451,30 +498,10 @@ export function prepareStagedSimilarityScope(
     options.observer?.onAxisReferenceIndexLookup?.(axisId, referenceIds.length);
     return referenceIds;
   };
-  const thresholds = capture.sources.predictionSettings.stageThresholds;
-  if (
-    !Array.isArray(thresholds) ||
-    thresholds.length !== 3 ||
-    thresholds.some((threshold) => !Number.isSafeInteger(threshold) || threshold < 1)
-  ) {
-    return { ok: false, reason: "prediction-readiness-settings-invalid" };
-  }
-  const ratedGameCount = references.length;
-  const readiness: StagedPredictionReadiness = Object.freeze({
-    ratedGameCount,
-    stage:
-      ratedGameCount >= thresholds[2]
-        ? 3
-        : ratedGameCount >= thresholds[1]
-          ? 2
-          : ratedGameCount >= thresholds[0]
-            ? 1
-            : 0,
-    stageThresholds: Object.freeze([thresholds[0], thresholds[1], thresholds[2]] as const),
-  });
   const unavailableTargetIds: string[] = [];
   const targets: StagedPredictionTarget[] = [];
   const pMap = new Map<string, MutablePair>();
+  const calculationDependencyMap = new Map<string, MutablePair>();
   const previousOwnedReferenceIds = references
     .filter((reference) => gameById.get(reference.gameId)?.ownership === "previously-owned")
     .map((reference) => reference.gameId)
@@ -505,6 +532,27 @@ export function prepareStagedSimilarityScope(
         for (const referenceGameId of referencesForAxis(axis.id)) {
           const pair = resolvePairFor("wishlist", target, referenceGameId);
           addPair(pMap, capture, pair, target.id, axis.id, referenceGameId);
+        }
+      }
+    }
+    if (options.includeOwnedPredictionDependenciesForWishlist && targets.length > 0) {
+      for (const game of collection.games) {
+        if (game.ownership !== "owned" || !game.bggData) continue;
+        const missingAxisIds = axes
+          .filter((axis) => !ratingValues.get(game.id)?.has(axis.id))
+          .map((axis) => axis.id);
+        for (const axisId of missingAxisIds) {
+          for (const referenceGameId of referencesForAxis(axisId)) {
+            if (referenceGameId === game.id) continue;
+            addPair(
+              calculationDependencyMap,
+              capture,
+              { domain: "collection", gameAId: game.id, gameBId: referenceGameId },
+              game.id,
+              axisId,
+              referenceGameId,
+            );
+          }
         }
       }
     }
@@ -561,16 +609,24 @@ export function prepareStagedSimilarityScope(
   }
 
   const pPairs = freezePairMap(pMap);
-  prepared.resolvePairs(pPairs.map((entry) => entry.pair));
+  const calculationDependencyPairs = freezePairMap(calculationDependencyMap);
+  prepared.resolvePairs([...pPairs, ...calculationDependencyPairs].map((entry) => entry.pair));
   const pSimilarities = new Map<string, number | null>();
   for (const entry of pPairs) pSimilarities.set(entry.key, prepared.similarity(entry.pair));
+  const calculationDependencySimilarities = new Map<string, number | null>();
+  for (const entry of calculationDependencyPairs) {
+    calculationDependencySimilarities.set(entry.key, prepared.similarity(entry.pair));
+  }
   const injected = evaluateFitness(
     Object.freeze({
       targets: Object.freeze([...targets]),
+      actualAxisContext: actualContext,
       actualReferences: references,
       readiness,
       axisPairs: Object.freeze(pPairs.flatMap((entry) => entry.axisReferences)),
       pairSimilarities: pSimilarities,
+      calculationDependencyPairs,
+      calculationDependencySimilarities,
     }),
   );
   if (

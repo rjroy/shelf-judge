@@ -12,6 +12,7 @@ import type {
 } from "../../src/services/staged-similarity-capture.js";
 import { createPreparedSimilarity } from "../../src/services/prepared-similarity.js";
 import {
+  deriveStagedActualAxisContext,
   prepareStagedSimilarityScope,
   stagedRunBudgetIdentity,
   stagedRunSelectionIdentity,
@@ -189,6 +190,7 @@ function setup(
     input: InjectedFitnessInput,
   ) => ReadonlyMap<string, { score: number | null; vetoed: boolean }>,
   observer?: StagedSimilarityScopeObserver,
+  includeOwnedPredictionDependenciesForWishlist = false,
 ) {
   const capture = captureStagedSimilaritySources(current, { readCurrent: () => current });
   let cacheRevision = 1;
@@ -217,6 +219,7 @@ function setup(
     budget: BUDGET,
     authorizationReader: { readCurrent: () => authState },
     evaluateFitness: evaluator,
+    includeOwnedPredictionDependenciesForWishlist,
     observer,
   });
   return {
@@ -229,6 +232,31 @@ function setup(
 }
 
 describe("staged similarity scope and frozen authorization", () => {
+  test("shared readiness uses the tournament cohort floor", () => {
+    const stats = Object.fromEntries(
+      ["target", "ref-a", "ref-b"].map((id) => [id, { eloRating: 1500, comparisonCount: 1 }]),
+    );
+    const current = sources({
+      axes: [axis("tournament", "tournament")],
+      tournament: {
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
+        sessions: [],
+        gameStats: stats,
+      } as unknown as TournamentData,
+    });
+    current.predictionSettings.stageThresholds = [2, 3, 4];
+    const capture = captureStagedSimilaritySources(current, { readCurrent: () => current });
+    const actual = deriveStagedActualAxisContext(capture);
+    if (!actual) throw new Error("Actual-axis context unavailable");
+    expect(actual?.references).toEqual([]);
+    expect(actual?.readiness).toEqual({
+      ratedGameCount: 0,
+      stage: 0,
+      stageThresholds: [2, 3, 4],
+    });
+    expect(actual.readiness.stageThresholds[0] - actual.readiness.ratedGameCount).toBe(2);
+  });
+
   test("builds exact per-axis P, includes previously-owned and vetoed actual refs, and derives current-owned R", () => {
     const current = sources({
       axes: [axis("personal", "personal"), axis("tournament", "tournament")],
@@ -418,6 +446,181 @@ describe("staged similarity scope and frozen authorization", () => {
     expect(run.disclosure.authorizationIdentity).toBe(wishlistAuthorizationIdentity);
     expect(run.isAuthorized()).toBe(true);
     expect(run.disclosure.previousOwnedReferenceIds).toContain("local-old");
+  });
+
+  test("keeps owned-fitness cache dependencies outside wishlist-authorized P/R/U0", () => {
+    const candidate: StagedWishlistCandidateSource = {
+      bggId: 901,
+      name: "Candidate",
+      bggSource: {
+        observedAt: NOW,
+        description: "Candidate description",
+        mechanics: ["Drafting"],
+        categories: ["Strategy"],
+        weight: 2,
+        communityRating: 7,
+        minPlayers: 2,
+        maxPlayers: 4,
+        bestPlayers: 3,
+        playingTime: 60,
+      },
+    };
+    let current = sources({
+      wishlistCandidates: [candidate],
+      games: [
+        game("owned-target"),
+        game("owned-new", { bgg: true }),
+        game("ref-a", { personal: 7 }),
+        game("ref-b", { personal: 8 }),
+      ],
+    });
+    const semantic = current.collection.semanticRedundancy;
+    if (!semantic) throw new Error("Semantic settings fixture missing");
+    const semanticSettings = {
+      ...semantic.settings,
+      weights: { ...semantic.settings.weights, ownerNote: 1 },
+      cachedOwnerNoteUse: true,
+    };
+    current = {
+      ...current,
+      collection: {
+        ...current.collection,
+        semanticRedundancy: { ...semantic, settings: semanticSettings },
+      },
+      similaritySettings: captureSimilaritySettings(DEFAULT_REDUNDANCY_SETTINGS, semanticSettings),
+    };
+    const fitnessInputs: InjectedFitnessInput[] = [];
+    const runResult = setup(
+      current,
+      { scope: "wishlist", selectedBggIds: [901] },
+      (input) => {
+        fitnessInputs.push(input);
+        return new Map([
+          ["owned-target", { score: 6, vetoed: false }],
+          ["owned-new", { score: null, vetoed: false }],
+          ["ref-a", { score: 7, vetoed: false }],
+          ["ref-b", { score: 8, vetoed: false }],
+        ]);
+      },
+      undefined,
+      true,
+    );
+    expect(runResult.result.ok).toBe(true);
+    if (!runResult.result.ok) return;
+    const { run } = runResult.result;
+    const fitnessInput = fitnessInputs[0];
+    if (!fitnessInput) throw new Error("Wishlist fitness input was not captured");
+    expect(run.predictionPairs.length).toBeGreaterThan(0);
+    expect(run.targets.every((target) => target.kind === "wishlist")).toBe(true);
+    expect(run.predictionPairs.every((pair) => pair.pair.domain === "wishlist-candidate")).toBe(
+      true,
+    );
+    expect(
+      run.predictionPairs.every(
+        (pair) => pair.pair.domain === "wishlist-candidate" && pair.pair.candidateBggId === 901,
+      ),
+    ).toBe(true);
+    expect(fitnessInput.axisPairs.every((pair) => pair.pair.domain === "wishlist-candidate")).toBe(
+      true,
+    );
+    expect(
+      fitnessInput.calculationDependencyPairs.every((pair) => pair.pair.domain === "collection"),
+    ).toBe(true);
+    expect(
+      fitnessInput.calculationDependencyPairs.some(
+        (pair) =>
+          pair.targetIds.includes("owned-target") &&
+          pair.axisReferences.some((reference) => reference.referenceGameId === "ref-a"),
+      ),
+    ).toBe(true);
+    expect(
+      fitnessInput.calculationDependencyPairs.some((pair) => pair.targetIds.includes("owned-new")),
+    ).toBe(true);
+    expect(
+      fitnessInput.calculationDependencyPairs.every((pair) => pair.requiredSignals.includes("D")),
+    ).toBe(true);
+    expect(fitnessInput.calculationDependencySimilarities.size).toBe(
+      fitnessInput.calculationDependencyPairs.length,
+    );
+    expect(run.redundancyPairs.every((pair) => pair.pair.domain === "wishlist-candidate")).toBe(
+      true,
+    );
+    expect(
+      run.redundancyPairs.every(
+        (pair) => pair.pair.domain === "wishlist-candidate" && pair.pair.candidateBggId === 901,
+      ),
+    ).toBe(true);
+    expect(
+      run.redundancyPairs
+        .map((pair) =>
+          pair.pair.domain === "wishlist-candidate" ? pair.pair.ownedGameId : "unexpected",
+        )
+        .sort(),
+    ).toEqual(["owned-target", "ref-a", "ref-b"]);
+    expect(run.authorizedPairs.every((pair) => pair.pair.domain === "wishlist-candidate")).toBe(
+      true,
+    );
+    expect(
+      run.authorizedPairs.every(
+        (pair) => pair.pair.domain === "wishlist-candidate" && pair.pair.candidateBggId === 901,
+      ),
+    ).toBe(true);
+    expect(run.disclosure.requestedTargetIds).toEqual(["901"]);
+    expect(run.disclosure.targetIds).toEqual(["wishlist:901"]);
+    expect(run.disclosure.requiredSignals).not.toContain("D");
+    expect(run.disclosure.pPairCount).toBe(run.predictionPairs.length);
+    expect(run.disclosure.authorizedPairCount).toBe(3);
+    expect(run.disclosure.cacheHits).toBe(0);
+    expect(run.disclosure.cacheMisses).toBe(3);
+    expect(run.authorizedPairs.length).toBe(
+      run.predictionPairs.length +
+        run.redundancyPairs.filter(
+          (pair) => !run.predictionPairs.some((predicted) => predicted.key === pair.key),
+        ).length,
+    );
+    const ownedDependency = fitnessInput.calculationDependencyPairs[0];
+    if (!ownedDependency) throw new Error("Owned cache-only dependency was not demanded");
+    const proof = runResult.prepared.sealProof();
+    const dependencyEvidence = runResult.prepared.evidence(ownedDependency.pair);
+    expect(dependencyEvidence).not.toBeNull();
+    expect(dependencyEvidence?.description.state).toBe("missing-row");
+    expect(dependencyEvidence?.ownerNote.state).toBe("missing-source");
+    expect(proof.demandedPairsIdentity).not.toBe("");
+    expect(proof.examinedComponentsIdentity).not.toBe("");
+    expect(runResult.prepared.resolvedPairCount).toBe(7);
+    expect(runResult.getCacheLookups()).toBe(7);
+    expect(runResult.prepared.isSealed).toBe(true);
+    runResult.setCacheRevision(2);
+    expect(run.isAuthorized()).toBe(true);
+    expect(run.isCalculationCurrent()).toBe(false);
+    expect(run.authorizedPairs.every((pair) => pair.pair.domain === "wishlist-candidate")).toBe(
+      true,
+    );
+    expect(run.authorizedPairs).toHaveLength(3);
+
+    const nextPreview = setup(
+      current,
+      { scope: "wishlist", selectedBggIds: [901] },
+      () =>
+        new Map([
+          ["owned-target", { score: 6, vetoed: false }],
+          ["owned-new", { score: 5, vetoed: false }],
+          ["ref-a", { score: 7, vetoed: false }],
+          ["ref-b", { score: 8, vetoed: false }],
+        ]),
+      undefined,
+      true,
+    );
+    expect(nextPreview.result.ok).toBe(true);
+    if (!nextPreview.result.ok) return;
+    expect(
+      nextPreview.result.run.redundancyPairs.some(
+        (pair) =>
+          pair.pair.domain === "wishlist-candidate" && pair.pair.ownedGameId === "owned-new",
+      ),
+    ).toBe(true);
+    expect(nextPreview.result.run.authorizedPairs).toHaveLength(4);
+    expect(run.authorizedPairs).toHaveLength(3);
   });
 
   test("deduplicates P∪R, seals resolver and freezes selected membership without cache-based expansion", () => {

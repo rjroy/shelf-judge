@@ -6,6 +6,7 @@ import {
   type Axis,
   type FitnessBreakdownEntry,
   type FitnessResult,
+  type Game,
   type PredictionConfidence,
   type ReferenceGame,
   type RedundancyAdjustment,
@@ -21,9 +22,11 @@ import {
   type StagedPredictionRequest,
   type StagedRunAuthorizationReader,
   type StagedRunBudget,
+  type StagedPredictionTarget,
+  type StagedPredictionReadiness,
+  type StagedActualAxisContext,
 } from "./staged-similarity-scope.js";
 import { createFitnessService } from "./fitness-service.js";
-import { normalizeElo } from "./elo-engine.js";
 import { computeUnifiedPrediction, unifiedConfidenceRank } from "./unified-prediction.js";
 import type { StagedSimilarityPair } from "./prepared-similarity.js";
 
@@ -59,27 +62,7 @@ function rounded(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-function actualAxisValue(
-  game: { readonly id: string; readonly ratings: Readonly<Record<string, number>> },
-  axis: Axis,
-  capture: StagedSimilarityCapture,
-): number | null {
-  if (axis.source === "personal") {
-    const value = game.ratings[axis.id];
-    return typeof value === "number" && Number.isFinite(value) ? value : null;
-  }
-  if (axis.source === "tournament") {
-    const stats = capture.sources.tournament.gameStats[game.id];
-    if (!stats || stats.comparisonCount <= 0) return null;
-    return normalizeElo(
-      stats.eloRating ?? 1500,
-      capture.sources.tournament.settings.normalizationHalfWidth,
-    );
-  }
-  return null;
-}
-
-function assemblePredictedFitness(
+export function assembleUnifiedPredictedFitness(
   actual: FitnessResult | null,
   axes: readonly Axis[],
   readinessStage: 0 | 1 | 2 | 3,
@@ -225,6 +208,149 @@ function assemblePredictedFitness(
   };
 }
 
+export interface UnifiedFitnessBatchOptions {
+  readonly capture: StagedSimilarityCapture;
+  readonly prepared: ReturnType<typeof createPreparedSimilarity>;
+  readonly actualAxisContext: StagedActualAxisContext;
+  readonly targets: readonly StagedPredictionTarget[];
+  readonly axisPairs: readonly StagedAxisPairInput[];
+  readonly readiness: StagedPredictionReadiness;
+  readonly includeOwnedPredictionTargets?: boolean;
+  readonly observer?: UnifiedCollectionPipelineObserver;
+}
+
+/** Reuse the one estimator and fitness assembler for collection and wishlist scopes. */
+export function computeUnifiedFitnessBatch(options: UnifiedFitnessBatchOptions): {
+  readonly collectionFitness: ReadonlyMap<string, FitnessResult | null>;
+  readonly targetFitness: ReadonlyMap<string, FitnessResult | null>;
+} {
+  const { capture, prepared } = options;
+  const { ratingValues } = options.actualAxisContext;
+  const scoringAxes = capture.sources.collection.axes.filter(isEnabledScoringAxis);
+  const axesById = new Map(scoringAxes.map((axis) => [axis.id, axis]));
+  const gamesById = new Map(capture.sources.collection.games.map((game) => [game.id, game]));
+  const wishlistSourcesById = new Map(
+    (capture.sources.wishlistCandidates ?? []).map((candidate) => [candidate.bggId, candidate]),
+  );
+  const indexedPairs = new Map<string, StagedAxisPairInput[]>();
+  for (const reference of options.axisPairs) {
+    options.observer?.onAxisPairIndexed?.(reference.targetId, reference.axisId);
+    const existing = indexedPairs.get(reference.targetId);
+    if (existing) existing.push(reference);
+    else indexedPairs.set(reference.targetId, [reference]);
+  }
+  options.observer?.onAxisPairIndexBuilt?.(options.axisPairs.length);
+
+  const targets = [...options.targets];
+  if (options.includeOwnedPredictionTargets) {
+    const targetIds = new Set(targets.map((target) => target.id));
+    for (const game of capture.sources.collection.games) {
+      if (game.ownership !== "owned" || !game.bggData || targetIds.has(game.id)) continue;
+      const missingAxisIds = scoringAxes
+        .filter((axis) => !ratingValues.get(game.id)?.has(axis.id))
+        .map((axis) => axis.id);
+      if (missingAxisIds.length > 0) {
+        targets.push({ id: game.id, kind: "collection", missingAxisIds });
+        targetIds.add(game.id);
+      }
+    }
+  }
+
+  const predictionsByTarget = new Map<string, ReturnType<typeof computeUnifiedPrediction>>();
+  for (const target of targets) {
+    const referencesByAxis = new Map<
+      string,
+      Array<{ gameId: string; gameName: string; rating: number; similarity: number | null }>
+    >();
+    const targetPairs = indexedPairs.get(target.id) ?? [];
+    options.observer?.onTargetAxisPairIndexLookup?.(target.id, targetPairs.length);
+    for (const reference of targetPairs) {
+      options.observer?.onAxisPairConsumed?.(reference.targetId, reference.axisId);
+      const axis = axesById.get(reference.axisId);
+      const game = gamesById.get(reference.referenceGameId);
+      if (!axis || !game) continue;
+      const rating = ratingValues.get(game.id)?.get(axis.id) ?? null;
+      if (rating === null) continue;
+      const list = referencesByAxis.get(axis.id) ?? [];
+      list.push({
+        gameId: game.id,
+        gameName: game.name,
+        rating,
+        similarity: prepared.similarity(reference.pair),
+      });
+      referencesByAxis.set(axis.id, list);
+    }
+    predictionsByTarget.set(
+      target.id,
+      computeUnifiedPrediction({
+        axisIds: options.readiness.stage > 0 ? target.missingAxisIds : [],
+        referencesByAxis,
+        settings: capture.sources.predictionSettings,
+      }),
+    );
+  }
+
+  const fitnessService = createFitnessService();
+  const collectionFitness = new Map<string, FitnessResult | null>();
+  for (const game of capture.sources.collection.games) {
+    const actual = fitnessService.calculateScore(
+      game,
+      [...capture.sources.collection.axes],
+      capture.sources.tournament,
+    );
+    const predictions = predictionsByTarget.get(game.id);
+    collectionFitness.set(
+      game.id,
+      predictions
+        ? assembleUnifiedPredictedFitness(actual, scoringAxes, options.readiness.stage, predictions)
+        : actual,
+    );
+  }
+
+  const targetFitness = new Map<string, FitnessResult | null>();
+  for (const target of targets) {
+    if (target.kind !== "wishlist") continue;
+    const predictions = predictionsByTarget.get(target.id);
+    const bggId = Number(target.id.slice("wishlist:".length));
+    const source = wishlistSourcesById.get(bggId);
+    // A captured compact BGG source can contribute ordinary derived scoring axes, but it is
+    // not a collection member: omit personal ratings, tournament labels, owner notes, and all
+    // persisted wishlist prediction fields. This object only supplies fields read by the
+    // existing derived-axis fitness service.
+    const actual = source
+      ? fitnessService.calculateScore(
+          {
+            id: target.id,
+            name: source.name,
+            ratings: {},
+            manualValues: { playingTime: null, playerCount: null },
+            bggData: {
+              communityRating: source.bggSource.communityRating,
+              weight: source.bggSource.weight,
+            },
+            minPlayers: source.bggSource.minPlayers,
+            maxPlayers: source.bggSource.maxPlayers,
+            bestPlayers: source.bggSource.bestPlayers,
+            playingTime: source.bggSource.playingTime,
+          } as unknown as Game,
+          [...capture.sources.collection.axes],
+          {
+            settings: capture.sources.tournament.settings,
+            sessions: [],
+            gameStats: {},
+          },
+        )
+      : null;
+    targetFitness.set(
+      target.id,
+      predictions
+        ? assembleUnifiedPredictedFitness(actual, scoringAxes, options.readiness.stage, predictions)
+        : actual,
+    );
+  }
+  return { collectionFitness, targetFitness };
+}
+
 /** Run actual cache-only P → unified prediction/current fitness → R scope staging. */
 export function prepareUnifiedCollectionPipeline(
   options: UnifiedCollectionPipelineOptions,
@@ -233,9 +359,6 @@ export function prepareUnifiedCollectionPipeline(
   | { readonly ok: false; readonly reason: string } {
   const { capture } = options;
   const prepared = createPreparedSimilarity({ capture, cache: options.cache });
-  const axes = capture.sources.collection.axes.filter(isEnabledScoringAxis);
-  const axesById = new Map(axes.map((axis) => [axis.id, axis]));
-  const gamesById = new Map(capture.sources.collection.games.map((game) => [game.id, game]));
   const fitness = new Map<string, FitnessResult>();
   const scope = prepareStagedSimilarityScope({
     capture,
@@ -244,60 +367,16 @@ export function prepareUnifiedCollectionPipeline(
     budget: options.budget,
     authorizationReader: options.authorizationReader,
     evaluateFitness(input) {
-      const fitnessService = createFitnessService();
-      const predictionsByTarget = new Map<string, ReturnType<typeof computeUnifiedPrediction>>();
-      const axisPairsByTarget = new Map<string, StagedAxisPairInput[]>();
-      for (const reference of input.axisPairs) {
-        options.observer?.onAxisPairIndexed?.(reference.targetId, reference.axisId);
-        const targetPairs = axisPairsByTarget.get(reference.targetId);
-        if (targetPairs) targetPairs.push(reference);
-        else axisPairsByTarget.set(reference.targetId, [reference]);
-      }
-      options.observer?.onAxisPairIndexBuilt?.(input.axisPairs.length);
-      for (const target of input.targets) {
-        const refsByAxis = new Map<
-          string,
-          Array<{ gameId: string; gameName: string; rating: number; similarity: number | null }>
-        >();
-        const targetAxisPairs = axisPairsByTarget.get(target.id) ?? [];
-        options.observer?.onTargetAxisPairIndexLookup?.(target.id, targetAxisPairs.length);
-        for (const reference of targetAxisPairs) {
-          options.observer?.onAxisPairConsumed?.(reference.targetId, reference.axisId);
-          const axis = axesById.get(reference.axisId);
-          const game = gamesById.get(reference.referenceGameId);
-          if (!axis || !game) continue;
-          const rating = actualAxisValue(game, axis, capture);
-          if (rating === null) continue;
-          const list = refsByAxis.get(axis.id) ?? [];
-          list.push({
-            gameId: game.id,
-            gameName: game.name,
-            rating,
-            similarity: prepared.similarity(reference.pair),
-          });
-          refsByAxis.set(axis.id, list);
-        }
-        predictionsByTarget.set(
-          target.id,
-          computeUnifiedPrediction({
-            axisIds: input.readiness.stage > 0 ? target.missingAxisIds : [],
-            referencesByAxis: refsByAxis,
-            settings: capture.sources.predictionSettings,
-          }),
-        );
-      }
-      for (const game of capture.sources.collection.games) {
-        const actual = fitnessService.calculateScore(
-          game,
-          [...capture.sources.collection.axes],
-          capture.sources.tournament,
-        );
-        const prediction = predictionsByTarget.get(game.id);
-        const result = prediction
-          ? assemblePredictedFitness(actual, axes, input.readiness.stage, prediction)
-          : actual;
-        if (result) fitness.set(game.id, result);
-      }
+      const batch = computeUnifiedFitnessBatch({
+        capture,
+        prepared,
+        actualAxisContext: input.actualAxisContext,
+        targets: input.targets,
+        axisPairs: input.axisPairs,
+        readiness: input.readiness,
+        observer: options.observer,
+      });
+      for (const [id, result] of batch.collectionFitness) if (result) fitness.set(id, result);
       return new Map(
         capture.sources.collection.games.map((game) => {
           const current = fitness.get(game.id);

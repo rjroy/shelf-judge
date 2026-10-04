@@ -12,15 +12,15 @@ related: [.lore/work/design/unified-similarity-prediction-redundancy.md]
 
 ## Authorization and execution status
 
-The user approved the linked design and seven-phase plan and authorized implementation. The execution branch is `feat/unified-similarity-prediction-redundancy`; Phase 1 is checkpointed at `c32cb3d5e63328177bcec169507f73a070c24627` from the approved-doc base `084936ca29c17c36b0e652e1173bcdc93209d3e3`, Phase 2 at `027ca1fbd88379f63a090375fccd290082fa3051`, and Phase 3 at `01b159c308c2d849c6a3b8f3ca7da4ee78ac947d`. Phases 1–3 are accepted; the epic remains in progress. Phase 4 is claimed and in progress. No later phase has started.
+The user approved the linked design and seven-phase plan and authorized implementation. The execution branch is `feat/unified-similarity-prediction-redundancy`; Phase 1 is checkpointed at `c32cb3d5e63328177bcec169507f73a070c24627` from the approved-doc base `084936ca29c17c36b0e652e1173bcdc93209d3e3`, Phase 2 at `027ca1fbd88379f63a090375fccd290082fa3051`, Phase 3 at `01b159c308c2d849c6a3b8f3ca7da4ee78ac947d`, Phase 4 at `407dd789`, and Phase 5 is checkpointed with `shelf-judge-bs1y.5`. Phases 1–5 are accepted; the epic remains in progress. Phase 6 has not started.
 
 | Phase | Status | Gate before next phase |
 | --- | --- | --- |
 | 1 — baseline, shared math, settings assembler | Accepted; checkpointed with `shelf-judge-bs1y.1` | Phase 1 checkpoint `c32cb3d5` verified before Phase 2 began |
 | 2 — source capture, cache-only resolver, proof/revocation | Accepted and checkpointed at `027ca1f` | Phase 2 commit reconciled before Phase 3 began |
 | 3 — pair scope and frozen run | Accepted and checkpointed with `shelf-judge-bs1y.3` | Phase 3 checkpoint `01b159c3` reconciled before Phase 4 began |
-| 4 — staged predictor and real numeric pipeline | Accepted and checkpointed with `shelf-judge-bs1y.4` | Phase 4 checkpoint verified before Phase 5 may start |
-| 5 — staged wishlist/API/client adapters | Not started | Phase 4 verified checkpoint |
+| 4 — staged predictor and real numeric pipeline | Accepted and checkpointed with `shelf-judge-bs1y.4` | Phase 4 checkpoint `407dd789` verified before Phase 5 began |
+| 5 — staged wishlist/API/client adapters | Accepted and checkpointed with `shelf-judge-bs1y.5`; staged adapters remain inert | Independent tester/reviewer and designer gates passed; Phase 6 remains open, ready, and unclaimed |
 | 6 — atomic production activation | Not started | Phase 5 verified checkpoint |
 | 7 — integration, performance, authority reconciliation | Not started | Phase 6 verified checkpoint |
 
@@ -172,7 +172,7 @@ Phase 4 author evidence (not acceptance), with the bounded correction record:
 - Final Phase 4 author regression command (the nine approved production/staged files) passed **216 tests / 1,475 expectations across 9 files**. The two direct staged suites passed **9 tests / 91 expectations across 2 files**. `bun run typecheck`, scoped ESLint on the four staged TypeScript files, Prettier check on those files and this note, and `git diff --check` passed after the final author edits. No production bindings or old expected outputs were changed.
 - Independent verification accepted the four-file Phase 4 manifest: **216 tests / 1,475 expectations across 9 files**, including **18 tests / 203 expectations** from upstream pure-scope and real-cache suites; the new staged suites contributed **9 tests / 91 expectations**. The reviewer explicitly accepted Phase 4 and closed P4-R01–R03 with no material issues; root TypeScript, scoped lint, formatting, and diff checks passed. Acceptance is for the real staged numeric P→cache-only S→shared predictor/current fitness→R pipeline, not live production wiring or lifecycle integration.
 - The accepted criterion includes the mixed-authority rule (`predictionMeta.actualAxisCount === 0` means fully predicted), raw penalty subtraction before rounding (score 5, raw 1.125 → adjusted 3.88; displayed penalty 1.13), and indexed workload (24 targets, 72 indexed and consumed pairs, 24 target lookups). Earlier T01–T03 evidence remains accepted: cached semantic evidence changed target fitness from unavailable to 6 and eligible R from 1 to 3; 1:3 settings produced parity across candidate/full/requested/predict-game staged paths.
-- The staged Phase 4 modules remain unwired. This acceptance does not claim production prediction/redundancy activation or production lifecycle integration. Phase 5 has not started.
+- The staged Phase 4 modules remain unwired. This acceptance does not claim production prediction/redundancy activation or production lifecycle integration.
 
 #### Phase 4 author source manifest (in-progress handoff)
 
@@ -192,4 +192,119 @@ SHA-256 and pre-staging working-tree/index record for the four accepted new sour
 | `packages/daemon/tests/services/unified-prediction.test.ts` | `5897b5975968bf101da70139cf16fdee8ee529490123c2d13823099b575d751e` | `??` | absent |
 | `packages/daemon/tests/services/unified-collection-pipeline.test.ts` | `0d9863e289f7abbd282fb5e3a55df25396639e597a17f911f21db6e45ef63740` | `??` | absent |
 
-The implementation manifest covers only these four accepted new staged files; the progress note is intentionally updated for checkpoint evidence and is not self-hashed. The worktree also retains unrelated pre-existing `.beads/issues.jsonl` modifications. No Phase 5 work has begun.
+The implementation manifest covers only these four accepted new staged files; the progress note is intentionally updated for checkpoint evidence and is not self-hashed. The worktree also retains unrelated pre-existing `.beads/issues.jsonl` modifications.
+
+## Phase 5 staged wishlist projection and shared/CLI contracts (in progress)
+
+Phase 5 author implementation remains unbound. The designer owns all `packages/web` work; this author lane adds only daemon projection, a separately named shared V2 contract, and an unbound CLI formatter. Existing wishlist services, current shared exports/validators, routes, loaded pages, and active CLI command behavior remain unchanged. The daemon adapter reads verified saved facts and cache-only JEV judgments, uses the single Phase 4 predictor, never falls back to saved-derived scores, and does not persist on read. V2 response projections exclude private BGG source and owner-note evidence; current aliases are projected from the current result or are null. No BGG/provider read is part of the ordinary projection path.
+
+The shared handoff module is `packages/shared/src/wishlist-current-projection-v2.ts`, with direct-import exports `CurrentPredictionProjectionV2`, `WishlistRedundancyProjectionV2`, `WishlistEntryReadResultV2` and strict runtime schemas. It does not alter V1 exports or acceptance. Wishlist current owned fitness requires collection-domain P cache evidence, but that evidence is a calculation dependency—not an authorized wishlist-run pair. The staged scope now resolves it into the same sealed source/cache proof while keeping `predictionPairs`, `redundancyPairs`, `authorizedPairs`, disclosure counts/signals, and run targets limited to the selected wishlist candidate domain. A new typed `calculationDependencyPairs` input is passed only to the internal fitness evaluator; it is not returned in the frozen run or provider authorization. The Phase 3 option is explicitly named `includeOwnedPredictionDependenciesForWishlist` and defaults false, so the accepted Phase 3 collection behavior and original scope behavior remain unchanged. Cache/source freshness still fences the complete prepared proof; changes invalidate calculation currentness without expanding the frozen authorization. The Phase 4 batch extraction lets collection and wishlist use the same per-target indexed calculation and `computeUnifiedPrediction`, rather than duplicating estimator or confidence logic; the collection entry point continues to use that same helper and retains its accepted per-target index counters. Neither dependency change modifies a production module or binding. The CLI addition is an unbound current-projection formatter only. Parallel designer-owned web files are outside this author lane and are not included in its manifest or validation.
+
+### Phase 5 author verification (initial author evidence; later acceptance recorded below)
+
+- New daemon/shared projection, Phase 3 scope, and Phase 4 predictor/pipeline suites: **24 tests, 0 failures, 230 expectations across 5 files**. The Phase 4 regression command (seven existing production regression files plus the two staged predictor/pipeline files) passed **216 tests, 0 failures, 1,475 expectations across 9 files** after the reusable batch extraction.
+- Existing wishlist regression suites plus the new staged tests passed together: **95 tests / 605 expectations across 8 files** (daemon services/routes, shared V2 contract, and CLI). The constituent baseline suites were daemon **82 / 546 across 4 files** and existing+new CLI **7 / 27 across 2 files**; new direct shared/daemon/CLI coverage contributes the remaining tests.
+- Projection fixtures use temporary real SQLite and synthetic source/cache rows. They cover cache-only current aliases and redundancy, no saved-derived fallback when current evidence is missing, missing C with sufficient F, source privacy, unchanged persisted facts, and cache-row changes altering current score and redundancy. Shared schema tests accept valid zero and reject private/legacy-derived/unknown fields. CLI tests check unavailable is explicit and saved values are not presented as current.
+- The cache-change fixture holds saved facts and actual ratings fixed, then changes valid SQLite C_ONLY judgments and recomputes: the staged current predicted score changes, the current redundancy calculation is based on that new pre-redundancy score, and ordering score comes from the current adjustment. The first projection asserts the confidence alias is sourced from current prediction metadata; the cache-change fixture does **not** claim confidence itself changed. The insufficient-evidence case is explicitly unavailable/null rather than a fabricated zero, while a factual-only scoring result remains available when C is absent. Genuine valid zero is retained by the V2 schemas.
+- **P5-T01 correction:** Replaced the prior incorrect test that put owned collection P into frozen wishlist P/U0. The corrected fixture has one selected BGG candidate and three authorized wishlist-domain pairs (two candidate P pairs, one additional R pair); run targets, prediction pairs, redundancy pairs, authorized pairs, requested IDs, cache hit/miss counts, and authorized signals remain wishlist-scoped. Separately, the evaluator receives four typed collection-domain owned-prediction calculation dependencies for two missing-axis owned targets. The sealed proof records those demands/evidence; the fixture has permission-enabled D requirements but no note source, so D evidence is unavailable and D remains absent from authorized wishlist signals. One PreparedSimilarity context resolves seven unique pairs once (three authorized wishlist pairs, four internal owned dependencies); no per-consumer resolver or provider call is added. After cache revision advances, run authorization remains the same three pairs while calculation currentness becomes false. A separately prepared scope with a changed injected current-fitness result then admits the newly eligible local game only in that new preview, expanding authorized wishlist pairs to four; the old run remains at three. This is pure Phase 3 scope-seam evidence, not a claim of a provider run. Staged wishlist projection tests separately verify real SQLite cache-derived candidate prediction and redundancy/order without saved-score fallback or storage mutation.
+- Exact focused test commands already run for this lane:
+
+  ```sh
+  bun test packages/shared/tests/wishlist-current-projection-v2.test.ts packages/daemon/tests/services/unified-wishlist-projection.test.ts packages/daemon/tests/services/staged-similarity-scope.test.ts packages/daemon/tests/services/unified-prediction.test.ts packages/daemon/tests/services/unified-collection-pipeline.test.ts
+  bun test packages/daemon/tests/services/prediction-engine.test.ts packages/daemon/tests/services/prediction-service.test.ts packages/daemon/tests/redundancy-engine.test.ts packages/daemon/tests/redundancy-integration.test.ts packages/daemon/tests/services/displayed-fitness-service.test.ts packages/daemon/tests/services/collection-snapshot-service.test.ts packages/daemon/tests/routes/prediction.test.ts packages/daemon/tests/services/unified-prediction.test.ts packages/daemon/tests/services/unified-collection-pipeline.test.ts
+  bun test packages/daemon/tests/wishlist-redundancy-scoring.test.ts packages/daemon/tests/wishlist-service.test.ts packages/daemon/tests/wishlist-candidate-read-proof.test.ts packages/daemon/tests/wishlist-routes.test.ts packages/daemon/tests/services/unified-wishlist-projection.test.ts packages/cli/tests/commands/wishlist.test.ts packages/cli/tests/commands/wishlist-current-projection.test.ts packages/shared/tests/wishlist-current-projection-v2.test.ts
+  ```
+   Results after P5-T01: scope/composition/budget/cache integration **45 tests / 456 expectations across 7 files**; Phase 4 production+staged regression **216 / 1,475 across 9 files**; wishlist/shared/CLI regression+staged suites **95 / 605 across 8 files**. The direct scope+projection pair passed **12 tests / 167 expectations across 2 files**. At this earlier author handoff, independent tester and Phase 5 reviewer verification were pending; final gate results are recorded below.
+- Exact daemon/shared/CLI checks: `bun run typecheck`; scoped `bunx eslint` over the nine author-owned TypeScript source/test files listed in the manifest; `bunx prettier --check` over those nine files plus this note; and `git diff --check`. These are backend-only checks; no root/global lint or browser checks ran while the designer-owned web files were moving.
+- `bun run typecheck`, scoped ESLint, scoped Prettier `--check`, and `git diff --check` passed. No active service, route, shared V1 validator/export, loaded web page, or live CLI command has been changed by this author lane. This was the pre-acceptance author handoff; final gates and acceptance are recorded below. Phase 6 has not started.
+
+#### Phase 5 author source manifest (in-progress handoff)
+
+The author-owned manifest includes the new shared contract/test, staged daemon projection/test, staged CLI formatter/test, and bounded changes to the Phase 3 scope helper/test and Phase 4 batch helper. The index is empty; new files were absent from the index, and changed files are working-tree-only. SHA-256 hashes at author handoff:
+
+| File | SHA-256 |
+| --- | --- |
+| `packages/shared/src/wishlist-current-projection-v2.ts` | `b8a0c428fd05dbf7fcfc854f203f1359c20a85876ba030fa1c7454000cc9bdbf` |
+| `packages/shared/tests/wishlist-current-projection-v2.test.ts` | `f7f316a920b59b0efca23847f65c223c75ba352626fe1b2a54ac7690f666aea9` |
+| `packages/daemon/src/services/staged-similarity-scope.ts` | `ed4d0e42116de3b97698a2c120c9fc2b30d5da12d1a3cd785d8192893f99631b` |
+| `packages/daemon/src/services/unified-collection-pipeline.ts` | `07d60c3601d3475fef94152f880d25c1ec934187959d7e15419127e8b2ad6722` |
+| `packages/daemon/src/services/unified-wishlist-projection.ts` | `75c082a0bf8fb3d14649a7c08aeffc1f257c8b5217a8443521253c059bbd09b2` |
+| `packages/daemon/tests/services/staged-similarity-scope.test.ts` | `94f2e273acc1fce81ad733294ff24219299705190e23dfd1858871cd4629d2c5` |
+| `packages/daemon/tests/services/unified-wishlist-projection.test.ts` | `854bf558d2c6ee0e8d3690e66c71c2232f0b11a846688a975bfb5de2ae38412d` |
+| `packages/cli/src/commands/wishlist-current-projection.ts` | `f261db8caeee8ea59082daead209d984a006f94f3e0f2bf2d357485189b3fdff` |
+| `packages/cli/tests/commands/wishlist-current-projection.test.ts` | `8fcbed2b9492d43fb937df498e82d334b8d4af83d839e4f6cc7552bdaafc1d4d` |
+
+The progress note is intentionally not self-hashed. The parallel designer-owned web files are excluded from this author's changes and tests. Unrelated pre-existing `.beads/issues.jsonl` changes remain unstaged and untouched by this implementation lane; no checkpoint or Phase 6 work has started.
+
+### Phase 5 bounded review corrections P5-R01/R02 (author verification; independent gates pending)
+
+- **P5-R01 — candidate factual fitness:** The wishlist target path now constructs only the score-readable fields from the capture-validated compact BGG snapshot and runs the existing `createFitnessService().calculateScore` before the shared prediction assembler. It supplies no saved wishlist score/breakdown, personal ratings, tournament labels, owner note, collection membership, or manual overrides; the candidate is not inserted into the captured factual universe. The actual derived result is combined by the same phase-4 assembler and estimator. Temporary SQLite fixtures show: a community-rating-only candidate with no prediction references is available at score **7** at Stage 0; a mixed actual-derived/personal-predicted candidate reports one actual and one predicted axis; a playing-time veto remains an available factual result with **score 0**, `vetoed: true`, and ordering score 0; and a verified candidate source with no usable scoring facts and no predictions returns explicit `no-scoring-contribution` with null aliases, not a fabricated zero. A missing-source failure carries the same captured stage-0 readiness metadata as the available factual-only result.
+- **P5-R02 — actual-label readiness:** Exported the one pure `deriveStagedActualAxisContext` calculation from the accepted Phase 3 scope helper. Normal P scope and wishlist failure projection now consume this same actual axes/reference/readiness derivation instead of separately approximating tournament and personal counts. With three tournament games having comparisons (below the existing five-game display floor) and a stage-0 threshold of two, it produces zero actual references, `ratedGameCount: 0`, `stage: 0`, and `gamesNeeded: 2`. The result is used for both unavailable and successful stage-0 projection metadata; the existing above-floor/actual-label rules are retained by the shared helper and regression suites.
+- The shared helper addition was necessary so failure metadata and normal P planning use exactly the same actual-label eligibility; it changes no production prediction/readiness function and remains an inert staged-module dependency. The Phase 4 batch adapter change supplies the compact candidate facts to the existing scorer; neither production factories/routes nor saved-output behavior were modified. Existing staged wishlist result schemas, privacy filtering, current-only aliases, redundancy classification/rounding, P5-T01 read-dependency versus authorization separation, and selected-scope freezing remain intact.
+- **Final targeted validation after these corrections:** `bun test packages/daemon/tests/services/unified-wishlist-projection.test.ts packages/daemon/tests/services/staged-similarity-scope.test.ts` — **14 tests, 0 failures, 183 expectations across 2 files**. The broader approved Phase 3 scope/composition/budget/cache command passed **46 / 463 across 7 files**; the Phase 4 nine-file regression passed **216 / 1,475**; the wishlist/shared/CLI regression command passed **96 / 612 across 8 files**. These broader suites were run after implementation and before final test-only assertion additions; the final targeted command above reran both modified suites afterward.
+- `bun run typecheck` (shared, daemon and CLI), scoped `bunx eslint` on the nine author-owned source/test files, scoped `bunx prettier --check` on those files plus this note, and `git diff --check`: passed after the final author edits. No browser checks ran in the backend lane. Fixtures use synthetic source and temporary SQLite only; no provider/network access or persistent write is made by the projection.
+- Phase 5 remains in progress and unaccepted; independent tester and reviewer gates are pending. Projection remains an inert adapter, not an activated API/route/UI/CLI behavior. Phase 6 has not started.
+
+#### Phase 5 correction author manifest (working-tree state)
+
+The nine backend/shared/CLI source and test paths in the manifest above are the author-owned files. After P5-R01/R02, their SHA-256 values are:
+
+| File | SHA-256 |
+| --- | --- |
+| `packages/shared/src/wishlist-current-projection-v2.ts` | `b8a0c428fd05dbf7fcfc854f203f1359c20a85876ba030fa1c7454000cc9bdbf` |
+| `packages/shared/tests/wishlist-current-projection-v2.test.ts` | `f7f316a920b59b0efca23847f65c223c75ba352626fe1b2a54ac7690f666aea9` |
+| `packages/daemon/src/services/staged-similarity-scope.ts` | `64c477a1e11131dd8f384765781837a33b43d57372133409f0233bedaea14df5` |
+| `packages/daemon/src/services/unified-collection-pipeline.ts` | `31289bfb3756ff57286d21f421afcd9f5473952e79830a0f28476e268253aed8` |
+| `packages/daemon/src/services/unified-wishlist-projection.ts` | `efaadb0e42da90c34983223c6c15aa097b384cba6091e6be319fa863ba541360` |
+| `packages/daemon/tests/services/staged-similarity-scope.test.ts` | `4d267f88fb7461c7ca534d7d4f191b7d55ec34fdedf62c38dc56772fb59e7900` |
+| `packages/daemon/tests/services/unified-wishlist-projection.test.ts` | `bd4b6ec4cf996ff13c3c381f2dce98cf4b90a7c2f2354a5b0a20e954fefc1e31` |
+| `packages/cli/src/commands/wishlist-current-projection.ts` | `f261db8caeee8ea59082daead209d984a006f94f3e0f2bf2d357485189b3fdff` |
+| `packages/cli/tests/commands/wishlist-current-projection.test.ts` | `8fcbed2b9492d43fb937df498e82d334b8d4af83d839e4f6cc7552bdaafc1d4d` |
+
+At this verification the index is empty; the three previously tracked Phase 3/4 author-owned source/test paths are working-tree modifications, and the six new author-owned source/test paths are untracked. The parallel designer-owned web files and pre-existing unrelated Beads changes are outside this manifest. The note is intentionally not self-hashed. No commit, issue close, or Phase 6 work has occurred.
+
+### User-authorized bounded Phase 5 P5-R01 veto-ordering correction (2026-10-04)
+
+After the Phase 5 review escalation, the user explicitly authorized one bounded additional correction round for the remaining P5-R01 veto-ordering defect. P5-R02 readiness remains closed and was not reopened. The projection now bypasses redundancy adjustment when the current shared prediction result has `vetoed: true`, preserving its available score 0 and ordering score 0 instead of allowing the redundancy helper's minimum-score floor to raise it to 1. This uses the existing factual `FitnessResult.vetoed` authority; non-vetoed candidate adjustment math, collection behavior, and the redundancy helper/minimum floor are unchanged.
+
+The new synthetic SQLite regression gives the vetoed candidate a playing-time fact of 60 (veto threshold 30), while owned games have playing time 20 and positive non-vetoed factual fitness. Cached candidate-to-owned semantic similarities resolve to 1, exceeding the configured threshold; therefore eligible neighbors exist and the prior path would exercise the helper's floor. The projection now remains available with `result.score: 0`, `vetoed: true`, `orderingScore: 0`, and no adjustment. The existing no-neighbor factual-veto case remains covered as a separate regression. This test uses no provider/network or persistent source writes.
+
+- Final targeted command: `bun test packages/daemon/tests/services/unified-wishlist-projection.test.ts packages/daemon/tests/services/staged-similarity-scope.test.ts` — **15 passed, 0 failed, 191 expectations across 2 files**. The regression directly verifies positive eligible owned fitness, cached similarity **1**, and preservation of candidate score/order **0**.
+- `bun run typecheck`; scoped ESLint and Prettier checks for the two changed projection files and the unchanged shared readiness helper/tests; `git diff --check`: passed. No full backend suite was repeated; prior full focused Phase 5, Phase 3, and Phase 4 evidence remains recorded above.
+- This is the explicitly user-authorized third bounded correction round, not a new design approval or phase acceptance. P5-R01 awaits independent tester and reviewer targeted verification; P5-R02 stays closed. Phase 5 remains in progress, no commit/Beads close occurred, and Phase 6 has not started. No canonical review-finding artifact hash was supplied; source hashes below identify this exact implementation/test state.
+
+#### P5-R01 correction source manifest
+
+| File | SHA-256 |
+| --- | --- |
+| `packages/daemon/src/services/unified-wishlist-projection.ts` | `06bb14a58afa0549ba3059e1bb43278a4558f622bb5552f9970fbc8e64a9370f` |
+| `packages/daemon/tests/services/unified-wishlist-projection.test.ts` | `1f078d2c82dd2364de9007e6badad1dbf25d7cd0b4a9ff0b20bd2c627c6ccd91` |
+
+The index remains empty; these two files are working-tree-only. Other Phase 5 files, designer-owned web files, and unrelated Beads changes were not modified in this correction. The note remains intentionally unhashed.
+
+## Phase 5 acceptance and checkpoint record (2026-10-04)
+
+Independent tester, Bun/TypeScript reviewer, and designer gates accepted Phase 5. The independent full run passed **3,899 tests, 1 skipped, 0 failed, and 23,337 expectations across 244 files**; the final P5-R01 focused run passed **15 tests / 191 expectations**, and the accepted Phase 4 regression remains **216 / 1,475**. Root TypeScript, scoped lint/format/diff checks passed. Browser coverage (**120 tests**), browser TypeScript, and build had passed earlier and the three designer-owned web files were unchanged from those verified hashes. The reviewer explicitly closed P5-R01 and P5-R02, including the authorized veto-zero correction; P5-T01's wishlist calculation dependencies remain separate from the three wishlist-authorized pairs. Phase 5 is accepted and `shelf-judge-bs1y.5` is closed. The epic remains `in_progress`; `.6` is open, ready, and unclaimed.
+
+Acceptance is strictly for the staged-only backend/shared/CLI adapters and isolated web view. There are still no active wishlist routes/service bindings, live shared V1 validator changes, loaded-page/CLI activation, or production inference behavior. The approved one-commit activation is Phase 6 only; this checkpoint does not start or claim it.
+
+### Accepted twelve-file source/test manifest
+
+SHA-256 values below were recomputed at checkpoint preparation and match the independently reviewed Phase 5 state. Existing tracked helper/test files are modified only in the working tree; new files remain untracked until this selective checkpoint. The staged index was empty when captured.
+
+| File | WT | HEAD blob | Index blob | SHA-256 |
+| --- | --- | --- | --- | --- |
+| `packages/daemon/src/services/staged-similarity-scope.ts` | ` M` | `d987312397a2b310261314aa142ef6013be10a3c` | `d987312397a2b310261314aa142ef6013be10a3c` | `64c477a1e11131dd8f384765781837a33b43d57372133409f0233bedaea14df5` |
+| `packages/daemon/src/services/unified-collection-pipeline.ts` | ` M` | `a9a81d39ee960fe60d29c083075fc01a04077eb2` | `a9a81d39ee960fe60d29c083075fc01a04077eb2` | `31289bfb3756ff57286d21f421afcd9f5473952e79830a0f28476e268253aed8` |
+| `packages/daemon/src/services/unified-wishlist-projection.ts` | `??` | absent | absent | `06bb14a58afa0549ba3059e1bb43278a4558f622bb5552f9970fbc8e64a9370f` |
+| `packages/daemon/tests/services/staged-similarity-scope.test.ts` | ` M` | `6bcd88fbacece2007118928955c2d1754aab3d6f` | `6bcd88fbacece2007118928955c2d1754aab3d6f` | `4d267f88fb7461c7ca534d7d4f191b7d55ec34fdedf62c38dc56772fb59e7900` |
+| `packages/daemon/tests/services/unified-wishlist-projection.test.ts` | `??` | absent | absent | `1f078d2c82dd2364de9007e6badad1dbf25d7cd0b4a9ff0b20bd2c627c6ccd91` |
+| `packages/shared/src/wishlist-current-projection-v2.ts` | `??` | absent | absent | `b8a0c428fd05dbf7fcfc854f203f1359c20a85876ba030fa1c7454000cc9bdbf` |
+| `packages/shared/tests/wishlist-current-projection-v2.test.ts` | `??` | absent | absent | `f7f316a920b59b0efca23847f65c223c75ba352626fe1b2a54ac7690f666aea9` |
+| `packages/cli/src/commands/wishlist-current-projection.ts` | `??` | absent | absent | `f261db8caeee8ea59082daead209d984a006f94f3e0f2bf2d357485189b3fdff` |
+| `packages/cli/tests/commands/wishlist-current-projection.test.ts` | `??` | absent | absent | `8fcbed2b9492d43fb937df498e82d334b8d4af83d839e4f6cc7552bdaafc1d4d` |
+| `packages/web/components/wishlist-current-projection.tsx` | `??` | absent | absent | `634cdea424291b496f1a7b80d0662538716d28dfd7af2505ac0f64e027f391ce` |
+| `packages/web/lib/wishlist-current-projection-view-model.ts` | `??` | absent | absent | `d32648acdc782927f9ca5d985839524daeb9a53d7bfcc47421d6fffe4508e907` |
+| `packages/web/tests/wishlist-current-projection.test.tsx` | `??` | absent | absent | `7d2f86529cc6a9e27d9b9a0e9e0554d19a4fbcfa0dbf10eb861936902522b99f` |
+
+The Phase 5 passive Beads export delta is only the exact current `shelf-judge-bs1y.5` record (closed for acceptance); the epic stays in progress and `.6` remains open/ready/unclaimed. Existing unrelated working-tree records `shelf-judge-0xhp` and `shelf-judge-uf1p` are excluded from the staged export delta and remain untouched. No design/plan files are included. The note's self-hash is the administrative exception.
