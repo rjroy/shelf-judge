@@ -12,14 +12,14 @@ related: [.lore/work/design/unified-similarity-prediction-redundancy.md]
 
 ## Authorization and execution status
 
-The user approved the linked design and seven-phase plan and authorized implementation. The execution branch is `feat/unified-similarity-prediction-redundancy`; Phase 1 is checkpointed at `c32cb3d5e63328177bcec169507f73a070c24627` from the approved-doc base `084936ca29c17c36b0e652e1173bcdc93209d3e3`. Phases 1 and 2 are accepted; the epic remains in progress. Phase 3 is ready but unclaimed/not started and cannot begin before Phase 2's bead-ID checkpoint is committed and reconciled. No later phase has started.
+The user approved the linked design and seven-phase plan and authorized implementation. The execution branch is `feat/unified-similarity-prediction-redundancy`; Phase 1 is checkpointed at `c32cb3d5e63328177bcec169507f73a070c24627` from the approved-doc base `084936ca29c17c36b0e652e1173bcdc93209d3e3`, Phase 2 at `027ca1fbd88379f63a090375fccd290082fa3051`, and Phase 3 acceptance is verified with its bead-ID checkpoint being recorded now. Phases 1–3 are accepted; the epic remains in progress. Phase 4 is ready but unclaimed/not started and cannot begin before Phase 3's checkpoint is committed and reconciled. No later phase has started.
 
 | Phase | Status | Gate before next phase |
 | --- | --- | --- |
 | 1 — baseline, shared math, settings assembler | Accepted; checkpointed with `shelf-judge-bs1y.1` | Phase 1 checkpoint `c32cb3d5` verified before Phase 2 began |
-| 2 — source capture, cache-only resolver, proof/revocation | Accepted (`shelf-judge-bs1y.2`; checkpointing now) | Phase 2 bead-ID checkpoint committed and reconciled before Phase 3 starts |
-| 3 — pair scope and frozen run | Ready, unclaimed; not started | Phase 2 accepted checkpoint committed and terminal handoff verified |
-| 4 — staged predictor and real numeric pipeline | Not started | Phase 3 verified checkpoint |
+| 2 — source capture, cache-only resolver, proof/revocation | Accepted and checkpointed at `027ca1f` | Phase 2 commit reconciled before Phase 3 began |
+| 3 — pair scope and frozen run | Accepted (`shelf-judge-bs1y.3`; checkpointing now) | Phase 3 bead-ID checkpoint committed and reconciled before Phase 4 starts |
+| 4 — staged predictor and real numeric pipeline | Ready, unclaimed; not started | Phase 3 accepted checkpoint committed and terminal handoff verified |
 | 5 — staged wishlist/API/client adapters | Not started | Phase 4 verified checkpoint |
 | 6 — atomic production activation | Not started | Phase 5 verified checkpoint |
 | 7 — integration, performance, authority reconciliation | Not started | Phase 6 verified checkpoint |
@@ -53,14 +53,14 @@ The R1–R13 labels below are the operational obligation map for the approved de
 | R2 — existing settings are sole weights; semantic enablement/note permission and penalty-toggle separation | 1 | Staged settings-assembly tests and real storage round-trip/reopen; `stored-source-revision.test.ts` baseline covers zero/zero→4:3 and personal-axis stripping; current phase in progress |
 | R3 — prediction and redundancy exact-pair parity; same prediction algorithm | 4, then 6 | Staged shared-predictor numeric parity and activation consumer comparison; not started |
 | R4 — factual context from full collection, no personal-axis/rating leakage | 4 | Real staged collection prediction fixture and axis/reference isolation; not started |
-| R5 — purpose-specific reference pools and exact prediction eligibility | 3–4 | Exact P/R scope fixture then real pipeline test; not started |
-| R6 — deduplicated, previewed, frozen authorized pair universe | 3 | Injected-fitness scope test for P∪R, overlap, self exclusion, frozen authorization; not started |
-| R7 — indexed cache-only reads, pair memoization and bounded execution | 2–3, 7 | Phase 2 indexed point reads, candidate indexing/vector dedupe, and stale-cache tests accepted; run-scope and composed production performance gates remain Phase 3/7 |
+| R5 — purpose-specific reference pools and exact prediction eligibility | 3–4 | Phase 3 staged exact axis-rated P/R tests in progress; real numeric pipeline remains Phase 4 |
+| R6 — deduplicated, previewed, frozen authorized pair universe | 3 | Phase 3 injected-fitness P∪R/overlap/frozen-scope tests in progress; independent gate pending |
+| R7 — indexed cache-only reads, pair memoization and bounded execution | 2–3, 7 | Phase 2 indexed point reads, candidate indexing/vector dedupe, and stale-cache tests accepted; Phase 3 frozen-scope fixture underway; composed production performance gates remain Phase 7 |
 | R8 — proof identity/currentness and source publication fence | 2, 6 | Staged V2 identity, every examined component, currentness/read/publication boundary accepted; production acceptance remains Phase 6 |
 | R9 — transitive note-permission revocation and fail-closed publication | 2, 6–7 | Staged SHARED_CD/O=0, indirect wishlist artifact, cleanup-failure/restart, and whole-recompute fixture accepted; real production lifecycle remains Phase 6/7 |
 | R10 — current prediction and redundancy result contracts / wishlist consumers | 5–6 | Staged API/view-model contract, designer-owned view, then atomic client binding; not started |
 | R11 — no unsafe saved-derived fallback; unavailable means unavailable | 5–6 | Staged projection tests and live route/client activation tests; not started |
-| R12 — explicit-run budgets, cancellation and atomic checkpoints | 2–3, 7 | Source/run contract tests and composed daemon integration tests with fake providers; not started |
+| R12 — explicit-run budgets, cancellation and atomic checkpoints | 2–3, 7 | Phase 3 frozen budget/source-auth contract in progress; composed daemon integration tests remain Phase 7 |
 | R13 — deterministic performance, integration and named-reference reconciliation | 7 | Counter assertions, complete isolated final gates, four named authority references; not started |
 
 ## Phase 1 change boundary
@@ -128,3 +128,25 @@ SHA-1 Git blob IDs for the six staged implementation/test files at the author-ve
 | `packages/shared/tests/semantic-scoring-input-proof-v2.test.ts` | `62a5d997941f33fbf7fe1c1a84f8c34897b58572` |
 
 The Phase 2 checkpoint consists of these six source/test blobs plus this note. No production files or active exports changed. The passive Beads export checkpoint includes only the Phase 2 record; unrelated `.beads/issues.jsonl` changes for `shelf-judge-0xhp` and `shelf-judge-uf1p` are deliberately excluded and remain in the working tree. The note's own blob is an administrative self-hash exception.
+
+## Phase 3 staged scope and author verification (in progress)
+
+Phase 3 adds only `staged-similarity-scope.ts` and its direct-import test. The module is not imported by production callers. It derives actual personal labels from captured game ratings and tournament labels from the existing Elo normalization/display-floor functions; readiness counts only actual rated games. It builds per-axis reference indexes, derives exact collection/wishlist P membership, resolves P cache-only through Phase 2's prepared resolver, then uses an explicitly injected deterministic fitness fixture to derive R. Collection R is limited to currently owned positive non-veto fixture scores. Wishlist pairs remain typed wishlist-candidate pairs with C-only signals; eligibility scores do not authorize local collection-domain inference. The frozen input publishes the phase-4 predictor target/reference/readiness contract, immutable U0/disclosure and a one-use internal execution authorization, but has no provider/gateway or run-controller integration.
+
+Cache calculation freshness remains separate from source/policy/selection authorization: cache-revision growth may make the prepared proof stale, but cannot add pairs to the already frozen U0. Source capture identity, exact request selection, current policy identity, mutation generation, budget and demanded pairs are bound to the in-memory authorization identity; the live mutation generation is not persisted as durable proof identity. Missing selected targets are disclosed as unavailable instead of silently expanding scope. Token budget field is consistently a positive-safe-integer reported-token stop threshold, not a hard ceiling.
+
+- New direct-import suite after P3-R01: `bun test packages/daemon/tests/services/staged-similarity-scope.test.ts` — **8 tests, 0 failures, 101 expectations**. Fixtures cover actual personal/tournament per-axis labels and readiness, one indexed reference-membership build, self-exclusion, previously-owned actual references, vetoed/unscored actual references in P but not R, exact collection and wishlist scopes, missing selected candidates, C-only wishlist pairs, overlap/dedup, source/cache authority separation, sealed resolver, one-use authorization, and deeply frozen pair identities during and after fitness evaluation.
+- Approved focused command after P3-R01, with the Phase 7 integration test at its verified actual path `packages/daemon/tests/wishlist-jev-phase7.integration.test.ts` — **44 tests, 0 failures, 416 expectations across 7 files**. The approved plan's `services/wishlist-jev-phase7.integration.test.ts` path is incorrect; the root-level path above was run instead.
+- `bunx tsc --noEmit -p packages/daemon`: passed. Scoped ESLint and Prettier checks for the two new files: passed. `git diff --check`: passed.
+- Phase 3 remains strictly pure scope evidence: the injected fitness fixture does not establish real similarity-to-fitness-to-redundancy behavior; Phase 4 owns that numeric integration. No active production imports, controllers, routes, shared public schemas or predictor functions changed; tests use synthetic facts and no live provider/network.
+
+#### P3-R01 correction record
+
+The reviewer found that a frozen `StagedAxisPairInput` still exposed a mutable nested similarity pair to injected fitness and returned scope consumers. The scope module now uses a readonly nested pair type and creates a cloned, runtime-frozen pair at every P/R/U0 projection boundary; axis-reference records point only to that frozen object. Regression tests attempt mutation inside injected fitness and after preparation for both collection and wishlist pair identities, then confirm pair members, canonical key/resolver association, authorization identity/status, and the all-unavailable `null` similarity remain unchanged. The independent tester accepted the corrected manifest with **44 tests / 416 expectations across 7 files** (including 8 / 101 for the new scope suite); the Bun/TypeScript reviewer accepted Phase 3 and closed P3-R01 with no other findings. Daemon typecheck, scoped ESLint/Prettier, and diff checks passed. This acceptance is for pure scope with injected fitness only, not the real numeric prediction pipeline. The Phase 3 checkpoint is being recorded now; do not start Phase 4 until it is committed and terminally reconciled.
+
+#### Phase 3 author source manifest
+
+| File | SHA-1 Git blob |
+| --- | --- |
+| `packages/daemon/src/services/staged-similarity-scope.ts` | `d987312397a2b310261314aa142ef6013be10a3c` |
+| `packages/daemon/tests/services/staged-similarity-scope.test.ts` | `6bcd88fbacece2007118928955c2d1754aab3d6f` |
