@@ -30,11 +30,7 @@ import {
 import { createLogger, type Logger } from "./logger.js";
 import type { PreparedWishlistRun, FrozenWishlistRunPair } from "./wishlist-run-preparation.js";
 import type { PreparedUnifiedRun } from "./unified-jev-run-preparation.js";
-import {
-  validateWishlistCandidateCOnlyRow,
-  type WishlistCandidateMembershipIndex,
-  type WishlistDescriptionPairRequest,
-} from "./wishlist-candidate-read-proof.js";
+import { createWishlistPairReadinessInspector } from "./wishlist-pair-readiness.js";
 import {
   encodeOwnedLocalMember,
   encodeWishlistBggMember,
@@ -688,50 +684,12 @@ export class JevRunService {
     let active: {
       pair: FrozenWishlistRunPair;
       request: ReadyAdmission;
-      membership: WishlistCandidateMembershipIndex;
-      proofRequest: WishlistDescriptionPairRequest;
+      proofRequest: import("./wishlist-candidate-read-proof.js").WishlistDescriptionPairRequest;
       cacheHitAtDispatch: { value: boolean };
     } | null = null;
     let stop = false;
 
-    const candidateBggIds = new Set(frozen.entries.map((entry) => entry.bggId));
-    const eligibleOwnedIds = new Set(frozen.eligibleOwnedIds);
-    const membership: WishlistCandidateMembershipIndex = { candidateBggIds, eligibleOwnedIds };
-    const entriesById = new Map(frozen.entries.map((entry) => [entry.id, entry]));
-    const ownedById = new Map(frozen.capture.collection.games.map((game) => [game.id, game]));
-
-    const pairProof = (pair: FrozenWishlistRunPair): WishlistDescriptionPairRequest | null => {
-      const candidate = entriesById.get(pair.candidateEntryId);
-      const ownedGame = ownedById.get(pair.ownedGameId);
-      if (!candidate?.bggSource || !ownedGame?.bggData?.description) return null;
-      return {
-        candidate: { bggId: candidate.bggId, name: candidate.name, bggSource: candidate.bggSource },
-        ownedGame: {
-          id: ownedGame.id,
-          bggId: ownedGame.bggId,
-          name: ownedGame.name,
-          description: ownedGame.bggData.description,
-        },
-      };
-    };
-
-    const inspectCache = (
-      pair: FrozenWishlistRunPair,
-      proofRequest: WishlistDescriptionPairRequest,
-    ) => {
-      const row = this.options.cache.lookup({
-        gameAId: pair.gameAId,
-        gameBId: pair.gameBId,
-        signal: "C",
-        pairDomain: "wishlist-candidate",
-      });
-      return validateWishlistCandidateCOnlyRow(
-        row,
-        frozen.capture.collection.id,
-        proofRequest,
-        membership,
-      );
-    };
+    const inspectPair = createWishlistPairReadinessInspector(frozen, this.options.cache);
 
     const getGateway = (): JevGateway => {
       if (gateway) return gateway;
@@ -745,8 +703,8 @@ export class JevRunService {
             throw new Error("Wishlist Jev sources changed before dispatch");
           if (!this.runCanContinue(control) || this.stopped(controller, startedAt))
             throw new Error("Wishlist Jev run stopped");
-          const current = inspectCache(bound.pair, bound.proofRequest);
-          if (current.valid) {
+          const current = inspectPair(bound.pair);
+          if (current.state === "current-hit") {
             bound.cacheHitAtDispatch.value = true;
             throw new Error("A valid C_ONLY judgment appeared before dispatch");
           }
@@ -770,8 +728,8 @@ export class JevRunService {
 
       for (const pair of frozen.pairs) {
         if (!this.runCanContinue(control) || this.stopped(controller, startedAt)) break;
-        const proofRequest = pairProof(pair);
-        if (!proofRequest) {
+        const readiness = inspectPair(pair);
+        if (readiness.state === "missing-source") {
           progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
           control.progress = progress;
           if (pair.state === "sendable-miss") continue;
@@ -787,7 +745,7 @@ export class JevRunService {
             return;
           }
           try {
-            currentHit = inspectCache(pair, proofRequest).valid;
+            currentHit = inspectPair(pair).state === "current-hit";
           } catch {
             lookupFailed = true;
           }
@@ -804,7 +762,8 @@ export class JevRunService {
           control.progress = progress;
           continue;
         }
-        // A cache hit present in the frozen disclosure was not authorized for transmission.
+        // Transmission authority comes from the frozen preparation, not mutable cache state
+        // observed before the coordinated currentness check.
         if (pair.state === "unavailable") {
           progress = this.persistOutcome(progress, { completedPairs: 1 });
           control.progress = progress;
@@ -818,23 +777,23 @@ export class JevRunService {
 
         const candidateMember = encodeWishlistBggMember(
           frozen.capture.collection.id,
-          String(proofRequest.candidate.bggId),
+          String(readiness.proofRequest.candidate.bggId),
         );
         const ownedMember = encodeOwnedLocalMember(
           frozen.capture.collection.id,
-          proofRequest.ownedGame.id,
+          readiness.proofRequest.ownedGame.id,
         );
         const dependencies = buildJevPairDependencies(
           "C_ONLY",
           {
             gameId: candidateMember,
-            name: proofRequest.candidate.name,
-            description: proofRequest.candidate.bggSource.description ?? undefined,
+            name: readiness.proofRequest.candidate.name,
+            description: readiness.proofRequest.candidate.bggSource.description ?? undefined,
           },
           {
             gameId: ownedMember,
-            name: proofRequest.ownedGame.name,
-            description: proofRequest.ownedGame.description ?? undefined,
+            name: readiness.proofRequest.ownedGame.name,
+            description: readiness.proofRequest.ownedGame.description ?? undefined,
           },
         );
         const ready: ReadyAdmission = {
@@ -842,12 +801,12 @@ export class JevRunService {
           request: {
             mode: "description-only",
             gameA: {
-              name: proofRequest.candidate.name,
-              bggDescription: proofRequest.candidate.bggSource.description ?? "",
+              name: readiness.proofRequest.candidate.name,
+              bggDescription: readiness.proofRequest.candidate.bggSource.description ?? "",
             },
             gameB: {
-              name: proofRequest.ownedGame.name,
-              bggDescription: proofRequest.ownedGame.description ?? "",
+              name: readiness.proofRequest.ownedGame.name,
+              bggDescription: readiness.proofRequest.ownedGame.description ?? "",
             },
           },
           dependencyKind: "C_ONLY",
@@ -861,7 +820,12 @@ export class JevRunService {
         progress = this.persistOutcome(progress, { cacheMisses: 1 });
         control.progress = progress;
         const cacheHitAtDispatch = { value: false };
-        active = { pair, request: ready, membership, proofRequest, cacheHitAtDispatch };
+        active = {
+          pair,
+          request: ready,
+          proofRequest: readiness.proofRequest,
+          cacheHitAtDispatch,
+        };
 
         let result: Awaited<ReturnType<JevGateway["evaluatePair"]>>;
         try {
@@ -909,7 +873,7 @@ export class JevRunService {
           if (!(await frozen.isSourceCurrent())) return;
           if (!this.runCanContinue(control) || this.stopped(controller, startedAt)) return;
           try {
-            if (inspectCache(pair, proofRequest).valid) {
+            if (inspectPair(pair).state === "current-hit") {
               outcome.value = "hit";
               progress = this.nextProgress(progress, { completedPairs: 1, cacheHits: 1 });
               this.options.cache.saveRunProgress(progress);

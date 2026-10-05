@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   createInitialEntityMetadata,
+  type Axis,
   type Collection,
   type FitnessResult,
   type Game,
@@ -18,6 +19,8 @@ import { createStorageService } from "../src/services/storage-service.js";
 import { createJevRunSourceAdapter } from "../src/services/jev-run-source-adapter.js";
 import { parseBoardgameScoringThings } from "../src/services/bgg-xml-parser.js";
 import { createJevPairReadService } from "../src/services/jev-pair-read-service.js";
+import { createUnifiedScoringService } from "../src/services/unified-scoring-service.js";
+import { createFitnessService } from "../src/services/fitness-service.js";
 import { encodeWishlistBggMember } from "../src/services/jev-pair-identity.js";
 import { JEV_MODEL_ID } from "../src/services/jev/jev-gateway.js";
 import type { StorageService } from "../src/services/storage-service.js";
@@ -30,6 +33,19 @@ afterEach(() => {
 
 const observedAt = "2026-09-30T12:00:00.000Z";
 const ownerNoteSentinel = "phase7-private-owner-note-sentinel";
+
+function personalAxis(): Axis {
+  return {
+    id: "personal",
+    name: "Personal",
+    description: null,
+    weight: 1,
+    enabled: true,
+    source: "personal",
+    createdAt: observedAt,
+    updatedAt: observedAt,
+  };
+}
 
 /** In-process stand-in for one verified BGG Thing response; no network is opened. */
 function fakeBggThingTransport(bggId: number, name: string, description: string): string {
@@ -240,7 +256,9 @@ describe("wishlist Jev phase 7 durable integration", () => {
     });
     try {
       const owned = makeGame(9200, "Owned comparison", "Owned description");
+      owned.ratings = { personal: 6 };
       const collection = await storage.loadCollection();
+      collection.axes = [personalAxis()];
       collection.games = [durable(owned)];
       collection.semanticRedundancy.settings = {
         ...collection.semanticRedundancy.settings,
@@ -248,6 +266,7 @@ describe("wishlist Jev phase 7 durable integration", () => {
         cachedOwnerNoteUse: false,
         weights: {
           ...collection.semanticRedundancy.settings.weights,
+          factual: 1,
           description: 1,
           ownerNote: 1,
         },
@@ -322,6 +341,11 @@ describe("wishlist Jev phase 7 durable integration", () => {
       const controller = composeJevRunController({
         storageService: storage,
         predictionService: prediction.predictions,
+        unifiedScoringService: createUnifiedScoringService({
+          storageService: storage,
+          cache,
+          fitnessService: createFitnessService(),
+        }),
         gameService,
         cache,
         runService: worker,
@@ -403,6 +427,11 @@ describe("wishlist Jev phase 7 durable integration", () => {
       const restartedController = composeJevRunController({
         storageService: storage,
         predictionService: restartedPrediction.predictions,
+        unifiedScoringService: createUnifiedScoringService({
+          storageService: storage,
+          cache,
+          fitnessService: createFitnessService(),
+        }),
         gameService,
         cache,
         runService: restartedWorker,
@@ -491,7 +520,9 @@ describe("wishlist Jev phase 7 durable integration", () => {
     let waitingForProvider = false;
     try {
       const owned = makeGame(9201, "Owned fence comparator", "Owned fence description");
+      owned.ratings = { personal: 6 };
       const collection = await storage.loadCollection();
+      collection.axes = [personalAxis()];
       collection.games = [durable(owned)];
       collection.semanticRedundancy.settings = {
         ...collection.semanticRedundancy.settings,
@@ -499,6 +530,7 @@ describe("wishlist Jev phase 7 durable integration", () => {
         cachedOwnerNoteUse: false,
         weights: {
           ...collection.semanticRedundancy.settings.weights,
+          factual: 1,
           description: 1,
           ownerNote: 1,
         },
@@ -538,6 +570,11 @@ describe("wishlist Jev phase 7 durable integration", () => {
       const controller = composeJevRunController({
         storageService: storage,
         predictionService: prediction.predictions,
+        unifiedScoringService: createUnifiedScoringService({
+          storageService: storage,
+          cache,
+          fitnessService: createFitnessService(),
+        }),
         gameService,
         cache,
         runService: worker,
@@ -618,6 +655,11 @@ describe("wishlist Jev phase 7 durable integration", () => {
       const blockedController = composeJevRunController({
         storageService: storage,
         predictionService: prediction.predictions,
+        unifiedScoringService: createUnifiedScoringService({
+          storageService: storage,
+          cache,
+          fitnessService: createFitnessService(),
+        }),
         gameService,
         cache,
         runService: blockedWorker,

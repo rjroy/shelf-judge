@@ -4,14 +4,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
+  Axis,
   Collection,
-  GameWithScore,
-  PredictionSettings,
   RedundancySettings,
-  TournamentData,
+  DurableGame,
   WishlistEntry,
 } from "@shelf-judge/shared";
-import { createInitialSemanticRedundancyStateV10 } from "@shelf-judge/shared";
+import { createInitialEntityMetadata, DEFAULT_JEV_RUN_BUDGET } from "@shelf-judge/shared";
 import {
   composeJevRunController,
   composeJevStatusService,
@@ -21,12 +20,12 @@ import {
 import { createJevPairCache } from "../src/services/jev-pair-cache-service.js";
 import type { JevPairCache } from "../src/services/jev-pair-cache-service.js";
 import type { JevRunHandle } from "../src/services/jev-run-service.js";
-import { canonicalSha256 } from "../src/services/profile-source-coordinator.js";
-import type { StorageService } from "../src/services/storage-service.js";
-import type { SourceVector } from "../src/services/source-vector.js";
 import { JEV_MODEL_ID } from "../src/services/jev/jev-gateway.js";
 import { createRedundancyRoutes } from "../src/routes/redundancy.js";
 import { createJevRefreshProgressService } from "../src/services/jev-refresh-progress-service.js";
+import { createTestApp } from "./helpers/test-app.js";
+import { prepareUnifiedJevRun } from "../src/services/unified-jev-run-preparation.js";
+import { createJevRunSourceAdapter } from "../src/services/jev-run-source-adapter.js";
 
 const originalApiKey = process.env.TYPESAFE_API_KEY;
 afterEach(() => {
@@ -34,85 +33,102 @@ afterEach(() => {
   else process.env.TYPESAFE_API_KEY = originalApiKey;
 });
 
-function runtimeSources() {
-  const semanticRedundancy = {
-    ...createInitialSemanticRedundancyStateV10(),
-    settings: {
-      enabled: true,
-      weights: { factual: 0, description: 1, ownerNote: 0 },
-      cachedOwnerNoteUse: false,
+const fixtureTime = "2026-10-04T00:00:00.000Z";
+
+function personalAxis(): Axis {
+  return {
+    id: "personal",
+    name: "Personal",
+    description: null,
+    weight: 1,
+    enabled: true,
+    source: "personal",
+    createdAt: fixtureTime,
+    updatedAt: fixtureTime,
+  };
+}
+
+function durableGame(id: string): DurableGame {
+  const digits = Number(id.replace(/\D/g, "")) || (id === "a" ? 100 : 101);
+  const description = `Description ${id}`;
+  return {
+    id,
+    bggId: digits,
+    entityMetadata: createInitialEntityMetadata(digits),
+    name: `Game ${id}`,
+    yearPublished: 2020,
+    minPlayers: 2,
+    maxPlayers: 4,
+    bestPlayers: 3,
+    playingTime: 60,
+    imageUrl: null,
+    numPlays: null,
+    latestPlayCountCheck: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
     },
+    bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
+    bggData: {
+      communityRating: 7.5,
+      bayesAverage: 7.2,
+      weight: 3,
+      numWeightVotes: 100,
+      description,
+      mechanics: [],
+      categories: [],
+      families: [],
+      subdomains: [],
+      bestPlayerCount: null,
+      fetchedAt: fixtureTime,
+    },
+    ownership: "owned",
+    boxDimensions: null,
+    manualShelfId: null,
+    ratings: { personal: 6 },
+    createdAt: fixtureTime,
+    updatedAt: fixtureTime,
+    ownerNote: { state: "cleared", version: 1, updatedAt: fixtureTime },
   };
-  const collection = {
-    id: "composition-test",
-    name: "composition test",
-    schemaVersion: 10,
-    revision: 1,
-    axes: [],
-    games: ["a", "b"].map((id) => ({
-      id,
-      name: `Game ${id}`,
-      ownership: "owned",
-      bggData: { description: `Description ${id}` },
-      ownerNote: { state: "cleared", version: 0, updatedAt: "test" },
-    })),
-    semanticRedundancy,
-  } as unknown as Collection;
-  const factualWeights = { binary: 0, continuous: 0 };
-  const vector: SourceVector = {
-    available: true,
-    unavailableSources: [],
-    processEpoch: "composition-test-process",
-    changeToken: 1,
-    collectionId: collection.id,
-    collectionSchemaVersion: collection.schemaVersion,
-    collectionRevision: collection.revision,
-    semanticEvidenceEpoch: semanticRedundancy.evidenceEpoch,
-    semanticConsentEpoch: semanticRedundancy.consentEpoch,
-    factualWeightsEpoch: semanticRedundancy.factualWeightsEpoch,
-    factualWeightsFingerprint: semanticRedundancy.factualWeightsFingerprint,
-    redundancyWeightsFingerprint: canonicalSha256(factualWeights),
-    tournamentRevision: 1,
-    predictionSettingsRevision: 1,
-    nicheSettingsRevision: 1,
-    redundancySettingsRevision: 1,
-    shelfConfigRevision: 1,
-    representationVersion: 1,
-    algorithmVersion: 1,
+}
+
+async function runtimeSources(cache: JevPairCache | null = null) {
+  const context = createTestApp(cache ? { jevPairCache: cache } : undefined);
+  const collection = await context.storageService.loadCollection();
+  collection.axes = [personalAxis()];
+  collection.games = [durableGame("a"), durableGame("b")];
+  collection.semanticRedundancy.settings = {
+    ...collection.semanticRedundancy.settings,
+    enabled: true,
+    cachedOwnerNoteUse: false,
+    weights: { factual: 1, description: 1, ownerNote: 0 },
   };
-  const tournament = { settings: {}, sessions: [], gameStats: {} } as unknown as TournamentData;
-  const predictionSettings: PredictionSettings = {
-    stageThresholds: [5, 15, 30],
-    defaultK: 5,
-    minSimilarityThreshold: 0.2,
-  };
-  const redundancySettings: RedundancySettings = {
-    enabled: false,
-    stage: "annotation",
+  await context.storageService.saveCollection(collection);
+  const redundancy = await context.storageService.loadRedundancySettings();
+  await context.storageService.saveRedundancySettings({
+    ...redundancy,
+    enabled: true,
+    stage: "integrated",
     similarityThreshold: 0.7,
-    maxPenalty: 0.2,
-    componentWeights: factualWeights,
-    minNeighbors: 2,
+    maxPenalty: 0.5,
+    minNeighbors: 1,
     expectedNeighbors: 5,
+    componentWeights: { binary: 1, continuous: 3 },
+  });
+  await context.storageService.hydrateSourceVector?.();
+  return {
+    ...context,
+    storage: context.storageService,
+    predictionService: context.predictionService,
   };
-  const storage = {
-    loadCollection: () => Promise.resolve(structuredClone(collection)),
-    loadTournament: () => Promise.resolve(structuredClone(tournament)),
-    loadPredictionSettings: () => Promise.resolve(structuredClone(predictionSettings)),
-    loadRedundancySettings: () => Promise.resolve(structuredClone(redundancySettings)),
-    saveCollection: () => Promise.resolve(),
-    sourceVector: () => structuredClone(vector),
-  } as unknown as StorageService;
-  const predictionService = {
-    listGamesWithPredictionsFromSnapshot: (snapshot: Collection) =>
-      Promise.resolve(
-        snapshot.games.map((game) => ({
-          game: { id: game.id, ownership: game.ownership },
-          score: { score: 1, vetoed: false, ratedAxisCount: 1, predictionMeta: null },
-        })) as unknown as GameWithScore[],
-      ),
-  } as unknown as Parameters<typeof createJevRunWorker>[0]["predictionService"];
-  return { storage, predictionService };
 }
 
 function gatewayResponse(): Response {
@@ -172,13 +188,9 @@ describe("Jev run production composition", () => {
   test("existing Run routes admit only the exact selected wishlist scope and expose scoped progress", async () => {
     const directory = await mkdtemp(join(tmpdir(), "jev-wishlist-run-routes-"));
     const cache = await createJevPairCache(directory);
-    const sources = runtimeSources();
-    const storage = sources.storage as unknown as StorageService & {
-      sourceVector(): SourceVector;
-      loadWishlist(): Promise<WishlistEntry[]>;
-      saveWishlist(entries: WishlistEntry[]): Promise<void>;
-    };
-    let entries: WishlistEntry[] = [501, 502].map((bggId) => ({
+    const sources = await runtimeSources(cache);
+    const storage = sources.storage;
+    const entries: WishlistEntry[] = [501, 502].map((bggId) => ({
       id: `wishlist-${bggId}`,
       bggId,
       name: `Candidate ${bggId}`,
@@ -203,31 +215,25 @@ describe("Jev run production composition", () => {
         playingTime: null,
       },
     }));
-    storage.loadWishlist = () => Promise.resolve(structuredClone(entries));
-    storage.saveWishlist = (next) => {
-      entries = structuredClone(next);
-      return Promise.resolve();
-    };
+    await storage.saveWishlist(entries);
     const collection = await storage.loadCollection();
     collection.games[0].ownerNote = {
       state: "present",
       version: 1,
-      updatedAt: "synthetic-note-time",
+      updatedAt: fixtureTime,
       text: "private wishlist-run note sentinel",
     };
-    storage.loadCollection = () => Promise.resolve(structuredClone(collection));
-    const currentVector = storage.sourceVector();
-    storage.sourceVector = () => structuredClone(currentVector);
+    await storage.saveCollection(collection);
     const redundancySettings: RedundancySettings = {
       enabled: true,
       stage: "integrated",
       similarityThreshold: 0.7,
-      maxPenalty: 0.2,
-      componentWeights: { binary: 0, continuous: 0 },
+      maxPenalty: 0.5,
+      componentWeights: { binary: 1, continuous: 3 },
       minNeighbors: 1,
       expectedNeighbors: 5,
     };
-    storage.loadRedundancySettings = () => Promise.resolve(redundancySettings);
+    await storage.saveRedundancySettings(redundancySettings);
     let hydrationCalls = 0;
     let transportCalls = 0;
     let lastBody = "";
@@ -248,6 +254,7 @@ describe("Jev run production composition", () => {
       const controller = composeJevRunController({
         storageService: storage,
         predictionService: sources.predictionService,
+        unifiedScoringService: sources.unifiedScoringService,
         gameService: {
           getBoardgameScoringInput: () => {
             hydrationCalls++;
@@ -351,46 +358,34 @@ describe("Jev run production composition", () => {
   test("real Run HTTP boundary keeps reads provider-free and fences explicit note-authorized work", async () => {
     const directory = await mkdtemp(join(tmpdir(), "jev-run-routes-integration-"));
     const cache = await createJevPairCache(directory);
-    const sources = runtimeSources();
-    const storage = sources.storage as unknown as {
-      loadCollection(): Promise<Collection>;
-      loadRedundancySettings(): Promise<RedundancySettings>;
-      sourceVector(): SourceVector;
-    };
+    const sources = await runtimeSources(cache);
+    const storage = sources.storage;
     let collection = await storage.loadCollection();
     for (const game of collection.games) {
       game.ownerNote = {
         state: "present",
         version: 1,
-        updatedAt: "synthetic-fixture",
+        updatedAt: fixtureTime,
         text: `synthetic-private-note-${game.id}`,
       };
     }
     collection.semanticRedundancy.settings.weights.ownerNote = 1;
     collection.semanticRedundancy.settings.cachedOwnerNoteUse = true;
-    let vector = storage.sourceVector();
-    storage.loadCollection = () => Promise.resolve(structuredClone(collection));
-    storage.loadRedundancySettings = () =>
-      Promise.resolve({
-        enabled: true,
-        stage: "integrated",
-        similarityThreshold: 0.7,
-        maxPenalty: 0.2,
-        componentWeights: { binary: 0, continuous: 0 },
-        minNeighbors: 1,
-        expectedNeighbors: 5,
-      });
-    storage.sourceVector = () => structuredClone(vector);
-    const mutateCollection = (mutation: (next: Collection) => void) => {
-      collection = structuredClone(collection);
+    await storage.saveCollection(collection);
+    await storage.saveRedundancySettings({
+      enabled: true,
+      stage: "integrated",
+      similarityThreshold: 0.7,
+      maxPenalty: 0.5,
+      componentWeights: { binary: 1, continuous: 3 },
+      minNeighbors: 1,
+      expectedNeighbors: 5,
+    });
+    const mutateCollection = async (mutation: (next: Collection) => void) => {
+      collection = structuredClone(await storage.loadCollection());
       mutation(collection);
       collection.revision++;
-      vector = {
-        ...vector,
-        collectionRevision: collection.revision,
-        semanticConsentEpoch: collection.semanticRedundancy.consentEpoch,
-        semanticEvidenceEpoch: collection.semanticRedundancy.evidenceEpoch,
-      };
+      await storage.saveCollection(collection);
     };
 
     process.env.TYPESAFE_API_KEY = "integration-fake-key";
@@ -400,7 +395,7 @@ describe("Jev run production composition", () => {
     const releaseTransport = deferred<Response>();
     try {
       const worker = createJevRunWorker({
-        storageService: sources.storage,
+        storageService: storage,
         predictionService: sources.predictionService,
         cache,
         fetch: async (_url, init) => {
@@ -412,8 +407,9 @@ describe("Jev run production composition", () => {
         },
       });
       const controller = composeJevRunController({
-        storageService: sources.storage,
+        storageService: storage,
         predictionService: sources.predictionService,
+        unifiedScoringService: sources.unifiedScoringService,
         cache,
         runService: worker,
       });
@@ -492,12 +488,12 @@ describe("Jev run production composition", () => {
       for (const mutation of ["note", "consent"] as const) {
         const preview = await request("/api/redundancy/semantic/run-preview");
         const body = (await preview.json()) as { requestId: string; precondition: string };
-        mutateCollection((next) => {
+        await mutateCollection((next) => {
           if (mutation === "note") {
             next.games[0].ownerNote = {
               state: "present",
               version: 2,
-              updatedAt: "changed-synthetic-fixture",
+              updatedAt: fixtureTime,
               text: "changed-synthetic-private-note",
             };
           } else {
@@ -517,7 +513,7 @@ describe("Jev run production composition", () => {
         expect(transportCalls).toBe(0);
       }
 
-      mutateCollection((next) => {
+      await mutateCollection((next) => {
         next.semanticRedundancy.settings.cachedOwnerNoteUse = true;
       });
       const validPreview = await request("/api/redundancy/semantic/run-preview");
@@ -585,17 +581,16 @@ describe("Jev run production composition", () => {
       delete process.env.TYPESAFE_API_KEY;
       directory = await mkdtemp(join(tmpdir(), "jev-run-controller-composition-"));
       cache = await createJevPairCache(directory);
-      const sources = runtimeSources();
-      sources.storage.loadRedundancySettings = () =>
-        Promise.resolve({
-          enabled: true,
-          stage: "integrated",
-          similarityThreshold: 0.7,
-          maxPenalty: 0.2,
-          componentWeights: { binary: 0, continuous: 0 },
-          minNeighbors: 1,
-          expectedNeighbors: 5,
-        });
+      const sources = await runtimeSources(cache);
+      await sources.storage.saveRedundancySettings({
+        enabled: true,
+        stage: "integrated",
+        similarityThreshold: 0.7,
+        maxPenalty: 0.5,
+        componentWeights: { binary: 1, continuous: 3 },
+        minNeighbors: 1,
+        expectedNeighbors: 5,
+      });
       const worker = createJevRunWorker({
         storageService: sources.storage,
         predictionService: sources.predictionService,
@@ -609,6 +604,7 @@ describe("Jev run production composition", () => {
       const controller = composeJevRunController({
         storageService: sources.storage,
         predictionService: sources.predictionService,
+        unifiedScoringService: sources.unifiedScoringService,
         cache,
         runService: worker,
       });
@@ -645,17 +641,16 @@ describe("Jev run production composition", () => {
   });
 
   test("composes aggregate status with the actual source adapter when lifecycle cache is absent", async () => {
-    const sources = runtimeSources();
-    sources.storage.loadRedundancySettings = () =>
-      Promise.resolve({
-        enabled: true,
-        stage: "annotation",
-        similarityThreshold: 0.7,
-        maxPenalty: 0.2,
-        componentWeights: { binary: 0, continuous: 0 },
-        minNeighbors: 2,
-        expectedNeighbors: 5,
-      });
+    const sources = await runtimeSources();
+    await sources.storage.saveRedundancySettings({
+      enabled: true,
+      stage: "annotation",
+      similarityThreshold: 0.7,
+      maxPenalty: 0.5,
+      componentWeights: { binary: 1, continuous: 3 },
+      minNeighbors: 2,
+      expectedNeighbors: 5,
+    });
     let predictionCalls = 0;
     const predictionService = {
       listGamesWithPredictionsFromSnapshot: () => {
@@ -691,7 +686,7 @@ describe("Jev run production composition", () => {
 
   test("unavailable lifecycle cache produces no worker and startup recovery is skipped", async () => {
     let predictionCalls = 0;
-    const sources = runtimeSources();
+    const sources = await runtimeSources();
     const worker = createJevRunWorker({
       storageService: sources.storage,
       predictionService: sources.predictionService,
@@ -716,7 +711,7 @@ describe("Jev run production composition", () => {
   test("startup reconciliation interrupts prior progress without transport or predictions", async () => {
     const directory = await mkdtemp(join(tmpdir(), "jev-run-startup-recovery-"));
     const cache = await createJevPairCache(directory);
-    const sources = runtimeSources();
+    const sources = await runtimeSources(cache);
     let transportCalls = 0;
     let predictionCalls = 0;
     const predictionService = {
@@ -763,7 +758,7 @@ describe("Jev run production composition", () => {
   test("each explicit run creates a gated gateway that uses only the fake transport", async () => {
     const directory = await mkdtemp(join(tmpdir(), "jev-run-explicit-composition-"));
     const cache = await createJevPairCache(directory);
-    const sources = runtimeSources();
+    const sources = await runtimeSources(cache);
     let transportCalls = 0;
     let handle: JevRunHandle | null = null;
     process.env.TYPESAFE_API_KEY = "composition-test-key";
@@ -781,7 +776,31 @@ describe("Jev run production composition", () => {
       });
       expect(worker).not.toBeNull();
       expect(transportCalls).toBe(0);
-      handle = worker!.startRun({ noteTransmissionAuthorized: false });
+      const snapshotPrediction =
+        sources.predictionService.listGamesWithPredictionsFromSnapshot?.bind(
+          sources.predictionService,
+        );
+      if (!snapshotPrediction)
+        throw new Error("Test prediction service lacks snapshot prediction support");
+      const prepared = await prepareUnifiedJevRun({
+        scoring: sources.unifiedScoringService,
+        sourceAdapter: createJevRunSourceAdapter({
+          storageService: sources.storage,
+          predictionService: { listGamesWithPredictionsFromSnapshot: snapshotPrediction },
+        }),
+        cache,
+        request: { scope: "collection-all" },
+        budget: DEFAULT_JEV_RUN_BUDGET,
+      });
+      const reservation = await worker!.prepareValidatedPreparedRun({
+        capture: prepared.capture,
+        scope: prepared.collectionScope!,
+        unifiedPreparation: prepared,
+        noteTransmissionAuthorized: false,
+        providerBudget: DEFAULT_JEV_RUN_BUDGET,
+      });
+      expect(reservation).not.toBeNull();
+      handle = worker!.reserveValidatedPreparedRun(reservation!);
       const progress = await handle.completion;
       expect(transportCalls).toBe(1);
       expect(progress.state).toBe("interrupted");

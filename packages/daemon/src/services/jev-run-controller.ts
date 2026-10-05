@@ -27,6 +27,7 @@ import {
   type JevRunScope,
 } from "./jev-run-scope.js";
 import { prepareJevRunPair } from "./jev-run-pair.js";
+import { createWishlistPairReadinessInspector } from "./wishlist-pair-readiness.js";
 import { JEV_GATEWAY_LIMITS, JEV_MODEL_ID, isJevGatewayConfigured } from "./jev/jev-gateway.js";
 import {
   canonicalSha256,
@@ -42,6 +43,7 @@ import {
 const DEFAULT_PRECONDITION_TTL_MS = 2 * 60_000;
 const DEFAULT_RECEIPT_TTL_MS = 10 * 60_000;
 const MAX_RECEIPTS = 256;
+const MAX_PROVIDER_READINESS_ATTEMPTS = 3;
 
 export type JevRunControllerPreview = JevRunPreviewBase;
 export type JevWishlistRunControllerPreview = JevWishlistRunPreview;
@@ -557,6 +559,15 @@ export class JevRunController {
       !(await prepared.isSourceCurrent())
     )
       return { status: 412, body: { error: "precondition-failed" } };
+    const eligiblePairs =
+      prepared.scopeKind === "collection"
+        ? prepared.collectionScope?.totalEligiblePairs
+        : prepared.wishlistPreparation?.disclosure.comparisonPairCount;
+    if (
+      eligiblePairs === undefined ||
+      eligiblePairs > this.options.runService.effectiveLimits.maxEligiblePairs
+    )
+      return { status: 409, body: { error: "scope-over-limit" } };
     if (prepared.scopeKind === "collection") {
       const scope = prepared.collectionScope;
       if (
@@ -588,37 +599,109 @@ export class JevRunController {
     );
     if (!preparedRun) return { status: 412, body: { error: "precondition-failed" } };
     try {
-      return await this.coordinator.runExclusive(async () => {
-        if (authorization.expiresAtMs <= this.now().getTime())
-          return { status: 412 as const, body: { error: "precondition-failed" as const } };
-        const authority = await this.readCurrentAuthority();
-        if (!authority || !this.available() || authority.cacheRevision === null)
-          return { status: 503 as const, body: { error: "run-unavailable" as const } };
-        if (
-          authority.source.sourceVectorIdentity !== authorization.sourceVectorIdentity ||
-          authority.source.policyIdentity !== authorization.policyIdentity ||
-          this.limitsIdentity(authorization.providerBudget).identity !==
-            authorization.limitsIdentity ||
-          (input.noteTransmissionAuthorized &&
-            prepared.collectionScope?.ownerNoteBearingPairCount &&
-            !authority.source.canTransmitNotes)
-        )
-          return { status: 412 as const, body: { error: "precondition-failed" as const } };
-        if (!this.enabled(prepared.capture.collection, authority.redundancySettings))
-          return { status: 503 as const, body: { error: "run-unavailable" as const } };
-        if (this.activeHandle)
-          return { status: 409 as const, body: { error: "run-conflict" as const } };
-        if (authorization.consumed)
-          return { status: 409 as const, body: { error: "run-conflict" as const } };
-        return this.acceptValidatedRun(
-          input.requestId,
-          authorization,
-          preparedRun,
-          prepared.scopeKind,
-        );
-      });
+      for (let attempt = 0; attempt < MAX_PROVIDER_READINESS_ATTEMPTS; attempt++) {
+        const configuredBeforeScan = this.isGatewayConfigured();
+        const readiness = configuredBeforeScan
+          ? null
+          : this.scanUnifiedProviderReadiness(prepared, input.noteTransmissionAuthorized);
+        if (readiness?.state === "retry") continue;
+        const outcome = await this.coordinator.runExclusive(async () => {
+          if (authorization.expiresAtMs <= this.now().getTime())
+            return { status: 412 as const, body: { error: "precondition-failed" as const } };
+          const authority = await this.readCurrentAuthority();
+          if (authorization.expiresAtMs <= this.now().getTime())
+            return { status: 412 as const, body: { error: "precondition-failed" as const } };
+          if (!authority || !this.available() || authority.cacheRevision === null)
+            return { status: 503 as const, body: { error: "run-unavailable" as const } };
+          if (
+            authority.source.sourceVectorIdentity !== authorization.sourceVectorIdentity ||
+            authority.source.policyIdentity !== authorization.policyIdentity ||
+            this.limitsIdentity(authorization.providerBudget).identity !==
+              authorization.limitsIdentity ||
+            (input.noteTransmissionAuthorized &&
+              prepared.collectionScope?.ownerNoteBearingPairCount &&
+              !authority.source.canTransmitNotes)
+          )
+            return { status: 412 as const, body: { error: "precondition-failed" as const } };
+          if (!this.enabled(prepared.capture.collection, authority.redundancySettings))
+            return { status: 503 as const, body: { error: "run-unavailable" as const } };
+          if (this.activeHandle)
+            return { status: 409 as const, body: { error: "run-conflict" as const } };
+          if (authorization.consumed)
+            return { status: 409 as const, body: { error: "run-conflict" as const } };
+          const configuredAtAdmission = this.isGatewayConfigured();
+          if (configuredAtAdmission !== configuredBeforeScan) return { retry: true as const };
+          if (!configuredAtAdmission) {
+            const currentRevision = this.options.cache.mutationRevision();
+            if (
+              !readiness ||
+              readiness.state !== "stable" ||
+              currentRevision === null ||
+              currentRevision !== readiness.revision
+            )
+              return { retry: true as const };
+            if (readiness.requiresProvider)
+              return { status: 503 as const, body: { error: "run-unavailable" as const } };
+          }
+          return this.acceptValidatedRun(
+            input.requestId,
+            authorization,
+            preparedRun,
+            prepared.scopeKind,
+          );
+        });
+        if ("retry" in outcome) continue;
+        return outcome;
+      }
+      return { status: 503, body: { error: "run-unavailable" } };
     } catch {
       return { status: 409, body: { error: "run-conflict" } };
+    }
+  }
+
+  private scanUnifiedProviderReadiness(
+    prepared: PreparedUnifiedRun,
+    noteTransmissionAuthorized: boolean,
+  ): { state: "stable"; revision: number; requiresProvider: boolean } | { state: "retry" } {
+    try {
+      const before = this.options.cache.mutationRevision();
+      if (before === null) return { state: "retry" };
+      let requiresProvider = false;
+      if (prepared.scopeKind === "collection") {
+        const scope = prepared.collectionScope;
+        if (!scope) return { state: "retry" };
+        let collectionLookup: JevRunCollectionLookup | undefined;
+        for (const pair of scope.pairs()) {
+          const result = prepareJevRunPair({
+            plannedPair: pair,
+            scope,
+            collection: prepared.capture.collection,
+            cache: this.options.cache,
+            noteTransmissionAuthorized,
+            getCollectionLookup: () =>
+              (collectionLookup ??= createJevRunCollectionLookup(prepared.capture.collection)),
+          });
+          if (result.status === "ready") {
+            requiresProvider = true;
+            break;
+          }
+        }
+      } else {
+        const wishlist = prepared.wishlistPreparation;
+        if (!wishlist) return { state: "retry" };
+        const inspectPair = createWishlistPairReadinessInspector(wishlist, this.options.cache);
+        for (const pair of wishlist.pairs) {
+          if (inspectPair(pair).state === "executable-miss") {
+            requiresProvider = true;
+            break;
+          }
+        }
+      }
+      const after = this.options.cache.mutationRevision();
+      if (after === null || after !== before) return { state: "retry" };
+      return { state: "stable", revision: before, requiresProvider };
+    } catch {
+      return { state: "retry" };
     }
   }
 
