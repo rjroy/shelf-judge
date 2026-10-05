@@ -46,15 +46,21 @@ Targeted validation with Bun 1.4.0 and API-key/debug variables unset: five suite
 
 Current diff size: test changes net −78 lines; this note adds 14 lines net; total diff net −64 lines. No production files changed.
 
-## Current checkpoint: `shelf-judge-gz1q`
+## Verified checkpoint: `shelf-judge-gz1q` (`3514251`)
 
-Pending independent final validation and review; no acceptance is claimed.
+Independent final review accepted. Root tests passed (3,942 tests) and all final gates passed before checkpoint `3514251`.
 
 - Displayed fitness: unified live-list and snapshot/proposal paths now use the same local score projector. The live list still excludes previously-owned entries; snapshot/proposal projections include them. The output game remains the explicit public projection when using public snapshots, not the captured private source.
 - Wishlist identity: one durable wishlist projection/hash fences membership and source rows, excluding saved prediction fields. Removed the redundant candidate baseline map; direct durable edit/removal, unrelated-row memo separation, and overlay original-baseline tests remain.
 - Wishlist calculation: the projection producer returns calculation details explicitly alongside results; the prior public projection API is a thin results-only wrapper. The observer remains optional and observational. Calculation-only scope, unavailable results, and authorization separation remain intact.
 - Redundancy: collection and candidate adjustment paths share only tie/predicted-neighbor/denominator/penalty-rounding/floor math. Each caller retains its ordering and insufficient-neighbor behavior.
 
-Validation with Bun 1.4.0 and API-key/debug variables unset: seven affected suites passed (90 tests); daemon typecheck, scoped ESLint, scoped Prettier check, and `git diff --check` pass. Independent final branch gates and review remain pending.
+Validation with Bun 1.4.0 and API-key/debug variables unset: seven affected suites passed (90 tests); daemon typecheck, scoped ESLint, scoped Prettier check, and `git diff --check` pass. Independent final branch gates passed and review accepted before checkpoint `3514251`.
 
 Current source diff net: −55 lines, including the 34-line shared arithmetic module; the complete diff including this note is net −42 lines.
+
+## Current checkpoint: `shelf-judge-f5zw`
+
+Independent final validation and review accepted. The bounded scope followed the read-only findings in `shelf-judge-uldx` (`fecae63`). Consolidated the three accepted-run handoffs in `JevRunController` into one synchronous private method. Each branch retains its distinct validation and error boundary before calling the method; reservation still precedes authorization consumption, receipt activation and completion-based TTL, active-handle and receipt identity guards, and rejection-swallowing cleanup remain in the shared handoff.
+
+Validation with Bun 1.4.0 and API-key/debug variables unset: four relevant suites passed (34 tests); root tests passed (3,942 tests), and all final gates passed. No test additions were needed; existing controller lifecycle tests cover duplicate starts, conflicts, cancellation, stale completion, receipt TTL/capacity, replay, and stale cancel. Independent final review accepted.

@@ -7,7 +7,12 @@ import type {
   RedundancySettings,
 } from "@shelf-judge/shared";
 import type { JevPairCache } from "./jev-pair-cache-service.js";
-import type { JevRunCapture, JevRunHandle, JevRunService } from "./jev-run-service.js";
+import type {
+  JevRunCapture,
+  JevRunHandle,
+  JevRunService,
+  ValidatedPreparedJevRun,
+} from "./jev-run-service.js";
 import type { JevRunSourceAdapter } from "./jev-run-source-adapter.js";
 import type { UnifiedScoringService } from "./unified-scoring-service.js";
 import { prepareUnifiedJevRun, type PreparedUnifiedRun } from "./unified-jev-run-preparation.js";
@@ -444,28 +449,7 @@ export class JevRunController {
             return { status: 409 as const, body: { error: "run-conflict" as const } };
           if (authorization.consumed)
             return { status: 409 as const, body: { error: "run-conflict" as const } };
-          const handle = this.options.runService.reserveValidatedPreparedRun(validated);
-          authorization.consumed = true;
-          this.activeHandle = handle;
-          this.activeRunScope = { handle, scope: authorization.scopeKind };
-          const receipt = this.receipts.get(input.requestId);
-          if (receipt) {
-            receipt.state = "active";
-            receipt.expiresAtMs = Number.POSITIVE_INFINITY;
-          }
-          void handle.completion
-            .finally(() => {
-              if (this.activeHandle === handle) {
-                this.activeHandle = null;
-                if (this.activeRunScope?.handle === handle) this.activeRunScope = null;
-              }
-              if (receipt && this.receipts.get(input.requestId) === receipt) {
-                receipt.state = "replay";
-                receipt.expiresAtMs = this.now().getTime() + this.receiptTtlMs();
-              }
-            })
-            .catch(() => {});
-          return { status: 200 as const, body: { state: "started" as const, runId: handle.runId } };
+          return this.acceptValidatedRun(input.requestId, authorization, validated, "wishlist");
         });
       } catch {
         return { status: 409, body: { error: "run-conflict" } };
@@ -548,28 +532,12 @@ export class JevRunController {
 
         // The opaque reservation was copied and scope-validated outside this lock.
         // This operation only consumes the token and reserves process-local activity.
-        const handle = this.options.runService.reserveValidatedPreparedRun(preparedRun);
-        authorization.consumed = true;
-        this.activeHandle = handle;
-        this.activeRunScope = { handle, scope: authorization.scopeKind };
-        const receipt = this.receipts.get(input.requestId);
-        if (receipt) {
-          receipt.state = "active";
-          receipt.expiresAtMs = Number.POSITIVE_INFINITY;
-        }
-        void handle.completion
-          .finally(() => {
-            if (this.activeHandle === handle) {
-              this.activeHandle = null;
-              if (this.activeRunScope?.handle === handle) this.activeRunScope = null;
-            }
-            if (receipt && this.receipts.get(input.requestId) === receipt) {
-              receipt.state = "replay";
-              receipt.expiresAtMs = this.now().getTime() + this.receiptTtlMs();
-            }
-          })
-          .catch(() => {});
-        return { status: 200 as const, body: { state: "started" as const, runId: handle.runId } };
+        return this.acceptValidatedRun(
+          input.requestId,
+          authorization,
+          preparedRun,
+          authorization.scopeKind,
+        );
       });
       return response;
     } catch {
@@ -642,32 +610,46 @@ export class JevRunController {
           return { status: 409 as const, body: { error: "run-conflict" as const } };
         if (authorization.consumed)
           return { status: 409 as const, body: { error: "run-conflict" as const } };
-        const handle = this.options.runService.reserveValidatedPreparedRun(preparedRun);
-        authorization.consumed = true;
-        this.activeHandle = handle;
-        this.activeRunScope = { handle, scope: prepared.scopeKind };
-        const receipt = this.receipts.get(input.requestId);
-        if (receipt) {
-          receipt.state = "active";
-          receipt.expiresAtMs = Number.POSITIVE_INFINITY;
-        }
-        void handle.completion
-          .finally(() => {
-            if (this.activeHandle === handle) {
-              this.activeHandle = null;
-              if (this.activeRunScope?.handle === handle) this.activeRunScope = null;
-            }
-            if (receipt && this.receipts.get(input.requestId) === receipt) {
-              receipt.state = "replay";
-              receipt.expiresAtMs = this.now().getTime() + this.receiptTtlMs();
-            }
-          })
-          .catch(() => {});
-        return { status: 200 as const, body: { state: "started" as const, runId: handle.runId } };
+        return this.acceptValidatedRun(
+          input.requestId,
+          authorization,
+          preparedRun,
+          prepared.scopeKind,
+        );
       });
     } catch {
       return { status: 409, body: { error: "run-conflict" } };
     }
+  }
+
+  private acceptValidatedRun(
+    requestId: string,
+    authorization: AuthorizationRecord,
+    reservation: ValidatedPreparedJevRun,
+    scope: AuthorizationRecord["scopeKind"],
+  ): JevRunControllerStartResponse {
+    const handle = this.options.runService.reserveValidatedPreparedRun(reservation);
+    authorization.consumed = true;
+    this.activeHandle = handle;
+    this.activeRunScope = { handle, scope };
+    const receipt = this.receipts.get(requestId);
+    if (receipt) {
+      receipt.state = "active";
+      receipt.expiresAtMs = Number.POSITIVE_INFINITY;
+    }
+    void handle.completion
+      .finally(() => {
+        if (this.activeHandle === handle) {
+          this.activeHandle = null;
+          if (this.activeRunScope?.handle === handle) this.activeRunScope = null;
+        }
+        if (receipt && this.receipts.get(requestId) === receipt) {
+          receipt.state = "replay";
+          receipt.expiresAtMs = this.now().getTime() + this.receiptTtlMs();
+        }
+      })
+      .catch(() => {});
+    return { status: 200, body: { state: "started", runId: handle.runId } };
   }
 
   private async previewUnifiedCollection(
