@@ -834,13 +834,12 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         }
         const normalizedCurrent =
           decoded.normalized && migration.sourceVersion === CURRENT_COLLECTION_SCHEMA_VERSION;
-        const candidate = normalizedCurrent
-          ? {
+        const validated = normalizedCurrent
+          ? validateCollection({
               ...migration.data,
               revision: migration.data.revision + 1,
-            }
+            })
           : migration.data;
-        const validated = validateCollection(candidate);
         if (!migration.migrated && !decoded.normalized) {
           sourceVector.publishCollection(sourceIdentityForCollection(validated));
           return validated;

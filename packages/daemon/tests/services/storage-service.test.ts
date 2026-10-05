@@ -78,6 +78,55 @@ function captureLogger(): { entries: string[]; logger: Logger } {
 }
 
 describe("StorageService.loadJevSourceSnapshot", () => {
+  test("validates each current collection read once and observes later disk replacements", async () => {
+    const { service, fileOps } = makeService();
+    const initial = await service.loadCollection();
+    const writeMethods = new Set(["writeFile", "writeFileExclusive", "rename", "unlink"]);
+    const writesAfterInitialLoad = fileOps.calls.filter(({ method }) =>
+      writeMethods.has(method),
+    ).length;
+    const originalParse = CollectionSchema.parse.bind(CollectionSchema);
+    const originalDescriptor = Object.getOwnPropertyDescriptor(CollectionSchema, "parse");
+    if (originalDescriptor === undefined)
+      throw new Error("CollectionSchema.parse descriptor missing");
+    let parseCalls = 0;
+    CollectionSchema.parse = (...args: Parameters<typeof CollectionSchema.parse>) => {
+      parseCalls += 1;
+      return originalParse(...args);
+    };
+
+    try {
+      const firstDiskRead = await service.loadCollection();
+      expect(parseCalls).toBe(1);
+      expect(firstDiskRead).toEqual(initial);
+
+      const replacement = JSON.parse(fileOps.files.get(COLLECTION_PATH)!) as Record<
+        string,
+        unknown
+      >;
+      replacement.name = "Externally replaced collection";
+      const replacementText = JSON.stringify(replacement);
+      const priorMetadata = fileOps.metadata.get(COLLECTION_PATH)!;
+      fileOps.files.set(COLLECTION_PATH, replacementText);
+      fileOps.metadata.set(COLLECTION_PATH, {
+        ...priorMetadata,
+        ino: priorMetadata.ino + 1n,
+        size: BigInt(Buffer.byteLength(replacementText)),
+        ctimeNs: priorMetadata.ctimeNs + 1n,
+      });
+
+      parseCalls = 0;
+      const secondDiskRead = await service.loadCollection();
+      expect(parseCalls).toBe(1);
+      expect(secondDiskRead.name).toBe("Externally replaced collection");
+      expect(fileOps.calls.filter(({ method }) => writeMethods.has(method))).toHaveLength(
+        writesAfterInitialLoad,
+      );
+    } finally {
+      Object.defineProperty(CollectionSchema, "parse", originalDescriptor);
+    }
+  });
+
   test("stats sources on every call, reuses unchanged parsed data, and protects cached values", async () => {
     const { service, fileOps } = makeService();
     const load = () => service.loadJevSourceSnapshot!();

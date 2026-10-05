@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +26,12 @@ function deferred<Value = void>() {
   return { promise, resolve };
 }
 
+type ConsoleSpy = {
+  mock: { calls: unknown[][] };
+  mockRestore(): void;
+  mockClear(): void;
+};
+
 async function bounded<Value>(promise: Promise<Value>, timeoutMs = 5_000) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -42,17 +48,27 @@ async function bounded<Value>(promise: Promise<Value>, timeoutMs = 5_000) {
 
 describe("Profile and collection snapshot concurrent requests", () => {
   let cleanup: (() => Promise<void>) | null = null;
-  const originalNodeDebug = process.env.NODE_DEBUG;
-  const logSpy = spyOn(console, "log").mockImplementation(() => {});
-  const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
-  const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+  let originalNodeDebug: string | undefined;
+  let logSpy: ConsoleSpy;
+  let warnSpy: ConsoleSpy;
+  let errorSpy: ConsoleSpy;
+
+  beforeEach(() => {
+    originalNodeDebug = process.env.NODE_DEBUG;
+    logSpy = spyOn(console, "log").mockImplementation(() => {}) as ConsoleSpy;
+    warnSpy = spyOn(console, "warn").mockImplementation(() => {}) as ConsoleSpy;
+    errorSpy = spyOn(console, "error").mockImplementation(() => {}) as ConsoleSpy;
+    logSpy.mockClear();
+    warnSpy.mockClear();
+    errorSpy.mockClear();
+  });
 
   afterEach(async () => {
     await cleanup?.();
     cleanup = null;
-    logSpy.mockReset();
-    warnSpy.mockReset();
-    errorSpy.mockReset();
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
     if (originalNodeDebug === undefined) delete process.env.NODE_DEBUG;
     else process.env.NODE_DEBUG = originalNodeDebug;
   });
@@ -207,7 +223,7 @@ describe("Profile and collection snapshot concurrent requests", () => {
     expect(CollectionSnapshotSchema.safeParse(await healthySnapshot.json()).success).toBe(true);
 
     const routeSummaries = logSpy.mock.calls.filter(
-      (call) => call[1] === "collection snapshot request completed",
+      (call: unknown[]) => call[1] === "collection snapshot request completed",
     );
     expect(routeSummaries).toHaveLength(3);
     const hasDetailedMessages = (calls: unknown[][]) =>

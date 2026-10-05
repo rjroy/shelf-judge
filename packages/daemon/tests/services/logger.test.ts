@@ -1,16 +1,32 @@
-import { describe, test, expect, spyOn, afterEach } from "bun:test";
+import { describe, test, expect, spyOn, afterEach, beforeEach } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { createLogger } from "../../src/services/logger.js";
 
+type ConsoleSpy = {
+  mock: { calls: unknown[][] };
+  mockImplementation(implementation: (...args: never[]) => void): ConsoleSpy;
+  mockRestore(): void;
+  mockClear(): void;
+};
+
 describe("createLogger", () => {
-  const logSpy = spyOn(console, "log");
-  const warnSpy = spyOn(console, "warn");
-  const errorSpy = spyOn(console, "error");
+  let logSpy: ConsoleSpy;
+  let warnSpy: ConsoleSpy;
+  let errorSpy: ConsoleSpy;
+
+  beforeEach(() => {
+    logSpy = spyOn(console, "log").mockImplementation(() => {}) as ConsoleSpy;
+    warnSpy = spyOn(console, "warn").mockImplementation(() => {}) as ConsoleSpy;
+    errorSpy = spyOn(console, "error").mockImplementation(() => {}) as ConsoleSpy;
+    logSpy.mockClear();
+    warnSpy.mockClear();
+    errorSpy.mockClear();
+  });
 
   afterEach(() => {
-    logSpy.mockReset();
-    warnSpy.mockReset();
-    errorSpy.mockReset();
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   test("log delegates to console.log with prefix", () => {

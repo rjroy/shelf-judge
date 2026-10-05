@@ -1,20 +1,37 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { performance } from "node:perf_hooks";
 import { spawnSync } from "node:child_process";
 import { Hono } from "hono";
 import type { CollectionSnapshotResponseDecision } from "../../src/services/collection-snapshot-cache-service.js";
 import { createCollectionSnapshotRoutes } from "../../src/routes/collection-snapshot.js";
 
-const originalNodeDebug = process.env.NODE_DEBUG;
-const originalPerformanceNow = performance.now.bind(performance);
-const logSpy = spyOn(console, "log").mockImplementation(() => {});
-const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
-const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+type ConsoleSpy = {
+  mock: { calls: unknown[][] };
+  mockRestore(): void;
+  mockClear(): void;
+};
+
+let originalNodeDebug: string | undefined;
+let originalPerformanceNow: typeof performance.now;
+let logSpy: ConsoleSpy;
+let warnSpy: ConsoleSpy;
+let errorSpy: ConsoleSpy;
+
+beforeEach(() => {
+  originalNodeDebug = process.env.NODE_DEBUG;
+  originalPerformanceNow = performance.now.bind(performance);
+  logSpy = spyOn(console, "log").mockImplementation(() => {}) as ConsoleSpy;
+  warnSpy = spyOn(console, "warn").mockImplementation(() => {}) as ConsoleSpy;
+  errorSpy = spyOn(console, "error").mockImplementation(() => {}) as ConsoleSpy;
+  logSpy.mockClear();
+  warnSpy.mockClear();
+  errorSpy.mockClear();
+});
 
 afterEach(() => {
-  logSpy.mockReset();
-  warnSpy.mockReset();
-  errorSpy.mockReset();
+  logSpy.mockRestore();
+  warnSpy.mockRestore();
+  errorSpy.mockRestore();
   performance.now = originalPerformanceNow;
   if (originalNodeDebug === undefined) delete process.env.NODE_DEBUG;
   else process.env.NODE_DEBUG = originalNodeDebug;

@@ -2609,6 +2609,7 @@ describe("wishlist service", () => {
         sourceAdapter,
         cache,
         runService,
+        gatewayConfigured: () => true,
         wishlistPreparation: { prepare: () => Promise.resolve(prepared) },
       });
       const preview = await controller.previewWishlist({
@@ -2687,6 +2688,7 @@ describe("wishlist service", () => {
         sourceAdapter,
         cache,
         runService: activeRunService,
+        gatewayConfigured: () => true,
         wishlistPreparation: preparation,
       });
       const activePreview = await activeController.previewWishlist({
@@ -3004,6 +3006,7 @@ describe("wishlist service", () => {
         sourceAdapter,
         cache,
         runService: startRunService,
+        gatewayConfigured: () => true,
         wishlistPreparation: preparation,
       });
       const stalePreview = await runController.previewWishlist();
@@ -3256,6 +3259,7 @@ describe("wishlist service", () => {
           sourceAdapter,
           cache,
           runService: mutationRunService,
+          gatewayConfigured: () => true,
           wishlistPreparation: preparation,
         });
         const mutationPreview = await mutationController.previewWishlist();
@@ -3346,6 +3350,7 @@ describe("wishlist service", () => {
         sourceAdapter,
         cache,
         runService: cancelRunService,
+        gatewayConfigured: () => true,
         wishlistPreparation: preparation,
       });
       const cancelPreview = await cancelController.previewWishlist();
@@ -3653,6 +3658,7 @@ describe("wishlist service", () => {
         sourceAdapter,
         cache,
         runService,
+        gatewayConfigured: () => true,
         wishlistPreparation: preparation,
       });
       const preview = await controller.previewWishlist();
@@ -3722,6 +3728,7 @@ describe("wishlist service", () => {
         sourceAdapter: reopenedSourceAdapter,
         cache,
         runService: restartedService,
+        gatewayConfigured: () => true,
         wishlistPreparation: reopenedPreparation,
       });
       expect(restartedController.activeRun()).toBeNull();
