@@ -44,7 +44,11 @@ This supersedes the "ELO and axis fitness are independent peer scores" decision 
 
 ### Value Derivation
 
-- REQ-TAXIS-6: For each game, the tournament axis value MUST be the normalized ELO display score defined by REQ-TOURN-9: `clamp(1 + 9 * (elo - min_ref) / (max_ref - min_ref), 1.0, 10.0)`. The bounds `min_ref` and `max_ref` are derived from the configurable `half_width` per REQ-TOURN-9 (`min_ref = 1500 - half_width`, `max_ref = 1500 + half_width`); they are not hardcoded constants. Any game with a displayable normalized score contributes it normally, without a low-comparison qualifier or threshold.
+- REQ-TAXIS-6: For each game, the tournament axis value MUST be the normalized ELO display score defined by REQ-TOURN-9: `clamp(1 + 9 * (elo - min_ref) / (max_ref - min_ref), 1.0, 10.0)`. When observed normalization bounds exist, `min_ref` and `max_ref` are the persisted asymmetric bounds; otherwise legacy data uses the configurable `half_width` (`1500 ± half_width`). Any game with a displayable normalized score contributes it normally, without a low-comparison qualifier or threshold.
+
+### Observed normalization bounds
+
+An explicit Normalize action captures the minimum and maximum raw ELO among current collection members with at least one comparison. It persists these bounds without changing raw ELO. Bounds remain frozen as comparisons change until the next explicit Normalize action, which recomputes both extrema and may shrink or expand the range. Unranked and non-collection games do not affect the bounds. Later ELO values outside the captured range clamp to 1–10. If all eligible ELO values are equal, that value maps to the midpoint 5.5; with no eligible games, normalization is a no-op. The existing five-compared-game display floor remains in force. Legacy files lacking observed bounds continue to use `normalizationHalfWidth`; changing that setting explicitly clears observed bounds.
 
 - REQ-TAXIS-7: The tournament axis value for a game is `null` in two cases: (a) the game has no comparisons, or (b) fewer than 5 games in the collection have any comparisons. Both cases produce `null` for the same documented reason: the normalization formula in REQ-TOURN-9 is unreliable below the 5-game cohort floor. A `null` value is excluded from both numerator and denominator of the fitness weighted average, identical to the existing handling of unrated personal axes.
 
@@ -87,7 +91,7 @@ This supersedes the "ELO and axis fitness are independent peer scores" decision 
 
 ## Scope Exclusions
 
-- **No changes to ELO math.** The tournament axis consumes the existing normalized display score. K-factor and reference-window behavior are unchanged.
+- **No changes to raw ELO math.** K-factor and comparison updates are unchanged. Normalized display values use captured observed bounds when present, with the symmetric half-width retained as a legacy fallback.
 - **No new editing affordances.** The user cannot delete or re-weight the tournament axis through this spec. That gap is acknowledged and stubbed for future work.
 - **No new sort modes beyond REQ-TAXIS-13.** Existing sorts continue to work; no combined-sort or ranked-divergence sort is added.
 

@@ -111,6 +111,19 @@ describe("normalizeElo", () => {
     expect(normalizeElo(1500, 200)).toBeCloseTo(5.5, 4);
   });
 
+  test("normalizes observed asymmetric bounds and clamps later outliers", () => {
+    const bounds = { minElo: 1367.11, maxElo: 1627.91 };
+    expect(normalizeElo(bounds.minElo, bounds)).toBe(1);
+    expect(normalizeElo(bounds.maxElo, bounds)).toBe(10);
+    expect(normalizeElo(1500, bounds)).toBeCloseTo(5.586, 3);
+    expect(normalizeElo(1300, bounds)).toBe(1);
+    expect(normalizeElo(1700, bounds)).toBe(10);
+  });
+
+  test("maps equal observed bounds to the midpoint", () => {
+    expect(normalizeElo(1500, { minElo: 1500, maxElo: 1500 })).toBe(5.5);
+  });
+
   test("linear interpolation between bounds", () => {
     // 1/4 of the way from bottom (1100) to top (1900) = 1300
     // Should be 1/4 of the way from 1.0 to 10.0 = 1 + 9*0.25 = 3.25

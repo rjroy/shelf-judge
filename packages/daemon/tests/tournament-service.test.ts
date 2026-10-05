@@ -2,8 +2,18 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { createTournamentService } from "../src/services/tournament-service.js";
 import type { TournamentService } from "../src/services/tournament-service.js";
 import type { StorageService } from "../src/services/storage-service.js";
-import type { TournamentData, Game, BggGameData, GameWithScore } from "@shelf-judge/shared";
+import type {
+  TournamentData,
+  TournamentGameStats,
+  Game,
+  BggGameData,
+  GameWithScore,
+} from "@shelf-judge/shared";
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
+
+function tournamentGameStats(eloRating: number, comparisonCount: number): TournamentGameStats {
+  return { eloRating, comparisonCount, wins: 0, losses: 0, recentComparisons: [] };
+}
 
 // In-memory storage stub for tournament data
 function createStubStorage(): StorageService & {
@@ -939,6 +949,90 @@ describe("TournamentService", () => {
       const updated = await service.updateSettings({ kFactorThreshold: 20 });
       expect(updated.kFactorThreshold).toBe(20);
       expect(updated.normalizationHalfWidth).toBe(400); // Unchanged
+    });
+
+    test("explicit half-width update clears frozen observed bounds", async () => {
+      storage.tournamentData.settings.normalizationBounds = { minElo: 1400, maxElo: 1600 };
+      const updated = await service.updateSettings({ normalizationHalfWidth: 450 });
+      expect(updated.normalizationHalfWidth).toBe(450);
+      expect(updated.normalizationBounds).toBeUndefined();
+    });
+
+    test("half-width update clears bounds even when patch also supplies bounds", async () => {
+      storage.tournamentData.settings.normalizationBounds = { minElo: 1400, maxElo: 1600 };
+      const updated = await service.updateSettings({
+        kFactorThreshold: 20,
+        normalizationHalfWidth: 450,
+        normalizationBounds: { minElo: 1300, maxElo: 1700 },
+      });
+      expect(updated.kFactorThreshold).toBe(20);
+      expect(updated.normalizationHalfWidth).toBe(450);
+      expect(updated.normalizationBounds).toBeUndefined();
+      expect(Object.hasOwn(updated, "normalizationBounds")).toBe(false);
+    });
+  });
+
+  describe("normalization", () => {
+    test("freezes observed asymmetric extrema of compared current collection games", async () => {
+      storage.collectionGameIds = ["low", "high", "middle", "middle-2", "middle-3", "unranked"];
+      storage.tournamentData.gameStats = {
+        low: tournamentGameStats(1367.11, 4),
+        high: tournamentGameStats(1627.91, 2),
+        middle: tournamentGameStats(1500, 1),
+        "middle-2": tournamentGameStats(1490, 1),
+        "middle-3": tournamentGameStats(1510, 1),
+        unranked: tournamentGameStats(1200, 0),
+        deleted: tournamentGameStats(1000, 5),
+      };
+
+      expect(await service.normalizeFitness()).toEqual({ normalized: 5 });
+      expect(storage.tournamentData.settings.normalizationBounds).toEqual({
+        minElo: 1367.11,
+        maxElo: 1627.91,
+      });
+      expect(storage.tournamentData.gameStats.low.eloRating).toBe(1367.11);
+      expect(storage.tournamentData.gameStats.high.eloRating).toBe(1627.91);
+      expect((await service.getGameStats("low")).normalizedScore).toBe(1);
+      expect((await service.getGameStats("high")).normalizedScore).toBe(10);
+    });
+
+    test("recomputes and shrinks bounds on explicit action; empty cohort is a no-op", async () => {
+      storage.collectionGameIds = ["one", "two"];
+      storage.tournamentData.settings.normalizationBounds = { minElo: 1000, maxElo: 2000 };
+      storage.tournamentData.gameStats = {
+        one: tournamentGameStats(1450, 1),
+        two: tournamentGameStats(1550, 1),
+      };
+      expect(await service.normalizeFitness()).toEqual({ normalized: 2 });
+      expect(storage.tournamentData.settings.normalizationBounds).toEqual({
+        minElo: 1450,
+        maxElo: 1550,
+      });
+      storage.collectionGameIds = [];
+      const savesBefore = storage.saveTournamentCalls;
+      expect(await service.normalizeFitness()).toEqual({ normalized: 0 });
+      expect(storage.saveTournamentCalls).toBe(savesBefore);
+      expect(storage.tournamentData.settings.normalizationBounds).toEqual({
+        minElo: 1450,
+        maxElo: 1550,
+      });
+    });
+
+    test("uses equal observed bounds safely", async () => {
+      storage.collectionGameIds = ["a", "b", "c", "d", "e"];
+      storage.tournamentData.gameStats = {
+        a: tournamentGameStats(1500, 1),
+        b: tournamentGameStats(1500, 1),
+        c: tournamentGameStats(1500, 1),
+        d: tournamentGameStats(1500, 1),
+        e: tournamentGameStats(1500, 1),
+      };
+      await service.normalizeFitness();
+      expect(storage.tournamentData.settings.normalizationBounds).toEqual({
+        minElo: 1500,
+        maxElo: 1500,
+      });
+      expect((await service.getGameStats("a")).normalizedScore).toBe(5.5);
     });
   });
 

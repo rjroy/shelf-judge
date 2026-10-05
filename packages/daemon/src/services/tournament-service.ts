@@ -152,7 +152,10 @@ export function deriveDisplayStats(
   const canDisplay = shouldDisplayRanking(gamesWithComparisons);
   const normalizedScore =
     canDisplay && comparisonCount > 0
-      ? normalizeElo(eloRating, data.settings.normalizationHalfWidth)
+      ? normalizeElo(
+          eloRating,
+          data.settings.normalizationBounds ?? data.settings.normalizationHalfWidth,
+        )
       : null;
 
   let displayLabel: string;
@@ -467,9 +470,16 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
 
     async normalizeFitness(): Promise<{ normalized: number }> {
       const data = await storageService.loadTournament();
+      const collection = await storageService.loadCollection();
+      const collectionGameIds = new Set(collection.games.map((game) => game.id));
+      const eligibleRatings = Object.entries(data.gameStats).filter(
+        ([gameId, stats]) => collectionGameIds.has(gameId) && stats.comparisonCount > 0,
+      );
+      if (eligibleRatings.length === 0) return { normalized: 0 };
+
       let minElo = Infinity;
       let maxElo = -Infinity;
-      for (const stats of Object.values(data.gameStats)) {
+      for (const [, stats] of eligibleRatings) {
         if (stats.eloRating < minElo) {
           minElo = stats.eloRating;
         }
@@ -478,16 +488,10 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         }
       }
 
-      // calculate the normalization half-width as the distance from 1500 to the furthest rating, or use the existing half-width if it's larger
-      const halfWidth = Math.max(
-        data.settings.normalizationHalfWidth,
-        maxElo - 1500,
-        1500 - minElo,
-      );
-      data.settings.normalizationHalfWidth = halfWidth;
+      data.settings.normalizationBounds = { minElo, maxElo };
 
       await saveTournament(data);
-      return { normalized: Object.keys(data.gameStats).length };
+      return { normalized: eligibleRatings.length };
     },
 
     async onGameDeleted(gameId: string): Promise<void> {
@@ -519,6 +523,9 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
     async updateSettings(patch: Partial<TournamentSettings>): Promise<TournamentSettings> {
       const data = await storageService.loadTournament();
       Object.assign(data.settings, patch);
+      if (patch.normalizationHalfWidth !== undefined) {
+        delete data.settings.normalizationBounds;
+      }
       await saveTournament(data);
       return data.settings;
     },

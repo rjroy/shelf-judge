@@ -771,6 +771,7 @@ export interface RedundancySimilarityInfo {
 export interface TournamentSettings {
   kFactorThreshold: number; // Default 15. Games with fewer comparisons use K=32, rest use K=16.
   normalizationHalfWidth: number; // Default 400. Reference range is 1500 ± this value.
+  normalizationBounds?: { minElo: number; maxElo: number };
 }
 
 export type SessionFilterType = "name" | "minFitness" | "maxFitness" | "bggTag";

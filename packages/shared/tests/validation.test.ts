@@ -734,6 +734,24 @@ describe("TournamentSettingsSchema", () => {
       }).success,
     ).toBe(false);
   });
+
+  test("validates finite ordered tournament normalization bounds", () => {
+    expect(
+      TournamentSettingsUpdateSchema.safeParse({
+        normalizationBounds: { minElo: 1367.11, maxElo: 1627.91 },
+      }).success,
+    ).toBe(true);
+    expect(
+      TournamentSettingsUpdateSchema.safeParse({
+        normalizationBounds: { minElo: 1700, maxElo: 1600 },
+      }).success,
+    ).toBe(false);
+    expect(
+      TournamentSettingsUpdateSchema.safeParse({
+        normalizationBounds: { minElo: Number.POSITIVE_INFINITY, maxElo: 1600 },
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("TournamentDataSchema", () => {

@@ -43,10 +43,14 @@ export function calculateNewRatings(
  * Always returns a number. Use shouldDisplayRanking() to decide whether to show the result.
  * Phase 3 composes both to produce TournamentGameStatsDisplay.normalizedScore: number | null.
  */
-export function normalizeElo(elo: number, halfWidth: number): number {
-  const minElo = 1500 - halfWidth;
-  const range = 2 * halfWidth;
-  const normalized = 1 + (9 * (elo - minElo)) / range;
+export function normalizeElo(
+  elo: number,
+  normalization: number | { minElo: number; maxElo: number },
+): number {
+  const minElo = typeof normalization === "number" ? 1500 - normalization : normalization.minElo;
+  const maxElo = typeof normalization === "number" ? 1500 + normalization : normalization.maxElo;
+  if (minElo === maxElo) return 5.5;
+  const normalized = 1 + (9 * (elo - minElo)) / (maxElo - minElo);
   return Math.max(1.0, Math.min(10.0, normalized));
 }
 

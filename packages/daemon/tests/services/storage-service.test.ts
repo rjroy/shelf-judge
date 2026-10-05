@@ -1490,6 +1490,16 @@ describe("StorageService.loadPredictionSettings", () => {
 });
 
 describe("StorageService.loadTournament", () => {
+  test("round-trips observed normalization bounds", async () => {
+    const { service } = makeService();
+    const tournament = await service.loadTournament();
+    tournament.settings.normalizationBounds = { minElo: 1367.11, maxElo: 1627.91 };
+    await service.saveTournament(tournament);
+
+    const reloaded = await service.loadTournament();
+    expect(reloaded.settings.normalizationBounds).toEqual({ minElo: 1367.11, maxElo: 1627.91 });
+  });
+
   test("rewrites legacy provisional settings and staleness filters", async () => {
     const { service, fileOps } = makeService({
       [TOURNAMENT_PATH]: JSON.stringify({
