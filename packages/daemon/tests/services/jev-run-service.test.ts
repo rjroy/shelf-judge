@@ -208,7 +208,6 @@ async function validateUnifiedRunForTest(
     scope: preparation.collectionScope,
     unifiedPreparation: preparation,
     noteTransmissionAuthorized,
-    providerBudget: preparation.run.disclosure.budget,
   });
   if (!reservation) throw new Error("Expected validated unified preparation");
   return reservation;
@@ -2422,7 +2421,6 @@ describe("JevRunService attempt barriers", () => {
       scope: otherPreparation.collectionScope,
       unifiedPreparation: otherPreparation,
       noteTransmissionAuthorized: false,
-      providerBudget: preparation.run.disclosure.budget,
     });
     expect(reservation).toBeNull();
     expect(currentReads).toBe(0);
@@ -2459,7 +2457,6 @@ describe("JevRunService attempt barriers", () => {
       wishlistPreparation: unifiedPreparation.wishlistPreparation,
       unifiedPreparation,
       noteTransmissionAuthorized: false,
-      providerBudget: unifiedPreparation.run.disclosure.budget,
     });
     expect(reservation).not.toBeNull();
     if (!reservation) throw new Error("Expected frozen wishlist reservation");
@@ -2524,7 +2521,6 @@ describe("JevRunService attempt barriers", () => {
           scope: collectionScope,
           unifiedPreparation: preparation,
           noteTransmissionAuthorized: false,
-          providerBudget: preparation.run.disclosure.budget,
         });
         validation = startedValidation;
         void startedValidation.then(

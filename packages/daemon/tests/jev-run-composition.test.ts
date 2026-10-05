@@ -798,7 +798,6 @@ describe("Jev run production composition", () => {
         scope: prepared.collectionScope!,
         unifiedPreparation: prepared,
         noteTransmissionAuthorized: false,
-        providerBudget: DEFAULT_JEV_RUN_BUDGET,
       });
       expect(reservation).not.toBeNull();
       handle = worker!.reserveValidatedPreparedRun(reservation!);

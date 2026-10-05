@@ -196,7 +196,7 @@ async function harness(
   let gatewayConfigured = options.gatewayConfigured ?? true;
   let gatewayCalls = 0;
   const requests: unknown[] = [];
-  const forwardedBudgets: unknown[] = [];
+  const preparedAuthorizationBudgets: unknown[] = [];
   const started = deferred();
   let pendingProvider = options.pending ?? false;
   let release = deferred();
@@ -246,7 +246,7 @@ async function harness(
   if (!runService) throw new Error("Expected a cache-backed worker");
   const prepareValidated = runService.prepareValidatedPreparedRun.bind(runService);
   runService.prepareValidatedPreparedRun = async (input) => {
-    forwardedBudgets.push(input.providerBudget);
+    preparedAuthorizationBudgets.push(input.unifiedPreparation.run.disclosure.budget);
     const prepared = await prepareValidated(input);
     await options.afterValidated?.((callback) => {
       afterAuthorityRead = callback;
@@ -288,7 +288,7 @@ async function harness(
       pendingProvider = value;
       if (value) release = deferred();
     },
-    forwardedBudgets,
+    preparedAuthorizationBudgets,
     setGatewayConfigured: (value: boolean) => {
       gatewayConfigured = value;
     },
@@ -371,7 +371,7 @@ describe("JevRunController unified lifecycle", () => {
       }),
     ).toMatchObject({ status: 200, body: { state: "started" } });
     await waitForRun(h.cache);
-    expect(h.forwardedBudgets).toEqual([budget]);
+    expect(h.preparedAuthorizationBudgets).toEqual([budget]);
     expect(h.requests.join(" ")).not.toContain("Private note");
     expect(h.runService.effectiveLimits.maxEligiblePairs).toBeGreaterThan(0);
     expect(

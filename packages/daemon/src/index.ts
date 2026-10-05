@@ -85,8 +85,8 @@ export function createJevRunWorker(options: {
     storageService,
     cache,
     ...sourceAdapter,
-    // This factory runs once per explicit startRun, so the gateway's request and
-    // reported-token budgets are fresh for each separately authorized execution.
+    // This factory runs once per unified prepared execution, so each authorized
+    // execution receives fresh request and reported-token budgets.
     createGateway: (admitAndDispatch, providerBudget) =>
       createJevGateway({
         admitAndDispatch,

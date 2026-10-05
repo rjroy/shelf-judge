@@ -250,7 +250,6 @@ export class JevRunController {
           wishlistPreparation,
           unifiedPreparation: prepared,
           noteTransmissionAuthorized: false,
-          providerBudget: authorization.providerBudget,
         });
       }
       const scope = prepared.collectionScope;
@@ -260,7 +259,6 @@ export class JevRunController {
         scope,
         unifiedPreparation: prepared,
         noteTransmissionAuthorized: input.noteTransmissionAuthorized,
-        providerBudget: authorization.providerBudget,
       });
     });
     if (!preparedRun) return { status: 412, body: { error: "precondition-failed" } };
