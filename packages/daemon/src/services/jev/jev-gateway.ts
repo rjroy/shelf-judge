@@ -9,8 +9,6 @@ export { JEV_QUESTION_VERSION, JEV_RUBRIC_VERSION } from "./jev-judgment-contrac
 
 export const JEV_MODEL_ID = JEV_JUDGMENT_CONTRACT.modelId;
 export const JEV_API_URL = "https://api.typesafe.ai/v1/systemone";
-export const JEV_RETENTION_CAVEAT =
-  "TypeSafe's default retention duration is unspecified; do not promise provider-side erasure or a retention window.";
 
 const MAX_GAME_NAME_CHARS = 200;
 const MAX_SOURCE_TEXT_CHARS = 12_000;

@@ -14,6 +14,7 @@ import {
   getVectorAxisValues,
 } from "./feature-vector.js";
 import type { FeatureVector } from "./feature-vector.js";
+import type { FactualScoringGame } from "./feature-vector.js";
 import { computeRedundancyAdjustments } from "./redundancy-engine.js";
 import { deriveDisplayStats } from "./tournament-service.js";
 
@@ -24,6 +25,7 @@ export function computeRedundancyPreview(
   tournamentData: TournamentData,
   allGames: GameWithScore[],
   settings: RedundancySettings,
+  factualCandidate?: FactualScoringGame,
 ): RedundancyAdjustment | null {
   if (!settings.enabled || candidate.score === null) return null;
 
@@ -32,15 +34,19 @@ export function computeRedundancyPreview(
   const ranges = computeContinuousRanges(gamesWithBgg);
   const vectorAxes = getOrderedVectorAxes(collection.axes);
   const vectorCache = new Map<string, FeatureVector>();
+  const factualOverrides = new Map<string, FactualScoringGame>();
+  if (factualCandidate) factualOverrides.set(candidate.game.id, factualCandidate);
   const getFeatureVector = (game: Game): FeatureVector => {
     const cached = vectorCache.get(game.id);
     if (cached) return cached;
+    const factual = factualOverrides.get(game.id);
+    const vectorGame = factual ?? game;
     const values = getVectorAxisValues(
-      game,
+      vectorGame,
       vectorAxes,
       deriveDisplayStats(game.id, tournamentData).normalizedScore,
     );
-    const vector = encodeGame(game, vocabulary, vectorAxes, values, ranges);
+    const vector = encodeGame(vectorGame, vocabulary, vectorAxes, values, ranges);
     vectorCache.set(game.id, vector);
     return vector;
   };

@@ -11,6 +11,7 @@ import type {
 import {
   createInitialEntityMetadata,
   createInitialSemanticRedundancyStateV10,
+  DEFAULT_JEV_RUN_BUDGET,
 } from "@shelf-judge/shared";
 import { JevRunService, type JevRunCapture } from "../../src/services/jev-run-service.js";
 import { planJevRunScope } from "../../src/services/jev-run-scope.js";
@@ -396,8 +397,8 @@ describe("JevRunService attempt barriers", () => {
     expect(startEvents[0]?.fields).toMatchObject({
       trigger: "owner-explicit",
       authorizedSignalScope: "no",
-      maxProviderAttempts: 100,
-      reportedTokenStopThreshold: 200_000,
+      maxProviderAttempts: DEFAULT_JEV_RUN_BUDGET.maxProviderAttempts,
+      reportedTokenStopThreshold: DEFAULT_JEV_RUN_BUDGET.reportedTokenStopThreshold,
       maxRunDurationMs: 1_800_000,
       eligiblePairs: null,
     });
@@ -2364,6 +2365,69 @@ describe("JevRunService attempt barriers", () => {
     });
     expect(reservation).toBeNull();
     expect(currentReads).toBe(0);
+    expect(gatewayConstructions).toBe(0);
+    expect(rows.size).toBe(0);
+  });
+
+  test("wishlist execution uses its typed executor and never recaptures collection scope", async () => {
+    const capture = fixture(["a", "b"]);
+    const { cache, rows } = cacheFake();
+    let gatewayConstructions = 0;
+    const service = new JevRunService({
+      storageService: {},
+      cache,
+      loadCapture: () => Promise.reject(new Error("Wishlist scope must not recapture")),
+      readCurrent: () =>
+        Promise.resolve({
+          collection: capture.collection,
+          sourceVectorIdentity: capture.sourceVectorIdentity,
+          policyIdentity: capture.policyIdentity,
+          canTransmitNotes: false,
+        }),
+      createGateway: () => {
+        gatewayConstructions++;
+        return { evaluatePair: () => Promise.resolve(scoreResult()) };
+      },
+    });
+
+    const wishlistPreparation = {
+      scope: "wishlist" as const,
+      selection: { kind: "all" as const },
+      selectionIdentity: "selection",
+      capture,
+      entries: [],
+      unavailableCandidateBggIds: [],
+      eligibleOwnedIds: [],
+      pairs: [],
+      disclosure: {
+        scope: "wishlist" as const,
+        wishlistEntryCount: 0,
+        selectedCandidateCount: 0,
+        unselectedEntryCount: 0,
+        ownedOverlapCandidateCount: 0,
+        requestedCandidateCount: 0,
+        eligibleCandidateCount: 0,
+        unavailableCandidateCount: 0,
+        eligibleOwnedGameCount: 0,
+        comparisonPairCount: 0,
+        cachedHitPairCount: 0,
+        sendablePairCount: 0,
+      },
+      cacheRevision: null,
+      wishlistMutationGeneration: "0",
+      identity: "identity",
+      isSourceCurrent: () => Promise.resolve(true),
+      isCurrent: () => Promise.resolve(true),
+    };
+    const reservation = await service.prepareValidatedPreparedRun({
+      scopeKind: "wishlist",
+      wishlistPreparation,
+      noteTransmissionAuthorized: false,
+    });
+    expect(reservation).not.toBeNull();
+    if (!reservation) throw new Error("Expected frozen wishlist reservation");
+    const result = await service.reserveValidatedPreparedRun(reservation).completion;
+    expect(result.state).toBe("completed");
     expect(gatewayConstructions).toBe(0);
     expect(rows.size).toBe(0);
   });

@@ -1,5 +1,10 @@
 // Redundancy commands: settings, enable, disable, stage, set
-import type { RedundancySettings } from "@shelf-judge/shared";
+import type {
+  JevRunPreview,
+  JevWishlistCandidateSelection,
+  RedundancySettings,
+} from "@shelf-judge/shared";
+import { DEFAULT_JEV_RUN_BUDGET } from "@shelf-judge/shared";
 import type { DaemonClient } from "../client.js";
 import { responseError } from "../errors.js";
 import type { OutputOptions } from "../output.js";
@@ -173,30 +178,6 @@ export async function redundancySet(
 
 const SEMANTIC = "/api/redundancy/semantic";
 
-interface SemanticRunPreview {
-  requestId: string;
-  precondition: string;
-  provider: string;
-  modelId: string;
-  eligibleGameCount: number;
-  pairCount: number;
-  descriptionBearingPairCount: number;
-  noteBearingPairCount: number;
-  noteTransmissionPermitted: boolean;
-  providerConfigured: boolean;
-  scoringEffect: "integrated-fitness" | "annotation-only";
-  retentionCaveat: string;
-  limits: {
-    maxEligiblePairs: number;
-    maxProviderAttempts: number;
-    maxRunDurationMs: number;
-    reportedTokenStopThreshold: number;
-    reportedTokenThresholdIsBilledCeiling: false;
-  };
-  withinPairLimit: boolean;
-  expiresAt: string;
-}
-
 interface SemanticRefreshProgress {
   coverageMeasurement: "not-measured";
   activity: { state: "active"; runId: string } | { state: "idle" } | { state: "unavailable" };
@@ -206,6 +187,7 @@ interface SemanticRefreshProgress {
         relation: "active-run" | "historical" | "unknown";
         value: {
           state: string;
+          scope?: "collection" | "wishlist";
           pairCount: number;
           completedPairs: number;
           cacheHits: number;
@@ -281,25 +263,46 @@ export async function redundancySemanticProgress(
   return opts.json ? printOutput(data, opts) : formatRunProgress(data);
 }
 
-function formatRunPreview(preview: SemanticRunPreview): string {
+function formatRunPreview(preview: JevRunPreview): string {
   const tokenThreshold = preview.limits.reportedTokenStopThreshold.toLocaleString();
-  return [
+  const wishlistPreview = "scope" in preview ? preview : null;
+  const lines = [
     "Semantic Run preview",
     `Provider/model: ${preview.provider} / ${preview.modelId}`,
-    `Eligible games: ${preview.eligibleGameCount}; eligible pairs: ${preview.pairCount}`,
-    `Pairs with descriptions: ${preview.descriptionBearingPairCount}; pairs with notes: ${preview.noteBearingPairCount}`,
+    ...(wishlistPreview
+      ? [
+          "Run scope: wishlist candidates",
+          `Wishlist entries: ${wishlistPreview.scope.wishlistEntryCount}; selected: ${wishlistPreview.scope.selectedCandidateCount}; unselected: ${wishlistPreview.scope.unselectedEntryCount}`,
+          `Selected owned overlaps: ${wishlistPreview.scope.ownedOverlapCandidateCount}; requested: ${wishlistPreview.scope.requestedCandidateCount}; source eligible: ${wishlistPreview.scope.eligibleCandidateCount}; source unavailable: ${wishlistPreview.scope.unavailableCandidateCount}`,
+          `Eligible owned games: ${wishlistPreview.scope.eligibleOwnedGameCount}; comparison pairs: ${wishlistPreview.scope.comparisonPairCount}; valid C_ONLY cache hits: ${wishlistPreview.scope.cachedHitPairCount}; sendable pairs: ${wishlistPreview.scope.sendablePairCount}`,
+          `Selected candidates: ${formatWishlistSelection(wishlistPreview.selection)}`,
+          "Wishlist submissions use descriptions only; owner notes are never included.",
+        ]
+      : [
+          "Run scope: collection",
+          `Eligible games: ${preview.eligibleGameCount}; eligible pairs: ${preview.pairCount}`,
+          `Pairs with descriptions: ${preview.descriptionBearingPairCount}; pairs with notes: ${preview.noteBearingPairCount}`,
+        ]),
     `Scoring effect: ${preview.scoringEffect}`,
-    `Note transmission permission available: ${preview.noteTransmissionPermitted ? "yes" : "no"}`,
     `Provider configured: ${preview.providerConfigured ? "yes" : "no"}`,
     `Application stop limits: ${preview.limits.maxProviderAttempts.toLocaleString()} provider attempts; ${Math.round(preview.limits.maxRunDurationMs / 60_000)} minutes; ${preview.limits.maxEligiblePairs.toLocaleString()} eligible pairs`,
     `Provider-reported usage stop threshold: ${tokenThreshold} tokens (reported usage is not a billing cap)`,
-    `Retention: ${preview.retentionCaveat}`,
     `Preview expires: ${preview.expiresAt}`,
     preview.withinPairLimit
       ? "Scope is within the pair limit."
       : "Scope exceeds the pair limit; no Run was started.",
-    "Note transmission is off by default. Add --authorize-notes only if you intend to send owner notes.",
-  ].join("\n");
+  ];
+  if (!wishlistPreview) {
+    lines.push(
+      `Note transmission permission available: ${preview.noteTransmissionPermitted ? "yes" : "no"}`,
+      "Note transmission is off by default. Add --authorize-notes only if you intend to send owner notes.",
+    );
+  }
+  return lines.join("\n");
+}
+
+function formatWishlistSelection(selection: JevWishlistCandidateSelection): string {
+  return selection.kind === "all" ? "all" : selection.bggIds.join(", ");
 }
 
 function formatRunProgress(status: SemanticRefreshProgress): string {
@@ -321,6 +324,7 @@ function formatRunProgress(status: SemanticRefreshProgress): string {
     lines.push("Saved progress: none");
   } else {
     const progress = status.progress.value;
+    lines.push(`Run scope: ${progress.scope ?? "unknown (legacy progress; not inferred)"}`);
     const label =
       status.progress.relation === "active-run"
         ? "Live associated progress"
@@ -360,7 +364,11 @@ export async function redundancySemanticRun(
   args: string[],
   opts: OutputOptions,
 ): Promise<string> {
-  const defaults = { maxAttempts: 100, reportedTokenStop: 200_000, maxDurationMinutes: 30 };
+  const defaults = {
+    maxAttempts: DEFAULT_JEV_RUN_BUDGET.maxProviderAttempts,
+    reportedTokenStop: DEFAULT_JEV_RUN_BUDGET.reportedTokenStopThreshold,
+    maxDurationMinutes: DEFAULT_JEV_RUN_BUDGET.maxRunDurationMs / 60_000,
+  };
   const bounds = {
     maxAttempts: 75_000,
     reportedTokenStop: Number.MAX_SAFE_INTEGER,
@@ -368,12 +376,37 @@ export async function redundancySemanticRun(
   };
   const values = { ...defaults };
   const seen = new Set<string>();
+  const candidateIds: number[] = [];
+  let scope: "collection" | "wishlist" = "collection";
+  let scopeSeen = false;
   let authorizeNotes = false;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--authorize-notes") {
       if (authorizeNotes) throw new Error("--authorize-notes may only be specified once");
       authorizeNotes = true;
+      continue;
+    }
+    if (arg === "--scope") {
+      if (scopeSeen) throw new Error("--scope may only be specified once");
+      scopeSeen = true;
+      const value = args[++index];
+      if (value !== "collection" && value !== "wishlist") {
+        throw new Error('--scope must be "collection" or "wishlist"');
+      }
+      scope = value;
+      continue;
+    }
+    if (arg === "--bgg-id") {
+      const rawId = args[++index];
+      if (rawId === undefined || !/^[1-9][0-9]*$/u.test(rawId)) {
+        throw new Error("--bgg-id must be a positive safe integer");
+      }
+      const bggId = Number(rawId);
+      if (!Number.isSafeInteger(bggId)) {
+        throw new Error("--bgg-id must be a positive safe integer");
+      }
+      candidateIds.push(bggId);
       continue;
     }
     const flagToKey = {
@@ -395,12 +428,27 @@ export async function redundancySemanticRun(
     }
     values[key] = value;
   }
+  if (candidateIds.length > 0 && scope !== "wishlist") {
+    throw new Error("--bgg-id requires --scope wishlist");
+  }
+  if (new Set(candidateIds).size !== candidateIds.length) {
+    throw new Error("--bgg-id values must be unique");
+  }
+  if (scope === "wishlist" && authorizeNotes) {
+    throw new Error("Wishlist Runs are description-only; --authorize-notes is not applicable");
+  }
   const query = new URLSearchParams({
     maxProviderAttempts: String(values.maxAttempts),
     reportedTokenStopThreshold: String(values.reportedTokenStop),
     maxRunDurationMs: String(values.maxDurationMinutes * 60_000),
   });
-  const { ok: previewOk, data: preview } = await client.get<SemanticRunPreview>(
+  if (scope === "wishlist") {
+    query.set("scope", "wishlist");
+    for (const bggId of candidateIds.sort((a, b) => a - b)) query.append("bggId", String(bggId));
+  } else if (scopeSeen) {
+    query.set("scope", "collection");
+  }
+  const { ok: previewOk, data: preview } = await client.get<JevRunPreview>(
     `${SEMANTIC}/run-preview?${query.toString()}`,
   );
   if (!previewOk) fail(preview, "Unable to preview semantic Run");
@@ -411,6 +459,24 @@ export async function redundancySemanticRun(
     typeof preview.withinPairLimit !== "boolean"
   ) {
     throw new Error("Daemon returned an invalid semantic Run preview");
+  }
+  if (scope === "wishlist" && !("scope" in preview)) {
+    throw new Error("Daemon returned a collection preview for a wishlist Run request");
+  }
+  if (scope === "collection" && "scope" in preview) {
+    throw new Error("Daemon returned a wishlist preview for a collection Run request");
+  }
+  if (scope === "wishlist" && "scope" in preview) {
+    const selectedIds = [...candidateIds].sort((a, b) => a - b);
+    const selectionMatches =
+      selectedIds.length === 0
+        ? preview.selection.kind === "all"
+        : preview.selection.kind === "selected" &&
+          preview.selection.bggIds.length === selectedIds.length &&
+          preview.selection.bggIds.every((bggId, index) => bggId === selectedIds[index]);
+    if (preview.scope.scope !== "wishlist" || !selectionMatches) {
+      throw new Error("Daemon preview did not preserve the requested wishlist candidate selection");
+    }
   }
   if (!preview.withinPairLimit) {
     const summary = formatRunPreview(preview);
@@ -431,12 +497,15 @@ export async function redundancySemanticRun(
   const disclosure = formatRunPreview(preview);
   if (opts.json) console.error(disclosure);
   else console.log(disclosure);
-  const { ok, data } = await client.post(`${SEMANTIC}/run`, {
+  const { ok, data, status } = await client.post(`${SEMANTIC}/run`, {
     requestId: preview.requestId,
     precondition: preview.precondition,
     noteTransmissionAuthorized,
   });
   if (!ok) {
+    if (status === 412) {
+      throw new Error("Run preview expired or current sources/settings changed; run preview again");
+    }
     const reason =
       typeof data === "object" && data !== null && "error" in data ? data.error : undefined;
     if (reason === "precondition-failed") {

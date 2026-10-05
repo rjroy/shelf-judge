@@ -11,7 +11,8 @@ import { buildJevPredictionCaptureIdentity } from "./jev-prediction-capture-iden
 import { validJevFactualWeights } from "./jev-pair-coverage.js";
 import { canonicalSha256, profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 import { JEV_JUDGMENT_CONTRACT } from "./jev/jev-judgment-contract.js";
-import type { SourceVector } from "./source-vector.js";
+import { semanticGenerationSourceIdentity, type SourceVector } from "./source-vector.js";
+import { wishlistCollectionSourceIdentity } from "./wishlist-collection-source-identity.js";
 
 export interface JevRunSourceStorage {
   loadCollection(): Promise<Collection>;
@@ -61,6 +62,7 @@ interface CapturedSources {
   sourceVector: SourceVector;
   sourceVectorIdentity: string;
   policyIdentity: string;
+  eligibilityIdentity: string;
   freshnessEpoch: string | null;
   externalEpoch: string | null;
 }
@@ -124,6 +126,7 @@ export function createJevRunSourceAdapter(
       factualWeights,
       sourceVector: vectorAfter,
       sourceVectorIdentity: sourceVectorIdentity(vectorAfter, freshnessEpoch),
+      eligibilityIdentity: eligibilitySourceIdentity(collection, vectorAfter),
       policyIdentity: policyIdentity(
         collection,
         predictionSettings,
@@ -199,6 +202,7 @@ export function createJevRunSourceAdapter(
         factualWeights: sources.factualWeights,
         sourceVectorIdentity: sources.sourceVectorIdentity,
         policyIdentity: sources.policyIdentity,
+        eligibilityIdentity: sources.eligibilityIdentity,
       };
     }
     throw new JevRunSourceUnavailableError();
@@ -230,6 +234,8 @@ export function createJevRunSourceAdapter(
         )
           throw new JevRunSourceUnavailableError();
         const factualWeights = redundancySettings.componentWeights;
+        if (!semanticGenerationSourceIdentity(vectorAfter))
+          throw new JevRunSourceUnavailableError();
         const policy = policyIdentity(
           collection,
           predictionSettings,
@@ -243,6 +249,7 @@ export function createJevRunSourceAdapter(
           sourceVectorIdentity: sourceVectorIdentity(vectorAfter, snapshot?.freshnessEpoch ?? null),
           policyIdentity: policy,
           canTransmitNotes: semantic.settings.cachedOwnerNoteUse === true,
+          eligibilityIdentity: eligibilitySourceIdentity(collection, vectorAfter),
         };
       });
     } catch {
@@ -256,6 +263,18 @@ export function createJevRunSourceAdapter(
     loadCapture,
     readCurrent,
   };
+}
+
+/** Prediction/ownership proof identity deliberately excludes note-only evidence epochs. */
+function eligibilitySourceIdentity(collection: Collection, vector: SourceVector): string {
+  return canonicalSha256({
+    domain: "jev-wishlist-eligibility-source-v1",
+    collectionIdentity: wishlistCollectionSourceIdentity(collection),
+    tournamentRevision: vector.tournamentRevision,
+    predictionSettingsRevision: vector.predictionSettingsRevision,
+    representationVersion: vector.representationVersion,
+    algorithmVersion: vector.algorithmVersion,
+  });
 }
 
 function sourceVectorIdentity(vector: SourceVector, freshnessEpoch: string | null = null): string {

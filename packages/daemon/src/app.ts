@@ -22,6 +22,8 @@ import { createWishlistRoutes } from "./routes/wishlist.js";
 import { createShelfRoutes } from "./routes/shelf.js";
 import { createCollectionRoutes } from "./routes/collection.js";
 import { createWishlistService } from "./services/wishlist-service.js";
+import type { WishlistService } from "./services/wishlist-service.js";
+import type { UnifiedScoringService } from "./services/unified-scoring-service.js";
 import { createShelfService } from "./services/shelf-service.js";
 import { createCapacityService } from "./services/capacity-service.js";
 import type { TournamentService } from "./services/tournament-service.js";
@@ -65,6 +67,8 @@ import type { SemanticRedundancyStateService } from "./services/semantic-redunda
 import type { createJevStatusService } from "./services/jev-status-service.js";
 import type { createJevRefreshProgressService } from "./services/jev-refresh-progress-service.js";
 import type { JevRunController } from "./services/jev-run-controller.js";
+import type { JevPairCache } from "./services/jev-pair-cache-service.js";
+import { createWishlistCandidateDescriptionResolver } from "./services/wishlist-candidate-read-proof.js";
 import { createCollectionSnapshotRoutes } from "./routes/collection-snapshot.js";
 
 export interface AppDeps {
@@ -82,7 +86,11 @@ export interface AppDeps {
   semanticRedundancyStateService?: SemanticRedundancyStateService;
   jevStatusService?: Pick<ReturnType<typeof createJevStatusService>, "read">;
   jevRefreshProgressService?: Pick<ReturnType<typeof createJevRefreshProgressService>, "read">;
-  jevRunController?: Pick<JevRunController, "preview" | "start" | "cancel" | "activeRun">;
+  jevRunController?: Pick<
+    JevRunController,
+    "preview" | "previewWishlist" | "start" | "cancel" | "activeRun"
+  >;
+  jevPairCache?: JevPairCache;
   ownerGameNoteService: OwnerGameNoteService;
   groundedAnalysisProvider: GroundedAnalysisProvider;
   reflectionRuntime: ReflectionRuntime;
@@ -93,6 +101,8 @@ export interface AppDeps {
   afterCandidateSourceSave?: (
     impact: import("./services/attention-candidate-service.js").AttentionMutationImpact,
   ) => Promise<void>;
+  wishlistService?: WishlistService;
+  unifiedScoringService: UnifiedScoringService;
 }
 
 export interface AppResult {
@@ -121,16 +131,29 @@ export function createApp(deps: AppDeps): AppResult {
     ownerGameNoteService,
     groundedAnalysisProvider,
     reflectionRuntime,
+    unifiedScoringService,
     bggClient,
     onShutdown,
   } = deps;
 
   // Build wishlist service (used by both wishlist routes and game routes for auto-removal)
-  const wishlistService = createWishlistService({
-    storageService,
-    predictionService,
-    gameService,
-  });
+  const wishlistService =
+    deps.wishlistService ??
+    createWishlistService({
+      storageService,
+      predictionService,
+      unifiedScoringService,
+      gameService,
+      coordinator: deps.profileSourceCoordinator,
+      jevPairCache: deps.jevPairCache,
+      ...(deps.jevPairCache
+        ? {
+            resolveWishlistDescriptionSignal: createWishlistCandidateDescriptionResolver(
+              deps.jevPairCache,
+            ),
+          }
+        : {}),
+    });
   const purchaseUtilizationService = createPurchaseUtilizationService({
     storageService,
     collectionMutationService,

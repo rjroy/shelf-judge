@@ -1,14 +1,8 @@
-export interface JevRunBudget {
-  maxProviderAttempts: number;
-  reportedTokenStopThreshold: number;
-  maxRunDurationMs: number;
-}
+import { DEFAULT_JEV_RUN_BUDGET } from "@shelf-judge/shared";
+import type { JevRunBudget } from "@shelf-judge/shared";
 
-export const DEFAULT_JEV_RUN_BUDGET: Readonly<JevRunBudget> = Object.freeze({
-  maxProviderAttempts: 100,
-  reportedTokenStopThreshold: 200_000,
-  maxRunDurationMs: 1_800_000,
-});
+export { DEFAULT_JEV_RUN_BUDGET };
+export type { JevRunBudget };
 
 export const MAX_JEV_RUN_PROVIDER_ATTEMPTS = 75_000;
 export const MIN_JEV_RUN_DURATION_MS = 60_000;

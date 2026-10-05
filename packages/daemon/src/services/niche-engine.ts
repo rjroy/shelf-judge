@@ -237,8 +237,13 @@ export function computeNicheImpact(
   candidateGame: Game,
   candidateScore: FitnessResult,
   settings: NicheSettings = DEFAULT_NICHE_SETTINGS,
+  candidateTags?: {
+    readonly mechanics: readonly { readonly name: string }[];
+    readonly categories: readonly { readonly name: string }[];
+    readonly families: readonly { readonly name: string }[];
+  },
 ): NicheImpact {
-  if (candidateGame.bggData === null) {
+  if (candidateGame.bggData === null && candidateTags === undefined) {
     return { wouldJoin: [] };
   }
 
@@ -247,10 +252,11 @@ export function computeNicheImpact(
   const index = buildAttributeIndex(eligible, ignoreSet);
   const entries: NicheImpactEntry[] = [];
 
-  const tagSets: [NicheTagType, { name: string }[]][] = [
-    ["mechanic", candidateGame.bggData.mechanics],
-    ["category", candidateGame.bggData.categories],
-    ["family", candidateGame.bggData.families],
+  const tags = candidateTags ?? candidateGame.bggData!;
+  const tagSets: [NicheTagType, readonly { name: string }[]][] = [
+    ["mechanic", tags.mechanics],
+    ["category", tags.categories],
+    ["family", tags.families],
   ];
 
   for (const [type, tags] of tagSets) {

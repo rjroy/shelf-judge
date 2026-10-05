@@ -122,6 +122,7 @@ describe("Analyst fitness preview projection", () => {
       undefined,
       174430,
     );
+    if (!sharedPreview.result.score) throw new Error("Expected available preview score");
     const projected = AnalystBggFitnessPreviewResultSchema.parse(
       projectFitnessPreview({ kind: "calculated", ...sharedPreview }, 174430, citations.value),
     );

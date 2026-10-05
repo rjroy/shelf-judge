@@ -8,6 +8,9 @@ import { createBggClient } from "./services/bgg-client.js";
 import { createTournamentService } from "./services/tournament-service.js";
 import { createProfileService } from "./services/profile-service.js";
 import { createPredictionService } from "./services/prediction-service.js";
+import { createWishlistService } from "./services/wishlist-service.js";
+import { createWishlistCandidateDescriptionResolver } from "./services/wishlist-candidate-read-proof.js";
+import { createAfterWishlistAcquisitionRecovery } from "./services/wishlist-acquisition-startup.js";
 import { createApp } from "./app.js";
 import { createLogger } from "./services/logger.js";
 import { createCollectionMutationService } from "./services/collection-mutation-service.js";
@@ -51,6 +54,9 @@ import { JevRunController } from "./services/jev-run-controller.js";
 import type { JevPairCache } from "./services/jev-pair-cache-service.js";
 import type { StorageService } from "./services/storage-service.js";
 import type { PredictionService } from "./services/prediction-service.js";
+import type { GameService } from "./services/game-service.js";
+import { createWishlistRunPreparationService } from "./services/wishlist-run-preparation.js";
+import { createUnifiedScoringService } from "./services/unified-scoring-service.js";
 
 const logger = createLogger("daemon");
 
@@ -98,6 +104,8 @@ export function createJevRunWorker(options: {
 export function composeJevRunController(options: {
   storageService: StorageService;
   predictionService: PredictionService;
+  unifiedScoringService?: ReturnType<typeof createUnifiedScoringService>;
+  gameService?: GameService;
   cache: JevPairCache | null;
   runService: JevRunService | null;
 }): JevRunController | null {
@@ -113,11 +121,23 @@ export function composeJevRunController(options: {
         predictSnapshot(collection, tournament, settings, targetGameIds),
     },
   });
+  const wishlistPreparation = options.gameService
+    ? createWishlistRunPreparationService({
+        storageService: options.storageService,
+        gameService: options.gameService,
+        sourceAdapter,
+        cache: options.cache,
+      })
+    : undefined;
   return new JevRunController({
     storageService: options.storageService,
     sourceAdapter,
     cache: options.cache,
     runService: options.runService,
+    ...(wishlistPreparation ? { wishlistPreparation } : {}),
+    ...(options.unifiedScoringService
+      ? { unifiedScoringService: options.unifiedScoringService }
+      : {}),
   });
 }
 
@@ -228,6 +248,13 @@ export async function main() {
     });
   }
   try {
+    const fitnessService = createFitnessService();
+    const unifiedScoringService = createUnifiedScoringService({
+      storageService,
+      cache: jevPairCache,
+      fitnessService,
+      coordinator: profileSourceCoordinatorFor(storageService),
+    });
     let displayedFitnessService: DisplayedFitnessService | null = null;
     const dispositionOracle = createAttentionCandidateOracle(() => {
       if (displayedFitnessService === null)
@@ -236,19 +263,35 @@ export async function main() {
     });
     const dispositionSource = createAttentionCandidateProductionSourceLoader(storageService);
     const dispositionWinners = async (
-      _prior: import("@shelf-judge/shared").Collection,
+      prior: import("@shelf-judge/shared").Collection,
       collection: import("@shelf-judge/shared").Collection,
       _context: import("./services/collection-mutation-service.js").CollectionMutationContext,
       gameIds: readonly string[],
     ) => {
       const source = await dispositionSource();
-      return dispositionOracle.evaluateStoredRules(
-        { ...source, collection: { ...collection, attentionDispositions: [] } },
+      const proposal = await unifiedScoringService.prepareProposedCollection({
+        prior,
+        proposed: collection,
+      });
+      const storedRules = collection.attentionDispositions
+        .filter((disposition) => gameIds.includes(disposition.gameId))
+        .map((disposition) => ({ gameId: disposition.gameId, ruleId: disposition.ruleId }));
+      if (storedRules.length === 0) {
+        return { winners: [], assertBaseCurrent: () => proposal.assertBaseCurrent() };
+      }
+      const evaluation = await dispositionOracle.evaluateStoredRulesForProposedCollection?.(
+        source,
+        proposal,
         new Date().toISOString(),
-        collection.attentionDispositions
-          .filter((disposition) => gameIds.includes(disposition.gameId))
-          .map((disposition) => ({ gameId: disposition.gameId, ruleId: disposition.ruleId })),
+        storedRules,
       );
+      if (!evaluation) throw new Error("Proposed stored-rule evaluation is unavailable");
+      const accepted = await evaluation.accept(() => ({
+        winners: evaluation.matches,
+        assertBaseCurrent: () => evaluation.assertBaseCurrent(),
+      }));
+      if (!accepted) throw new Error("Proposed stored-rule scoring became stale");
+      return accepted;
     };
     let attentionCandidates: AttentionCandidateService | null = null;
     let dispositionMaintenance: ReturnType<
@@ -296,8 +339,6 @@ export async function main() {
       throw error;
     }
 
-    const fitnessService = createFitnessService();
-
     const bggClient = createBggClient({
       config: { bggAuthToken: appConfig.bggAuthToken, username: appConfig.username },
     });
@@ -317,14 +358,23 @@ export async function main() {
         collectionMutations: collectionMutationService,
         storedRuleMatches: async (dispositions) => {
           const source = await dispositionSource();
-          return dispositionOracle.evaluateStoredRules(
-            { ...source, collection: { ...source.collection, attentionDispositions: [] } },
+          const proposal = await unifiedScoringService.prepareProposedCollection({
+            prior: source.collection,
+            proposed: { ...source.collection, attentionDispositions: [] },
+          });
+          const evaluation = await dispositionOracle.evaluateStoredRulesForProposedCollection?.(
+            source,
+            proposal,
             new Date().toISOString(),
             dispositions.map((disposition) => ({
               gameId: disposition.gameId,
               ruleId: disposition.ruleId,
             })),
           );
+          if (!evaluation) throw new Error("Proposed stored-rule evaluation is unavailable");
+          const matches = await evaluation.accept(() => evaluation.matches);
+          if (!matches) throw new Error("Proposed stored-rule scoring became stale");
+          return matches;
         },
         maintainCandidates: async (impact) => {
           await attentionCandidates?.maintain(impact);
@@ -393,6 +443,21 @@ export async function main() {
       tournamentService,
       bggClient,
       afterSourceSave: maintainCandidateSource,
+      unifiedScoringService,
+    });
+    const wishlistService = createWishlistService({
+      storageService,
+      predictionService,
+      unifiedScoringService,
+      gameService,
+      coordinator: profileSourceCoordinatorFor(storageService),
+      ...(jevPairCache
+        ? {
+            jevPairCache,
+            resolveWishlistDescriptionSignal:
+              createWishlistCandidateDescriptionResolver(jevPairCache),
+          }
+        : {}),
     });
     const resolveSemanticRead = createJevProductionSemanticRead(jevPairCache);
     displayedFitnessService = createDisplayedFitnessService({
@@ -400,6 +465,7 @@ export async function main() {
       predictionService,
       storageService,
       resolveSemanticRead,
+      unifiedScoringService,
     });
     const purchaseUtilizationService = createPurchaseUtilizationService({
       storageService,
@@ -468,6 +534,8 @@ export async function main() {
       jevRunController = composeJevRunController({
         storageService,
         predictionService,
+        unifiedScoringService,
+        gameService,
         cache: jevPairCache,
         runService: jevRunWorker,
       });
@@ -509,37 +577,51 @@ export async function main() {
       });
     }
 
-    const { app } = createApp({
-      storageService,
-      collectionMutationService,
-      axisService,
-      gameService,
-      tournamentService,
-      profileService,
-      predictionService,
-      displayedFitnessService,
-      intentionService,
-      attentionDispositionService,
-      collectionSnapshotService,
-      semanticRedundancyStateService: semanticStateService,
-      jevStatusService: jevStatusService ?? undefined,
-      jevRefreshProgressService: createJevRefreshProgressService({
-        cache: jevPairCache,
-        ...(jevRunController ? { activeRun: () => jevRunController?.activeRun() ?? null } : {}),
+    logger.log("Wishlist acquisition reconciliation started", { trigger: "startup" });
+    const {
+      application: { app },
+      reconciledEntries: acquisitionReconciled,
+    } = await createAfterWishlistAcquisitionRecovery(wishlistService, () =>
+      createApp({
+        storageService,
+        collectionMutationService,
+        axisService,
+        gameService,
+        tournamentService,
+        profileService,
+        predictionService,
+        unifiedScoringService,
+        displayedFitnessService,
+        intentionService,
+        attentionDispositionService,
+        collectionSnapshotService,
+        semanticRedundancyStateService: semanticStateService,
+        jevStatusService: jevStatusService ?? undefined,
+        jevRefreshProgressService: createJevRefreshProgressService({
+          cache: jevPairCache,
+          ...(jevRunController ? { activeRun: () => jevRunController?.activeRun() ?? null } : {}),
+        }),
+        jevRunController: jevRunController ?? undefined,
+        jevPairCache: jevPairCache ?? undefined,
+        ownerGameNoteService,
+        groundedAnalysisProvider,
+        reflectionRuntime,
+        bggClient,
+        profileSourceCoordinator: profileSourceCoordinatorFor(storageService),
+        wishlistService,
+        afterCandidateSourceSave: maintainCandidateSource,
+        onShutdown() {
+          logger.log("Shutting down via API...");
+          void serverRef.current?.stop();
+          jevPairCacheLifecycle.close();
+          process.exit(0);
+        },
       }),
-      jevRunController: jevRunController ?? undefined,
-      ownerGameNoteService,
-      groundedAnalysisProvider,
-      reflectionRuntime,
-      bggClient,
-      profileSourceCoordinator: profileSourceCoordinatorFor(storageService),
-      afterCandidateSourceSave: maintainCandidateSource,
-      onShutdown() {
-        logger.log("Shutting down via API...");
-        void serverRef.current?.stop();
-        jevPairCacheLifecycle.close();
-        process.exit(0);
-      },
+    );
+    logger.log("Wishlist acquisition reconciliation completed", {
+      trigger: "startup",
+      reconciledEntries: acquisitionReconciled,
+      outcome: "reconciled-before-app",
     });
 
     serverRef.current = Bun.serve({

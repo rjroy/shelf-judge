@@ -107,6 +107,18 @@ const parser = new XMLParser({
   isArray: (name) => ["item", "link", "name", "results", "result", "rank", "play"].includes(name),
 });
 
+// Thing scoring inputs need the decoded BGG description verbatim for the saved
+// source fingerprint. Keep the legacy parser's whitespace behavior for every
+// other text/attribute field so prediction inputs remain unchanged.
+const scoringInputParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "@_",
+  trimValues: false,
+  tagValueProcessor: (tagName, value) => (tagName === "description" ? value : value.trim()),
+  attributeValueProcessor: (_attributeName, value) => value.trim(),
+  isArray: (name) => ["item", "link", "name", "results", "result", "rank", "play"].includes(name),
+});
+
 function cleanupString(value: string | undefined): string {
   return value?.replace(/&#039;/g, "'") ?? "";
 }
@@ -387,7 +399,7 @@ export interface ThingItem {
   entityMetadata: EntityMetadataByClass;
 }
 
-/** Bounded Thing-only facts intended for preview scoring, not persistence/model projection. */
+/** Bounded Thing-only inputs for preview scoring and the compact wishlist source snapshot. */
 export interface BoardgameScoringThing {
   bggId: number;
   type: string | null;
@@ -395,8 +407,11 @@ export interface BoardgameScoringThing {
   yearPublished: number | null;
   minPlayers: number | null;
   maxPlayers: number | null;
+  bestPlayers: number | null;
   playingTime: number | null;
   weight: number | null;
+  communityRating: number | null;
+  description: string | null;
   categories: BggTag[];
   mechanics: BggTag[];
   suggestedPlayerPoll: ParsedSuggestedPlayerPoll;
@@ -420,7 +435,7 @@ export function parseBoardgameScoringThings(
   xml: string,
   observedAt = new Date().toISOString(),
 ): BoardgameScoringThing[] {
-  const parsed = parser.parse(xml) as BggXmlDocument;
+  const parsed = scoringInputParser.parse(xml) as BggXmlDocument;
   assertBggXml(parsed, "thing");
   return ensureArray(parsed?.items?.item).map((item) => {
     const names = ensureArray(item.name);
@@ -449,8 +464,11 @@ export function parseBoardgameScoringThings(
       yearPublished: thing.metadata.yearPublished,
       minPlayers: thing.metadata.minPlayers,
       maxPlayers: thing.metadata.maxPlayers,
+      bestPlayers: thing.bggData.bestPlayerCount,
       playingTime: thing.metadata.playingTime,
       weight: thing.bggData.weight,
+      communityRating: parseNumber(item.statistics?.ratings?.average?.["@_value"]),
+      description: thing.bggData.description,
       categories: thing.bggData.categories.slice(0, 40),
       mechanics: thing.bggData.mechanics.slice(0, 40),
       suggestedPlayerPoll: {

@@ -783,9 +783,9 @@ describe("DisplayedFitnessService", () => {
     expect(withProof.games).toHaveLength(1);
     expect(withProof.games[0]?.score?.score).toBe(7);
     expect(withProof.semanticScoringInputProof).toMatchObject({
-      mode: "semantic",
-      status: "not-ready",
-      identity: "a".repeat(64),
+      version: 2,
+      mode: "unified-similarity",
+      algorithmVersion: "unified-jaccard-manhattan-jev-v1",
     });
     expect(withProof.games[0]?.score?.redundancySimilarityInfo?.status).toBe("not-ready");
     expect(withProof.isCurrent()).toBe(true);

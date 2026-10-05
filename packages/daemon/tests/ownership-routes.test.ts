@@ -570,6 +570,7 @@ describe("wishlist interaction with previously-owned games", () => {
     const storage = createMockStorageService(coll);
     const mockWishlistService: WishlistService = {
       list: () => Promise.resolve([]),
+      listWithCurrentRedundancy: () => Promise.resolve([]),
       add: async (bggId: number) => {
         // Replicate the real wishlist service's collection check
         const collection = await storage.loadCollection();
@@ -583,6 +584,9 @@ describe("wishlist interaction with previously-owned games", () => {
       refresh: () => Promise.reject(new Error("not implemented")),
       refreshAll: () => Promise.reject(new Error("not implemented")),
       removeByBggId: () => Promise.reject(new Error("not implemented")),
+      finalizeAcquisition: () => Promise.reject(new Error("not implemented")),
+      acquireGame: () => Promise.reject(new Error("not implemented")),
+      reconcileAcquisitions: () => Promise.resolve(0),
     };
 
     const app = new Hono();

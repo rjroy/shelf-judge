@@ -39,6 +39,7 @@ function fixture(ids = ["a", "b"]): State {
     name: "adapter test",
     schemaVersion: 10,
     revision: 1,
+    axes: [],
     games: ids.map((id) => ({ id, ownership: "owned" as const })),
     semanticRedundancy: semantic,
   } as unknown as Collection;
@@ -502,6 +503,50 @@ describe("JevRunSourceAdapter", () => {
     ).adapter;
     await expectUnavailable(unavailable.loadCapture());
     expect(predictionCalls).toBe(0);
+  });
+
+  test("wishlist eligibility identity ignores note-only epochs and tracks prediction revisions", async () => {
+    const state = fixture(["scoring-game"]);
+    const { adapter } = adapterFor(state, (collection) =>
+      Promise.resolve(predictionRows(collection)),
+    );
+    const beforeNote = await adapter.readCurrent();
+    const game = state.collection.games[0];
+    if (!game) throw new Error("Expected source fixture game");
+    game.ownerNote = { state: "present", version: 1, updatedAt: "note-only", text: "private" };
+    game.updatedAt = "note-only";
+    state.collection.revision++;
+    state.vector = {
+      ...state.vector,
+      collectionRevision: state.collection.revision,
+      semanticEvidenceEpoch: (state.vector.semanticEvidenceEpoch ?? 0) + 1,
+      changeToken: state.vector.changeToken + 1,
+    };
+    const afterNote = await adapter.readCurrent();
+    expect(afterNote.eligibilityIdentity).toBe(beforeNote.eligibilityIdentity);
+    expect(afterNote.policyIdentity).toBe(beforeNote.policyIdentity);
+
+    const tournamentRevision = state.vector.tournamentRevision;
+    if (tournamentRevision === null) throw new Error("Expected tournament revision");
+    state.vector = {
+      ...state.vector,
+      tournamentRevision: tournamentRevision + 1,
+      changeToken: state.vector.changeToken + 1,
+    };
+    const afterTournament = await adapter.readCurrent();
+    expect(afterTournament.eligibilityIdentity).not.toBe(afterNote.eligibilityIdentity);
+    const predictionSettingsRevision = state.vector.predictionSettingsRevision;
+    if (predictionSettingsRevision === null)
+      throw new Error("Expected prediction settings revision");
+    state.vector = {
+      ...state.vector,
+      predictionSettingsRevision: predictionSettingsRevision + 1,
+      changeToken: state.vector.changeToken + 1,
+    };
+    const afterPredictionSettings = await adapter.readCurrent();
+    expect(afterPredictionSettings.eligibilityIdentity).not.toBe(
+      afterTournament.eligibilityIdentity,
+    );
   });
 
   test("capture retries are bounded when sources keep moving during prediction", async () => {

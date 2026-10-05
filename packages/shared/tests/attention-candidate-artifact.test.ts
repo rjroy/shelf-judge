@@ -4,9 +4,18 @@ import {
   ATTENTION_CANDIDATE_ARTIFACT_SCHEMA_VERSION,
   AttentionCandidateArtifactSchema,
   AttentionCandidateArtifactRowSchema,
+  SIMILARITY_ALGORITHM_VERSION,
 } from "../src/index.js";
 
 const hash = "a".repeat(64);
+const semanticScoringInputProof = {
+  version: 2,
+  mode: "unified-similarity",
+  algorithmVersion: SIMILARITY_ALGORITHM_VERSION,
+  identity: hash,
+  demandedPairsIdentity: hash,
+  examinedComponentsIdentity: hash,
+};
 function artifact() {
   return {
     schemaVersion: ATTENTION_CANDIDATE_ARTIFACT_SCHEMA_VERSION,
@@ -18,7 +27,7 @@ function artifact() {
       tournamentHash: hash,
       predictionSettingsHash: hash,
       redundancySettingsHash: hash,
-      semanticScoringInputProof: { version: 1, mode: "factual-only", identity: hash },
+      semanticScoringInputProof,
       calculationVersion: 1,
       ruleCatalogVersion: 1,
       dependencyVersion: 1,
@@ -78,6 +87,7 @@ describe("attention candidate artifact contract", () => {
       }).success,
     ).toBe(false);
     for (const proof of [
+      { version: 1, mode: "factual-only", identity: hash },
       { version: 2, mode: "factual-only", identity: hash },
       {
         version: 1,

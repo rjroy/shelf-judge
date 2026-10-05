@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
-import { createInitialSemanticRedundancyStateV10, type Collection } from "@shelf-judge/shared";
+import {
+  createInitialSemanticRedundancyStateV10,
+  DEFAULT_JEV_RUN_BUDGET,
+  type Collection,
+} from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import type { JevStatusResponse } from "../src/services/jev-pair-status";
 import type { createJevStatusService } from "../src/services/jev-status-service";
@@ -188,6 +192,7 @@ describe("semantic redundancy routes", () => {
         relation: "active-run" as const,
         value: {
           state: "last-known-running" as const,
+          scope: "wishlist" as const,
           pairCount: 3,
           completedPairs: 1,
           cacheHits: 0,
@@ -230,7 +235,6 @@ describe("semantic redundancy routes", () => {
             providerConfigured: false,
             signalScope: { description: true, ownerNotes: false },
             scoringEffect: "annotation-only",
-            retentionCaveat: "Provider retention may apply.",
             limits: { maxEligiblePairs: 25_000, maxProviderAttempts: 100 },
             withinPairLimit: true,
             expiresAt: "2026-01-01T00:00:00.000Z",
@@ -256,7 +260,22 @@ describe("semantic redundancy routes", () => {
     expect(preview.status).toBe(200);
     expect(preview.headers.get("Cache-Control")).toBe("no-store");
     expect(preview.headers.get("ETag")).toBeNull();
-    expect(await preview.json()).toMatchObject({ pairCount: 1, providerConfigured: false });
+    const previewBody = (await preview.json()) as Record<string, unknown>;
+    expect(previewBody).toMatchObject({
+      provider: "TypeSafe",
+      modelId: "jev-test",
+      pairCount: 1,
+      providerConfigured: false,
+      noteTransmissionPermitted: false,
+      signalScope: { description: true, ownerNotes: false },
+      limits: { maxProviderAttempts: 100 },
+    });
+    expect(previewBody).not.toHaveProperty("retentionCaveat");
+    expect(JSON.stringify(previewBody)).not.toMatch(/retention/i);
+    expect(JSON.stringify(previewBody)).not.toContain(
+      "TypeSafe's default retention duration is unspecified",
+    );
+    expect(JSON.stringify(previewBody)).not.toContain("do not promise provider-side erasure");
 
     const malformed = await app.request(
       "/api/redundancy/semantic/run",
@@ -269,6 +288,18 @@ describe("semantic redundancy routes", () => {
     );
     expect(malformed.status).toBe(400);
     expect(malformed.headers.get("Cache-Control")).toBe("no-store");
+    expect(calls).toEqual(["preview"]);
+    const scopeCannotBeReselectedAtStart = await app.request(
+      "/api/redundancy/semantic/run",
+      json({
+        requestId: "request-safe",
+        precondition: "opaque-token",
+        noteTransmissionAuthorized: false,
+        scope: "wishlist",
+        bggId: [999],
+      }),
+    );
+    expect(scopeCannotBeReselectedAtStart.status).toBe(400);
     expect(calls).toEqual(["preview"]);
 
     const started = await app.request(
@@ -336,6 +367,90 @@ describe("semantic redundancy routes", () => {
         maxRunDurationMs: 60_000,
       },
     ]);
+  });
+
+  test("Run preview strictly freezes collection, all-wishlist, and repeated selected IDs", async () => {
+    const collectionCalls: unknown[] = [];
+    const wishlistCalls: unknown[] = [];
+    const controller = {
+      preview: (budget: unknown) => {
+        collectionCalls.push(budget);
+        return Promise.resolve({ status: 200 as const, body: { requestId: "collection-preview" } });
+      },
+      previewWishlist: (selection: unknown, budget: unknown) => {
+        wishlistCalls.push({ selection, budget });
+        return Promise.resolve({
+          status: 200 as const,
+          body: { requestId: "wishlist-preview", selection },
+        });
+      },
+    } as unknown as NonNullable<RedundancyRoutesDeps["jevRunController"]>;
+    const { app, operations } = harness(undefined, controller);
+
+    expect((await app.request("/api/redundancy/semantic/run-preview")).status).toBe(200);
+    expect(
+      (await app.request("/api/redundancy/semantic/run-preview?scope=collection")).status,
+    ).toBe(200);
+    expect((await app.request("/api/redundancy/semantic/run-preview?scope=wishlist")).status).toBe(
+      200,
+    );
+    const selected = await app.request(
+      "/api/redundancy/semantic/run-preview?scope=wishlist&bggId=902&bggId=101",
+    );
+    expect(selected.status).toBe(200);
+    expect(await selected.json()).toMatchObject({
+      requestId: "wishlist-preview",
+      selection: { kind: "selected", bggIds: [101, 902] },
+    });
+    expect(collectionCalls).toHaveLength(2);
+    expect(wishlistCalls).toHaveLength(2);
+    expect(wishlistCalls[0]).toMatchObject({
+      selection: undefined,
+      budget: DEFAULT_JEV_RUN_BUDGET,
+    });
+    expect(wishlistCalls[1]).toMatchObject({
+      selection: { kind: "selected", bggIds: [101, 902] },
+      budget: DEFAULT_JEV_RUN_BUDGET,
+    });
+    const previewOperation = operations.find(
+      (operation) => operation.operationId === "shelf.redundancy.get-semantic-run-preview",
+    );
+    expect(
+      previewOperation?.parameters?.some(
+        (parameter) => parameter.name === "scope" && parameter.in === "query",
+      ),
+    ).toBe(true);
+    expect(
+      previewOperation?.parameters?.some(
+        (parameter) => parameter.name === "bggId" && parameter.in === "query",
+      ),
+    ).toBe(true);
+    const previewProperties = previewOperation?.response?.body.properties;
+    expect(previewProperties).not.toHaveProperty("retentionCaveat");
+    expect(previewOperation?.response?.body.required).not.toContain("retentionCaveat");
+    const startOperation = operations.find(
+      (operation) => operation.operationId === "shelf.redundancy.start-semantic-run",
+    );
+    expect(startOperation?.request?.body.properties).not.toHaveProperty("scope");
+    expect(startOperation?.request?.body.properties).not.toHaveProperty("bggId");
+
+    const invalidQueries = [
+      "scope=wishlist&scope=collection",
+      "scope=wishlist&bggId=101&bggId=101",
+      "scope=wishlist&bggId=0",
+      "scope=wishlist&bggId=",
+      "bggId=101",
+      "scope=collection&bggId=101",
+      "scope=unknown",
+      "scope=wishlist&unexpected=true",
+    ];
+    for (const query of invalidQueries) {
+      const response = await app.request(`/api/redundancy/semantic/run-preview?${query}`);
+      expect(response.status).toBe(400);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+    }
+    expect(collectionCalls).toHaveLength(2);
+    expect(wishlistCalls).toHaveLength(2);
   });
 
   test("new Run routes fail closed when no controller is composed", async () => {

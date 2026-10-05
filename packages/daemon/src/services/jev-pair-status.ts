@@ -20,6 +20,8 @@ export type JevStatusState =
   | "unavailable";
 export type JevStatusProgress = null | {
   state: "last-known-running" | "completed" | "interrupted" | "failed";
+  /** Omitted on persisted legacy rows whose run scope cannot be established. */
+  scope?: "collection" | "wishlist";
   pairCount: number;
   completedPairs: number;
   cacheHits: number;
@@ -90,8 +92,15 @@ export function projectJevRunProgress(progress: JevRunProgress | null): JevStatu
       progress.state !== "failed")
   )
     return null;
+  if (
+    progress.scope !== undefined &&
+    progress.scope !== "collection" &&
+    progress.scope !== "wishlist"
+  )
+    return null;
   return {
     state: progress.state === "running" ? "last-known-running" : progress.state,
+    ...(progress.scope === undefined ? {} : { scope: progress.scope }),
     pairCount: progress.pairCount,
     completedPairs: progress.completedPairs,
     cacheHits: progress.cacheHits,

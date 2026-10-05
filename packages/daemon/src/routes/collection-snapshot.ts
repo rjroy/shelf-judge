@@ -4,6 +4,10 @@ import type { RouteModule } from "../operations.js";
 import { CollectionSnapshotUnavailableError } from "../services/collection-snapshot-service.js";
 import type { CollectionSnapshotCacheService } from "../services/collection-snapshot-cache-service.js";
 import { createLogger } from "../services/logger.js";
+import { performance } from "node:perf_hooks";
+
+let requestSequence = 0;
+const SLOW_COLLECTION_SNAPSHOT_REQUEST_MS = 3_000;
 
 export function createCollectionSnapshotRoutes(
   service: CollectionSnapshotCacheService,
@@ -11,24 +15,35 @@ export function createCollectionSnapshotRoutes(
   const logger = createLogger("collection-snapshot-route");
   const routes = new Hono();
   routes.get("/collection/snapshot", async (c) => {
-    logger.log("collection snapshot request attempt", {
+    const requestId = `collection-${++requestSequence}`;
+    const startedAt = performance.now();
+    logger.debug?.("collection snapshot request attempt", {
+      requestId,
       method: "GET",
       path: "/collection/snapshot",
     });
     try {
-      const decision = await service.resolve(c.req.header("if-none-match"));
+      const decision = await service.resolve(c.req.header("if-none-match"), requestId);
       if (decision.cacheable) {
         c.header("Cache-Control", "private, no-cache");
         c.header("ETag", decision.etag!);
       } else {
         c.header("Cache-Control", "no-store");
       }
-      logger.log("collection snapshot request completed", {
+      const elapsedMs = Math.max(0, performance.now() - startedAt);
+      const completion = {
+        requestId,
+        elapsedMs,
         status: decision.snapshotStatus ?? decision.status,
         gameCount: decision.gameCount ?? 0,
         httpStatus: decision.status,
-        outcome: "success",
-      });
+        outcome: elapsedMs >= SLOW_COLLECTION_SNAPSHOT_REQUEST_MS ? "slow-success" : "success",
+      };
+      if (elapsedMs >= SLOW_COLLECTION_SNAPSHOT_REQUEST_MS) {
+        logger.warn("collection snapshot request completed", completion);
+      } else {
+        logger.log("collection snapshot request completed", completion);
+      }
       if (decision.status === 304) return c.body(null, 304);
       c.header("Content-Type", "application/json; charset=UTF-8");
       return c.body(decision.body ?? "", 200);
@@ -36,9 +51,11 @@ export function createCollectionSnapshotRoutes(
       const status = error instanceof CollectionSnapshotUnavailableError ? 503 : 500;
       c.header("Cache-Control", "no-store");
       logger.error("collection snapshot request failed", {
+        requestId,
+        elapsedMs: Math.max(0, performance.now() - startedAt),
         status,
         outcome: "failed",
-        error: toErrorMessage(error),
+        errorClass: error instanceof Error ? error.name : "UnknownError",
       });
       return c.json({ error: toErrorMessage(error) }, status);
     }

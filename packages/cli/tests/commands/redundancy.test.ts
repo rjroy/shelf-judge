@@ -126,12 +126,11 @@ describe("semantic redundancy CLI consent boundary", () => {
       noteTransmissionPermitted: true,
       providerConfigured: true,
       scoringEffect: "integrated-fitness",
-      retentionCaveat: "Provider retention applies.",
       limits: {
         maxEligiblePairs: 25_000,
-        maxProviderAttempts: 100,
+        maxProviderAttempts: 1_000,
         maxRunDurationMs: 30 * 60_000,
-        reportedTokenStopThreshold: 200_000,
+        reportedTokenStopThreshold: 2_000_000,
         reportedTokenThresholdIsBilledCeiling: false,
       },
       withinPairLimit: true,
@@ -167,15 +166,21 @@ describe("semantic redundancy CLI consent boundary", () => {
       console.log = originalLog;
     }
     expect(output).toContain("Run accepted");
-    expect(outputEvents[0]).toContain("100 provider attempts");
+    expect(outputEvents[0]).toContain("1,000 provider attempts");
+    expect(outputEvents[0]).toContain("Provider/model: TypeSafe / model-safe");
+    expect(outputEvents[0]).toContain("Pairs with descriptions: 6; pairs with notes: 2");
     expect(requestedPaths).toEqual([
-      "/api/redundancy/semantic/run-preview?maxProviderAttempts=100&reportedTokenStopThreshold=200000&maxRunDurationMs=1800000",
+      "/api/redundancy/semantic/run-preview?maxProviderAttempts=1000&reportedTokenStopThreshold=2000000&maxRunDurationMs=1800000",
     ]);
     expect(outputEvents[0]).toContain("Note transmission is off by default");
+    expect(outputEvents[0]).toContain("Note transmission permission available: yes");
     expect(outputEvents[1]).toBe("POST");
     expect(outputEvents[0]).toContain("not a billing cap");
     expect(outputEvents[0]).toContain("Application stop limits");
-    expect(outputEvents[0]).toContain("200,000 tokens");
+    expect(outputEvents[0]).toContain("2,000,000 tokens");
+    expect(outputEvents[0]).not.toMatch(/retention/i);
+    expect(outputEvents[0]).not.toContain("TypeSafe's default retention duration is unspecified");
+    expect(outputEvents[0]).not.toContain("do not promise provider-side erasure");
     // The preview is the only GET made; the mock has no manifest or page route.
     expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
     expect(calls.find((call) => call.method === "POST")?.body).toEqual({
@@ -199,7 +204,6 @@ describe("semantic redundancy CLI consent boundary", () => {
       noteTransmissionPermitted: false,
       providerConfigured: true,
       scoringEffect: "annotation-only",
-      retentionCaveat: "Retention applies.",
       limits: {
         maxEligiblePairs: 25_000,
         maxProviderAttempts: 100,
@@ -249,7 +253,6 @@ describe("semantic redundancy CLI consent boundary", () => {
       noteTransmissionPermitted: false,
       providerConfigured: true,
       scoringEffect: "annotation-only",
-      retentionCaveat: "Retention applies.",
       limits: {
         maxEligiblePairs: 25_000,
         maxProviderAttempts: 250,
@@ -348,7 +351,6 @@ describe("semantic redundancy CLI consent boundary", () => {
       noteTransmissionPermitted: false,
       providerConfigured: false,
       scoringEffect: "annotation-only",
-      retentionCaveat: "Retention applies.",
       limits: {
         maxEligiblePairs: 25_000,
         maxProviderAttempts: 100,
@@ -381,10 +383,292 @@ describe("semantic redundancy CLI consent boundary", () => {
     );
     expect(starts).toBe(0);
     preview.withinPairLimit = true;
-    await expectError(
-      redundancySemanticRun(client, [], { json: false }),
-      "Run precondition failed",
+    await expectError(redundancySemanticRun(client, [], { json: false }), "preview expired");
+    expect(starts).toBe(1);
+  });
+
+  test("wishlist all preview discloses candidate counts and starts without note consent", async () => {
+    const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+    const consoleOutput: string[] = [];
+    const wishlistPreview = {
+      requestId: "wishlist-request",
+      precondition: "wishlist-token",
+      provider: "TypeSafe",
+      modelId: "model-safe",
+      eligibleGameCount: 0,
+      pairCount: 0,
+      descriptionBearingPairCount: 0,
+      noteBearingPairCount: 0,
+      noteTransmissionPermitted: false,
+      providerConfigured: true,
+      scoringEffect: "annotation-only",
+      limits: {
+        maxEligiblePairs: 25_000,
+        maxProviderAttempts: 100,
+        maxRunDurationMs: 30 * 60_000,
+        reportedTokenStopThreshold: 200_000,
+        reportedTokenThresholdIsBilledCeiling: false,
+      },
+      withinPairLimit: true,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+      scope: {
+        scope: "wishlist",
+        wishlistEntryCount: 5,
+        selectedCandidateCount: 5,
+        unselectedEntryCount: 0,
+        ownedOverlapCandidateCount: 1,
+        requestedCandidateCount: 4,
+        eligibleCandidateCount: 3,
+        unavailableCandidateCount: 1,
+        eligibleOwnedGameCount: 2,
+        comparisonPairCount: 6,
+        cachedHitPairCount: 2,
+        sendablePairCount: 3,
+      },
+      selection: { kind: "all" },
+      unavailableCandidateBggIds: [500],
+    };
+    const base = createMockClient({
+      routes: {
+        "GET /api/redundancy/semantic/run-preview": {
+          response: { ok: true, status: 200, data: wishlistPreview },
+        },
+        "POST /api/redundancy/semantic/run": {
+          response: (body) => {
+            calls.push({ method: "POST", path: "/api/redundancy/semantic/run", body });
+            return { ok: true, status: 202, data: { state: "started", runId: "wishlist-run" } };
+          },
+        },
+      },
+    });
+    const client = {
+      ...base,
+      get: <T>(path: string) => {
+        calls.push({ method: "GET", path });
+        return base.get<T>(path);
+      },
+    };
+    const originalLog = console.log;
+    console.log = (message?: unknown) => consoleOutput.push(String(message));
+    try {
+      const output = await redundancySemanticRun(client, ["--scope", "wishlist"], { json: false });
+      expect(output).toContain("Run accepted");
+    } finally {
+      console.log = originalLog;
+    }
+    expect(calls[0]?.path).toContain(
+      "?maxProviderAttempts=1000&reportedTokenStopThreshold=2000000",
     );
+    expect(calls[0]?.path).toContain("&scope=wishlist");
+    expect(calls[0]?.path).not.toContain("bggId=");
+    expect(consoleOutput[0]).toContain("Wishlist entries: 5; selected: 5; unselected: 0");
+    expect(consoleOutput[0]).toContain(
+      "Selected owned overlaps: 1; requested: 4; source eligible: 3; source unavailable: 1",
+    );
+    expect(consoleOutput[0]).toContain(
+      "Eligible owned games: 2; comparison pairs: 6; valid C_ONLY cache hits: 2; sendable pairs: 3",
+    );
+    expect(consoleOutput[0]).toContain("descriptions only");
+    expect(consoleOutput[0]).toContain("Provider/model: TypeSafe / model-safe");
+    expect(consoleOutput[0]).toContain("Application stop limits");
+    expect(consoleOutput[0]).not.toContain("authorize-notes");
+    expect(consoleOutput[0]).not.toMatch(/retention/i);
+    expect(consoleOutput[0]).not.toContain("TypeSafe's default retention duration is unspecified");
+    expect(calls[1]?.body).toEqual({
+      requestId: "wishlist-request",
+      precondition: "wishlist-token",
+      noteTransmissionAuthorized: false,
+    });
+  });
+
+  test("selected wishlist IDs are sorted repeated preview keys and never enter the start body", async () => {
+    const requestedPaths: string[] = [];
+    let postBody: unknown;
+    let starts = 0;
+    const preview = {
+      requestId: "selected-request",
+      precondition: "selected-token",
+      provider: "TypeSafe",
+      modelId: "model-safe",
+      eligibleGameCount: 0,
+      pairCount: 0,
+      descriptionBearingPairCount: 0,
+      noteBearingPairCount: 0,
+      noteTransmissionPermitted: false,
+      providerConfigured: true,
+      scoringEffect: "annotation-only" as const,
+      limits: {
+        maxEligiblePairs: 25_000,
+        maxProviderAttempts: 100,
+        maxRunDurationMs: 60_000,
+        reportedTokenStopThreshold: 10_000,
+        reportedTokenThresholdIsBilledCeiling: false as const,
+      },
+      withinPairLimit: true,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+      scope: {
+        scope: "wishlist" as const,
+        wishlistEntryCount: 4,
+        selectedCandidateCount: 2,
+        unselectedEntryCount: 2,
+        ownedOverlapCandidateCount: 0,
+        requestedCandidateCount: 2,
+        eligibleCandidateCount: 2,
+        unavailableCandidateCount: 0,
+        eligibleOwnedGameCount: 1,
+        comparisonPairCount: 2,
+        cachedHitPairCount: 1,
+        sendablePairCount: 1,
+      },
+      selection: { kind: "selected" as const, bggIds: [101, 902] },
+      unavailableCandidateBggIds: [],
+    };
+    const base = createMockClient({
+      routes: {
+        "GET /api/redundancy/semantic/run-preview": {
+          response: { ok: true, status: 200, data: preview },
+        },
+        "POST /api/redundancy/semantic/run": {
+          response: (body) => {
+            postBody = body;
+            starts++;
+            return { ok: true, status: 202, data: { state: "started" } };
+          },
+        },
+      },
+    });
+    const client = {
+      ...base,
+      get: <T>(path: string) => {
+        requestedPaths.push(path);
+        return base.get<T>(path);
+      },
+    };
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      await redundancySemanticRun(
+        client,
+        ["--scope", "wishlist", "--bgg-id", "902", "--bgg-id", "101"],
+        { json: false },
+      );
+    } finally {
+      console.log = originalLog;
+    }
+    const previewUrl = new URL(requestedPaths[0] ?? "", "http://localhost");
+    expect(previewUrl.searchParams.getAll("bggId")).toEqual(["101", "902"]);
+    expect(postBody).toEqual({
+      requestId: "selected-request",
+      precondition: "selected-token",
+      noteTransmissionAuthorized: false,
+    });
+    preview.selection.bggIds = [101, 903];
+    await expectError(
+      redundancySemanticRun(client, ["--scope", "wishlist", "--bgg-id", "902", "--bgg-id", "101"], {
+        json: false,
+      }),
+      "did not preserve the requested",
+    );
+    expect(starts).toBe(1);
+  });
+
+  test("invalid wishlist selectors and note authorization fail before any daemon request", async () => {
+    let requests = 0;
+    const base = createMockClient();
+    const client = {
+      ...base,
+      get: <T>(path: string) => {
+        requests++;
+        return base.get<T>(path);
+      },
+      post: <T>(path: string, body?: unknown) => {
+        requests++;
+        return base.post<T>(path, body);
+      },
+    };
+    const invalidArgs: Array<[string[], string]> = [
+      [["--scope"], "--scope must"],
+      [["--scope", "unknown"], "--scope must"],
+      [["--scope", "wishlist", "--scope", "collection"], "only be specified once"],
+      [["--scope", "wishlist", "--bgg-id", "0"], "positive safe integer"],
+      [["--scope", "wishlist", "--bgg-id", "01"], "positive safe integer"],
+      [["--scope", "wishlist", "--bgg-id", "9007199254740992"], "positive safe integer"],
+      [["--scope", "wishlist", "--bgg-id", "11", "--bgg-id", "11"], "must be unique"],
+      [["--bgg-id", "11"], "requires --scope wishlist"],
+      [["--scope", "collection", "--bgg-id", "11"], "requires --scope wishlist"],
+      [["--scope", "wishlist", "--authorize-notes"], "description-only"],
+    ];
+    for (const [args, message] of invalidArgs) {
+      await expectError(redundancySemanticRun(client, args, { json: false }), message);
+    }
+    expect(requests).toBe(0);
+  });
+
+  test("stale wishlist preview returns without a retry or second start", async () => {
+    let previews = 0;
+    let starts = 0;
+    const base = createMockClient({
+      routes: {
+        "GET /api/redundancy/semantic/run-preview": {
+          response: () => {
+            previews++;
+            return {
+              ok: true,
+              status: 200,
+              data: {
+                requestId: "stale-request",
+                precondition: "old-token",
+                provider: "TypeSafe",
+                modelId: "model-safe",
+                eligibleGameCount: 0,
+                pairCount: 0,
+                descriptionBearingPairCount: 0,
+                noteBearingPairCount: 0,
+                noteTransmissionPermitted: false,
+                providerConfigured: true,
+                scoringEffect: "annotation-only",
+                limits: {
+                  maxEligiblePairs: 25_000,
+                  maxProviderAttempts: 100,
+                  maxRunDurationMs: 60_000,
+                  reportedTokenStopThreshold: 10_000,
+                  reportedTokenThresholdIsBilledCeiling: false,
+                },
+                withinPairLimit: true,
+                expiresAt: "2030-01-01T00:00:00.000Z",
+                scope: {
+                  scope: "wishlist",
+                  wishlistEntryCount: 1,
+                  selectedCandidateCount: 1,
+                  unselectedEntryCount: 0,
+                  ownedOverlapCandidateCount: 0,
+                  requestedCandidateCount: 1,
+                  eligibleCandidateCount: 1,
+                  unavailableCandidateCount: 0,
+                  eligibleOwnedGameCount: 1,
+                  comparisonPairCount: 1,
+                  cachedHitPairCount: 0,
+                  sendablePairCount: 1,
+                },
+                selection: { kind: "selected", bggIds: [7] },
+                unavailableCandidateBggIds: [],
+              },
+            };
+          },
+        },
+        "POST /api/redundancy/semantic/run": {
+          response: () => {
+            starts++;
+            return { ok: false, status: 412, data: { error: "Run precondition failed" } };
+          },
+        },
+      },
+    });
+    await expectError(
+      redundancySemanticRun(base, ["--scope", "wishlist", "--bgg-id", "7"], { json: false }),
+      "preview expired",
+    );
+    expect(previews).toBe(1);
     expect(starts).toBe(1);
   });
 
@@ -404,6 +688,7 @@ describe("semantic redundancy CLI consent boundary", () => {
                 relation: "historical",
                 value: {
                   state: "failed",
+                  scope: "wishlist",
                   pairCount: 3,
                   completedPairs: 1,
                   cacheHits: 0,
@@ -430,6 +715,7 @@ describe("semantic redundancy CLI consent boundary", () => {
     expect(progress).toContain("Coverage counts: not measured");
     expect(progress).toContain("Live activity: idle");
     expect(progress).toContain("Historical saved progress");
+    expect(progress).toContain("Run scope: wishlist");
     expect(progress).toContain("legacy local budget limit");
     expect(progress).toContain("does not establish that TypeSafe rate-limited");
     expect(progress).not.toContain("game/");
@@ -438,6 +724,85 @@ describe("semantic redundancy CLI consent boundary", () => {
     );
     await redundancySemanticCancel(client, ["live-run"], { json: true });
     expect(cancelBody).toEqual({ runId: "live-run" });
+  });
+
+  test("progress polling carries scope and does not request wishlist projection", async () => {
+    const requested: string[] = [];
+    const base = createMockClient({
+      routes: {
+        "GET /api/redundancy/semantic/refresh-progress": {
+          response: {
+            ok: true,
+            status: 200,
+            data: {
+              coverageMeasurement: "not-measured",
+              activity: { state: "idle" },
+              progress: {
+                state: "saved",
+                relation: "historical",
+                value: {
+                  state: "completed",
+                  scope: "wishlist",
+                  pairCount: 3,
+                  completedPairs: 3,
+                  cacheHits: 2,
+                  cacheMisses: 1,
+                  failedPairs: 0,
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    const client = {
+      ...base,
+      get: <T>(path: string) => {
+        requested.push(path);
+        return base.get<T>(path);
+      },
+    };
+    const human = await redundancySemanticProgress(client, [], { json: false });
+    expect(human).toContain("Run scope: wishlist");
+    expect(human).toContain("3/3 completed; 2 cache hits; 1 misses; 0 failed");
+    expect(requested).toEqual(["/api/redundancy/semantic/refresh-progress"]);
+    const json = JSON.parse(await redundancySemanticProgress(client, [], { json: true })) as {
+      progress: { value: { scope?: string } };
+    };
+    expect(json.progress.value.scope).toBe("wishlist");
+    expect(requested).toHaveLength(2);
+    expect(requested.every((path) => path.endsWith("refresh-progress"))).toBe(true);
+  });
+
+  test("legacy progress scope stays unknown instead of being inferred", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/redundancy/semantic/refresh-progress": {
+          response: {
+            ok: true,
+            status: 200,
+            data: {
+              coverageMeasurement: "not-measured",
+              activity: { state: "idle" },
+              progress: {
+                state: "saved",
+                relation: "unknown",
+                value: {
+                  state: "completed",
+                  pairCount: 1,
+                  completedPairs: 1,
+                  cacheHits: 1,
+                  cacheMisses: 0,
+                  failedPairs: 0,
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    const human = await redundancySemanticProgress(client, [], { json: false });
+    expect(human).toContain("Run scope: unknown (legacy progress; not inferred)");
   });
 
   test.each([

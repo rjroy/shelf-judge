@@ -52,6 +52,12 @@ function fixture(
     semanticRead?:
       | CollectionSnapshotBuildResult["semanticRead"]
       | (() => CollectionSnapshotBuildResult["semanticRead"]);
+    logger?: {
+      debug?(...args: unknown[]): void;
+      log(...args: unknown[]): void;
+      warn(...args: unknown[]): void;
+      error(...args: unknown[]): void;
+    };
   } = {},
 ) {
   const vectorService = createSourceVectorService();
@@ -110,6 +116,7 @@ function fixture(
     storageService: storage,
     coordinator: profileSourceCoordinatorFor(storage),
     clock: { now: () => now },
+    logger: options.logger,
     serialize(snapshot) {
       serializations += 1;
       if (options.serialize) return options.serialize(snapshot);
@@ -140,6 +147,80 @@ function fixture(
 }
 
 describe("CollectionSnapshotCacheService", () => {
+  test("emits correlated, privacy-safe request and build timings", async () => {
+    const records: Array<{ level: string; message: string; fields: Record<string, unknown> }> = [];
+    const record = (level: string) => (message: unknown, fields: unknown) => {
+      records.push({
+        level,
+        message: String(message),
+        fields: (fields ?? {}) as Record<string, unknown>,
+      });
+    };
+    const logger = {
+      debug: record("debug"),
+      log: record("log"),
+      warn: record("warn"),
+      error: record("error"),
+    };
+    const f = fixture({ logger });
+    const response = await f.route.request("/collection/snapshot");
+    expect(response.status).toBe(200);
+    const build = records.find(
+      ({ message }) => message === "collection snapshot cache build attempt",
+    );
+    expect(build?.fields.requestId).toMatch(/^collection-/);
+    expect(build?.fields.operationId).toMatch(/^snapshot-build-/);
+    expect(build?.fields.flightId).toMatch(/^snapshot-flight-/);
+    const enqueued = records.find(
+      ({ message }) => message === "collection snapshot reservation enqueue",
+    );
+    const entered = records.find(
+      ({ message }) => message === "collection snapshot reservation entered",
+    );
+    expect(enqueued?.fields.requestId).toBe(build?.fields.requestId);
+    expect(entered?.fields.requestId).toBe(build?.fields.requestId);
+    expect(entered?.fields.reservationId).toBe(enqueued?.fields.reservationId);
+    expect(enqueued?.fields.candidateFlightId).toBe(build?.fields.flightId);
+    expect(entered?.fields.candidateFlightId).toBe(build?.fields.flightId);
+    expect(typeof entered?.fields.waitMs).toBe("number");
+    const completed = records.find(
+      ({ message, fields }) =>
+        message === "collection snapshot cache build completed" && fields.outcome === "built",
+    );
+    expect(typeof completed?.fields.elapsedMs).toBe("number");
+    expect(JSON.stringify(records)).not.toContain("Private");
+    expect(
+      records.some(
+        ({ message, fields }) =>
+          message === "collection snapshot resolve completed" && fields.outcome === "success",
+      ),
+    ).toBe(true);
+  });
+
+  test("records failed builds with correlation and safe error class only", async () => {
+    const records: Array<{ message: string; fields: Record<string, unknown> }> = [];
+    const record = (message: unknown, fields: unknown) => {
+      records.push({
+        message: String(message),
+        fields: (fields ?? {}) as Record<string, unknown>,
+      });
+    };
+    const logger = { log: record, warn: record, error: record };
+    const f = fixture({
+      logger,
+      build: () => Promise.reject(new Error("synthetic private description")),
+    });
+    const response = await f.route.request("/collection/snapshot");
+    expect(response.status).toBe(500);
+    const failure = records.find(
+      ({ message }) => message === "collection snapshot cache build failed",
+    );
+    expect(failure?.fields.requestId).toMatch(/^collection-/);
+    expect(failure?.fields.operationId).toMatch(/^snapshot-build-/);
+    expect(failure?.fields.errorClass).toBe("Error");
+    expect(JSON.stringify(records)).not.toContain("synthetic private description");
+  });
+
   test("caches one serialized body and returns bodyless weak/strong/list/wildcard matches", async () => {
     const f = fixture();
     const first = await f.route.request("/collection/snapshot");

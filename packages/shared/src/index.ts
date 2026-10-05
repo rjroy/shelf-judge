@@ -205,7 +205,17 @@ export type {
   RedundancySimilarityInfo,
   RedundancySettings,
   WishlistBreakdownEntry,
+  WishlistBggSourceSnapshot,
   WishlistEntry,
+  WishlistEntryView,
+  JevWishlistCandidateSelection,
+  JevRunScopeSelector,
+  JevRunScopeDisclosure,
+  JevRunPreviewBase,
+  JevWishlistRunPreview,
+  JevRunPreview,
+  WishlistRedundancyProjection,
+  WishlistEntryReadResult,
   BoxDimensions,
   Shelf,
   ShelfUnit,
@@ -220,6 +230,8 @@ export type {
   AssignmentConflict,
   ShelfCapacityResult,
 } from "./types";
+
+export * from "./wishlist-current-projection-v2";
 
 export {
   NotNowAttentionCommandSchema,
@@ -242,7 +254,15 @@ export type {
   AttentionCandidateArtifactIdentity,
 } from "./attention-candidate-artifact";
 
-export { SemanticScoringInputProofSchema } from "./semantic-scoring-input-proof";
+export { DEFAULT_JEV_RUN_BUDGET } from "./jev-run-budget";
+export type { JevRunBudget } from "./jev-run-budget";
+
+export {
+  SemanticScoringInputProofSchema,
+  SemanticScoringInputProofV2Schema,
+  SIMILARITY_ALGORITHM_VERSION,
+} from "./semantic-scoring-input-proof";
+export type { SemanticScoringInputProofV2 } from "./semantic-scoring-input-proof";
 
 export {
   DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
@@ -366,6 +386,7 @@ export {
   AcquisitionMutationRequestSchema,
   EntertainmentBenchmarkMutationRequestSchema,
   ManualGameValuesMutationRequestSchema,
+  WishlistBggSourceSnapshotSchema,
 } from "./validation";
 
 export {
@@ -458,6 +479,7 @@ export {
 } from "./derived-axis-registry";
 export type {
   DerivedAxisRegistry,
+  DerivedAxisGameInput,
   DerivedAxisTemplateDefaults,
   DerivedFieldDefinition,
   DerivedAxisPayload,

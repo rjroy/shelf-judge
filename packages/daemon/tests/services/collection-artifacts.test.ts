@@ -140,6 +140,39 @@ describe("collection artifact manifest", () => {
     expect(sink.messages.some((message) => message.includes("invalidPrediction=1"))).toBe(true);
   });
 
+  test("preserves a valid compact BGG source during salvage and drops only a malformed source", async () => {
+    const bggSource = {
+      observedAt: "2026-01-02T00:00:00.000Z",
+      description: "  exact prose  ",
+      mechanics: ["Deck Building"],
+      categories: ["Strategy"],
+      weight: null,
+      communityRating: 7.2,
+      minPlayers: 2,
+      maxPlayers: 4,
+      bestPlayers: null,
+      playingTime: 60,
+    };
+    const fileOps = createMockFileOps({
+      [WISHLIST_PATH]: JSON.stringify([
+        validEntry({ bggSource }),
+        validEntry({ id: "bad-source", bggSource: { description: 12 } }),
+      ]),
+    });
+
+    await descriptor("wishlist-predictions").invalidate(
+      createCollectionArtifactContext(DATA_DIR, fileOps, logger()),
+    );
+
+    const entries = JSON.parse(fileOps.files.get(WISHLIST_PATH) ?? "null") as Array<
+      Record<string, unknown>
+    >;
+    expect(entries[0]?.bggSource).toEqual(bggSource);
+    expect(entries[1]).not.toHaveProperty("bggSource");
+    expect(entries[0]?.predictedScore).toBeNull();
+    expect(entries[1]?.id).toBe("bad-source");
+  });
+
   test("quarantines an untouched mixed array before atomically salvaging valid core entries", async () => {
     const raw = JSON.stringify([validEntry(), { id: "broken", name: 42 }]);
     const fileOps = createMockFileOps({

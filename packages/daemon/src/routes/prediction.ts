@@ -103,6 +103,7 @@ export function createPredictionRoutes(deps: PredictionRoutesDeps): RouteModule 
         bggId,
         { signal: c.req.raw.signal },
       );
+      if (!result.score) return c.json({ error: "Current BGG prediction is unavailable" }, 503);
 
       const response = projectPredictedGameResponse({
         game:

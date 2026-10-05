@@ -2,20 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { wishlistAdd, wishlistList, wishlistRefresh } from "../../src/commands/wishlist.js";
 import { createMockClient } from "../helpers/mock-client.js";
 
-const preview = {
-  penalty: 1.2,
-  originalScore: 8,
-  adjustedScore: 6.8,
-  nicheNeighbors: [
-    { gameId: "1", gameName: "Game One", similarity: 0.9, fitnessScore: 8 },
-    { gameId: "2", gameName: "Game Two", similarity: 0.8, fitnessScore: 7 },
-    { gameId: "3", gameName: "Game Three", similarity: 0.7, fitnessScore: 6 },
-    { gameId: "4", gameName: "Game Four", similarity: 0.6, fitnessScore: 5 },
-  ],
-  nicheRank: 4,
-  nicheSize: 5,
-};
-
 const entry = {
   id: "entry-1",
   bggId: 123,
@@ -26,56 +12,100 @@ const entry = {
   predictionConfidence: "strong" as const,
   predictedBreakdown: null,
   nicheImpact: null,
+  redundancyPreview: null,
   addedAt: "2026-01-01T00:00:00Z",
-  redundancyPreview: preview,
 };
 
-describe("wishlist redundancy preview", () => {
-  test("list shows adjusted score, penalty, and at most three similar games", async () => {
-    const client = createMockClient({
-      routes: {
-        "GET /api/wishlist": { response: { ok: true, status: 200, data: [entry] } },
+const available = {
+  entry,
+  prediction: {
+    availability: "available" as const,
+    source: "current" as const,
+    result: {
+      score: 7.25,
+      ratedAxisCount: 0,
+      totalAxisCount: 1,
+      breakdown: [],
+      vetoed: false,
+      vetoedBy: null,
+      hypotheticalScore: null,
+      predictionMeta: {
+        readinessStage: 1 as const,
+        confidence: "moderate" as const,
+        predictedAxisCount: 1,
+        actualAxisCount: 0,
+        referenceGameCount: 1,
+        coveragePercent: 1,
       },
-    });
+      redundancyAdjustment: null,
+      redundancySimilarityInfo: { status: "disabled" as const, generationId: null },
+    },
+    predictionUnavailable: null,
+  },
+  redundancy: { source: "base-prediction" as const, adjustment: null, orderingScore: 7.25 },
+};
 
-    const output = await wishlistList(client, [], { json: false });
-    expect(output).toContain("6.8 (-1.2)");
-    expect(output).toContain("Game One, Game Two, Game Three");
-    expect(output).not.toContain("Game Four");
-  });
+const unavailable = {
+  ...available,
+  entry: { ...entry, predictedScore: null, predictionConfidence: null },
+  prediction: {
+    availability: "unavailable" as const,
+    source: "current" as const,
+    result: null,
+    reason: "missing-source" as const,
+    predictionUnavailable: null,
+  },
+  redundancy: { source: "unavailable" as const, adjustment: null, orderingScore: null },
+};
 
-  test("add and refresh explain the adjusted score and penalty", async () => {
+describe("active CLI wishlist current projection", () => {
+  test("list formats V2 current values and never falls back to saved aliases", async () => {
     const client = createMockClient({
       routes: {
-        "POST /api/wishlist": { response: { ok: true, status: 200, data: { entry } } },
-        "POST /api/wishlist/entry-1/refresh": {
-          response: { ok: true, status: 200, data: { entry } },
+        "GET /api/wishlist/redundancy": {
+          response: { ok: true, status: 200, data: [available, unavailable] },
         },
       },
     });
-
-    const added = await wishlistAdd(client, ["123"], { json: false });
-    const refreshed = await wishlistRefresh(client, ["entry-1"], { json: false });
-    for (const output of [added, refreshed]) {
-      expect(output).toContain("Adjusted score: 6.8 (redundancy penalty: -1.2)");
-      expect(output).toContain("Top similar collection games: Game One, Game Two, Game Three");
-      expect(output).not.toContain("Game Four");
-    }
+    const human = await wishlistList(client, [], { json: false });
+    expect(human).toContain("7.3");
+    expect(human).toContain("Current prediction unavailable");
+    expect(human).not.toContain("8.0");
+    const json = JSON.parse(await wishlistList(client, [], { json: true })) as unknown[];
+    expect(json).toHaveLength(2);
+    expect(JSON.stringify(json)).not.toContain("bggSource");
   });
 
-  test("null preview does not imply a reduction and JSON labels its factual-only semantics", async () => {
-    const noPreview = { ...entry, redundancyPreview: null };
+  test("add and refresh print current aliases rather than historical preview fields", async () => {
+    const currentEntry = { ...entry, predictedScore: 7.25, predictionConfidence: "moderate" };
     const client = createMockClient({
       routes: {
-        "GET /api/wishlist": { response: { ok: true, status: 200, data: [noPreview] } },
-        "POST /api/wishlist": { response: { ok: true, status: 200, data: { entry: noPreview } } },
+        "POST /api/wishlist": {
+          response: { ok: true, status: 201, data: { entry: currentEntry } },
+        },
+        "POST /api/wishlist/entry-1/refresh": {
+          response: { ok: true, status: 200, data: { entry: currentEntry } },
+        },
       },
     });
+    expect(await wishlistAdd(client, ["123"], { json: false })).toContain("available: 7.3");
+    expect(await wishlistRefresh(client, ["entry-1"], { json: false })).toContain("available: 7.3");
+  });
 
-    const listed = await wishlistList(client, [], { json: false });
-    const addedJson = await wishlistAdd(client, ["123"], { json: true });
-    expect(listed).toContain("---");
-    expect(listed).not.toContain("penalty");
-    expect(JSON.parse(addedJson)).toEqual({ ...noPreview, redundancyPreviewMode: "factual-only" });
+  test("unavailable current projection is explicit in list JSON", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/wishlist/redundancy": {
+          response: { ok: true, status: 200, data: [unavailable] },
+        },
+      },
+    });
+    const parsed = JSON.parse(await wishlistList(client, [], { json: true })) as Array<{
+      prediction: { availability: string; reason?: string };
+    }>;
+    expect(parsed[0]?.prediction).toMatchObject({
+      availability: "unavailable",
+      reason: "missing-source",
+    });
   });
 });

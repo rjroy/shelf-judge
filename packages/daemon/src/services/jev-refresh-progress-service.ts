@@ -3,7 +3,10 @@ import { projectJevRunProgress, type JevStatusProgress } from "./jev-pair-status
 
 export type JevRefreshProgressResponse = {
   coverageMeasurement: "not-measured";
-  activity: { state: "active"; runId: string } | { state: "idle" } | { state: "unavailable" };
+  activity:
+    | { state: "active"; runId: string; scope?: "collection" | "wishlist" }
+    | { state: "idle" }
+    | { state: "unavailable" };
   progress:
     | { state: "none" }
     | { state: "unavailable" }
@@ -17,7 +20,7 @@ export type JevRefreshProgressResponse = {
 /** Synchronous cache/controller-only read; deliberately does not inspect coverage or sources. */
 export function createJevRefreshProgressService(options: {
   cache: JevPairCache | null;
-  activeRun?: () => { runId: string } | null;
+  activeRun?: () => { runId: string; scope?: "collection" | "wishlist" } | null;
 }) {
   function read(): JevRefreshProgressResponse {
     const unavailable = (): JevRefreshProgressResponse => ({
@@ -32,10 +35,18 @@ export function createJevRefreshProgressService(options: {
       const saved = cache.getRunProgressRead();
       const activityAfter = options.activeRun?.() ?? null;
       // If the process-local run changed around the singleton read, its association is ambiguous.
-      if (activityBefore?.runId !== activityAfter?.runId) return unavailable();
+      if (
+        activityBefore?.runId !== activityAfter?.runId ||
+        activityBefore?.scope !== activityAfter?.scope
+      )
+        return unavailable();
       const activity = options.activeRun
         ? activityAfter
-          ? { state: "active" as const, runId: activityAfter.runId }
+          ? {
+              state: "active" as const,
+              runId: activityAfter.runId,
+              ...(activityAfter.scope ? { scope: activityAfter.scope } : {}),
+            }
           : { state: "idle" as const }
         : { state: "unavailable" as const };
       if (saved.status === "unavailable" || saved.status === "invalid") return unavailable();

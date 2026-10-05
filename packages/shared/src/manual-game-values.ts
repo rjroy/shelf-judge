@@ -23,7 +23,7 @@ export function resolveEffectivePlayingTime(game: Game): FieldEvidence<number> {
 }
 
 export function resolveEffectivePlayerCount(
-  game: Game,
+  game: Pick<Game, "manualValues">,
   source: FieldEvidence<number> | null,
 ): FieldEvidence<number> | null {
   return resolveManualOverSource(

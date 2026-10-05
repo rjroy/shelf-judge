@@ -1,5 +1,9 @@
 import * as path from "node:path";
-import { CURRENT_COLLECTION_SCHEMA_VERSION } from "@shelf-judge/shared";
+import {
+  CURRENT_COLLECTION_SCHEMA_VERSION,
+  WishlistBggSourceSnapshotSchema,
+  type WishlistBggSourceSnapshot,
+} from "@shelf-judge/shared";
 import { z } from "zod";
 import { atomicWrite, type FileOps, type TemporaryPathForAttempt } from "./file-ops.js";
 import type { Logger } from "./logger.js";
@@ -57,6 +61,7 @@ type ClearedWishlistEntry = z.output<typeof WishlistCoreEntrySchema> & {
   predictedBreakdown: null;
   nicheImpact: null;
   redundancyPreview: null;
+  bggSource?: WishlistBggSourceSnapshot;
 };
 
 function defaultQuarantinePath(activePath: string, attempt: number): string {
@@ -127,15 +132,25 @@ const wishlistDescriptor: CollectionArtifactDescriptor = {
     const salvageable: ClearedWishlistEntry[] = [];
     let invalidCoreCount = 0;
     let invalidPredictionCount = 0;
-    for (const entry of parsed) {
+    const entries: unknown[] = parsed;
+    for (const entry of entries) {
       const core = WishlistCoreEntrySchema.safeParse(entry);
       if (!core.success) {
         invalidCoreCount += 1;
         continue;
       }
       if (!WishlistPredictionFieldsSchema.safeParse(entry).success) invalidPredictionCount += 1;
+      const sourceValue =
+        typeof entry === "object" && entry !== null && "bggSource" in entry
+          ? entry.bggSource
+          : undefined;
+      const source =
+        sourceValue === undefined ? null : WishlistBggSourceSnapshotSchema.safeParse(sourceValue);
+      const coreFields = { ...core.data };
+      delete coreFields.bggSource;
       salvageable.push({
-        ...core.data,
+        ...coreFields,
+        ...(source?.success ? { bggSource: source.data } : {}),
         predictedScore: null,
         predictionConfidence: null,
         predictedBreakdown: null,

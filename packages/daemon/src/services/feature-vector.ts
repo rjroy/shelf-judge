@@ -3,6 +3,7 @@
 // Follows the elo-engine.ts and curve-engine.ts pattern.
 
 import type {
+  BggTag,
   ComponentDistances,
   ComponentWeights,
   Axis,
@@ -30,6 +31,23 @@ export interface FeatureVector {
   personalAxes: number[] | null; // axis ratings normalized 0-1, null when no ratings
 }
 
+/** The compact factual fields consumed by the binary/continuous encoder. */
+export interface FactualScoringGame {
+  id: string;
+  /** Optional disjoint memo identity for non-collection projections such as wishlist candidates. */
+  cacheIdentity?: object;
+  minPlayers: number | null;
+  maxPlayers: number | null;
+  bestPlayers: number | null;
+  playingTime: number | null;
+  bggData: {
+    weight: number | null;
+    communityRating: number | null;
+    mechanics: readonly Pick<BggTag, "name">[];
+    categories: readonly Pick<BggTag, "name">[];
+  } | null;
+}
+
 export type VectorAxis = PersonalAxis | TournamentAxis;
 
 export const FACTUAL_VECTOR_DIMENSIONS = [
@@ -53,7 +71,7 @@ export const DEFAULT_WEIGHTS: ComponentWeights = {
  * Scan all games' BGG data and return sorted, deduplicated mechanic and category name lists.
  * The vocabulary defines which binary columns exist in the feature vector.
  */
-export function buildVocabulary(games: Game[]): Vocabulary {
+export function buildVocabulary(games: readonly FactualScoringGame[]): Vocabulary {
   const mechanicsSet = new Set<string>();
   const categoriesSet = new Set<string>();
 
@@ -88,13 +106,18 @@ export function getOrderedVectorAxes(axes: readonly Axis[]): VectorAxis[] {
 }
 
 export function getVectorAxisValues(
-  game: Game,
+  game: Game | FactualScoringGame,
   vectorAxes: readonly VectorAxis[],
   tournamentScore: number | null | undefined,
 ): Record<string, number> {
   const values: Record<string, number> = {};
   for (const axis of vectorAxes) {
-    const value = axis.source === "tournament" ? tournamentScore : game.ratings[axis.id];
+    const value =
+      axis.source === "tournament"
+        ? tournamentScore
+        : "ratings" in game
+          ? game.ratings[axis.id]
+          : undefined;
     if (value !== null && value !== undefined && Number.isFinite(value)) {
       values[axis.id] = value;
     }
@@ -106,7 +129,7 @@ export function getVectorAxisValues(
  * Compute observed min/max ranges for continuous attributes across a collection.
  * Used to normalize continuous values per REQ-PROFILE-11.
  */
-export function computeContinuousRanges(games: Game[]): ContinuousRanges {
+export function computeContinuousRanges(games: readonly FactualScoringGame[]): ContinuousRanges {
   let minP = Infinity,
     maxP = -Infinity;
   let minMP = Infinity,
@@ -152,7 +175,7 @@ export function computeContinuousRanges(games: Game[]): ContinuousRanges {
  * Personal axes portion: axis ratings normalized 0-1 over 1-10.
  */
 export function encodeGame(
-  game: Game,
+  game: FactualScoringGame,
   vocabulary: Vocabulary,
   vectorAxes: readonly VectorAxis[],
   axisValues?: Readonly<Record<string, number | undefined>>,

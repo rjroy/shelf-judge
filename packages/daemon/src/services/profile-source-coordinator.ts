@@ -19,8 +19,26 @@ export interface ProfileSourceCoordinator {
   runExclusive<Value>(operation: () => Promise<Value>): Promise<Value>;
 }
 
-const coordinators = new WeakMap<object, ProfileSourceCoordinator>();
+/** Reentrancy query for capture paths that may share work across coordinator owners. */
+export interface ReentrantProfileSourceCoordinator extends ProfileSourceCoordinator {
+  isHeldByCurrentContext(): boolean;
+}
+
+const coordinators = new WeakMap<object, ReentrantProfileSourceCoordinator>();
 const activeCoordinator = new AsyncLocalStorage<ProfileSourceCoordinator>();
+const wishlistMutationGenerations = new WeakMap<object, bigint>();
+
+/** Process-local revocation fence for durable wishlist membership, scoped to the storage authority. */
+export function wishlistMutationGenerationFor(storageService: object): string {
+  return (wishlistMutationGenerations.get(storageService) ?? 0n).toString(10);
+}
+
+/** Call only at the serialized wishlist write boundary (or before destructive cache revocation). */
+export function advanceWishlistMutationGeneration(storageService: object): string {
+  const next = (wishlistMutationGenerations.get(storageService) ?? 0n) + 1n;
+  wishlistMutationGenerations.set(storageService, next);
+  return next.toString(10);
+}
 
 /** Run work without inheriting a coordinator token from the caller's async context. */
 export function runOutsideProfileSourceCoordinator<Value>(operation: () => Value): Value {
@@ -72,12 +90,14 @@ export function sameProfileSourceIdentity(
   return canonicalJson(left) === canonicalJson(right);
 }
 
-export function profileSourceCoordinatorFor(storageService: object): ProfileSourceCoordinator {
+export function profileSourceCoordinatorFor(
+  storageService: object,
+): ReentrantProfileSourceCoordinator {
   const existing = coordinators.get(storageService);
   if (existing) return existing;
 
   let operations: Promise<void> = Promise.resolve();
-  const coordinator: ProfileSourceCoordinator = {
+  const coordinator: ReentrantProfileSourceCoordinator = {
     runExclusive<Value>(operation: () => Promise<Value>): Promise<Value> {
       if (activeCoordinator.getStore() === coordinator) return operation();
       const run = () => activeCoordinator.run(coordinator, operation);
@@ -87,6 +107,9 @@ export function profileSourceCoordinatorFor(storageService: object): ProfileSour
         () => undefined,
       );
       return result;
+    },
+    isHeldByCurrentContext(): boolean {
+      return activeCoordinator.getStore() === coordinator;
     },
   };
   coordinators.set(storageService, coordinator);

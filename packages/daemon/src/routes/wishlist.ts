@@ -1,10 +1,16 @@
 import { Hono } from "hono";
-import { toErrorMessage } from "@shelf-judge/shared";
+import { toErrorMessage, type WishlistEntry, type WishlistEntryView } from "@shelf-judge/shared";
 import type { WishlistService } from "../services/wishlist-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 
 export interface WishlistRoutesDeps {
   wishlistService: WishlistService;
+}
+
+function publicEntry(entry: WishlistEntry | WishlistEntryView): WishlistEntryView {
+  const view = { ...entry };
+  delete (view as Partial<WishlistEntry>).bggSource;
+  return view;
 }
 
 export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
@@ -17,9 +23,26 @@ export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
       const entries = await wishlistService.list();
       // Sort by addedAt descending (newest first)
       entries.sort((a, b) => b.addedAt.localeCompare(a.addedAt));
-      return c.json(entries);
+      return c.json(entries.map(publicEntry));
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
+    }
+  });
+
+  // Explicit heavier read: unlike progress polling, this computes one current projection.
+  routes.get("/wishlist/redundancy", async (c) => {
+    c.header("Cache-Control", "no-store");
+    try {
+      const results = await wishlistService.listWithCurrentRedundancy();
+      return c.json(
+        results.map(({ entry, prediction, redundancy }) => ({
+          entry: publicEntry(entry as WishlistEntry),
+          prediction,
+          redundancy,
+        })),
+      );
+    } catch {
+      return c.json({ error: "Wishlist redundancy projection is unavailable" }, 503);
     }
   });
 
@@ -43,7 +66,7 @@ export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
 
     try {
       const entry = await wishlistService.add(bggId);
-      return c.json({ entry }, 201);
+      return c.json({ entry: publicEntry(entry) }, 201);
     } catch (err) {
       const message = toErrorMessage(err);
       if (
@@ -81,7 +104,7 @@ export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
     const id = c.req.param("id");
     try {
       const entry = await wishlistService.refresh(id);
-      return c.json({ entry });
+      return c.json({ entry: publicEntry(entry) });
     } catch (err) {
       const message = toErrorMessage(err);
       if (message.includes("not found")) {
@@ -112,6 +135,45 @@ export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
       name: "list",
       description: "List all wishlist entries",
       invocation: { method: "GET", path: "/api/wishlist" },
+      hierarchy: { root: "shelf", feature: "wishlist" },
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.wishlist.list-redundancy-projection",
+      name: "list-redundancy-projection",
+      description:
+        "List safe wishlist entries with strict current V2 prediction and redundancy projections; source text is omitted",
+      invocation: { method: "GET", path: "/api/wishlist/redundancy" },
+      response: {
+        body: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              entry: {
+                type: "object",
+                description: "Public WishlistEntryView; excludes bggSource.",
+              },
+              redundancy: {
+                type: "object",
+                properties: {
+                  source: { enum: ["current", "base-prediction", "unavailable"] },
+                  adjustment: { type: ["object", "null"] },
+                  orderingScore: { type: ["number", "null"] },
+                },
+                required: ["source", "adjustment", "orderingScore"],
+                additionalProperties: false,
+              },
+              prediction: {
+                type: "object",
+                description: "Strict current V2 prediction projection; never saved history.",
+              },
+            },
+            required: ["entry", "prediction", "redundancy"],
+            additionalProperties: false,
+          },
+        },
+      },
       hierarchy: { root: "shelf", feature: "wishlist" },
       idempotent: true,
     },

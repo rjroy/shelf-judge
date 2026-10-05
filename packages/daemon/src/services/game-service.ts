@@ -489,7 +489,7 @@ function strictSafeBestPlayerCount(value: number | null): number | null {
   return value !== null && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
-function isBggDataStale(game: Game): boolean | undefined {
+export function isBggDataStale(game: Game): boolean | undefined {
   if (!game.bggData?.fetchedAt) return undefined;
   const fetchedAt = new Date(game.bggData.fetchedAt).getTime();
   return Date.now() - fetchedAt > STALE_THRESHOLD_MS;

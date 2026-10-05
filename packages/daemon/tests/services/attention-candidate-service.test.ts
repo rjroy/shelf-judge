@@ -1,5 +1,8 @@
 /* eslint-disable @typescript-eslint/require-await -- async service fixtures return already-resolved Promises. */
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   ATTENTION_CANDIDATE_ARTIFACT_INDEX_VERSION,
   ATTENTION_CANDIDATE_ARTIFACT_SCHEMA_VERSION,
@@ -13,6 +16,7 @@ import {
 import {
   AttentionCandidateService,
   createAttentionCandidateOracle,
+  createAttentionCandidateProductionSourceLoader,
   productionAttentionCandidateDependenciesForGame,
   type AttentionCandidateSource,
   type AttentionCandidateProductionSource,
@@ -31,12 +35,17 @@ import { DEFAULT_REDUNDANCY_SETTINGS } from "../../src/services/redundancy-engin
 import { attentionRuleCatalog } from "../../src/services/attention-rule-catalog.js";
 import { projectPurchaseUtilization } from "../../src/services/purchase-utilization-projection.js";
 import { createTestApp } from "../helpers/test-app.js";
+import { createFileOps } from "../../src/services/file-ops.js";
+import { createJevPairCache } from "../../src/services/jev-pair-cache-service.js";
 
 const hash = "a".repeat(64);
 const syntheticProof = {
-  version: 1 as const,
-  mode: "factual-only" as const,
+  version: 2 as const,
+  mode: "unified-similarity" as const,
+  algorithmVersion: "unified-jaccard-manhattan-jev-v1" as const,
   identity: "f".repeat(64),
+  demandedPairsIdentity: "d".repeat(64),
+  examinedComponentsIdentity: "e".repeat(64),
 };
 function syntheticOracle<Source extends AttentionCandidateSource>(oracle: {
   evaluate(
@@ -321,6 +330,15 @@ describe("AttentionCandidateService core", () => {
     let oracleCalls = 0;
     let saves = 0;
     let generation = 0;
+    const proofFor = (value: AttentionCandidateSource) => {
+      const token = value.collection.semanticRedundancy.settings.enabled ? "a" : "f";
+      return {
+        ...syntheticProof,
+        identity: token.repeat(64),
+        demandedPairsIdentity: token.repeat(64),
+        examinedComponentsIdentity: token.repeat(64),
+      };
+    };
     const service = new AttentionCandidateService({
       coordinator: { runExclusive: (operation) => operation() },
       clock: { now: () => new Date("2026-01-02T00:00:00.000Z") },
@@ -336,33 +354,17 @@ describe("AttentionCandidateService core", () => {
         discardAttentionCandidates: () => Promise.resolve(),
       },
       oracle: {
-        getScoringInput: (value) =>
+        getScoringInput: () =>
           Promise.resolve({
-            semanticScoringInputProof: value.collection.semanticRedundancy.settings.enabled
-              ? {
-                  version: 1,
-                  mode: "semantic",
-                  status: "ready",
-                  coverageVersion: 1,
-                  identity: "b".repeat(64),
-                }
-              : syntheticProof,
+            semanticScoringInputProof: proofFor(current),
             isCurrent: () => true,
           }),
-        evaluate: (value) => {
+        evaluate: () => {
           oracleCalls += 1;
           return Promise.resolve({
             evaluations: [],
             presentations: new Map(),
-            semanticScoringInputProof: value.collection.semanticRedundancy.settings.enabled
-              ? {
-                  version: 1,
-                  mode: "semantic",
-                  status: "ready",
-                  coverageVersion: 1,
-                  identity: "b".repeat(64),
-                }
-              : syntheticProof,
+            semanticScoringInputProof: proofFor(current),
             isCurrent: () => true,
           });
         },
@@ -1147,7 +1149,7 @@ describe("AttentionCandidateService core", () => {
     ]);
     expect(result.evaluations.map((evaluation) => evaluation.gameId)).toEqual(["game"]);
   });
-  test("stored-rule scoring omits a staged future note receipt without leaking private capture", async () => {
+  test("proposed stored-rule scoring removes only the pending receipt and preserves strict snapshots", async () => {
     const pendingReceipt = {
       receiptType: "owner-game-note",
       commandId: "10000000-0000-4000-8000-000000000099",
@@ -1170,37 +1172,70 @@ describe("AttentionCandidateService core", () => {
       ...ownedGame("game"),
       ownerNote: { state: "present" as const, version: 1, updatedAt: observedAt, text: "private" },
     };
-    const production: AttentionCandidateProductionSource = {
-      ...productionSource(1, [game]),
-      collection: {
-        ...productionSource(1, [game]).collection,
-        commandReceipts: [pendingReceipt],
-      },
-    };
-    const app = createTestApp();
-    let captured: Parameters<DisplayedFitnessService["listGamesFromSnapshot"]>[0] | undefined;
-    const displayedFitness = provenFitness({
-      listGames: () => Promise.resolve([]),
-      listGamesFromSnapshot: (snapshot, options) => {
-        captured = snapshot;
-        return app.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
-      },
-    });
+    const directory = await mkdtemp(join(tmpdir(), "attention-proposed-receipt-"));
+    const cache = await createJevPairCache(directory);
+    try {
+      const app = createTestApp({
+        dataDir: directory,
+        configPath: join(directory, "config.json"),
+        fileOps: createFileOps(),
+        jevPairCache: cache,
+      });
+      const prior = await app.storageService.loadCollection();
+      prior.revision = 1;
+      prior.games = [{ ...game, ownerNote: { state: "missing", version: 0, updatedAt: null } }];
+      prior.semanticRedundancy.settings = {
+        ...prior.semanticRedundancy.settings,
+        enabled: true,
+        cachedOwnerNoteUse: true,
+      };
+      await app.storageService.saveCollection(prior);
+      await app.storageService.hydrateSourceVector?.();
+      const production = await createAttentionCandidateProductionSourceLoader(app.storageService)();
+      const proposed = structuredClone(prior);
+      proposed.games[0].ownerNote = game.ownerNote;
+      proposed.commandReceipts = [pendingReceipt];
+      const capability = await app.unifiedScoringService.prepareProposedCollection({
+        prior,
+        proposed,
+      });
+      const result = await createAttentionCandidateOracle(
+        app.displayedFitnessService,
+      ).evaluateStoredRulesForProposedCollection?.(production, capability, observedAt, [
+        { gameId: "game", ruleId: "unknown-rule" },
+      ]);
+      expect(result?.matches).toEqual([]);
+      expect(capability.collection.commandReceipts).toEqual([pendingReceipt]);
+      expect(capability.collection.games[0]?.ownerNote).toMatchObject({ text: "private" });
+      expect(JSON.stringify(result?.matches)).not.toContain("private");
+      expect((await app.storageService.loadCollection()).commandReceipts).toEqual([]);
 
-    const matches = await createAttentionCandidateOracle(displayedFitness).evaluateStoredRules(
-      production,
-      observedAt,
-      [{ gameId: "game", ruleId: "unknown-rule" }],
-    );
-
-    expect(matches).toEqual([]);
-    expect(captured).toMatchObject({ kind: "private-capture" });
-    if (captured?.kind !== "private-capture") throw new Error("Expected private scoring capture");
-    expect(captured.collection.revision).toBe(1);
-    expect(captured.collection.commandReceipts).toEqual([]);
-    expect(captured.collection.games[0]?.ownerNote).toMatchObject({ text: "private" });
-    expect(JSON.stringify(matches)).not.toContain("private");
-    expect(production.collection.commandReceipts).toEqual([pendingReceipt]);
+      const changedWeights = structuredClone(prior);
+      changedWeights.semanticRedundancy.settings.weights.description += 0.1;
+      let changedSnapshotError: unknown;
+      try {
+        await app.displayedFitnessService.listGamesFromSnapshot(
+          {
+            kind: "private-capture",
+            collection: changedWeights,
+            sourceVector: production.sourceVector,
+            tournament: production.tournament,
+            predictionSettings: production.predictionSettings,
+            redundancySettings: production.redundancySettings,
+          },
+          { includePredicted: true },
+        );
+      } catch (error) {
+        changedSnapshotError = error;
+      }
+      expect(changedSnapshotError).toBeInstanceOf(Error);
+      expect((changedSnapshotError as Error).message).toContain(
+        "Displayed fitness snapshot differs from current capture",
+      );
+    } finally {
+      cache.close();
+      await rm(directory, { recursive: true, force: true });
+    }
   });
   test("production adapter projects only target output while preserving full evaluation parity", async () => {
     const production: AttentionCandidateProductionSource = {

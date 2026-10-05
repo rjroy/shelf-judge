@@ -86,7 +86,7 @@ describe("ProfileService", () => {
     if (!persisted) throw new Error("Expected proof-bearing Profile cache");
     expect(
       persisted.publicationIdentity.attentionCandidates.identity.semanticScoringInputProof.mode,
-    ).toBe("disabled");
+    ).toBe("unified-similarity");
     const repeated = await service.getProfile();
     expect(repeated).toEqual(first);
     expect(computations).toBe(1);
@@ -900,6 +900,52 @@ describe("ProfileService", () => {
     });
     expect(await ctx.storageService.loadCollection()).toEqual(before);
     expect(await ctx.storageService.loadProfile()).toBeNull();
+  });
+
+  test("logs unavailable completion visibly without exposing failure details", async () => {
+    const originalNodeDebug = process.env.NODE_DEBUG;
+    const originalWarn = console.warn;
+    const warnings: unknown[][] = [];
+    delete process.env.NODE_DEBUG;
+    console.warn = ((...args: unknown[]) => warnings.push(args)) as typeof console.warn;
+    try {
+      const ctx = await createHydratedTestApp();
+      const sentinel = "PRIVATE_PROFILE_FAILURE_SENTINEL";
+      const failingStorage: StorageService = {
+        ...ctx.storageService,
+        loadPredictionSettings: () => Promise.reject(new Error(sentinel)),
+      };
+
+      const unavailable = await createProfileService({
+        storageService: failingStorage,
+        attentionCandidates: ctx.attentionCandidateService,
+        displayedFitnessService: ctx.displayedFitnessService,
+      }).getProfile();
+      expect(unavailable.status).toBe("unavailable");
+
+      expect(warnings).toHaveLength(1);
+      const [prefix, message, details] = warnings[0] ?? [];
+      expect(prefix).toBe("[profile-service]");
+      expect(message).toBe("profile source operation completed");
+      expect(typeof details).toBe("string");
+      const loggedDetails = JSON.parse(details as string) as Record<string, unknown>;
+      expect(loggedDetails).toMatchObject({
+        outcome: "unavailable",
+        failureKind: "transport",
+      });
+      expect(loggedDetails.operationId).toEqual(expect.any(String));
+      expect(loggedDetails.elapsedMs).toEqual(expect.any(Number));
+      expect(JSON.stringify(warnings)).not.toContain(sentinel);
+
+      warnings.length = 0;
+      const available = await ctx.profileService.getProfile();
+      expect(available.status).toBe("available");
+      expect(warnings).toHaveLength(0);
+    } finally {
+      console.warn = originalWarn;
+      if (originalNodeDebug === undefined) delete process.env.NODE_DEBUG;
+      else process.env.NODE_DEBUG = originalNodeDebug;
+    }
   });
 
   test("distinguishes source validation and cache transport failures", async () => {

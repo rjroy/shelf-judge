@@ -143,6 +143,56 @@ describe("web daemon transport ownership", () => {
     expect(await response.text()).toBe('{"games":[]}');
   });
 
+  test("trusted proxy preserves repeated wishlist selection queries and Run status codes", async () => {
+    const capturedPaths: string[] = [];
+    const previewRequest = new NextRequest(
+      "http://localhost/api/daemon/redundancy/semantic/run-preview?scope=wishlist&bggId=902&bggId=101",
+    );
+    const preview = await proxyToDaemon(
+      previewRequest,
+      Promise.resolve({ path: ["redundancy", "semantic", "run-preview"] }),
+      (path) => {
+        capturedPaths.push(path);
+        return Promise.resolve({
+          response: Response.json({ selection: { kind: "selected", bggIds: [101, 902] } }),
+          isStream: false,
+        });
+      },
+    );
+    expect(capturedPaths[0]).toBe(
+      "/api/redundancy/semantic/run-preview?scope=wishlist&bggId=902&bggId=101",
+    );
+    expect(await preview.json()).toEqual({ selection: { kind: "selected", bggIds: [101, 902] } });
+
+    const startRequest = new NextRequest("http://localhost/api/daemon/redundancy/semantic/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestId: "wishlist-request",
+        precondition: "wishlist-bound-token",
+        noteTransmissionAuthorized: false,
+      }),
+    });
+    const stale = await proxyToDaemon(
+      startRequest,
+      Promise.resolve({ path: ["redundancy", "semantic", "run"] }),
+      (path, options) => {
+        capturedPaths.push(path);
+        expect(options?.body).toEqual({
+          requestId: "wishlist-request",
+          precondition: "wishlist-bound-token",
+          noteTransmissionAuthorized: false,
+        });
+        return Promise.resolve({
+          response: Response.json({ error: "Run precondition failed" }, { status: 412 }),
+          isStream: false,
+        });
+      },
+    );
+    expect(stale.status).toBe(412);
+    expect(await stale.json()).toEqual({ error: "Run precondition failed" });
+  });
+
   test("preserves conditional 304 without a body and degraded no-store responses", async () => {
     const controller = new AbortController();
     const notModified = await proxyDaemonRequest(

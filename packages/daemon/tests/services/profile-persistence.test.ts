@@ -67,9 +67,12 @@ async function currentData(storage: ReturnType<typeof createStorageService>): Pr
         identity: {
           ...source,
           semanticScoringInputProof: {
-            version: 1,
-            mode: "factual-only",
+            version: 2,
+            mode: "unified-similarity",
+            algorithmVersion: "unified-jaccard-manhattan-jev-v1",
             identity: "b".repeat(64),
+            demandedPairsIdentity: "c".repeat(64),
+            examinedComponentsIdentity: "d".repeat(64),
           },
           calculationVersion: 1,
           ruleCatalogVersion: 1,

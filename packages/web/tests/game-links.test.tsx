@@ -4,8 +4,12 @@ import type {
   ReferenceGame,
   PredictionConfidence,
   FitnessBreakdownEntry,
+  FitnessResult,
+  WishlistEntry,
 } from "@shelf-judge/shared";
 import { DeletionHistoryConflict, OwnershipMutationNotice } from "@/components/game-actions";
+import { WishlistCurrentProjectionCard } from "@/components/wishlist-current-projection";
+import { toCurrentWishlistRow } from "@/lib/wishlist-current-projection-view-model";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -121,20 +125,93 @@ describe("Tournament recent comparison links", () => {
 // ---------------------------------------------------------------------------
 
 describe("Wishlist BGG links", () => {
-  test("game name links to BGG using bggId", async () => {
-    const file = await Bun.file("packages/web/app/wishlist/page.tsx").text();
-    expect(file).toContain("href={`https://boardgamegeek.com/boardgame/${entry.bggId}`}");
+  const entry: WishlistEntry = {
+    id: "synthetic-wishlist-entry",
+    bggId: 8123,
+    name: "Synthetic wishlist game",
+    yearPublished: 2025,
+    thumbnailUrl: null,
+    predictedScore: 7.2,
+    predictionConfidence: "moderate",
+    predictedBreakdown: null,
+    nicheImpact: null,
+    redundancyPreview: null,
+    addedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  const currentResult: FitnessResult = {
+    score: 7.2,
+    ratedAxisCount: 1,
+    totalAxisCount: 1,
+    breakdown: [],
+    vetoed: false,
+    vetoedBy: null,
+    hypotheticalScore: null,
+    predictionMeta: {
+      readinessStage: 1,
+      confidence: "moderate",
+      predictedAxisCount: 1,
+      actualAxisCount: 0,
+      referenceGameCount: 1,
+      coveragePercent: 1,
+    },
+    redundancyAdjustment: null,
+  };
+
+  function markup(row: NonNullable<ReturnType<typeof toCurrentWishlistRow>>) {
+    return renderToString(
+      <WishlistCurrentProjectionCard
+        row={row}
+        onRemove={() => {}}
+        onRefresh={async () => {}}
+        onAddToCollection={async () => {}}
+      />,
+    );
+  }
+
+  function linkHtml(html: string) {
+    const anchor = html.match(/<a\b[^>]*>Synthetic wishlist game<\/a>/)?.[0];
+    expect(anchor).toBeDefined();
+    expect(anchor).toContain('href="https://boardgamegeek.com/boardgame/8123"');
+    expect(anchor).toContain('class="game-link"');
+    expect(anchor).toContain('target="_blank"');
+    expect(anchor).toContain('rel="noopener noreferrer"');
+    return anchor;
+  }
+
+  test("current result renders a BGG link with the safe new-tab attributes", () => {
+    const row = toCurrentWishlistRow({
+      entry,
+      prediction: {
+        availability: "available",
+        source: "current",
+        result: currentResult,
+        predictionUnavailable: null,
+      },
+      redundancy: { source: "base-prediction", adjustment: null, orderingScore: 7.2 },
+    });
+    expect(row).not.toBeNull();
+    linkHtml(markup(row!));
   });
 
-  test("wishlist game name link has game-link class", async () => {
-    const file = await Bun.file("packages/web/app/wishlist/page.tsx").text();
-    expect(file).toContain('className="game-link"');
-  });
-
-  test("wishlist game name link opens in new tab", async () => {
-    const file = await Bun.file("packages/web/app/wishlist/page.tsx").text();
-    expect(file).toContain('target="_blank"');
-    expect(file).toContain('rel="noopener noreferrer"');
+  test("missing-current-source row keeps the BGG link while showing unavailable status", () => {
+    const row = toCurrentWishlistRow({
+      entry,
+      prediction: {
+        availability: "unavailable",
+        source: "current",
+        result: null,
+        reason: "missing-source",
+        predictionUnavailable: null,
+      },
+      redundancy: { source: "unavailable", adjustment: null, orderingScore: null },
+    });
+    expect(row).not.toBeNull();
+    const html = markup(row!);
+    linkHtml(html);
+    expect(html).toContain("Current prediction unavailable");
+    expect(html).toContain("Refresh factual details to calculate it.");
+    expect(html).not.toContain(">7.2</span>");
   });
 });
 

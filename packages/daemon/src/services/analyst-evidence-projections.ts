@@ -15,7 +15,7 @@ import {
 } from "@shelf-judge/shared";
 import { z } from "zod";
 import type { DisplayedGameFitness, DisplayedFitnessService } from "./displayed-fitness-service.js";
-import { projectProfileCollectionSource } from "./game-projection.js";
+import { projectProfileCollectionSource, projectPublicGame } from "./game-projection.js";
 import { canonicalSha256, profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 import { createProfileService } from "./profile-service.js";
 import type { ProfileService } from "./profile-service.js";
@@ -883,7 +883,7 @@ export function buildAnalystProjectionSnapshot(input: {
     .sort((a, b) => compareText(a.id, b.id))
     .flatMap((game) => {
       const entry = displayed.get(game.id);
-      if (!entry || canonicalSha256(entry.game) !== canonicalSha256(game))
+      if (!entry || canonicalSha256(projectPublicGame(entry.game)) !== canonicalSha256(game))
         throw new Error(`Analyst fitness source mismatch for ${game.id}`);
       return gameSources(game, entry, input.shelfConfiguration, collection);
     })

@@ -30,7 +30,10 @@ import {
   type OperationDefinition,
   type OperationJsonValue,
 } from "../operations.js";
-import type { WishlistService } from "../services/wishlist-service.js";
+import {
+  WishlistAcquisitionRecoveryError,
+  type WishlistService,
+} from "../services/wishlist-service.js";
 import type { PurchaseUtilizationService } from "../services/purchase-utilization-service.js";
 import { PurchaseUtilizationValidationError } from "../services/purchase-utilization-service.js";
 import { createLogger, type Logger } from "../services/logger.js";
@@ -425,18 +428,30 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
 
     try {
-      const result = await gameService.addGame(parsed.data);
+      let result: Awaited<ReturnType<GameService["addGame"]>>;
+      if (parsed.data.bggId != null) {
+        if (!wishlistService)
+          throw new Error("Coordinated wishlist acquisition service is not configured");
+        result = await wishlistService.acquireGame(parsed.data);
+      } else {
+        result = await gameService.addGame(parsed.data);
+      }
       if (parsed.data.bggId != null && result.game.bggId !== parsed.data.bggId) {
         return c.json(INTERNAL_ERROR_RESPONSE, 500);
       }
 
-      // REQ-WISH-10: auto-remove matching wishlist entry (fire-and-forget on error, not on completion)
-      if (parsed.data.bggId && wishlistService) {
-        await wishlistService.removeByBggId(parsed.data.bggId).catch(() => {});
-      }
-
       return c.json(projectAddGameResult(result), 201);
     } catch (err) {
+      if (err instanceof WishlistAcquisitionRecoveryError) {
+        return c.json(
+          {
+            error: "Game was added to the collection, but wishlist/cache recovery is pending",
+            code: "acquisition_recovery_pending",
+            acquired: projectAddGameResult(err.committedResult),
+          },
+          500,
+        );
+      }
       const message = toErrorMessage(err);
       if (message.includes("already exists")) {
         return c.json({ error: message }, 409);

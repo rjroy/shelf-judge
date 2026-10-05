@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { Collection, GameWithScore } from "@shelf-judge/shared";
-import { createInitialSemanticRedundancyStateV10 } from "@shelf-judge/shared";
+import {
+  createInitialSemanticRedundancyStateV10,
+  DEFAULT_JEV_RUN_BUDGET,
+} from "@shelf-judge/shared";
 import { JevRunController } from "../../src/services/jev-run-controller.js";
 import { JevRunService, type JevRunCapture } from "../../src/services/jev-run-service.js";
+import type { PreparedWishlistRun } from "../../src/services/wishlist-run-preparation.js";
 import type { JevRunSourceAdapter } from "../../src/services/jev-run-source-adapter.js";
 import {
   type JevPairCache,
@@ -131,6 +135,7 @@ function harness(
     maxPairs?: number;
     gatewayConfigured?: boolean;
     noteTransmissionPermitted?: boolean;
+    wishlistPreparation?: { prepare: () => Promise<PreparedWishlistRun> };
     receiptTtlMs?: number;
     maxReceipts?: number;
   } = {},
@@ -209,6 +214,9 @@ function harness(
     gatewayConfigured: () => providerConfigured,
     ...(options.receiptTtlMs === undefined ? {} : { receiptTtlMs: options.receiptTtlMs }),
     ...(options.maxReceipts === undefined ? {} : { maxReceipts: options.maxReceipts }),
+    ...(options.wishlistPreparation === undefined
+      ? {}
+      : { wishlistPreparation: options.wishlistPreparation }),
   });
   return {
     controller,
@@ -248,6 +256,83 @@ function harness(
 }
 
 describe("JevRunController", () => {
+  test("wishlist preview binds frozen preparation and start fails closed until executor exists", async () => {
+    const capture = makeCapture();
+    let current = true;
+    const preparation = {
+      prepare: () =>
+        Promise.resolve({
+          scope: "wishlist",
+          selection: { kind: "selected", bggIds: [501] },
+          selectionIdentity: "selection",
+          capture,
+          entries: [],
+          unavailableCandidateBggIds: [],
+          eligibleOwnedIds: ["owned-a"],
+          pairs: [],
+          disclosure: {
+            scope: "wishlist",
+            wishlistEntryCount: 1,
+            selectedCandidateCount: 1,
+            unselectedEntryCount: 0,
+            ownedOverlapCandidateCount: 0,
+            requestedCandidateCount: 1,
+            eligibleCandidateCount: 1,
+            unavailableCandidateCount: 0,
+            eligibleOwnedGameCount: 1,
+            comparisonPairCount: 1,
+            cachedHitPairCount: 0,
+            sendablePairCount: 1,
+          },
+          cacheRevision: 0,
+          wishlistMutationGeneration: "0",
+          identity: "frozen-wishlist-preparation",
+          isSourceCurrent: () => Promise.resolve(current),
+          isCurrent: () => Promise.resolve(current),
+        } as PreparedWishlistRun),
+    };
+    const h = harness({ wishlistPreparation: preparation });
+    const preview = await h.controller.previewWishlist({ kind: "selected", bggIds: [501] });
+    expect(preview.status).toBe(200);
+    if (preview.status !== 200) throw new Error("Expected wishlist preview");
+    expect(preview.body).toMatchObject({
+      scope: { scope: "wishlist", selectedCandidateCount: 1, sendablePairCount: 1 },
+      selection: { kind: "selected", bggIds: [501] },
+      provider: "TypeSafe",
+      noteTransmissionPermitted: false,
+      signalScope: { description: true, ownerNotes: false },
+    });
+    expect(preview.body.limits.maxProviderAttempts).toBeGreaterThan(0);
+    expect(preview.body).not.toHaveProperty("retentionCaveat");
+    expect(JSON.stringify(preview.body)).not.toMatch(/retention/i);
+    expect(JSON.stringify(preview.body)).not.toContain(
+      "TypeSafe's default retention duration is unspecified",
+    );
+    expect(JSON.stringify(preview.body)).not.toContain("do not promise provider-side erasure");
+
+    const startInput = {
+      requestId: preview.body.requestId,
+      precondition: preview.body.precondition,
+      noteTransmissionAuthorized: false,
+    };
+    const started = await h.controller.start(startInput);
+    expect(started.status).toBe(200);
+    expect(h.gatewayConstructions).toBe(0);
+    if (started.status === 200) await startedRunCompletion(h);
+
+    const secondPreview = await h.controller.previewWishlist({ kind: "selected", bggIds: [501] });
+    if (secondPreview.status !== 200) throw new Error("Expected second wishlist preview");
+    current = false;
+    const changed = await h.controller.start({
+      requestId: secondPreview.body.requestId,
+      precondition: secondPreview.body.precondition,
+      noteTransmissionAuthorized: false,
+    });
+    expect(changed).toEqual({ status: 412, body: { error: "precondition-failed" } });
+    expect(h.gatewayConstructions).toBe(0);
+    expect(h.starts).toBe(0);
+  });
+
   test("preview exposes and binds validated per-run budget through opaque authorization", async () => {
     const h = harness();
     const selected = {
@@ -259,6 +344,18 @@ describe("JevRunController", () => {
     expect(preview.status).toBe(200);
     if (preview.status !== 200) throw new Error("Expected budget preview");
     expect(preview.body.limits).toMatchObject(selected);
+    expect(preview.body).toMatchObject({
+      provider: "TypeSafe",
+      modelId: JEV_MODEL_ID,
+      noteTransmissionPermitted: true,
+      signalScope: { description: true, ownerNotes: false },
+    });
+    expect(preview.body).not.toHaveProperty("retentionCaveat");
+    expect(JSON.stringify(preview.body)).not.toMatch(/retention/i);
+    expect(JSON.stringify(preview.body)).not.toContain(
+      "TypeSafe's default retention duration is unspecified",
+    );
+    expect(JSON.stringify(preview.body)).not.toContain("do not promise provider-side erasure");
     const started = await h.controller.start({
       requestId: preview.body.requestId,
       precondition: preview.body.precondition,
@@ -298,10 +395,10 @@ describe("JevRunController", () => {
       scoringEffect: "integrated-fitness",
       limits: {
         maxEligiblePairs: h.runService.effectiveLimits.maxEligiblePairs,
-        maxProviderAttempts: JEV_GATEWAY_LIMITS.maxRequestsPerInstance,
+        maxProviderAttempts: DEFAULT_JEV_RUN_BUDGET.maxProviderAttempts,
         maxRetriesPerEvaluation: JEV_GATEWAY_LIMITS.maxRetriesPerEvaluation,
         maxRunDurationMs: h.runService.effectiveLimits.maxRunDurationMs,
-        reportedTokenStopThreshold: JEV_GATEWAY_LIMITS.maxReportedTokensPerInstance,
+        reportedTokenStopThreshold: DEFAULT_JEV_RUN_BUDGET.reportedTokenStopThreshold,
         reportedTokenThresholdIsBilledCeiling: false,
       },
     });
@@ -685,8 +782,8 @@ describe("JevRunController", () => {
     if (started.status !== 200) throw new Error("Expected run start");
     await h.started;
 
-    expect(h.controller.activeRun()).toEqual({ runId: started.body.runId });
-    expect(Object.keys(h.controller.activeRun()!)).toEqual(["runId"]);
+    expect(h.controller.activeRun()).toEqual({ runId: started.body.runId, scope: "collection" });
+    expect(Object.keys(h.controller.activeRun()!)).toEqual(["runId", "scope"]);
     expect(h.controller.cancel({ runId: started.body.runId })).toEqual({
       status: 200,
       body: { state: "cancellation-requested" },

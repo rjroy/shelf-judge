@@ -22,14 +22,18 @@ async function schemaTwoFixture(): Promise<string> {
   ).text();
 }
 
-function boot(collectionText: string, result?: BggGameResult): TestAppContext {
+function boot(
+  collectionText: string,
+  result?: BggGameResult,
+  fileOps?: TestAppContext["fileOps"],
+): TestAppContext {
   const bggClient = createMockBggClient({
     getGame: () =>
       result === undefined
         ? Promise.reject(new Error("No BGG result configured"))
         : Promise.resolve(result),
   });
-  const context = createTestApp({ bggClient });
+  const context = createTestApp({ bggClient, ...(fileOps ? { fileOps } : {}) });
   context.fileOps.files.set(collectionPath, collectionText);
   return context;
 }
@@ -230,6 +234,7 @@ describe("persisted purchase utilization flow", () => {
       third.game.id,
       "vetoed-game",
     ]);
+    expect(daemonList.map(({ score }) => score?.score ?? null)).toEqual([6, 4, 0]);
     expect(
       daemonList.map(({ purchaseUtilization }) =>
         purchaseUtilization.components.valueRemaining.outcome === "calculated"
@@ -240,7 +245,8 @@ describe("persisted purchase utilization flow", () => {
 
     const persistedAfterRefresh = initial.fileOps.files.get(collectionPath);
     if (persistedAfterRefresh === undefined) throw new Error("Collection was not persisted");
-    const reloaded = boot(persistedAfterRefresh);
+    const renamesBeforeReload = collectionRenames(initial);
+    const reloaded = boot(persistedAfterRefresh, undefined, initial.fileOps);
     const ordinaryAfterReload = await detail(reloaded, "ordinary-game");
     expect(ordinaryAfterReload.purchaseUtilization).toEqual(ordinary.purchaseUtilization);
     expect((await reloaded.storageService.loadCollection()).games[0]).toMatchObject({
@@ -249,7 +255,7 @@ describe("persisted purchase utilization flow", () => {
       playerRangeEvidence: { observedAt: thingObservedAt },
       suggestedPlayerPoll: { observedAt: thingObservedAt },
     });
-    expect(collectionRenames(reloaded)).toBe(0);
+    expect(collectionRenames(reloaded)).toBe(renamesBeforeReload);
 
     const malformed = JSON.parse(persistedAfterRefresh) as Record<string, unknown>;
     const malformedGames = malformed.games as Array<Record<string, unknown>>;
@@ -261,7 +267,7 @@ describe("persisted purchase utilization flow", () => {
       state: "configured",
       amount: { hundredths: -1, source: "manual" },
     };
-    const correcting = boot(JSON.stringify(malformed));
+    const correcting = boot(JSON.stringify(malformed), undefined, initial.fileOps);
     const invalid = await detail(correcting, "ordinary-game");
     expect(invalid.purchaseUtilization.reasons).toEqual(["invalid-acquisition"]);
     const normalized = await correcting.storageService.loadCollection();
@@ -287,11 +293,12 @@ describe("persisted purchase utilization flow", () => {
     });
     const normalizedText = correcting.fileOps.files.get(collectionPath);
     if (normalizedText === undefined) throw new Error("Invalid collection was not normalized");
-    const normalizedReload = boot(normalizedText);
+    const renamesBeforeNormalizedReload = collectionRenames(correcting);
+    const normalizedReload = boot(normalizedText, undefined, initial.fileOps);
     const normalizedAgain = await normalizedReload.storageService.loadCollection();
     expect(normalizedAgain.games[0].acquisition).toEqual(normalized.games[0].acquisition);
     expect(normalizedAgain.entertainmentBenchmark).toEqual(normalized.entertainmentBenchmark);
-    expect(collectionRenames(normalizedReload)).toBe(0);
+    expect(collectionRenames(normalizedReload)).toBe(renamesBeforeNormalizedReload);
 
     expect(
       await jsonRequest(normalizedReload.app, "PUT", "/api/games/ordinary-game/acquisition", {
@@ -335,7 +342,7 @@ describe("persisted purchase utilization flow", () => {
 
     const correctedText = normalizedReload.fileOps.files.get(collectionPath);
     if (correctedText === undefined) throw new Error("Corrected collection was not persisted");
-    const finalReload = boot(correctedText);
+    const finalReload = boot(correctedText, undefined, initial.fileOps);
     const finalCollection: Collection = await finalReload.storageService.loadCollection();
     expect(finalCollection.games[0].acquisition.state).toBe("purchase");
     expect(finalCollection.entertainmentBenchmark?.state).toBe("configured");

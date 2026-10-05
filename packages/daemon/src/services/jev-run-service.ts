@@ -28,6 +28,19 @@ import {
   type JevRunBudget,
 } from "./jev-run-budget.js";
 import { createLogger, type Logger } from "./logger.js";
+import type { PreparedWishlistRun, FrozenWishlistRunPair } from "./wishlist-run-preparation.js";
+import type { PreparedUnifiedRun } from "./unified-jev-run-preparation.js";
+import {
+  validateWishlistCandidateCOnlyRow,
+  type WishlistCandidateMembershipIndex,
+} from "./wishlist-candidate-read-proof.js";
+import type { WishlistDescriptionPairRequest } from "./wishlist-redundancy-scoring.js";
+import {
+  encodeOwnedLocalMember,
+  encodeWishlistBggMember,
+  buildJevPairDependencies,
+} from "./jev-pair-identity.js";
+import { JEV_JUDGMENT_CONTRACT } from "./jev/jev-judgment-contract.js";
 
 export interface JevRunCapture {
   collection: Collection;
@@ -36,6 +49,8 @@ export interface JevRunCapture {
   factualWeights: RedundancyComponentWeights;
   sourceVectorIdentity: string;
   policyIdentity: string;
+  /** Revision identity for prediction/eligibility inputs, excluding collection write tokens. */
+  eligibilityIdentity?: string;
 }
 
 export interface JevRunCurrentState {
@@ -43,6 +58,8 @@ export interface JevRunCurrentState {
   sourceVectorIdentity: string;
   policyIdentity: string;
   canTransmitNotes: boolean;
+  /** Revision identity for prediction/eligibility inputs, excluding collection write tokens. */
+  eligibilityIdentity?: string;
 }
 
 export interface JevRunServiceOptions {
@@ -74,21 +91,43 @@ export interface JevRunHandle {
 }
 
 export interface JevPreparedRunInput {
+  scopeKind?: "collection";
   capture: JevRunCapture;
   scope: JevRunScope;
   noteTransmissionAuthorized: boolean;
+  providerBudget?: Readonly<JevRunBudget>;
+  wishlistPreparation?: never;
+  unifiedPreparation?: PreparedUnifiedRun;
+}
+
+export interface JevPreparedWishlistRunInput {
+  scopeKind: "wishlist";
+  wishlistPreparation: PreparedWishlistRun;
+  unifiedPreparation?: PreparedUnifiedRun;
+  noteTransmissionAuthorized: false;
   providerBudget?: Readonly<JevRunBudget>;
 }
 
 declare const validatedPreparedRunBrand: unique symbol;
 export type ValidatedPreparedJevRun = { readonly [validatedPreparedRunBrand]: true };
 
-interface PreparedRunData {
-  capture: JevRunCapture;
-  scope: JevRunScope;
-  noteTransmissionAuthorized: boolean;
-  providerBudget: Readonly<JevRunBudget>;
-}
+type PreparedRunData =
+  | {
+      scopeKind: "collection";
+      capture: JevRunCapture;
+      scope: JevRunScope;
+      noteTransmissionAuthorized: boolean;
+      providerBudget: Readonly<JevRunBudget>;
+      unifiedPreparation?: PreparedUnifiedRun;
+    }
+  | {
+      scopeKind: "wishlist";
+      wishlistPreparation: PreparedWishlistRun;
+      capture: JevRunCapture;
+      noteTransmissionAuthorized: false;
+      providerBudget: Readonly<JevRunBudget>;
+      unifiedPreparation?: PreparedUnifiedRun;
+    };
 
 export interface JevRunEffectiveLimits {
   maxEligiblePairs: number;
@@ -150,9 +189,42 @@ export class JevRunService {
    * Validates and privately owns an already authorized snapshot before the short admission lock.
    * Pair-scope correspondence is checked in bounded asynchronous slices outside the coordinator.
    */
-  prepareValidatedPreparedRun(input: JevPreparedRunInput): Promise<ValidatedPreparedJevRun | null> {
+  prepareValidatedPreparedRun(
+    input: JevPreparedRunInput | JevPreparedWishlistRunInput,
+  ): Promise<ValidatedPreparedJevRun | null> {
     return runOutsideProfileSourceCoordinator(async () => {
       try {
+        if (input.scopeKind === "wishlist") {
+          const unifiedPreparation = input.unifiedPreparation;
+          if (
+            input.noteTransmissionAuthorized !== false ||
+            input.wishlistPreparation.scope !== "wishlist" ||
+            !(await input.wishlistPreparation.isCurrent()) ||
+            (unifiedPreparation !== undefined &&
+              (unifiedPreparation.scopeKind !== "wishlist" ||
+                unifiedPreparation.wishlistPreparation !== input.wishlistPreparation ||
+                unifiedPreparation.capture !== input.wishlistPreparation.capture ||
+                !unifiedPreparation.isAuthorized() ||
+                !(await unifiedPreparation.isSourceCurrent()))) ||
+            input.wishlistPreparation.pairs.length > this.maxPairs
+          )
+            return null;
+          const providerBudget = input.providerBudget ?? {
+            ...DEFAULT_JEV_RUN_BUDGET,
+            maxRunDurationMs: this.maxRunMs,
+          };
+          if (!isValidJevRunBudget(providerBudget)) return null;
+          const reservation = Object.freeze({});
+          this.preparedRuns.set(reservation, {
+            scopeKind: "wishlist",
+            wishlistPreparation: input.wishlistPreparation,
+            capture: input.wishlistPreparation.capture,
+            noteTransmissionAuthorized: false,
+            providerBudget: Object.freeze({ ...providerBudget }),
+            ...(unifiedPreparation ? { unifiedPreparation } : {}),
+          });
+          return reservation as ValidatedPreparedJevRun;
+        }
         if (typeof input.noteTransmissionAuthorized !== "boolean") return null;
         const capture = structuredClone(input.capture);
         const providerBudget = input.providerBudget ?? {
@@ -160,19 +232,36 @@ export class JevRunService {
           maxRunDurationMs: this.maxRunMs,
         };
         if (!isValidJevRunBudget(providerBudget)) return null;
-        const planned = this.planScope(capture.collection, capture.predictionCapture);
-        if (
-          !planned.ok ||
-          planned.scope.totalEligiblePairs > this.maxPairs ||
-          !(await this.scopeMatchesCapture(input.scope, planned.scope))
-        )
-          return null;
+        let scope: JevRunScope;
+        if (input.unifiedPreparation) {
+          if (
+            input.unifiedPreparation.scopeKind !== "collection" ||
+            input.unifiedPreparation.capture !== input.capture ||
+            input.unifiedPreparation.collectionScope !== input.scope ||
+            !input.unifiedPreparation.isAuthorized() ||
+            !(await input.unifiedPreparation.isSourceCurrent())
+          )
+            return null;
+          scope = input.scope;
+        } else {
+          const planned = this.planScope(capture.collection, capture.predictionCapture);
+          if (
+            !planned.ok ||
+            planned.scope.totalEligiblePairs > this.maxPairs ||
+            !(await this.scopeMatchesCapture(input.scope, planned.scope))
+          )
+            return null;
+          scope = planned.scope;
+        }
+        if (scope.totalEligiblePairs > this.maxPairs) return null;
         const reservation = Object.freeze({});
         this.preparedRuns.set(reservation, {
+          scopeKind: "collection",
           capture,
-          scope: planned.scope,
+          scope,
           noteTransmissionAuthorized: input.noteTransmissionAuthorized,
           providerBudget: Object.freeze({ ...providerBudget }),
+          ...(input.unifiedPreparation ? { unifiedPreparation: input.unifiedPreparation } : {}),
         });
         return reservation as ValidatedPreparedJevRun;
       } catch {
@@ -187,6 +276,7 @@ export class JevRunService {
     const prepared = this.preparedRuns.get(key);
     if (!prepared) throw new Error("Prepared Jev reservation is invalid or already consumed");
     if (activeRuns.has(this.options.storageService)) throw new Error("A Jev run is already active");
+    prepared.unifiedPreparation?.beginExecution();
     this.preparedRuns.delete(key);
     return this.reserveRun(prepared.noteTransmissionAuthorized, prepared);
   }
@@ -212,6 +302,7 @@ export class JevRunService {
       progress: {
         runId,
         state: "running" as const,
+        scope: prepared?.scopeKind ?? "collection",
         pairCount: 0,
         completedPairs: 0,
         cacheHits: 0,
@@ -241,7 +332,10 @@ export class JevRunService {
         maxProviderAttempts: budget.maxProviderAttempts,
         reportedTokenStopThreshold: budget.reportedTokenStopThreshold,
         maxRunDurationMs: budget.maxRunDurationMs,
-        eligiblePairs: prepared?.scope.totalEligiblePairs ?? null,
+        eligiblePairs:
+          prepared?.scopeKind === "collection"
+            ? prepared.scope.totalEligiblePairs
+            : (prepared?.wishlistPreparation.pairs.length ?? null),
       });
     } catch {
       // Lifecycle diagnostics are best-effort and must not strand a reserved Run.
@@ -332,6 +426,7 @@ export class JevRunService {
     noteAuthorized: boolean,
     prepared?: PreparedRunData,
   ): Promise<JevRunProgress> {
+    if (prepared?.scopeKind === "wishlist") return this.executeWishlist(control, prepared);
     const { runId, controller, startedAt } = control;
     const providerBudget = prepared?.providerBudget ?? {
       ...DEFAULT_JEV_RUN_BUDGET,
@@ -340,6 +435,7 @@ export class JevRunService {
     let progress = control.progress;
     let capture: JevRunCapture;
     let originalScope: JevRunScope;
+    const unifiedPreparation = prepared?.unifiedPreparation;
     let terminalStopReason: JevRunStopReason | undefined;
     try {
       if (prepared) {
@@ -401,6 +497,7 @@ export class JevRunService {
               latestScope = scope;
             },
             getLatestScope: () => latestScope,
+            ...(unifiedPreparation ? { unifiedPreparation } : {}),
             pair: bound.pair,
             ready: bound.ready,
             attempt,
@@ -412,7 +509,11 @@ export class JevRunService {
       for (const originalPair of originalScope.pairs()) {
         if (!this.runCanContinue(control) || this.stopped(controller, startedAt)) break;
         const previousCapture = latestCapture;
-        const currentCapture = await this.refreshForCurrentVector(previousCapture, control);
+        const currentCapture = await this.refreshForCurrentVector(
+          previousCapture,
+          control,
+          unifiedPreparation,
+        );
         if (!this.runCanContinue(control)) return control.progress;
         const captureChanged =
           currentCapture.sourceVectorIdentity !== previousCapture.sourceVectorIdentity;
@@ -502,6 +603,7 @@ export class JevRunService {
               latestScope = scope;
             },
             getLatestScope: () => latestScope,
+            ...(unifiedPreparation ? { unifiedPreparation } : {}),
             getProgress: () => progress,
             setProgress: (next) => {
               progress = next;
@@ -573,10 +675,324 @@ export class JevRunService {
     }
   }
 
+  /** Executes only the frozen candidate-domain C_ONLY misses authorized by Phase 5a. */
+  private async executeWishlist(
+    control: RunControl,
+    prepared: Extract<PreparedRunData, { scopeKind: "wishlist" }>,
+  ): Promise<JevRunProgress> {
+    const { controller, startedAt } = control;
+    const frozen = prepared.wishlistPreparation;
+    let progress = this.nextProgress(control.progress, { pairCount: frozen.pairs.length });
+    control.progress = progress;
+    let gateway: JevGateway | null = null;
+    let active: {
+      pair: FrozenWishlistRunPair;
+      request: ReadyAdmission;
+      membership: WishlistCandidateMembershipIndex;
+      proofRequest: WishlistDescriptionPairRequest;
+      cacheHitAtDispatch: { value: boolean };
+    } | null = null;
+    let stop = false;
+
+    const candidateBggIds = new Set(frozen.entries.map((entry) => entry.bggId));
+    const eligibleOwnedIds = new Set(frozen.eligibleOwnedIds);
+    const membership: WishlistCandidateMembershipIndex = { candidateBggIds, eligibleOwnedIds };
+    const entriesById = new Map(frozen.entries.map((entry) => [entry.id, entry]));
+    const ownedById = new Map(frozen.capture.collection.games.map((game) => [game.id, game]));
+
+    const pairProof = (pair: FrozenWishlistRunPair): WishlistDescriptionPairRequest | null => {
+      const candidate = entriesById.get(pair.candidateEntryId);
+      const ownedGame = ownedById.get(pair.ownedGameId);
+      if (!candidate?.bggSource || !ownedGame?.bggData?.description) return null;
+      return {
+        candidate: { bggId: candidate.bggId, name: candidate.name, bggSource: candidate.bggSource },
+        ownedGame: {
+          id: ownedGame.id,
+          bggId: ownedGame.bggId,
+          name: ownedGame.name,
+          description: ownedGame.bggData.description,
+        },
+      };
+    };
+
+    const inspectCache = (
+      pair: FrozenWishlistRunPair,
+      proofRequest: WishlistDescriptionPairRequest,
+    ) => {
+      const row = this.options.cache.lookup({
+        gameAId: pair.gameAId,
+        gameBId: pair.gameBId,
+        signal: "C",
+        pairDomain: "wishlist-candidate",
+      });
+      return validateWishlistCandidateCOnlyRow(
+        row,
+        frozen.capture.collection.id,
+        proofRequest,
+        membership,
+      );
+    };
+
+    const getGateway = (): JevGateway => {
+      if (gateway) return gateway;
+      gateway = this.options.createGateway(async (attempt) => {
+        const bound = active;
+        if (!bound) throw new Error("No active wishlist Jev admission");
+        return this.coordinator.runExclusive(async () => {
+          if (!this.runCanContinue(control) || this.stopped(controller, startedAt))
+            throw new Error("Wishlist Jev run stopped");
+          if (!(await frozen.isSourceCurrent()))
+            throw new Error("Wishlist Jev sources changed before dispatch");
+          if (!this.runCanContinue(control) || this.stopped(controller, startedAt))
+            throw new Error("Wishlist Jev run stopped");
+          const current = inspectCache(bound.pair, bound.proofRequest);
+          if (current.valid) {
+            bound.cacheHitAtDispatch.value = true;
+            throw new Error("A valid C_ONLY judgment appeared before dispatch");
+          }
+          return attempt.start();
+        });
+      }, prepared.providerBudget);
+      return gateway;
+    };
+
+    try {
+      if (!this.options.cache.available || !(await frozen.isCurrent()))
+        throw new Error("Wishlist Jev preparation became stale before admission");
+      await this.coordinator.runExclusive(async () => {
+        if (!this.runCanContinue(control) || this.stopped(controller, startedAt))
+          throw new Error("Wishlist Jev run stopped");
+        if (!(await frozen.isCurrent())) throw new Error("Wishlist Jev preparation became stale");
+        if (!this.runCanContinue(control) || this.stopped(controller, startedAt))
+          throw new Error("Wishlist Jev run stopped");
+        this.options.cache.saveRunProgress(progress);
+      });
+
+      for (const pair of frozen.pairs) {
+        if (!this.runCanContinue(control) || this.stopped(controller, startedAt)) break;
+        const proofRequest = pairProof(pair);
+        if (!proofRequest) {
+          progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
+          control.progress = progress;
+          if (pair.state === "sendable-miss") continue;
+          continue;
+        }
+
+        let currentHit = false;
+        let lookupFailed = false;
+        await this.coordinator.runExclusive(async () => {
+          if (!this.runCanContinue(control) || this.stopped(controller, startedAt)) return;
+          if (!(await frozen.isSourceCurrent())) {
+            lookupFailed = true;
+            return;
+          }
+          try {
+            currentHit = inspectCache(pair, proofRequest).valid;
+          } catch {
+            lookupFailed = true;
+          }
+        });
+        if (!this.runCanContinue(control)) return control.progress;
+        if (lookupFailed) {
+          progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
+          control.progress = progress;
+          stop = true;
+          break;
+        }
+        if (currentHit) {
+          progress = this.persistOutcome(progress, { completedPairs: 1, cacheHits: 1 });
+          control.progress = progress;
+          continue;
+        }
+        // A cache hit present in the frozen disclosure was not authorized for transmission.
+        if (pair.state === "unavailable") {
+          progress = this.persistOutcome(progress, { completedPairs: 1 });
+          control.progress = progress;
+          continue;
+        }
+        if (pair.state !== "sendable-miss") {
+          progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
+          control.progress = progress;
+          continue;
+        }
+
+        const candidateMember = encodeWishlistBggMember(
+          frozen.capture.collection.id,
+          String(proofRequest.candidate.bggId),
+        );
+        const ownedMember = encodeOwnedLocalMember(
+          frozen.capture.collection.id,
+          proofRequest.ownedGame.id,
+        );
+        const dependencies = buildJevPairDependencies(
+          "C_ONLY",
+          {
+            gameId: candidateMember,
+            name: proofRequest.candidate.name,
+            description: proofRequest.candidate.bggSource.description ?? undefined,
+          },
+          {
+            gameId: ownedMember,
+            name: proofRequest.ownedGame.name,
+            description: proofRequest.ownedGame.description ?? undefined,
+          },
+        );
+        const ready: ReadyAdmission = {
+          status: "ready",
+          request: {
+            mode: "description-only",
+            gameA: {
+              name: proofRequest.candidate.name,
+              bggDescription: proofRequest.candidate.bggSource.description ?? "",
+            },
+            gameB: {
+              name: proofRequest.ownedGame.name,
+              bggDescription: proofRequest.ownedGame.description ?? "",
+            },
+          },
+          dependencyKind: "C_ONLY",
+          signals: ["C"],
+          gameAId: candidateMember,
+          gameBId: ownedMember,
+          collectionId: frozen.capture.collection.id,
+          dependencies,
+          contract: JEV_JUDGMENT_CONTRACT,
+        };
+        progress = this.persistOutcome(progress, { cacheMisses: 1 });
+        control.progress = progress;
+        const cacheHitAtDispatch = { value: false };
+        active = { pair, request: ready, membership, proofRequest, cacheHitAtDispatch };
+
+        let result: Awaited<ReturnType<JevGateway["evaluatePair"]>>;
+        try {
+          result = await getGateway().evaluatePair(ready.request, controller.signal);
+        } catch (error) {
+          active = null;
+          if (!this.runCanContinue(control)) return control.progress;
+          if (cacheHitAtDispatch.value) {
+            progress = this.persistOutcome(progress, {
+              completedPairs: 1,
+              cacheHits: 1,
+              cacheMisses: -1,
+            });
+            control.progress = progress;
+            continue;
+          }
+          progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
+          control.progress = progress;
+          const reason = terminalStopReasonFor(error);
+          if (reason) {
+            stop = true;
+            progress = { ...progress, stopReason: reason };
+            control.progress = progress;
+            break;
+          }
+          continue;
+        }
+        active = null;
+        if (!this.runCanContinue(control)) return control.progress;
+        const mapped = mapJevPairResult(ready, result, this.now().toISOString());
+        if (!mapped || mapped.length !== 1) {
+          progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
+          control.progress = progress;
+          continue;
+        }
+        const judgment = {
+          ...mapped[0],
+          pairDomain: "wishlist-candidate" as const,
+          gameAId: pair.gameAId,
+          gameBId: pair.gameBId,
+        };
+        const outcome: { value: "saved" | "hit" | "stale" } = { value: "stale" };
+        await this.coordinator.runExclusive(async () => {
+          if (!this.runCanContinue(control) || this.stopped(controller, startedAt)) return;
+          if (!(await frozen.isSourceCurrent())) return;
+          if (!this.runCanContinue(control) || this.stopped(controller, startedAt)) return;
+          try {
+            if (inspectCache(pair, proofRequest).valid) {
+              outcome.value = "hit";
+              progress = this.nextProgress(progress, { completedPairs: 1, cacheHits: 1 });
+              this.options.cache.saveRunProgress(progress);
+              control.progress = progress;
+              return;
+            }
+            const next = this.nextProgress(progress, { completedPairs: 1 });
+            this.options.cache.checkpointPair({ judgments: [judgment], progress: next });
+            progress = next;
+            control.progress = next;
+            outcome.value = "saved";
+          } catch (error) {
+            throw new Error("Wishlist Jev checkpoint failed", { cause: error });
+          }
+        });
+        if (!this.runCanContinue(control)) return control.progress;
+        if (outcome.value === "stale") {
+          progress = this.persistOutcome(progress, { completedPairs: 1, failedPairs: 1 });
+          control.progress = progress;
+          stop = true;
+        }
+        if (stop) break;
+        if (result.stopReason) {
+          stop = true;
+          progress = { ...progress, stopReason: result.stopReason };
+          control.progress = progress;
+          break;
+        }
+      }
+
+      if (!this.runCanContinue(control)) return control.progress;
+      const state: JevRunProgress["state"] = this.deadlineReached(controller, startedAt)
+        ? "failed"
+        : this.stopped(controller, startedAt)
+          ? "interrupted"
+          : stop || progress.failedPairs || progress.stopReason
+            ? "failed"
+            : "completed";
+      const terminal = this.nextProgress(progress, {}, state);
+      if (state === "completed") {
+        await this.coordinator.runExclusive(async () => {
+          if (!this.runCanContinue(control) || !(await frozen.isSourceCurrent()))
+            throw new Error("Wishlist Jev sources changed at completion");
+          if (!this.runCanContinue(control) || this.stopped(controller, startedAt))
+            throw new Error("Wishlist Jev run stopped");
+          this.options.cache.finishRun({ activation: null, progress: terminal });
+          control.successCommitted = true;
+        });
+      } else {
+        this.options.cache.finishRun({ activation: null, progress: terminal });
+      }
+      return terminal;
+    } catch {
+      if (control.terminalCause) return control.progress;
+      const state = this.deadlineReached(controller, startedAt) ? "failed" : "failed";
+      const terminal = this.nextProgress(progress, {}, state);
+      control.progress = terminal;
+      try {
+        if (!control.terminalCause)
+          this.options.cache.finishRun({ activation: null, progress: terminal });
+      } catch {
+        control.terminalPersistenceFailed = true;
+      }
+      return terminal;
+    }
+  }
+
   private async refreshForCurrentVector(
     capture: JevRunCapture,
     control?: RunControl,
+    unifiedPreparation?: PreparedUnifiedRun,
   ): Promise<JevRunCapture> {
+    if (unifiedPreparation) {
+      if (control && !this.runCanContinue(control)) throw new Error("Jev run stopped");
+      const current = await this.options.readCurrent();
+      if (
+        current.sourceVectorIdentity !== capture.sourceVectorIdentity ||
+        current.policyIdentity !== capture.policyIdentity ||
+        !(await unifiedPreparation.isSourceCurrent())
+      )
+        throw new Error("Frozen unified run sources changed");
+      return capture;
+    }
     for (let attempt = 0; attempt < 3; attempt++) {
       const current = await this.options.readCurrent();
       if (control && !this.runCanContinue(control)) throw new Error("Jev run stopped");
@@ -653,6 +1069,7 @@ export class JevRunService {
     pair: JevRunPair;
     ready: ReadyAdmission;
     attempt: JevAttemptAdmission;
+    unifiedPreparation?: PreparedUnifiedRun;
   }): Promise<JevDispatchReceipt> {
     for (let refresh = 0; refresh < 3; refresh++) {
       if (
@@ -661,7 +1078,11 @@ export class JevRunService {
       )
         throw new Error("Jev run stopped");
       // A coherent eligibility refresh is required independently for every initial/retry attempt.
-      const refreshed = await this.refreshForCurrentVector(input.getLatest(), input.control);
+      const refreshed = await this.refreshForCurrentVector(
+        input.getLatest(),
+        input.control,
+        input.unifiedPreparation,
+      );
       const freshScopeResult =
         refreshed === input.getLatest()
           ? { ok: true as const, scope: input.getLatestScope() }
@@ -843,12 +1264,14 @@ export class JevRunService {
     setProgress: (progress: JevRunProgress) => void;
     onStorageFailure: () => void;
     control: RunControl;
+    unifiedPreparation?: PreparedUnifiedRun;
   }): Promise<boolean> {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (!this.runCanContinue(input.control)) return false;
       const checkpointCapture = await this.refreshForCurrentVector(
         input.getLatest(),
         input.control,
+        input.unifiedPreparation,
       );
       if (!this.runCanContinue(input.control)) return false;
       const checkpointPlan =

@@ -8,6 +8,9 @@ import {
   type JevPairJudgment,
 } from "../../src/services/jev-pair-cache-service.js";
 import {
+  encodeOwnedLocalMember,
+  encodeWishlistBggMember,
+  parseWishlistCandidateMember,
   buildJevPairDependencies,
   fingerprintJevSource,
 } from "../../src/services/jev-pair-identity.js";
@@ -68,7 +71,473 @@ function progress(state: "running" | "completed" | "interrupted" | "failed" = "r
   } as const;
 }
 
+function candidateRecord(
+  candidateBggId: string,
+  ownedLocalId: string,
+  value = 0.7,
+): JevPairJudgment {
+  const candidateId = encodeWishlistBggMember("collection-1", candidateBggId);
+  const ownedId = encodeOwnedLocalMember("collection-1", ownedLocalId);
+  const [gameAId, gameBId] = [candidateId, ownedId].sort();
+  return {
+    pairDomain: "wishlist-candidate",
+    collectionId: "collection-1",
+    gameAId,
+    gameBId,
+    signal: "C",
+    dependencyKind: "C_ONLY",
+    value,
+    confidence: 0.4,
+    modelId: "model-v1",
+    rubricVersion: "rubric-v2",
+    questionVersion: "question-v3",
+    requestSchemaVersion: "schema-v4",
+    scoreMappingVersion: "mapping-v5",
+    semanticPolicyId: "policy-v6",
+    completedAt: "2026-09-30T12:00:00.000Z",
+    dependencies: [candidateId, ownedId].sort().map((gameId) => ({
+      gameId,
+      nameFingerprint: "a".repeat(64),
+      descriptionFingerprint: "c".repeat(64),
+    })),
+  };
+}
+
+function candidateKey(judgment: JevPairJudgment) {
+  return {
+    pairDomain: "wishlist-candidate" as const,
+    gameAId: judgment.gameAId,
+    gameBId: judgment.gameBId,
+    signal: "C" as const,
+  };
+}
+
+function rekeyedCandidateRecord(
+  candidate: JevPairJudgment,
+  candidateBggId: string,
+  otherOwnedLocalId: string,
+  acquiredLocalId: string,
+): JevPairJudgment {
+  const candidateMember = encodeWishlistBggMember(candidate.collectionId, candidateBggId);
+  const otherOwnedMember = encodeOwnedLocalMember(candidate.collectionId, otherOwnedLocalId);
+  const [gameAId, gameBId] = [acquiredLocalId, otherOwnedLocalId].sort();
+  return {
+    gameAId,
+    gameBId,
+    collectionId: candidate.collectionId,
+    signal: "C",
+    dependencyKind: "C_ONLY",
+    value: candidate.value,
+    ...(candidate.confidence === undefined ? {} : { confidence: candidate.confidence }),
+    modelId: candidate.modelId,
+    rubricVersion: candidate.rubricVersion,
+    questionVersion: candidate.questionVersion,
+    requestSchemaVersion: candidate.requestSchemaVersion,
+    scoreMappingVersion: candidate.scoreMappingVersion,
+    semanticPolicyId: candidate.semanticPolicyId,
+    completedAt: candidate.completedAt,
+    dependencies: candidate.dependencies
+      .map((dependency) => ({
+        ...dependency,
+        gameId:
+          dependency.gameId === candidateMember
+            ? acquiredLocalId
+            : dependency.gameId === otherOwnedMember
+              ? otherOwnedLocalId
+              : dependency.gameId,
+      }))
+      .sort((left, right) => left.gameId.localeCompare(right.gameId)),
+  };
+}
+
 describe("Jev pair cache", () => {
+  test("encodes typed candidate members as reversible canonical JSON tuples", () => {
+    const candidate = encodeWishlistBggMember("collection/id", "123");
+    const owned = encodeOwnedLocalMember("collection/id", "123");
+    expect(candidate).toBe('["wishlist-bgg","collection/id","123"]');
+    expect(owned).toBe('["owned-local","collection/id","123"]');
+    expect(parseWishlistCandidateMember(candidate)).toEqual({
+      kind: "wishlist-bgg",
+      collectionId: "collection/id",
+      bggId: "123",
+    });
+    expect(parseWishlistCandidateMember(owned)).toEqual({
+      kind: "owned-local",
+      collectionId: "collection/id",
+      localGameId: "123",
+    });
+    expect(parseWishlistCandidateMember('[ "wishlist-bgg", "collection/id", "123" ]')).toBeNull();
+    expect(encodeWishlistBggMember("another-collection", "123")).not.toBe(candidate);
+  });
+
+  test("migrates the prior schema to collection domain without losing complete judgment rows", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    cache.upsert({ ...record(), value: 0.63 });
+    cache.saveRunProgress(progress());
+    cache.close();
+
+    const db = new Database(join(dir, "jev-pair-cache.sqlite"));
+    db.exec(`ALTER TABLE judgments RENAME TO judgments_v4;
+      CREATE TABLE judgments (
+        game_a TEXT NOT NULL, game_b TEXT NOT NULL, signal TEXT NOT NULL,
+        collection_id TEXT NOT NULL, consent_epoch TEXT, dependency_kind TEXT NOT NULL,
+        value REAL NOT NULL, confidence REAL, model_id TEXT NOT NULL, rubric_version TEXT NOT NULL,
+        question_version TEXT NOT NULL, request_schema_version TEXT NOT NULL,
+        score_mapping_version TEXT NOT NULL, semantic_policy_id TEXT NOT NULL,
+        completed_at TEXT NOT NULL, dependencies_json TEXT NOT NULL,
+        PRIMARY KEY(game_a,game_b,signal), CHECK(game_a < game_b)
+      );
+      INSERT INTO judgments SELECT game_a,game_b,signal,collection_id,consent_epoch,dependency_kind,
+        value,confidence,model_id,rubric_version,question_version,request_schema_version,
+        score_mapping_version,semantic_policy_id,completed_at,dependencies_json FROM judgments_v4;
+      DROP TABLE judgments_v4;
+      ALTER TABLE run_progress RENAME TO run_progress_v4;
+      CREATE TABLE run_progress (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1), run_id TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('running','completed','interrupted','failed')),
+        pair_count INTEGER NOT NULL, completed_pairs INTEGER NOT NULL, cache_hits INTEGER NOT NULL,
+        cache_misses INTEGER NOT NULL, failed_pairs INTEGER NOT NULL, stop_reason TEXT,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO run_progress (singleton,run_id,state,pair_count,completed_pairs,cache_hits,cache_misses,failed_pairs,stop_reason,updated_at)
+        SELECT singleton,run_id,state,pair_count,completed_pairs,cache_hits,cache_misses,failed_pairs,stop_reason,updated_at FROM run_progress_v4;
+      DROP TABLE run_progress_v4;
+      PRAGMA user_version=3;`);
+    db.close();
+
+    const migrated = await createJevPairCache(dir);
+    expect(migrated.available).toBe(true);
+    expect(migrated.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })).toEqual({
+      ...record(),
+      value: 0.63,
+    });
+    expect(migrated.getRunProgress()).toEqual(progress());
+    migrated.close();
+    const reopened = await createJevPairCache(dir);
+    expect(reopened.lookup({ gameAId: "stable-a", gameBId: "stable-b", signal: "C" })?.value).toBe(
+      0.63,
+    );
+    expect(reopened.getRunProgress()).toEqual(progress());
+    reopened.close();
+  });
+
+  test("persists explicit run scope and leaves historical scope unknown", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    cache.saveRunProgress({ ...progress(), scope: "wishlist" });
+    expect(cache.getRunProgress()).toMatchObject({ scope: "wishlist" });
+    cache.close();
+
+    const reopened = await createJevPairCache(dir);
+    expect(reopened.getRunProgress()).toMatchObject({ scope: "wishlist" });
+    reopened.saveRunProgress(progress("completed"));
+    expect(reopened.getRunProgress()).not.toHaveProperty("scope");
+    reopened.close();
+  });
+
+  test("keeps typed candidate pairs collision-free across equal and reversed member IDs", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    const equalIds = candidateRecord("123", "123", 0.31);
+    const firstReverse = candidateRecord("123", "456", 0.42);
+    const secondReverse = candidateRecord("456", "123", 0.53);
+    for (const judgment of [equalIds, firstReverse, secondReverse]) cache.upsert(judgment);
+
+    // The same encoded member strings are legal arbitrary collection IDs, but
+    // the explicit domain keeps the rows independently addressable.
+    const collisionCollection = {
+      ...record(),
+      gameAId: equalIds.gameAId,
+      gameBId: equalIds.gameBId,
+      dependencies: equalIds.dependencies.map((dependency) => ({
+        ...dependency,
+        noteFingerprint: "b".repeat(64),
+        noteVersion: "note-v1",
+      })),
+      dependencyKind: "SHARED_CD" as const,
+      consentEpoch: "consent-epoch-1",
+    };
+    cache.upsert(collisionCollection);
+    expect(cache.lookup(candidateKey(equalIds))).toMatchObject({ value: 0.31 });
+    expect(
+      cache.lookup({ gameAId: equalIds.gameAId, gameBId: equalIds.gameBId, signal: "C" }),
+    ).toMatchObject({ dependencyKind: "SHARED_CD" });
+    expect(cache.lookup(candidateKey(firstReverse))).toMatchObject({ value: 0.42 });
+    expect(cache.lookup(candidateKey(secondReverse))).toMatchObject({ value: 0.53 });
+    expect(() =>
+      cache.upsert({
+        ...candidateRecord("789", "987"),
+        dependencies: candidateRecord("789", "987").dependencies.map((dependency) => ({
+          ...dependency,
+          noteFingerprint: "b".repeat(64),
+          noteVersion: "note-v1",
+        })),
+      }),
+    ).toThrow("C-only dependency cannot contain note metadata");
+    const db = new Database(join(dir, "jev-pair-cache.sqlite"));
+    const candidateLookupPlan = db
+      .query<
+        { detail: string },
+        [string, string, string, string]
+      >("EXPLAIN QUERY PLAN SELECT * FROM judgments WHERE pair_domain=? AND game_a=? AND game_b=? AND signal=?")
+      .all("wishlist-candidate", equalIds.gameAId, equalIds.gameBId, "C");
+    expect(candidateLookupPlan.some((step) => step.detail.includes("SEARCH judgments"))).toBe(true);
+    db.close();
+
+    expect(cache.purgePair(equalIds.gameAId, equalIds.gameBId, "C", "wishlist-candidate")).toBe(1);
+    expect(cache.lookup(candidateKey(equalIds))).toBeNull();
+    expect(cache.lookup(candidateKey(firstReverse))).toMatchObject({ value: 0.42 });
+    expect(cache.lookup(candidateKey(secondReverse))).toMatchObject({ value: 0.53 });
+    expect(
+      cache.purgeGame(
+        encodeWishlistBggMember("collection-1", "123"),
+        undefined,
+        undefined,
+        "wishlist-candidate",
+      ),
+    ).toBe(1);
+    expect(cache.lookup(candidateKey(firstReverse))).toBeNull();
+    expect(cache.lookup(candidateKey(secondReverse))).toMatchObject({ value: 0.53 });
+    expect(
+      cache.lookup({ gameAId: equalIds.gameAId, gameBId: equalIds.gameBId, signal: "C" }),
+    ).toMatchObject({ dependencyKind: "SHARED_CD" });
+    cache.close();
+  });
+
+  test("checkpoints a candidate C-only judgment and progress in one mutation", async () => {
+    const cache = await createJevPairCache(await tempDir());
+    const judgment = candidateRecord("bgg-1", "local-2");
+    cache.checkpointPair({ judgments: [judgment], progress: progress("completed") });
+    expect(cache.mutationRevision()).toBe(1);
+    expect(cache.lookup(candidateKey(judgment))).toMatchObject({
+      value: 0.7,
+      dependencyKind: "C_ONLY",
+    });
+    expect(cache.getRunProgress()).toMatchObject({ state: "completed", completedPairs: 1 });
+    expect(() =>
+      cache.checkpointPair({
+        judgments: [judgment, record("C_ONLY", 0.8)],
+        progress: progress(),
+      }),
+    ).toThrow("same domain, collection, and pair");
+    cache.close();
+  });
+
+  test("atomically transfers candidate C-only cache to raw owned IDs preserving judgment provenance", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    const candidate = candidateRecord("123", "456", 0.81);
+    cache.upsert(candidate);
+    const before = cache.mutationRevision();
+    expect(
+      cache.transferCandidateCOnlyPair(candidateKey(candidate), ["local-acquired", "456"]),
+    ).toBe(true);
+    expect(cache.mutationRevision()).toBe((before ?? 0) + 1);
+    expect(cache.lookup(candidateKey(candidate))).toBeNull();
+    const owned = cache.lookup({
+      gameAId: "local-acquired",
+      gameBId: "456",
+      signal: "C",
+    });
+    expect(owned).toMatchObject({
+      collectionId: candidate.collectionId,
+      gameAId: "456",
+      gameBId: "local-acquired",
+      signal: "C",
+      dependencyKind: "C_ONLY",
+      value: candidate.value,
+      confidence: candidate.confidence,
+      modelId: candidate.modelId,
+      rubricVersion: candidate.rubricVersion,
+      questionVersion: candidate.questionVersion,
+      requestSchemaVersion: candidate.requestSchemaVersion,
+      scoreMappingVersion: candidate.scoreMappingVersion,
+      semanticPolicyId: candidate.semanticPolicyId,
+      completedAt: candidate.completedAt,
+      dependencies: candidate.dependencies
+        .map((dependency) => ({
+          ...dependency,
+          gameId:
+            dependency.gameId === encodeWishlistBggMember("collection-1", "123")
+              ? "local-acquired"
+              : "456",
+        }))
+        .sort((left, right) => left.gameId.localeCompare(right.gameId)),
+    });
+    expect(owned).not.toHaveProperty("pairDomain");
+    expect(owned?.completedAt).toBe(candidate.completedAt);
+    expect(owned?.modelId).toBe(candidate.modelId);
+    expect(owned?.dependencies.every((dependency) => !dependency.noteFingerprint)).toBe(true);
+    expect(
+      cache.transferCandidateCOnlyPair(candidateKey(candidate), ["local-acquired", "456"]),
+    ).toBe(false);
+    cache.close();
+    const reopened = await createJevPairCache(dir);
+    expect(
+      reopened.lookup({ gameAId: "local-acquired", gameBId: "456", signal: "C" }),
+    ).toMatchObject({
+      value: 0.81,
+      completedAt: candidate.completedAt,
+      modelId: candidate.modelId,
+    });
+    reopened.close();
+  });
+
+  test("removes candidate when an identical owned target already exists despite object property order", async () => {
+    const cache = await createJevPairCache(await tempDir());
+    const candidate = candidateRecord("123", "456", 0.81);
+    const expectedOwned = rekeyedCandidateRecord(candidate, "123", "456", "local-acquired");
+    cache.upsert(candidate);
+    // This is a separately persisted owned judgment with the same content;
+    // its object insertion order intentionally differs from the transfer's.
+    cache.upsert(expectedOwned);
+    const before = cache.mutationRevision();
+
+    expect(
+      cache.transferCandidateCOnlyPair(candidateKey(candidate), ["local-acquired", "456"]),
+    ).toBe(true);
+    expect(cache.lookup(candidateKey(candidate))).toBeNull();
+    expect(cache.lookup({ gameAId: "456", gameBId: "local-acquired", signal: "C" })).toEqual(
+      expectedOwned,
+    );
+    expect(cache.mutationRevision()).toBe((before ?? 0) + 1);
+    cache.close();
+  });
+
+  test("rolls back candidate deletion when an identical target exists and deletion fails", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    const candidate = candidateRecord("123", "456", 0.81);
+    const expectedOwned = rekeyedCandidateRecord(candidate, "123", "456", "local-acquired");
+    cache.upsert(candidate);
+    cache.upsert(expectedOwned);
+    const db = new Database(join(dir, "jev-pair-cache.sqlite"));
+    db.exec(`CREATE TRIGGER fail_candidate_delete BEFORE DELETE ON judgments
+      WHEN OLD.pair_domain='wishlist-candidate' BEGIN SELECT RAISE(ABORT, 'test delete failure'); END;`);
+    db.close();
+    const revision = cache.mutationRevision();
+
+    expect(() =>
+      cache.transferCandidateCOnlyPair(candidateKey(candidate), ["local-acquired", "456"]),
+    ).toThrow("test delete failure");
+    expect(cache.mutationRevision()).toBe(revision);
+    expect(cache.lookup(candidateKey(candidate))).toEqual(candidate);
+    expect(cache.lookup({ gameAId: "456", gameBId: "local-acquired", signal: "C" })).toEqual(
+      expectedOwned,
+    );
+    cache.close();
+  });
+
+  test("rejects a genuinely conflicting owned target and keeps candidate evidence", async () => {
+    const cache = await createJevPairCache(await tempDir());
+    const candidate = candidateRecord("123", "456", 0.81);
+    const conflictingOwned = {
+      ...rekeyedCandidateRecord(candidate, "123", "456", "local-acquired"),
+      value: 0.12,
+    };
+    cache.upsert(candidate);
+    cache.upsert(conflictingOwned);
+    const revision = cache.mutationRevision();
+
+    expect(() =>
+      cache.transferCandidateCOnlyPair(candidateKey(candidate), ["local-acquired", "456"]),
+    ).toThrow("Conflicting owned cache row prevents candidate transfer");
+    expect(cache.mutationRevision()).toBe(revision);
+    expect(cache.lookup(candidateKey(candidate))).toEqual(candidate);
+    expect(cache.lookup({ gameAId: "456", gameBId: "local-acquired", signal: "C" })).toEqual(
+      conflictingOwned,
+    );
+    cache.close();
+  });
+
+  test("rolls back failed candidate transfer without losing source or advancing cache revision", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    const candidate = candidateRecord("123", "456", 0.81);
+    cache.upsert(candidate);
+    const db = new Database(join(dir, "jev-pair-cache.sqlite"));
+    db.exec(`CREATE TRIGGER fail_candidate_transfer BEFORE INSERT ON judgments
+      WHEN NEW.pair_domain='collection' BEGIN SELECT RAISE(ABORT, 'test transfer failure'); END;`);
+    db.close();
+    const revision = cache.mutationRevision();
+
+    expect(() =>
+      cache.transferCandidateCOnlyPair(candidateKey(candidate), ["local-acquired", "456"]),
+    ).toThrow("test transfer failure");
+    expect(cache.mutationRevision()).toBe(revision);
+    expect(cache.lookup(candidateKey(candidate))).toMatchObject({ value: 0.81 });
+    expect(cache.lookup({ gameAId: "local-acquired", gameBId: "456", signal: "C" })).toBeNull();
+    cache.close();
+  });
+
+  test("candidate acquisition finalization rolls back the whole batch and uses indexed candidate lookup", async () => {
+    const dir = await tempDir();
+    const cache = await createJevPairCache(dir);
+    const candidate = candidateRecord("123", "456", 0.81);
+    const secondCandidatePair = candidateRecord("123", "789", 0.63);
+    cache.upsert(candidate);
+    cache.upsert(secondCandidatePair);
+    const candidateMember = encodeWishlistBggMember("collection-1", "123");
+    expect(cache.candidateCOnlyPairs(candidateMember)).toHaveLength(2);
+    const db = new Database(join(dir, "jev-pair-cache.sqlite"), { readonly: true });
+    const queryPlan = db
+      .query<
+        { detail: string },
+        [string, string]
+      >("EXPLAIN QUERY PLAN SELECT * FROM judgments WHERE pair_domain='wishlist-candidate' AND signal='C' AND (game_a=? OR game_b=?)")
+      .all(candidateMember, candidateMember);
+    db.close();
+    expect(queryPlan.some((row) => row.detail.includes("judgments_domain_member_"))).toBe(true);
+
+    const dbWriter = new Database(join(dir, "jev-pair-cache.sqlite"));
+    dbWriter.exec(
+      "CREATE TRIGGER fail_second_batch_transfer BEFORE INSERT ON judgments WHEN NEW.pair_domain='collection' AND NEW.game_a='789' BEGIN SELECT RAISE(ABORT, 'second transfer failure'); END;",
+    );
+    dbWriter.close();
+    const revision = cache.mutationRevision();
+    expect(() =>
+      cache.finalizeCandidateAcquisition(candidateMember, [
+        {
+          candidateKey: candidateKey(candidate),
+          ownedLocalGameIds: ["local-acquired", "456"],
+        },
+        {
+          candidateKey: candidateKey(secondCandidatePair),
+          ownedLocalGameIds: ["local-acquired", "789"],
+        },
+      ]),
+    ).toThrow("second transfer failure");
+    expect(cache.mutationRevision()).toBe(revision);
+    expect(cache.lookup(candidateKey(candidate))).toEqual(candidate);
+    expect(cache.lookup(candidateKey(secondCandidatePair))).toEqual(secondCandidatePair);
+    expect(cache.lookup({ gameAId: "local-acquired", gameBId: "456", signal: "C" })).toBeNull();
+    expect(cache.lookup({ gameAId: "local-acquired", gameBId: "789", signal: "C" })).toBeNull();
+
+    const cleanup = new Database(join(dir, "jev-pair-cache.sqlite"));
+    cleanup.exec("DROP TRIGGER fail_second_batch_transfer");
+    cleanup.close();
+    const beforeSuccess = cache.mutationRevision();
+    cache.finalizeCandidateAcquisition(candidateMember, [
+      { candidateKey: candidateKey(candidate), ownedLocalGameIds: ["local-acquired", "456"] },
+      {
+        candidateKey: candidateKey(secondCandidatePair),
+        ownedLocalGameIds: ["local-acquired", "789"],
+      },
+    ]);
+    expect(cache.mutationRevision()).toBe((beforeSuccess ?? 0) + 1);
+    expect(cache.candidateCOnlyPairs(candidateMember)).toHaveLength(0);
+    expect(cache.lookup({ gameAId: "local-acquired", gameBId: "456", signal: "C" })).toMatchObject({
+      value: 0.81,
+      completedAt: candidate.completedAt,
+    });
+    expect(cache.lookup({ gameAId: "local-acquired", gameBId: "789", signal: "C" })).toMatchObject({
+      value: 0.63,
+      completedAt: secondCandidatePair.completedAt,
+    });
+    cache.close();
+  });
+
   test("checkpoints C and D judgments with progress atomically and persists after reopen", async () => {
     const dir = await tempDir();
     const cache = await createJevPairCache(dir);

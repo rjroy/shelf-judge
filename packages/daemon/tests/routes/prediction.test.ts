@@ -14,7 +14,7 @@ import type {
   GameDetailWithPurchaseUtilization,
   GameWithPurchaseUtilization,
 } from "@shelf-judge/shared";
-import { createInitialEntityMetadata } from "@shelf-judge/shared";
+import { createInitialEntityMetadata, GameSchema } from "@shelf-judge/shared";
 import { calculateBggFitnessPreview } from "../../src/services/bgg-fitness-preview-service.js";
 
 describe("prediction routes", () => {
@@ -352,9 +352,152 @@ describe("prediction routes", () => {
         ctx.storageService,
         999,
       );
+      if (!shared.result.score) throw new Error("Expected available shared preview score");
       expect(shared.result.score.score).toBe(prediction.score.score);
       expect(shared.result.predictionUnavailable).toEqual(prediction.predictionUnavailable);
       expect([collectionReads, settingsReads, tournamentReads]).toEqual([2, 2, 2]);
+    });
+
+    test("production unified preview preserves distinct verified ratings in public Game and breakdown", async () => {
+      let communityRating: number | null = 7.5;
+      let scoringReads = 0;
+      const bggClient = createMockBggClient({
+        getBoardgameScoringInput: (bggId) => {
+          scoringReads++;
+          return Promise.resolve({
+            bggId,
+            type: "boardgame",
+            primaryName: "Unified Rating Candidate",
+            yearPublished: 2024,
+            minPlayers: 2,
+            maxPlayers: 4,
+            bestPlayers: 3,
+            playingTime: 90,
+            weight: 3,
+            communityRating,
+            description: null,
+            categories: [{ id: 1, name: "Strategy" }],
+            mechanics: [{ id: 2, name: "Worker Placement" }],
+            suggestedPlayerPoll: { state: "absent", buckets: [] },
+            missingFields: [],
+            observedAt: "2026-08-28T00:00:00.000Z",
+          });
+        },
+      });
+      ctx = createTestApp({ bggClient });
+
+      for (const [sourceRating, rounded] of [
+        [7.5, 7.5],
+        [8.347, 8.3],
+      ] as const) {
+        communityRating = sourceRating;
+        const response = await jsonRequest(ctx.app, "GET", "/api/predictions/bgg/999");
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as PredictedGameResponse;
+        expect(body).not.toHaveProperty("internalCandidateProjection");
+        expect(body).not.toHaveProperty("internalCandidateTags");
+        expect(body).not.toHaveProperty("verifiedScoringInput");
+        expect(body.game).not.toHaveProperty("internalCandidateProjection");
+        expect(GameSchema.safeParse(body.game).success).toBe(true);
+        expect(body.game.bggData?.communityRating).toBe(sourceRating);
+        const entry = body.score.breakdown.find(
+          ({ derivedField }) => derivedField === "communityRating",
+        );
+        expect(entry).toMatchObject({
+          sourceValue: sourceRating,
+          scoringRawValue: sourceRating,
+          effectiveRating: rounded,
+          predictionConfidence: "actual",
+        });
+      }
+
+      communityRating = null;
+      const missingResponse = await jsonRequest(ctx.app, "GET", "/api/predictions/bgg/999");
+      expect(missingResponse.status).toBe(200);
+      const missing = (await missingResponse.json()) as PredictedGameResponse;
+      expect(missing.game.bggData).toBeNull();
+      expect(GameSchema.safeParse(missing.game).success).toBe(true);
+      expect(missing).not.toHaveProperty("internalCandidateProjection");
+      expect(missing).not.toHaveProperty("internalCandidateTags");
+      expect(missing).not.toHaveProperty("verifiedScoringInput");
+      expect(
+        missing.score.breakdown.find(({ derivedField }) => derivedField === "communityRating"),
+      ).toMatchObject({
+        sourceValue: null,
+        scoringRawValue: null,
+        effectiveRating: null,
+      });
+      expect(
+        missing.score.breakdown.find(({ derivedField }) => derivedField === "weight"),
+      ).toMatchObject({
+        sourceValue: 3,
+        scoringRawValue: 3,
+        effectiveRating: 5.5,
+      });
+
+      const addResponse = await jsonRequest(ctx.app, "POST", "/api/wishlist", { bggId: 999 });
+      expect(addResponse.status).toBe(201);
+      const added = (await addResponse.json()) as { entry: { id: string } };
+      expect(added.entry).not.toHaveProperty("bggSource");
+      const savedAdd = (await ctx.storageService.loadWishlist())[0];
+      expect(savedAdd?.bggSource).toMatchObject({ communityRating: null, weight: 3 });
+
+      communityRating = 8.347;
+      const refreshResponse = await jsonRequest(
+        ctx.app,
+        "POST",
+        `/api/wishlist/${added.entry.id}/refresh`,
+        {},
+      );
+      expect(refreshResponse.status).toBe(200);
+      const refreshedWishlist = await ctx.storageService.loadWishlist();
+      const savedRefresh = refreshedWishlist[0];
+      expect(savedRefresh?.bggSource).toMatchObject({ communityRating: 8.347, weight: 3 });
+      if (!savedRefresh) throw new Error("Refreshed wishlist entry missing");
+      savedRefresh.predictedScore = 1;
+      savedRefresh.predictedBreakdown = [
+        { axisName: "Community Rating", rating: 1, confidence: "strong" },
+      ];
+      await ctx.storageService.saveWishlist(refreshedWishlist);
+      const wishlistResponse = await jsonRequest(ctx.app, "GET", "/api/wishlist");
+      expect(wishlistResponse.status).toBe(200);
+      const [currentEntry] = (await wishlistResponse.json()) as Array<{
+        predictedBreakdown: Array<{ axisName: string; rating: number; confidence: string }> | null;
+      }>;
+      expect(currentEntry?.predictedBreakdown).toContainEqual({
+        axisName: "Community Rating",
+        rating: 8.3,
+        confidence: "actual",
+      });
+      expect(scoringReads).toBe(5);
+    });
+
+    test("production unified preview with zero scoring contribution is unavailable", async () => {
+      const bggClient = createMockBggClient({
+        getBoardgameScoringInput: (bggId) =>
+          Promise.resolve({
+            bggId,
+            type: "boardgame",
+            primaryName: "No Scoring Contribution",
+            yearPublished: null,
+            minPlayers: null,
+            maxPlayers: null,
+            bestPlayers: null,
+            playingTime: null,
+            weight: null,
+            communityRating: null,
+            description: null,
+            categories: [],
+            mechanics: [],
+            suggestedPlayerPoll: { state: "absent", buckets: [] },
+            missingFields: [],
+            observedAt: "2026-08-28T00:00:00.000Z",
+          }),
+      });
+      const appContext = createTestApp({ bggClient });
+      const response = await jsonRequest(appContext.app, "GET", "/api/predictions/bgg/997");
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: "Current BGG prediction is unavailable" });
     });
 
     test("returns existing game prediction when bggId is in collection", async () => {

@@ -4,6 +4,7 @@ import type { AddGameResult, GameWithScore, Game, WishlistEntry } from "@shelf-j
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createWishlistRoutes } from "../src/routes/wishlist";
 import { createGameRoutes } from "../src/routes/games";
+import { WishlistAcquisitionRecoveryError } from "../src/services/wishlist-service.js";
 import type { WishlistService } from "../src/services/wishlist-service";
 import type { GameService } from "../src/services/game-service";
 import type { BggClient } from "../src/services/bgg-client";
@@ -32,6 +33,18 @@ function makeEntry(id: string, bggId: number, name: string, addedAt: string): Wi
     predictedBreakdown: [{ axisName: "Fun", rating: 7, confidence: "strong" }],
     nicheImpact: null,
     redundancyPreview: null,
+    bggSource: {
+      observedAt: NOW,
+      description: "private persisted BGG prose",
+      mechanics: [],
+      categories: [],
+      weight: null,
+      communityRating: null,
+      minPlayers: null,
+      maxPlayers: null,
+      bestPlayers: null,
+      playingTime: null,
+    },
     addedAt,
   };
 }
@@ -42,6 +55,10 @@ function createMockWishlistService(): WishlistService & { entries: WishlistEntry
 
     list() {
       return Promise.resolve(structuredClone(mock.entries));
+    },
+
+    listWithCurrentRedundancy() {
+      return Promise.resolve([]);
     },
 
     add(bggId: number) {
@@ -89,6 +106,9 @@ function createMockWishlistService(): WishlistService & { entries: WishlistEntry
       mock.entries.splice(idx, 1);
       return Promise.resolve(true);
     },
+    finalizeAcquisition: () => Promise.resolve(),
+    acquireGame: () => Promise.reject(new Error("not implemented")),
+    reconcileAcquisitions: () => Promise.resolve(0),
   };
   return mock;
 }
@@ -132,6 +152,59 @@ describe("wishlist routes", () => {
       expect(body).toHaveLength(2);
       expect(body[0].name).toBe("Newer Game");
       expect(body[1].name).toBe("Older Game");
+      expect(JSON.stringify(body)).not.toContain("private persisted BGG prose");
+      expect(body[0]).not.toHaveProperty("bggSource");
+    });
+
+    test("separate redundancy projection keeps safe entry DTO and provenance intact", async () => {
+      const entry = makeEntry("e1", 100, "Projected Game", NOW);
+      let projectionCalls = 0;
+      wishlistService.listWithCurrentRedundancy = () => {
+        projectionCalls++;
+        return Promise.resolve([
+          {
+            entry: { ...entry, bggSource: undefined } as never,
+            prediction: {
+              availability: "unavailable" as const,
+              source: "current" as const,
+              result: null,
+              reason: "missing-source" as const,
+              predictionUnavailable: null,
+            },
+            redundancy: {
+              source: "unavailable" as const,
+              adjustment: null,
+              orderingScore: null,
+            },
+          },
+        ]);
+      };
+      const response = await app.request("/api/wishlist/redundancy");
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      const body = (await response.json()) as unknown;
+      expect(body).toMatchObject([
+        {
+          entry: { id: "e1", bggId: 100, name: "Projected Game" },
+          prediction: { availability: "unavailable", reason: "missing-source" },
+          redundancy: { source: "unavailable", orderingScore: null },
+        },
+      ]);
+      expect(JSON.stringify(body)).not.toContain("private persisted BGG prose");
+      expect(JSON.stringify(body)).not.toContain("bggSource");
+      expect(projectionCalls).toBe(1);
+      expect((await app.request("/api/wishlist")).status).toBe(200);
+      expect(projectionCalls).toBe(1);
+    });
+
+    test("projection failure is sanitized and does not expose source details", async () => {
+      wishlistService.listWithCurrentRedundancy = () =>
+        Promise.reject(new Error("private description sentinel"));
+      const response = await app.request("/api/wishlist/redundancy");
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "Wishlist redundancy projection is unavailable",
+      });
     });
   });
 
@@ -141,6 +214,7 @@ describe("wishlist routes", () => {
       expect(res.status).toBe(201);
       const body = (await res.json()) as { entry: WishlistEntry };
       expect(body.entry.bggId).toBe(100);
+      expect(body.entry).not.toHaveProperty("bggSource");
     });
 
     test("duplicate bggId returns 409", async () => {
@@ -195,6 +269,8 @@ describe("wishlist routes", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { entry: WishlistEntry };
       expect(body.entry.predictedScore).toBe(8.0);
+      expect(body.entry).not.toHaveProperty("bggSource");
+      expect(JSON.stringify(body)).not.toContain("private persisted BGG prose");
     });
 
     test("nonexistent ID returns 404", async () => {
@@ -320,6 +396,11 @@ describe("POST /games auto-removal (REQ-WISH-10)", () => {
     const mockGameSvc = createMockGameService({
       addGame: () => Promise.resolve(addResult),
     });
+    wishSvc.acquireGame = async (input) => {
+      const result = await mockGameSvc.addGame(input);
+      await wishSvc.removeByBggId(input.bggId ?? 0);
+      return result;
+    };
 
     const { routes: gameRoutes } = createGameRoutes({
       gameService: mockGameSvc,
@@ -366,6 +447,32 @@ describe("POST /games auto-removal (REQ-WISH-10)", () => {
 
     // Wishlist should be untouched
     expect(wishSvc.entries).toHaveLength(1);
+  });
+
+  test("reports collection-committed recovery as a partial failure", async () => {
+    const wishSvc = createMockWishlistService();
+    const addResult: AddGameResult = { game: makeGame(100, "Committed game"), bggImported: false };
+    wishSvc.acquireGame = () =>
+      Promise.reject(
+        new WishlistAcquisitionRecoveryError(addResult, new Error("cache unavailable")),
+      );
+    const { routes } = createGameRoutes({
+      gameService: createMockGameService(),
+      wishlistService: wishSvc,
+      bggClient: mockBggClient,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
+    });
+    const app = new Hono();
+    app.route("/api", routes);
+
+    const response = await app.request(
+      jsonPost("/api/games", { bggId: 100, name: "Committed game" }),
+    );
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      code: "acquisition_recovery_pending",
+      acquired: { game: { bggId: 100 } },
+    });
   });
 });
 

@@ -35,21 +35,21 @@ function fakeCache(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Jev refresh progress", () => {
-  test("returns projected saved progress and never exposes historical run IDs", () => {
+  test("returns live scope with projected progress and never exposes historical run IDs", () => {
     const { cache, calls } = fakeCache();
     let activeReads = 0;
     const service = createJevRefreshProgressService({
       cache,
       activeRun: () => {
         activeReads++;
-        return { runId: "private-run-id" };
+        return { runId: "private-run-id", scope: "wishlist" };
       },
     });
 
     const result = service.read();
     expect(result).toEqual({
       coverageMeasurement: "not-measured",
-      activity: { state: "active", runId: "private-run-id" },
+      activity: { state: "active", runId: "private-run-id", scope: "wishlist" },
       progress: {
         state: "saved",
         relation: "active-run",
@@ -115,6 +115,31 @@ describe("Jev refresh progress", () => {
     expect(mutating.calls.progress).toBe(0);
     expect(mutating.calls.revision).toBe(0);
     expect(reads).toBe(1);
+  });
+
+  test("historical progress cannot supply live scope and scope replacement between reads fails closed", () => {
+    const historical = fakeCache();
+    const historicalResult = createJevRefreshProgressService({
+      cache: historical.cache,
+      activeRun: () => null,
+    }).read();
+    expect(historicalResult.activity).toEqual({ state: "idle" });
+    expect(historicalResult.progress).toMatchObject({ state: "saved", relation: "historical" });
+    expect(historicalResult.activity).not.toHaveProperty("scope");
+
+    let reads = 0;
+    const replaced = fakeCache();
+    const result = createJevRefreshProgressService({
+      cache: replaced.cache,
+      activeRun: () => {
+        reads++;
+        return reads === 1
+          ? { runId: "same-run-id", scope: "collection" }
+          : { runId: "same-run-id", scope: "wishlist" };
+      },
+    }).read();
+    expect(result.activity).toEqual({ state: "unavailable" });
+    expect(result.progress).toEqual({ state: "unavailable" });
   });
 
   test("invalid saved progress remains distinct from a genuinely empty cache", () => {

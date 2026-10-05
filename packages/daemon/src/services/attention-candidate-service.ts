@@ -30,6 +30,7 @@ import {
 import { ATTENTION_CANDIDATE_CALCULATION_VERSION } from "./attention-candidate-engine.js";
 import type { SourceVector } from "./source-vector.js";
 import type { SemanticScoringInputProof } from "@shelf-judge/shared";
+import type { ProposedCollectionEvaluation } from "./unified-scoring-service.js";
 
 function unavailableSourceVector(): SourceVector {
   return {
@@ -139,6 +140,14 @@ export interface AttentionCandidateOracleResult {
     }
   >;
 }
+export interface ProposedAttentionCandidateOracleResult {
+  readonly kind: "proposed-collection";
+  readonly evaluations: readonly AttentionCandidateEvaluation[];
+  readonly semanticScoringInputProof: SemanticScoringInputProof;
+  readonly presentations: AttentionCandidateOracleResult["presentations"];
+  accept<Value>(acceptSync: () => Value): Promise<Value | null>;
+  assertBaseCurrent(): Promise<boolean>;
+}
 export interface AttentionCandidateOracle<
   Source extends AttentionCandidateSource = AttentionCandidateSource,
 > {
@@ -151,6 +160,12 @@ export interface AttentionCandidateOracle<
     readonly semanticScoringInputProof: SemanticScoringInputProof;
     isCurrent(): boolean;
   }>;
+  evaluateProposedCollection?(
+    source: Source,
+    proposal: ProposedCollectionEvaluation,
+    evaluatedAt: string,
+    targetGameIds?: readonly string[],
+  ): Promise<ProposedAttentionCandidateOracleResult>;
 }
 
 export interface AttentionDispositionCompatibilityOracle<
@@ -161,6 +176,16 @@ export interface AttentionDispositionCompatibilityOracle<
     evaluatedAt: string,
     storedRules: readonly { readonly gameId: string; readonly ruleId: string }[],
   ): Promise<readonly AttentionStoredRuleMatch[]>;
+  evaluateStoredRulesForProposedCollection?(
+    source: Source,
+    proposal: ProposedCollectionEvaluation,
+    evaluatedAt: string,
+    storedRules: readonly { readonly gameId: string; readonly ruleId: string }[],
+  ): Promise<{
+    readonly matches: readonly AttentionStoredRuleMatch[];
+    accept<Value>(acceptSync: () => Value): Promise<Value | null>;
+    assertBaseCurrent(): Promise<boolean>;
+  }>;
 }
 export interface AttentionCandidateProductionSource extends AttentionCandidateSource {
   readonly kind: "private-capture";
@@ -217,16 +242,31 @@ export function createAttentionCandidateProductionSourceLoader(storage: {
   loadTournament(): Promise<TournamentData>;
   loadPredictionSettings(): Promise<PredictionSettings>;
   loadRedundancySettings(): Promise<RedundancySettings>;
+  loadJevSourceSnapshot?(): Promise<{
+    collection: Collection;
+    tournament: TournamentData;
+    predictionSettings: PredictionSettings;
+    redundancySettings: RedundancySettings;
+  }>;
   sourceVector?(): SourceVector;
+  hydrateSourceVector?(): Promise<SourceVector>;
 }): () => Promise<AttentionCandidateProductionSource> {
   return async () => {
-    const [collection, tournament, predictionSettings, redundancySettings] = await Promise.all([
-      storage.loadCollection(),
-      storage.loadTournament(),
-      storage.loadPredictionSettings(),
-      storage.loadRedundancySettings(),
-    ]);
-    const vectorAfter = storage.sourceVector?.();
+    const coherent = await storage.loadJevSourceSnapshot?.();
+    const [collection, tournament, predictionSettings, redundancySettings] = coherent
+      ? [
+          coherent.collection,
+          coherent.tournament,
+          coherent.predictionSettings,
+          coherent.redundancySettings,
+        ]
+      : await Promise.all([
+          storage.loadCollection(),
+          storage.loadTournament(),
+          storage.loadPredictionSettings(),
+          storage.loadRedundancySettings(),
+        ]);
+    const vectorAfter = (await storage.hydrateSourceVector?.()) ?? storage.sourceVector?.();
     const identity = profileSourceIdentity({
       collection,
       tournament,
@@ -308,6 +348,52 @@ export function createAttentionCandidateOracle(
   const fitnessService = () =>
     typeof displayedFitness === "function" ? displayedFitness() : displayedFitness;
   return {
+    async evaluateProposedCollection(source, proposal, evaluatedAt, targetGameIds) {
+      const service = fitnessService() as DisplayedFitnessService & {
+        evaluateProposedCollection?: (
+          proposal: ProposedCollectionEvaluation,
+          options: { includePredicted: true; targetGameIds?: readonly string[] },
+        ) => Promise<{
+          games: readonly Awaited<
+            ReturnType<DisplayedFitnessService["listGamesFromSnapshot"]>
+          >[number][];
+          semanticScoringInputProof: SemanticScoringInputProof;
+          accept<Value>(acceptSync: () => Value): Promise<Value | null>;
+          assertBaseCurrent(): Promise<boolean>;
+        }>;
+      };
+      if (!service.evaluateProposedCollection)
+        throw new Error("Proposed displayed-fitness API is unavailable");
+      const output = await service.evaluateProposedCollection(proposal, {
+        includePredicted: true,
+        targetGameIds,
+      });
+      const collection = collectionForStoredRuleScoring(proposal.collection);
+      const projections = new Map(
+        output.games.map((entry) => [
+          entry.game.id,
+          project(entry, collection.entertainmentBenchmark),
+        ]),
+      );
+      const result = computeAttentionCandidates({
+        collection,
+        evaluatedAt,
+        displayedFitness: output.games,
+        purchaseUtilizationProjectionByGameId: projections,
+        displayedFitnessSourceIdentity: source.identity,
+        targetGameIds,
+      });
+      return Object.freeze({
+        kind: "proposed-collection" as const,
+        evaluations: result.evaluations,
+        semanticScoringInputProof: output.semanticScoringInputProof,
+        presentations: new Map(
+          result.winners.map(({ gameId, presentation }) => [gameId, presentation]),
+        ),
+        accept: <Value>(acceptSync: () => Value) => output.accept(acceptSync),
+        assertBaseCurrent: () => output.assertBaseCurrent(),
+      });
+    },
     async getScoringInput(source) {
       const service = fitnessService() as DisplayedFitnessService & {
         getScoringInputFromSnapshot: (snapshot: unknown) => Promise<{
@@ -410,6 +496,60 @@ export function createAttentionCandidateOracle(
         const match = evaluateAttentionStoredRule(input, stored.gameId, stored.ruleId);
         return match === null ? [] : [match];
       });
+    },
+    async evaluateStoredRulesForProposedCollection(source, proposal, evaluatedAt, storedRules) {
+      const targetGameIds = [...new Set(storedRules.map((stored) => stored.gameId))];
+      const rulesCollection = collectionForStoredRuleScoring(proposal.collection);
+      if (targetGameIds.length === 0) {
+        return {
+          matches: Object.freeze([]),
+          accept: async <Value>(acceptSync: () => Value) =>
+            (await proposal.assertBaseCurrent()) ? acceptSync() : null,
+          assertBaseCurrent: () => proposal.assertBaseCurrent(),
+        };
+      }
+      const fitnessServiceValue = fitnessService() as DisplayedFitnessService & {
+        evaluateProposedCollection?: (
+          proposal: ProposedCollectionEvaluation,
+          options: { includePredicted: true; targetGameIds: readonly string[] },
+        ) => Promise<{
+          games: readonly Awaited<
+            ReturnType<DisplayedFitnessService["listGamesFromSnapshot"]>
+          >[number][];
+          accept<Value>(acceptSync: () => Value): Promise<Value | null>;
+          assertBaseCurrent(): Promise<boolean>;
+        }>;
+      };
+      if (!fitnessServiceValue.evaluateProposedCollection)
+        throw new Error("Proposed displayed-fitness API is unavailable");
+      const displayed = await fitnessServiceValue.evaluateProposedCollection(proposal, {
+        includePredicted: true,
+        targetGameIds,
+      });
+      const projections = new Map(
+        displayed.games.map((entry) => [
+          entry.game.id,
+          project(entry, rulesCollection.entertainmentBenchmark),
+        ]),
+      );
+      const input = {
+        collection: rulesCollection,
+        evaluatedAt,
+        displayedFitness: displayed.games,
+        purchaseUtilizationProjectionByGameId: projections,
+        displayedFitnessSourceIdentity: source.identity,
+      };
+      const matches = Object.freeze(
+        storedRules.flatMap((stored) => {
+          const match = evaluateAttentionStoredRule(input, stored.gameId, stored.ruleId);
+          return match === null ? [] : [match];
+        }),
+      );
+      return {
+        matches,
+        accept: <Value>(acceptSync: () => Value) => displayed.accept(acceptSync),
+        assertBaseCurrent: () => displayed.assertBaseCurrent(),
+      };
     },
   };
 }
