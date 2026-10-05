@@ -19,7 +19,12 @@ export interface ProfileSourceCoordinator {
   runExclusive<Value>(operation: () => Promise<Value>): Promise<Value>;
 }
 
-const coordinators = new WeakMap<object, ProfileSourceCoordinator>();
+/** Reentrancy query for capture paths that may share work across coordinator owners. */
+export interface ReentrantProfileSourceCoordinator extends ProfileSourceCoordinator {
+  isHeldByCurrentContext(): boolean;
+}
+
+const coordinators = new WeakMap<object, ReentrantProfileSourceCoordinator>();
 const activeCoordinator = new AsyncLocalStorage<ProfileSourceCoordinator>();
 const wishlistMutationGenerations = new WeakMap<object, bigint>();
 
@@ -85,12 +90,14 @@ export function sameProfileSourceIdentity(
   return canonicalJson(left) === canonicalJson(right);
 }
 
-export function profileSourceCoordinatorFor(storageService: object): ProfileSourceCoordinator {
+export function profileSourceCoordinatorFor(
+  storageService: object,
+): ReentrantProfileSourceCoordinator {
   const existing = coordinators.get(storageService);
   if (existing) return existing;
 
   let operations: Promise<void> = Promise.resolve();
-  const coordinator: ProfileSourceCoordinator = {
+  const coordinator: ReentrantProfileSourceCoordinator = {
     runExclusive<Value>(operation: () => Promise<Value>): Promise<Value> {
       if (activeCoordinator.getStore() === coordinator) return operation();
       const run = () => activeCoordinator.run(coordinator, operation);
@@ -100,6 +107,9 @@ export function profileSourceCoordinatorFor(storageService: object): ProfileSour
         () => undefined,
       );
       return result;
+    },
+    isHeldByCurrentContext(): boolean {
+      return activeCoordinator.getStore() === coordinator;
     },
   };
   coordinators.set(storageService, coordinator);

@@ -8,6 +8,7 @@ import type {
 } from "@shelf-judge/shared";
 import { CollectionSchema } from "@shelf-judge/shared";
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import type { JevPairCache } from "./jev-pair-cache-service.js";
 import type { StagedSimilarityPair, StagedSimilarityEvidence } from "./prepared-similarity.js";
 import type { PreparedSimilarityObserver } from "./prepared-similarity.js";
@@ -47,6 +48,7 @@ import {
   wishlistMutationGenerationFor,
 } from "./profile-source-coordinator.js";
 import type { SourceVector } from "./source-vector.js";
+import { createLogger } from "./logger.js";
 
 const DEFAULT_BUDGET: StagedRunBudget = Object.freeze({
   maxProviderAttempts: 1_000,
@@ -418,12 +420,16 @@ export function createUnifiedScoringService(
   options: UnifiedScoringServiceOptions,
 ): UnifiedScoringService {
   const coordinator = options.coordinator ?? profileSourceCoordinatorFor(options.storageService);
+  const logger = createLogger("unified-scoring");
   const cache = options.cache ?? unavailableCache;
   const budget = deepFreeze(structuredClone(options.budget ?? DEFAULT_BUDGET));
   const calculationMemo = new Map<string, UnifiedCalculation>();
   const calculationMemoLimit = 32;
   const captureFlights = new Map<string, Promise<UnifiedSourceFrame>>();
+  const captureFlightIds = new WeakMap<Promise<UnifiedSourceFrame>, string>();
   const captureFlightLimit = 16;
+  let captureCallSequence = 0;
+  let captureFlightSequence = 0;
   const privateCalculationFrames = new WeakMap<UnifiedCalculation, UnifiedSourceFrame>();
   const privateWishlistCandidateBaselines = new WeakMap<object, WishlistCandidateBaselines>();
 
@@ -442,9 +448,60 @@ export function createUnifiedScoringService(
       includeWishlist,
       verifiedRefreshOverlays: overlays.map(({ candidate }) => candidate),
     });
-    const existingFlight = captureFlights.get(flightKey);
-    if (existingFlight) return existingFlight;
+    // Owner-local captures must execute in the current ALS frame. Joining an external
+    // promise here can make the coordinator owner await work queued behind itself.
+    const shareFlight = !coordinator.isHeldByCurrentContext();
+    const callId = `capture-${++captureCallSequence}`;
+    const startedAt = performance.now();
+    const existingFlight = shareFlight ? captureFlights.get(flightKey) : undefined;
+    if (existingFlight) {
+      const existingFlightId = captureFlightIds.get(existingFlight) ?? "unlabeled-flight";
+      logger.log("unified source capture join", {
+        callId,
+        flightId: existingFlightId,
+        includeWishlist,
+        outcome: "joined",
+      });
+      try {
+        const frame = await existingFlight;
+        logger.log("unified source capture completed", {
+          callId,
+          flightId: existingFlightId,
+          elapsedMs: Math.max(0, performance.now() - startedAt),
+          outcome: "joined",
+        });
+        return frame;
+      } catch (error) {
+        logger.error("unified source capture failed", {
+          callId,
+          flightId: existingFlightId,
+          elapsedMs: Math.max(0, performance.now() - startedAt),
+          errorClass: error instanceof Error ? error.name : "UnknownError",
+        });
+        throw error;
+      }
+    }
+    const flightId = shareFlight ? `unified-capture-flight-${++captureFlightSequence}` : null;
+    logger.log("unified source capture attempt", {
+      callId,
+      flightId,
+      includeWishlist,
+      phase: "capture",
+      captureMode: shareFlight ? "shareable" : "owner-local-bypass",
+    });
+    const enqueuedAt = performance.now();
+    logger.log("unified source capture coordinator queued", {
+      callId,
+      flightId,
+      captureMode: shareFlight ? "shareable" : "owner-local-bypass",
+    });
     const work = coordinator.runExclusive(async () => {
+      logger.log("unified source capture coordinator entered", {
+        callId,
+        flightId,
+        waitMs: Math.max(0, performance.now() - enqueuedAt),
+        captureMode: shareFlight ? "shareable" : "owner-local-bypass",
+      });
       const before = options.storageService.sourceVector?.();
       if (
         before?.unavailableSources.some(
@@ -504,13 +561,45 @@ export function createUnifiedScoringService(
         sourceVector: captured.sources.sourceVector,
       });
       if (includeWishlist) privateWishlistCandidateBaselines.set(frame, candidateBaselines);
+      logger.log("unified source capture frame prepared", {
+        callId,
+        flightId,
+        gameCount: frame.sources.collection.games.length,
+        wishlistCount: frame.wishlistEntries.length,
+        outcome: "captured",
+      });
       return frame;
     });
-    if (captureFlights.size < captureFlightLimit) captureFlights.set(flightKey, work);
+    if (shareFlight && captureFlights.size < captureFlightLimit) {
+      const registeredFlightId = flightId ?? `unified-capture-flight-${++captureFlightSequence}`;
+      captureFlightIds.set(work, registeredFlightId);
+      captureFlights.set(flightKey, work);
+      logger.log("unified source capture flight registered", {
+        callId,
+        flightId: registeredFlightId,
+        flightCount: captureFlights.size,
+        outcome: "new",
+      });
+    }
     try {
-      return await work;
+      const frame = await work;
+      logger.log("unified source capture completed", {
+        callId,
+        flightId: flightId ?? `owner-local-${callId}`,
+        elapsedMs: Math.max(0, performance.now() - startedAt),
+        outcome: "new",
+      });
+      return frame;
+    } catch (error) {
+      logger.error("unified source capture failed", {
+        callId,
+        flightId: flightId ?? `owner-local-${callId}`,
+        elapsedMs: Math.max(0, performance.now() - startedAt),
+        errorClass: error instanceof Error ? error.name : "UnknownError",
+      });
+      throw error;
     } finally {
-      if (captureFlights.get(flightKey) === work) captureFlights.delete(flightKey);
+      if (shareFlight && captureFlights.get(flightKey) === work) captureFlights.delete(flightKey);
     }
   }
 

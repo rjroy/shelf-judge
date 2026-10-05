@@ -955,6 +955,52 @@ describe("CollectionSnapshotService", () => {
     expect(degraded.expiresAtMs).toBe(complete.expiresAtMs);
   });
 
+  test("diagnostic operation IDs do not sample the domain clock near BGG expiry", async () => {
+    const fetchedAtMs = Date.UTC(2026, 0, 1);
+    const transitionAtMs = fetchedAtMs + 7 * 24 * 60 * 60 * 1000 + 1;
+    const evaluatedAtMs = transitionAtMs - 1;
+    const game = {
+      ...gameWithPrivateNote(),
+      bggData: {
+        communityRating: 7,
+        bayesAverage: 7,
+        weight: 2,
+        numWeightVotes: 1,
+        description: null,
+        mechanics: [],
+        categories: [],
+        families: [],
+        subdomains: [],
+        bestPlayerCount: null,
+        fetchedAt: new Date(fetchedAtMs).toISOString(),
+      },
+    } as GameWithNote;
+    let directReads = 0;
+    const direct = await setup({
+      game,
+      clock: { now: () => ((directReads += 1), evaluatedAtMs) },
+    }).service.buildSnapshot();
+    let contextualReads = 0;
+    const contextual = await setup({
+      game,
+      clock: { now: () => ((contextualReads += 1), evaluatedAtMs) },
+    }).service.buildSnapshot({ requestId: "synthetic-request", operationId: "synthetic-build" });
+    let getSnapshotReads = 0;
+    const snapshot = await setup({
+      game,
+      clock: { now: () => ((getSnapshotReads += 1), evaluatedAtMs) },
+    }).service.getSnapshot();
+
+    expect(directReads).toBe(1);
+    expect(contextualReads).toBe(directReads);
+    expect(getSnapshotReads).toBe(directReads);
+    expect(direct.evaluatedAtMs).toBe(evaluatedAtMs);
+    expect(contextual.evaluatedAtMs).toBe(direct.evaluatedAtMs);
+    expect(direct.expiresAtMs).toBe(transitionAtMs);
+    expect(contextual.expiresAtMs).toBe(direct.expiresAtMs);
+    expect(snapshot.status).toBe(direct.snapshot.status);
+  });
+
   test("cache rejects a real assembler build that crosses BGG expiry or moves backward", async () => {
     const fetchedAtMs = Date.UTC(2026, 0, 1);
     const firstStaleMs = fetchedAtMs + 7 * 24 * 60 * 60 * 1000 + 1;

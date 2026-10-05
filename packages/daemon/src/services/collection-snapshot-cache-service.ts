@@ -1,4 +1,5 @@
 import type { CollectionSnapshot } from "@shelf-judge/shared";
+import { performance } from "node:perf_hooks";
 import { canonicalSha256 } from "./profile-source-coordinator.js";
 import { createLogger, type Logger } from "./logger.js";
 import {
@@ -13,7 +14,10 @@ export type BuiltCollectionSnapshot = Pick<
 >;
 
 export interface CollectionSnapshotBuilder {
-  buildSnapshot(): Promise<BuiltCollectionSnapshot>;
+  buildSnapshot(context?: {
+    requestId: string;
+    operationId: string;
+  }): Promise<BuiltCollectionSnapshot>;
 }
 
 export interface CollectionSnapshotCacheStorage {
@@ -44,7 +48,10 @@ export interface CollectionSnapshotResponseDecision {
 }
 
 export interface CollectionSnapshotCacheService {
-  resolve(ifNoneMatch?: string | null): Promise<CollectionSnapshotResponseDecision>;
+  resolve(
+    ifNoneMatch?: string | null,
+    requestId?: string,
+  ): Promise<CollectionSnapshotResponseDecision>;
 }
 
 interface CacheEntry {
@@ -57,6 +64,7 @@ interface CacheEntry {
 }
 
 interface BuildFlight {
+  id: string;
   semanticEnabled: boolean;
   promise: Promise<CompletedBuild>;
   resolve(value: CompletedBuild): void;
@@ -87,15 +95,18 @@ export function createCollectionSnapshotCacheService(
   const serialize = deps.serialize ?? ((snapshot) => JSON.stringify(snapshot));
   let entry: CacheEntry | null = null;
   let flight: BuildFlight | null = null;
+  let operationSequence = 0;
+  let flightSequence = 0;
+  let reservationSequence = 0;
 
-  function createFlight(semanticEnabled: boolean): BuildFlight {
+  function createFlight(semanticEnabled: boolean, id: string): BuildFlight {
     let resolve!: (value: CompletedBuild) => void;
     let reject!: (error: unknown) => void;
     const promise = new Promise<CompletedBuild>((res, rej) => {
       resolve = res;
       reject = rej;
     });
-    return { semanticEnabled, promise, resolve, reject };
+    return { id, semanticEnabled, promise, resolve, reject };
   }
 
   async function semanticEnabled(): Promise<boolean> {
@@ -137,8 +148,30 @@ export function createCollectionSnapshotCacheService(
     } satisfies CollectionSnapshotResponseDecision;
   }
 
-  async function reserve(ifNoneMatch?: string | null): Promise<Reservation> {
+  async function reserve(
+    ifNoneMatch: string | null | undefined,
+    requestId: string,
+  ): Promise<Reservation> {
+    const enqueuedAt = performance.now();
+    const reservationId = `snapshot-reservation-${++reservationSequence}`;
+    const queuedFlightId = flight?.id ?? null;
+    const candidateFlightId = queuedFlightId ?? `snapshot-flight-${flightSequence + 1}`;
+    logger.log("collection snapshot reservation enqueue", {
+      requestId,
+      reservationId,
+      flightId: queuedFlightId,
+      candidateFlightId,
+      operation: "reserve",
+    });
     return deps.coordinator.runExclusive(async () => {
+      logger.log("collection snapshot reservation entered", {
+        requestId,
+        reservationId,
+        flightId: flight?.id ?? null,
+        candidateFlightId,
+        waitMs: Math.max(0, performance.now() - enqueuedAt),
+        operation: "reserve",
+      });
       await Promise.resolve();
       const semanticIsEnabled = await semanticEnabled();
       const current = deps.storageService.sourceVector?.();
@@ -161,14 +194,22 @@ export function createCollectionSnapshotCacheService(
       }
       if (flight && flight.semanticEnabled === semanticIsEnabled) {
         logger.log("collection snapshot cache miss", {
+          requestId,
+          reservationId,
+          flightId: flight.id,
+          elapsedMs: Math.max(0, performance.now() - enqueuedAt),
           outcome: "joined-in-flight",
           currentChangeToken: current?.changeToken ?? null,
         });
         return { kind: "join", flight };
       }
-      const created = createFlight(semanticIsEnabled);
+      const created = createFlight(semanticIsEnabled, `snapshot-flight-${++flightSequence}`);
       flight = created;
       logger.log("collection snapshot cache miss", {
+        requestId,
+        reservationId,
+        flightId: created.id,
+        elapsedMs: Math.max(0, performance.now() - enqueuedAt),
         outcome: "build-reserved",
         currentChangeToken: current?.changeToken ?? null,
         available: current?.available ?? false,
@@ -177,152 +218,226 @@ export function createCollectionSnapshotCacheService(
     });
   }
 
-  async function finishBuild(buildFlight: BuildFlight): Promise<void> {
-    logger.log("collection snapshot cache build attempt", { outcome: "started" });
+  async function finishBuild(
+    buildFlight: BuildFlight,
+    requestId: string,
+    operationId: string,
+  ): Promise<void> {
+    const startedAt = performance.now();
+    logger.log("collection snapshot cache build attempt", {
+      requestId,
+      operationId,
+      flightId: buildFlight.id,
+      outcome: "started",
+    });
     try {
-      const built = await deps.builder.buildSnapshot();
+      const built = await deps.builder.buildSnapshot({ requestId, operationId });
       const serializedBody = serialize(built.snapshot);
-      const result = await deps.coordinator.runExclusive(async (): Promise<CompletedBuild> => {
-        await Promise.resolve();
-        const semanticIsEnabled = await semanticEnabled();
-        const current = deps.storageService.sourceVector?.();
-        if (semanticIsEnabled !== buildFlight.semanticEnabled) {
-          throw new CollectionSnapshotUnavailableError(
-            "Collection snapshot semantic settings changed before publication",
-          );
-        }
-        if (!sameSourceVector(built.sourceVector, current)) {
-          logger.warn("collection snapshot cache build discarded", {
-            outcome: "source-changed",
-            capturedChangeToken: built.sourceVector.changeToken,
-            currentChangeToken: current?.changeToken ?? null,
+      const publicationEnqueuedAt = performance.now();
+      logger.log("collection snapshot cache publication enqueue", {
+        requestId,
+        operationId,
+        flightId: buildFlight.id,
+        phase: "cache-publication",
+      });
+      const result = await deps.coordinator
+        .runExclusive(async (): Promise<CompletedBuild> => {
+          logger.log("collection snapshot cache publication entered", {
+            requestId,
+            operationId,
+            flightId: buildFlight.id,
+            phase: "cache-publication",
+            waitMs: Math.max(0, performance.now() - publicationEnqueuedAt),
           });
-          throw new CollectionSnapshotUnavailableError(
-            "Collection snapshot sources changed before cache publication",
-          );
-        }
-        if (built.snapshot.status === "complete" && !built.sourceVector.available) {
-          throw new CollectionSnapshotUnavailableError(
-            "Complete collection snapshot has unavailable sources",
-          );
-        }
-        const now = clock.now();
-        if (!freshAt(built.evaluatedAtMs, built.expiresAtMs, now)) {
-          logger.warn("collection snapshot cache build discarded", {
-            outcome: "time-changed",
-            evaluatedAtMs: built.evaluatedAtMs,
-            expiresAtMs: built.expiresAtMs,
-            semanticEnabled: semanticIsEnabled,
-            semanticRead: built.semanticRead,
-            now,
-          });
-          throw new CollectionSnapshotUnavailableError(
-            "Collection snapshot freshness changed before publication",
-          );
-        }
-        if (built.snapshot.status !== "complete") {
-          if (flight === buildFlight) flight = null;
-          logger.log("collection snapshot cache build completed", {
-            outcome: "degraded-not-cached",
-            gameCount: built.snapshot.games.length,
-            bytes: Buffer.byteLength(serializedBody),
-          });
-          return {
-            decision: {
-              status: 200,
-              body: serializedBody,
-              etag: null,
-              cacheable: false,
-              snapshotStatus: "degraded",
+          await Promise.resolve();
+          const semanticIsEnabled = await semanticEnabled();
+          const current = deps.storageService.sourceVector?.();
+          if (semanticIsEnabled !== buildFlight.semanticEnabled) {
+            throw new CollectionSnapshotUnavailableError(
+              "Collection snapshot semantic settings changed before publication",
+            );
+          }
+          if (!sameSourceVector(built.sourceVector, current)) {
+            logger.warn("collection snapshot cache build discarded", {
+              outcome: "source-changed",
+              capturedChangeToken: built.sourceVector.changeToken,
+              currentChangeToken: current?.changeToken ?? null,
+            });
+            throw new CollectionSnapshotUnavailableError(
+              "Collection snapshot sources changed before cache publication",
+            );
+          }
+          if (built.snapshot.status === "complete" && !built.sourceVector.available) {
+            throw new CollectionSnapshotUnavailableError(
+              "Complete collection snapshot has unavailable sources",
+            );
+          }
+          const now = clock.now();
+          if (!freshAt(built.evaluatedAtMs, built.expiresAtMs, now)) {
+            logger.warn("collection snapshot cache build discarded", {
+              outcome: "time-changed",
+              evaluatedAtMs: built.evaluatedAtMs,
+              expiresAtMs: built.expiresAtMs,
+              semanticEnabled: semanticIsEnabled,
+              semanticRead: built.semanticRead,
+              now,
+            });
+            throw new CollectionSnapshotUnavailableError(
+              "Collection snapshot freshness changed before publication",
+            );
+          }
+          if (built.snapshot.status !== "complete") {
+            if (flight === buildFlight) flight = null;
+            logger.log("collection snapshot cache build completed", {
+              outcome: "degraded-not-cached",
               gameCount: built.snapshot.games.length,
-            } satisfies CollectionSnapshotResponseDecision,
+              bytes: Buffer.byteLength(serializedBody),
+            });
+            return {
+              decision: {
+                status: 200,
+                body: serializedBody,
+                etag: null,
+                cacheable: false,
+                snapshotStatus: "degraded",
+                gameCount: built.snapshot.games.length,
+              } satisfies CollectionSnapshotResponseDecision,
+              sourceVector: built.sourceVector,
+              evaluatedAtMs: built.evaluatedAtMs,
+              expiresAtMs: built.expiresAtMs,
+              semanticEnabled: semanticIsEnabled,
+              semanticRead: built.semanticRead,
+            };
+          }
+          if (semanticIsEnabled) {
+            if (flight === buildFlight) flight = null;
+            logger.log("collection snapshot cache build completed", {
+              outcome: "semantic-redundancy-no-store",
+              gameCount: built.snapshot.games.length,
+              bytes: Buffer.byteLength(serializedBody),
+            });
+            return {
+              decision: {
+                status: 200,
+                body: serializedBody,
+                etag: null,
+                cacheable: false,
+                snapshotStatus: "complete",
+                gameCount: built.snapshot.games.length,
+              },
+              sourceVector: built.sourceVector,
+              evaluatedAtMs: built.evaluatedAtMs,
+              expiresAtMs: built.expiresAtMs,
+              semanticEnabled: true,
+              semanticRead: built.semanticRead,
+            };
+          }
+          const etag = createSnapshotEtag(built);
+          entry = {
             sourceVector: built.sourceVector,
             evaluatedAtMs: built.evaluatedAtMs,
             expiresAtMs: built.expiresAtMs,
-            semanticEnabled: semanticIsEnabled,
-            semanticRead: built.semanticRead,
+            serializedBody,
+            etag,
+            gameCount: built.snapshot.games.length,
           };
-        }
-        if (semanticIsEnabled) {
-          if (flight === buildFlight) flight = null;
           logger.log("collection snapshot cache build completed", {
-            outcome: "semantic-redundancy-no-store",
+            outcome: "published",
+            changeToken: built.sourceVector.changeToken,
             gameCount: built.snapshot.games.length,
             bytes: Buffer.byteLength(serializedBody),
+            expiresAtMs: built.expiresAtMs,
           });
+          if (flight === buildFlight) flight = null;
           return {
             decision: {
               status: 200,
               body: serializedBody,
-              etag: null,
-              cacheable: false,
+              etag,
+              cacheable: true,
               snapshotStatus: "complete",
               gameCount: built.snapshot.games.length,
             },
             sourceVector: built.sourceVector,
             evaluatedAtMs: built.evaluatedAtMs,
             expiresAtMs: built.expiresAtMs,
-            semanticEnabled: true,
+            semanticEnabled: semanticIsEnabled,
             semanticRead: built.semanticRead,
           };
-        }
-        const etag = createSnapshotEtag(built);
-        entry = {
-          sourceVector: built.sourceVector,
-          evaluatedAtMs: built.evaluatedAtMs,
-          expiresAtMs: built.expiresAtMs,
-          serializedBody,
-          etag,
-          gameCount: built.snapshot.games.length,
-        };
-        logger.log("collection snapshot cache build completed", {
-          outcome: "published",
-          changeToken: built.sourceVector.changeToken,
-          gameCount: built.snapshot.games.length,
-          bytes: Buffer.byteLength(serializedBody),
-          expiresAtMs: built.expiresAtMs,
-        });
-        if (flight === buildFlight) flight = null;
-        return {
-          decision: {
-            status: 200,
-            body: serializedBody,
-            etag,
-            cacheable: true,
-            snapshotStatus: "complete",
-            gameCount: built.snapshot.games.length,
+        })
+        .then(
+          (completed) => {
+            logger.log("collection snapshot cache publication completed", {
+              requestId,
+              operationId,
+              flightId: buildFlight.id,
+              phase: "cache-publication",
+              elapsedMs: Math.max(0, performance.now() - publicationEnqueuedAt),
+              outcome: completed.decision.snapshotStatus === "degraded" ? "degraded" : "published",
+            });
+            return completed;
           },
-          sourceVector: built.sourceVector,
-          evaluatedAtMs: built.evaluatedAtMs,
-          expiresAtMs: built.expiresAtMs,
-          semanticEnabled: semanticIsEnabled,
-          semanticRead: built.semanticRead,
-        };
-      });
+          (error: unknown) => {
+            logger.warn("collection snapshot cache publication failed", {
+              requestId,
+              operationId,
+              flightId: buildFlight.id,
+              phase: "cache-publication",
+              elapsedMs: Math.max(0, performance.now() - publicationEnqueuedAt),
+              outcome: "rejected",
+              errorClass: error instanceof Error ? error.name : "UnknownError",
+            });
+            throw error;
+          },
+        );
       // Publication/removal is atomic with source validation; resolve outside the
       // lock only after no later caller can join this completed flight.
       buildFlight.resolve(result);
+      logger.log("collection snapshot cache build completed", {
+        requestId,
+        operationId,
+        flightId: buildFlight.id,
+        elapsedMs: Math.max(0, performance.now() - startedAt),
+        outcome: "built",
+      });
     } catch (error) {
       await deps.coordinator.runExclusive(async () => {
         await Promise.resolve();
         if (flight === buildFlight) flight = null;
       });
       logger.error("collection snapshot cache build failed", {
+        requestId,
+        operationId,
+        flightId: buildFlight.id,
+        elapsedMs: Math.max(0, performance.now() - startedAt),
         outcome: "failed",
-        error: error instanceof Error ? error.message : String(error),
+        errorClass: error instanceof Error ? error.name : "UnknownError",
       });
       buildFlight.reject(error);
     }
   }
 
   return {
-    async resolve(ifNoneMatch?: string | null): Promise<CollectionSnapshotResponseDecision> {
+    async resolve(
+      ifNoneMatch?: string | null,
+      suppliedRequestId?: string,
+    ): Promise<CollectionSnapshotResponseDecision> {
+      const requestId = suppliedRequestId ?? `snapshot-${++operationSequence}`;
+      const startedAt = performance.now();
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        const reservation = await reserve(ifNoneMatch);
-        if (reservation.kind === "hit") return reservation.decision;
+        const reservation = await reserve(ifNoneMatch, requestId);
+        if (reservation.kind === "hit") {
+          logger.log("collection snapshot resolve completed", {
+            requestId,
+            elapsedMs: Math.max(0, performance.now() - startedAt),
+            cache: "hit",
+            outcome: "success",
+          });
+          return reservation.decision;
+        }
         if (reservation.kind === "build") {
           // Launch after reserve's coordinator callback to avoid ALS reentrancy.
-          void finishBuild(reservation.flight);
+          void finishBuild(reservation.flight, requestId, `snapshot-build-${++operationSequence}`);
         }
         let completed: CompletedBuild;
         try {
@@ -331,64 +446,119 @@ export function createCollectionSnapshotCacheService(
           if (error instanceof CollectionSnapshotUnavailableError && attempt === 0) continue;
           throw error;
         }
-        const decision = await deps.coordinator.runExclusive(async () => {
-          await Promise.resolve();
-          const semanticIsEnabled = await semanticEnabled();
-          // Read the vector only after the authoritative semantic setting has
-          // settled; loading it can cross an activation/commit boundary.
-          const current = deps.storageService.sourceVector?.();
-          const now = clock.now();
-          if (
-            semanticIsEnabled !== completed.semanticEnabled ||
-            !sameSourceVector(completed.sourceVector, current) ||
-            !freshAt(completed.evaluatedAtMs, completed.expiresAtMs, now)
-          ) {
-            if (entry && !sameSourceVector(entry.sourceVector, current)) entry = null;
-            logger.warn("collection snapshot cache result superseded", {
-              outcome: "retry",
-              capturedChangeToken: completed.sourceVector.changeToken,
-              currentChangeToken: current?.changeToken ?? null,
-              now,
-            });
-            return null;
-          }
-          if (
-            completed.semanticEnabled &&
-            completed.semanticRead?.status !== "verified" &&
-            completed.semanticRead?.status !== "unified-v2" &&
-            hasReadySemanticData(completed.decision.body)
-          ) {
-            throw new CollectionSnapshotUnavailableError(
-              "Semantic snapshot result has no current read proof",
-            );
-          }
-          if (
-            completed.semanticEnabled &&
-            (completed.semanticRead?.status === "verified" ||
-              completed.semanticRead?.status === "unified-v2") &&
-            !completed.semanticRead.isCurrent()
-          ) {
-            logger.warn("collection snapshot semantic result superseded", {
-              outcome: "retry",
-              proofStatus:
-                completed.semanticRead.status === "verified"
-                  ? completed.semanticRead.proof.status
-                  : "unified-v2",
-              currentChangeToken: current?.changeToken ?? null,
-            });
-            return null;
-          }
-          if (completed.decision.snapshotStatus === "degraded") {
-            return completed.decision;
-          }
-          if (completed.semanticEnabled) return completed.decision;
-          if (!current?.available || !entry || !sameSourceVector(entry.sourceVector, current)) {
-            return null;
-          }
-          return decisionForEntry(entry, ifNoneMatch);
+        const validationEnqueuedAt = performance.now();
+        logger.log("collection snapshot response validation enqueue", {
+          requestId,
+          flightId: reservation.flight.id,
+          phase: "response-validation",
+          attempt,
         });
-        if (decision) return decision;
+        const decision = await deps.coordinator
+          .runExclusive(async () => {
+            logger.log("collection snapshot response validation entered", {
+              requestId,
+              flightId: reservation.flight.id,
+              phase: "response-validation",
+              attempt,
+              waitMs: Math.max(0, performance.now() - validationEnqueuedAt),
+            });
+            await Promise.resolve();
+            const semanticIsEnabled = await semanticEnabled();
+            // Read the vector only after the authoritative semantic setting has
+            // settled; loading it can cross an activation/commit boundary.
+            const current = deps.storageService.sourceVector?.();
+            const now = clock.now();
+            if (
+              semanticIsEnabled !== completed.semanticEnabled ||
+              !sameSourceVector(completed.sourceVector, current) ||
+              !freshAt(completed.evaluatedAtMs, completed.expiresAtMs, now)
+            ) {
+              if (entry && !sameSourceVector(entry.sourceVector, current)) entry = null;
+              logger.warn("collection snapshot cache result superseded", {
+                outcome: "retry",
+                capturedChangeToken: completed.sourceVector.changeToken,
+                currentChangeToken: current?.changeToken ?? null,
+                now,
+              });
+              return null;
+            }
+            if (
+              completed.semanticEnabled &&
+              completed.semanticRead?.status !== "verified" &&
+              completed.semanticRead?.status !== "unified-v2" &&
+              hasReadySemanticData(completed.decision.body)
+            ) {
+              throw new CollectionSnapshotUnavailableError(
+                "Semantic snapshot result has no current read proof",
+              );
+            }
+            if (
+              completed.semanticEnabled &&
+              (completed.semanticRead?.status === "verified" ||
+                completed.semanticRead?.status === "unified-v2") &&
+              !completed.semanticRead.isCurrent()
+            ) {
+              logger.warn("collection snapshot semantic result superseded", {
+                outcome: "retry",
+                proofStatus:
+                  completed.semanticRead.status === "verified"
+                    ? completed.semanticRead.proof.status
+                    : "unified-v2",
+                currentChangeToken: current?.changeToken ?? null,
+              });
+              return null;
+            }
+            if (completed.decision.snapshotStatus === "degraded") {
+              return completed.decision;
+            }
+            if (completed.semanticEnabled) return completed.decision;
+            if (!current?.available || !entry || !sameSourceVector(entry.sourceVector, current)) {
+              return null;
+            }
+            return decisionForEntry(entry, ifNoneMatch);
+          })
+          .then(
+            (validated) => {
+              logger.log("collection snapshot response validation completed", {
+                requestId,
+                flightId: reservation.flight.id,
+                phase: "response-validation",
+                attempt,
+                elapsedMs: Math.max(0, performance.now() - validationEnqueuedAt),
+                outcome: validated === null ? "retry" : "accepted",
+              });
+              return validated;
+            },
+            (error: unknown) => {
+              logger.warn("collection snapshot response validation failed", {
+                requestId,
+                flightId: reservation.flight.id,
+                phase: "response-validation",
+                attempt,
+                elapsedMs: Math.max(0, performance.now() - validationEnqueuedAt),
+                outcome: "rejected",
+                errorClass: error instanceof Error ? error.name : "UnknownError",
+              });
+              throw error;
+            },
+          );
+        if (decision) {
+          logger.log("collection snapshot resolve completed", {
+            requestId,
+            elapsedMs: Math.max(0, performance.now() - startedAt),
+            flightId: reservation.flight.id,
+            cache: reservation.kind,
+            attempt,
+            outcome: "success",
+          });
+          return decision;
+        }
       }
+      logger.warn("collection snapshot resolve rejected", {
+        requestId,
+        elapsedMs: Math.max(0, performance.now() - startedAt),
+        outcome: "stale-retries-exhausted",
+      });
       throw new CollectionSnapshotUnavailableError(
         "Collection snapshot sources or freshness changed repeatedly",
       );

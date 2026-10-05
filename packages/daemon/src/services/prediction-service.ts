@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import type {
   Game,
   Collection,
@@ -47,6 +48,12 @@ import type { StagedPredictionRequest } from "./staged-similarity-scope.js";
 import { projectProfileCollectionSource } from "./game-projection.js";
 import { canonicalSha256 } from "./profile-source-coordinator.js";
 import { createVerifiedWishlistRefreshOverlay } from "./staged-similarity-capture.js";
+import { createLogger } from "./logger.js";
+
+export interface SnapshotDiagnosticContext {
+  requestId: string;
+  operationId: string;
+}
 
 function sameSnapshotPredictionSources(
   frame: import("./unified-scoring-service.js").UnifiedSourceFrame,
@@ -169,6 +176,7 @@ export interface PredictionService {
     collection: CollectionProfileCollectionSource,
     tournamentData: TournamentData,
     settings: PredictionSettings,
+    diagnostics?: SnapshotDiagnosticContext,
   ): Promise<PreparedPredictionList>;
   getSettings(): Promise<PredictionSettings>;
   updateSettings(patch: Partial<PredictionSettings>): Promise<PredictionSettings>;
@@ -189,6 +197,8 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
   const { storageService, fitnessService, bggClient } = deps;
   const unifiedScoringService = deps.unifiedScoringService;
   const profileSourceCoordinator = profileSourceCoordinatorFor(storageService);
+  const logger = createLogger("prediction-service");
+  let snapshotPreparationSequence = 0;
   const now = deps.now ?? (() => new Date().toISOString());
 
   async function calculateUnifiedCollection(
@@ -956,17 +966,84 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       return listGamesWithPredictionsFromContext(ctx, targetGameIds);
     },
 
-    async preparePredictionListFromSnapshot(collection, tournamentData, settings) {
+    async preparePredictionListFromSnapshot(collection, tournamentData, settings, diagnostics) {
+      const callId = `snapshot-prediction-${++snapshotPreparationSequence}`;
+      const context = {
+        ...(diagnostics ?? { requestId: callId, operationId: callId }),
+        callId,
+      };
       if (unifiedScoringService) {
-        const frame = await unifiedScoringService.capture();
+        const captureStartedAt = performance.now();
+        logger.log("snapshot prediction phase attempt", { ...context, phase: "capture" });
+        let frame: Awaited<ReturnType<UnifiedScoringService["capture"]>>;
+        try {
+          frame = await unifiedScoringService.capture();
+          logger.log("snapshot prediction phase completed", {
+            ...context,
+            phase: "capture",
+            elapsedMs: Math.max(0, performance.now() - captureStartedAt),
+            outcome: "captured",
+          });
+        } catch (error) {
+          logger.error("snapshot prediction phase failed", {
+            ...context,
+            phase: "capture",
+            elapsedMs: Math.max(0, performance.now() - captureStartedAt),
+            errorClass: error instanceof Error ? error.name : "UnknownError",
+          });
+          throw error;
+        }
         if (!sameSnapshotPredictionSources(frame, collection, tournamentData, settings))
           throw new Error("Snapshot prediction sources do not match the current private capture");
-        const calculation = unifiedScoringService.calculate(
-          frame,
-          { scope: "collection-all" },
-          { includeRedundancy: true },
-        );
-        const accepted = await unifiedScoringService.publishCurrent(calculation, () => true);
+        const calculationStartedAt = performance.now();
+        logger.log("snapshot prediction phase attempt", {
+          ...context,
+          phase: "calculation",
+          gameCount: frame.sources.collection.games.length,
+        });
+        let calculation: ReturnType<UnifiedScoringService["calculate"]>;
+        try {
+          calculation = unifiedScoringService.calculate(
+            frame,
+            { scope: "collection-all" },
+            { includeRedundancy: true },
+          );
+          logger.log("snapshot prediction phase completed", {
+            ...context,
+            phase: "calculation",
+            gameCount: frame.sources.collection.games.length,
+            elapsedMs: Math.max(0, performance.now() - calculationStartedAt),
+            outcome: "calculated",
+          });
+        } catch (error) {
+          logger.error("snapshot prediction phase failed", {
+            ...context,
+            phase: "calculation",
+            elapsedMs: Math.max(0, performance.now() - calculationStartedAt),
+            errorClass: error instanceof Error ? error.name : "UnknownError",
+          });
+          throw error;
+        }
+        const publicationStartedAt = performance.now();
+        logger.log("snapshot prediction phase attempt", { ...context, phase: "publication" });
+        let accepted: boolean | null;
+        try {
+          accepted = await unifiedScoringService.publishCurrent(calculation, () => true);
+          logger.log("snapshot prediction phase completed", {
+            ...context,
+            phase: "publication",
+            elapsedMs: Math.max(0, performance.now() - publicationStartedAt),
+            outcome: accepted ? "published" : "rejected",
+          });
+        } catch (error) {
+          logger.error("snapshot prediction phase failed", {
+            ...context,
+            phase: "publication",
+            elapsedMs: Math.max(0, performance.now() - publicationStartedAt),
+            errorClass: error instanceof Error ? error.name : "UnknownError",
+          });
+          throw error;
+        }
         if (!accepted) throw new Error("Snapshot prediction source changed before preparation");
         const entriesFor = (scores: ReadonlyMap<string, FitnessResult | null>) =>
           frame.sources.collection.games.map((game) => {

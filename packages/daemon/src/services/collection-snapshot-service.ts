@@ -14,6 +14,7 @@ import {
   type TournamentData,
   type SemanticScoringInputProof,
 } from "@shelf-judge/shared";
+import { performance } from "node:perf_hooks";
 import type { StorageService } from "./storage-service.js";
 import type { GameService } from "./game-service.js";
 import type { PredictionService, PreparedPredictionList } from "./prediction-service.js";
@@ -88,7 +89,10 @@ export class CollectionSnapshotUnavailableError extends Error {
 
 export interface CollectionSnapshotService {
   getSnapshot(): Promise<CollectionSnapshot>;
-  buildSnapshot(): Promise<CollectionSnapshotBuildResult>;
+  buildSnapshot(context?: {
+    requestId: string;
+    operationId: string;
+  }): Promise<CollectionSnapshotBuildResult>;
 }
 
 export interface CollectionSnapshotServiceDeps {
@@ -118,6 +122,10 @@ function errorReason(error: unknown): string {
   return toErrorMessage(error);
 }
 
+function errorClass(error: unknown): string {
+  return error instanceof Error ? error.name : "UnknownError";
+}
+
 function assertFiniteTournamentStats(stats: ReturnType<typeof deriveDisplayStats>): void {
   const finiteFields = [stats.eloRating, stats.normalizedScore];
   if (finiteFields.some((value) => value !== null && !Number.isFinite(value))) {
@@ -144,57 +152,85 @@ export function createCollectionSnapshotService(
   const coordinator = profileSourceCoordinatorFor(storageService);
   const clock = deps.clock ?? { now: () => Date.now() };
   const timePolicy = createCollectionSnapshotTimePolicy(clock);
+  let buildSequence = 0;
 
-  async function capture(): Promise<CapturedInputs> {
+  async function capture(context: {
+    requestId: string;
+    operationId: string;
+  }): Promise<CapturedInputs> {
+    const queueStartedAt = performance.now();
+    logger.log("collection snapshot coordinator wait", {
+      ...context,
+      phase: "attempt",
+      operation: "capture",
+    });
     return coordinator.runExclusive(async () => {
+      logger.log("collection snapshot coordinator acquired", {
+        ...context,
+        operation: "capture",
+        waitMs: Math.max(0, performance.now() - queueStartedAt),
+      });
       let before = storageService.sourceVector?.();
       const hasStartupMarker = before?.unavailableSources.some(
         (source) => source === "startup" || source === "startup-hydration",
       );
       if (hasStartupMarker && storageService.hydrateSourceVector) {
+        const hydrationStartedAt = performance.now();
         logger.log("collection snapshot startup hydration attempt", {
+          ...context,
           changeToken: before?.changeToken ?? null,
         });
         try {
           await storageService.hydrateSourceVector();
           logger.log("collection snapshot startup hydration completed", {
+            ...context,
             changeToken: storageService.sourceVector?.()?.changeToken ?? null,
+            elapsedMs: Math.max(0, performance.now() - hydrationStartedAt),
             outcome: "hydrated",
           });
         } catch (error) {
           logger.warn("collection snapshot startup hydration failed", {
+            ...context,
             changeToken: storageService.sourceVector?.()?.changeToken ?? null,
+            elapsedMs: Math.max(0, performance.now() - hydrationStartedAt),
             outcome: "retrying-sources",
-            error: errorReason(error),
+            errorClass: errorClass(error),
           });
         }
         before = storageService.sourceVector?.();
       }
       logger.log("collection snapshot capture attempt", {
+        ...context,
         changeToken: before?.changeToken ?? null,
         available: before?.available ?? false,
       });
       if (!before) throw new CollectionSnapshotUnavailableError();
       const load = <Value>(source: string, read: () => Promise<Value>): Promise<Value> => {
+        const loadStartedAt = performance.now();
         logger.log("collection snapshot source load attempt", {
+          ...context,
           source,
           changeToken: before.changeToken,
         });
         return read().then(
           (value) => {
             logger.log("collection snapshot source load completed", {
+              ...context,
               source,
               outcome: "loaded",
               changeToken: before.changeToken,
+              elapsedMs: Math.max(0, performance.now() - loadStartedAt),
             });
             return value;
           },
           (error: unknown) => {
             logger.error("collection snapshot source load failed", {
+              ...context,
               source,
               outcome: "failed",
               changeToken: before.changeToken,
-              error: errorReason(error),
+              elapsedMs: Math.max(0, performance.now() - loadStartedAt),
+              errorClass: errorClass(error),
             });
             throw error;
           },
@@ -217,14 +253,13 @@ export function createCollectionSnapshotService(
       ]);
       if (collectionResult.status === "rejected" || tournamentResult.status === "rejected") {
         logger.error("collection snapshot required source failed", {
-          collection:
-            collectionResult.status === "rejected"
-              ? errorReason(collectionResult.reason)
-              : "loaded",
-          tournament:
-            tournamentResult.status === "rejected"
-              ? errorReason(tournamentResult.reason)
-              : "loaded",
+          ...context,
+          collection: collectionResult.status === "rejected" ? "failed" : "loaded",
+          collectionErrorClass:
+            collectionResult.status === "rejected" ? errorClass(collectionResult.reason) : null,
+          tournament: tournamentResult.status === "rejected" ? "failed" : "loaded",
+          tournamentErrorClass:
+            tournamentResult.status === "rejected" ? errorClass(tournamentResult.reason) : null,
           outcome: "unavailable",
         });
         throw new CollectionSnapshotUnavailableError();
@@ -251,6 +286,7 @@ export function createCollectionSnapshotService(
         );
       }
       logger.log("collection snapshot capture completed", {
+        ...context,
         collectionId: collectionResult.value.id,
         changeToken: after.changeToken,
         degradedSourceCount: [predictionResult, redundancyResult, nicheResult, shelfResult].filter(
@@ -258,7 +294,7 @@ export function createCollectionSnapshotService(
         ).length,
         outcome: "captured",
       });
-      return {
+      const captured = {
         sourceVector: after,
         token: after.changeToken,
         serverId: after.processEpoch,
@@ -281,13 +317,32 @@ export function createCollectionSnapshotService(
           ? { shelfConfig: shelfResult.value }
           : {}),
       };
+      return captured;
     });
   }
 
-  async function stillCurrent(token: number, capturedVector: SourceVector): Promise<void> {
+  async function stillCurrent(
+    token: number,
+    capturedVector: SourceVector,
+    context: { requestId: string; operationId: string },
+  ): Promise<void> {
+    const queueStartedAt = performance.now();
+    logger.log("collection snapshot coordinator wait", {
+      ...context,
+      phase: "attempt",
+      operation: "publication-check",
+    });
     await coordinator.runExclusive(() =>
       Promise.resolve().then(() => {
-        logger.log("collection snapshot source verification attempt", { changeToken: token });
+        logger.log("collection snapshot coordinator acquired", {
+          ...context,
+          operation: "publication-check",
+          waitMs: Math.max(0, performance.now() - queueStartedAt),
+        });
+        logger.log("collection snapshot source verification attempt", {
+          ...context,
+          changeToken: token,
+        });
         const current = storageService.sourceVector?.();
         if (
           !current ||
@@ -295,6 +350,7 @@ export function createCollectionSnapshotService(
           current.changeToken !== token
         ) {
           logger.warn("collection snapshot source verification failed", {
+            ...context,
             changeToken: token,
             currentChangeToken: current?.changeToken ?? null,
             outcome: "stale",
@@ -304,6 +360,7 @@ export function createCollectionSnapshotService(
           );
         }
         logger.log("collection snapshot source verification completed", {
+          ...context,
           changeToken: token,
           outcome: "current",
         });
@@ -312,8 +369,20 @@ export function createCollectionSnapshotService(
   }
 
   return {
-    async buildSnapshot() {
-      const input = await capture();
+    async buildSnapshot(context) {
+      const operationId = context?.operationId ?? `snapshot-build-${++buildSequence}`;
+      const requestId = context?.requestId ?? operationId;
+      const operationStartedAt = performance.now();
+      logger.log("collection snapshot build attempt", { requestId, operationId, phase: "capture" });
+      const input = await capture({ requestId, operationId });
+      logger.log("collection snapshot phase completed", {
+        requestId,
+        operationId,
+        phase: "capture",
+        elapsedMs: Math.max(0, performance.now() - operationStartedAt),
+        gameCount: input.collection.games.length,
+        changeToken: input.token,
+      });
       // BGG freshness belongs to the captured source generation and is evaluated
       // before any potentially long scoring or projection work.
       const evaluatedAtMs = clock.now();
@@ -324,6 +393,13 @@ export function createCollectionSnapshotService(
       const degraded: Array<{ feature: string; reason: string }> = [];
       const noteDegraded = (feature: string, reason: string) => degraded.push({ feature, reason });
       let ordinary: GameWithScore[];
+      const ordinaryStartedAt = performance.now();
+      logger.log("collection snapshot phase attempt", {
+        requestId,
+        operationId,
+        phase: "ordinary-scoring",
+        gameCount: input.collection.games.length,
+      });
       try {
         if (!gameService.listRawGamesFromSnapshot)
           throw new Error("Raw snapshot scoring helper is unavailable");
@@ -331,17 +407,34 @@ export function createCollectionSnapshotService(
         for (const entry of ordinary) {
           if (entry.score !== null) FitnessResultResponseSchema.parse(entry.score);
         }
+        logger.log("collection snapshot phase completed", {
+          requestId,
+          operationId,
+          phase: "ordinary-scoring",
+          elapsedMs: Math.max(0, performance.now() - ordinaryStartedAt),
+          gameCount: ordinary.length,
+        });
       } catch (error) {
         logger.error("collection snapshot ordinary scoring failed", {
+          requestId,
+          operationId,
+          elapsedMs: Math.max(0, performance.now() - ordinaryStartedAt),
           collectionId: input.collection.id,
           outcome: "unavailable",
-          error: errorReason(error),
+          errorClass: errorClass(error),
         });
         throw new CollectionSnapshotUnavailableError("Ordinary scoring is unavailable");
       }
 
       let prepared: PreparedPredictionList | undefined;
       if (input.predictionSettings) {
+        const preparedStartedAt = performance.now();
+        logger.log("collection snapshot phase attempt", {
+          requestId,
+          operationId,
+          phase: "prediction-preparation",
+          gameCount: input.collection.games.length,
+        });
         try {
           if (!predictionService.preparePredictionListFromSnapshot)
             throw new Error("Snapshot prediction context is unavailable");
@@ -349,8 +442,23 @@ export function createCollectionSnapshotService(
             input.collection,
             input.tournament,
             input.predictionSettings,
+            { requestId, operationId },
           );
+          logger.log("collection snapshot phase completed", {
+            requestId,
+            operationId,
+            phase: "prediction-preparation",
+            elapsedMs: Math.max(0, performance.now() - preparedStartedAt),
+            outcome: "prepared",
+          });
         } catch (error) {
+          logger.error("collection snapshot phase failed", {
+            requestId,
+            operationId,
+            phase: "prediction-preparation",
+            elapsedMs: Math.max(0, performance.now() - preparedStartedAt),
+            errorClass: errorClass(error),
+          });
           noteDegraded("predictions", errorReason(error));
         }
       } else noteDegraded("predictions", "Prediction settings are unavailable");
@@ -358,14 +466,35 @@ export function createCollectionSnapshotService(
       const ordinaryScores = new Map(ordinary.map((entry) => [entry.game.id, entry.score]));
       let predicted: GameWithScore[] | undefined;
       if (prepared) {
+        const predictionStartedAt = performance.now();
+        logger.log("collection snapshot phase attempt", {
+          requestId,
+          operationId,
+          phase: "prediction-resolution",
+          gameCount: ordinary.length,
+        });
         try {
           if (prepared.listActualGames) ordinary = prepared.listActualGames();
           predicted = prepared.listGames(ordinaryScores);
           for (const entry of predicted) {
             if (entry.score !== null) FitnessResultResponseSchema.parse(entry.score);
           }
+          logger.log("collection snapshot phase completed", {
+            requestId,
+            operationId,
+            phase: "prediction-resolution",
+            elapsedMs: Math.max(0, performance.now() - predictionStartedAt),
+            gameCount: predicted.length,
+          });
         } catch (error) {
           predicted = undefined;
+          logger.error("collection snapshot phase failed", {
+            requestId,
+            operationId,
+            phase: "prediction-resolution",
+            elapsedMs: Math.max(0, performance.now() - predictionStartedAt),
+            errorClass: errorClass(error),
+          });
           noteDegraded("predictions", errorReason(error));
         }
       }
@@ -417,6 +546,13 @@ export function createCollectionSnapshotService(
         input.predictionSettings &&
         !unifiedCalculated
       ) {
+        const redundancyStartedAt = performance.now();
+        logger.log("collection snapshot phase attempt", {
+          requestId,
+          operationId,
+          phase: "redundancy-adjustment",
+          gameCount: predicted.length,
+        });
         try {
           const semanticConfigured =
             input.collection.semanticRedundancy?.settings.enabled === true &&
@@ -500,8 +636,22 @@ export function createCollectionSnapshotService(
           }
           ordinaryDisplay = mergeByGame(ordinary, adjusted.ordinary);
           predictedDisplay = mergeByGame(predicted, adjusted.predicted);
+          logger.log("collection snapshot phase completed", {
+            requestId,
+            operationId,
+            phase: "redundancy-adjustment",
+            elapsedMs: Math.max(0, performance.now() - redundancyStartedAt),
+            outcome: "adjusted",
+          });
         } catch (error) {
           redundancyMode = "off";
+          logger.error("collection snapshot phase failed", {
+            requestId,
+            operationId,
+            phase: "redundancy-adjustment",
+            elapsedMs: Math.max(0, performance.now() - redundancyStartedAt),
+            errorClass: errorClass(error),
+          });
           noteDegraded("redundancy", errorReason(error));
         }
       } else if (!input.redundancySettings)
@@ -676,11 +826,25 @@ export function createCollectionSnapshotService(
             .map((entry) => entry.score?.score ?? null),
         ),
       });
+      logger.log("collection snapshot phase completed", {
+        requestId,
+        operationId,
+        phase: "public-projection",
+        gameCount: games.length,
+        outcome: "projected",
+      });
       if (prepared?.isCurrent && !prepared.isCurrent())
         throw new CollectionSnapshotUnavailableError(
           "Unified scoring inputs changed before snapshot publication",
         );
-      await stillCurrent(input.token, input.sourceVector);
+      await stillCurrent(input.token, input.sourceVector, { requestId, operationId });
+      logger.log("collection snapshot build completed", {
+        requestId,
+        operationId,
+        elapsedMs: Math.max(0, performance.now() - operationStartedAt),
+        gameCount: snapshot.games.length,
+        outcome: "current",
+      });
       return {
         snapshot,
         sourceVector: input.sourceVector,

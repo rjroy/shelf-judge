@@ -18,6 +18,7 @@ import {
   createCollectionProfileSnapshotSchema,
 } from "@shelf-judge/shared";
 import { ZodError } from "zod";
+import { performance } from "node:perf_hooks";
 import type { StorageService } from "./storage-service.js";
 import {
   semanticFallbackStatus,
@@ -36,6 +37,7 @@ import {
 import type { AttentionCandidateReadFreshness } from "./attention-disposition-maintenance.js";
 import type { SourceVector } from "./source-vector.js";
 import type { PrivateDisplayedFitnessService } from "./displayed-fitness-service.js";
+import { createLogger } from "./logger.js";
 
 export interface ProfileService {
   getProfile(): Promise<CollectionProfileResult>;
@@ -310,10 +312,19 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
   const { storageService, displayedFitnessService } = deps;
   const now = deps.now ?? (() => new Date().toISOString());
   const coordinator = profileSourceCoordinatorFor(storageService);
+  const logger = createLogger("profile-service");
+  let operationSequence = 0;
 
   return {
     getProfile(): Promise<CollectionProfileResult> {
-      return coordinator.runExclusive(async () => {
+      const operationId = `profile-${++operationSequence}`;
+      const enqueuedAt = performance.now();
+      logger.log("profile source operation start", { operationId, phase: "enqueue" });
+      const operation = coordinator.runExclusive(async () => {
+        logger.log("profile source operation entered", {
+          operationId,
+          waitMs: Math.max(0, performance.now() - enqueuedAt),
+        });
         if (deps.attentionCandidates === undefined)
           return unavailable("recomputation", new Error("Attention candidates are unavailable"));
         let sources: ProfileSources;
@@ -561,6 +572,25 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
           return unavailable(error instanceof ZodError ? "validation" : failureKind(error), error);
         }
       });
+      return operation.then(
+        (result) => {
+          logger.log("profile source operation completed", {
+            operationId,
+            elapsedMs: Math.max(0, performance.now() - enqueuedAt),
+            outcome: result.status === "unavailable" ? "unavailable" : "available",
+          });
+          return result;
+        },
+        (error: unknown) => {
+          logger.error("profile source operation failed", {
+            operationId,
+            elapsedMs: Math.max(0, performance.now() - enqueuedAt),
+            outcome: "failed",
+            errorClass: error instanceof Error ? error.name : "UnknownError",
+          });
+          throw error;
+        },
+      );
     },
   };
 }
