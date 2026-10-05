@@ -38,6 +38,24 @@ describe("migrateTournamentData", () => {
     expect(second.data).toEqual(first.data);
   });
 
+  test("preserves valid observed normalization bounds and repairs invalid bounds", () => {
+    const valid = migrateTournamentData({
+      settings: { ...baseSettings, normalizationBounds: { minElo: 1367.11, maxElo: 1627.91 } },
+      sessions: [],
+      gameStats: {},
+    });
+    expect(valid.data.settings.normalizationBounds).toEqual({ minElo: 1367.11, maxElo: 1627.91 });
+    expect(valid.migrated).toBe(false);
+
+    const invalid = migrateTournamentData({
+      settings: { ...baseSettings, normalizationBounds: { minElo: 1700, maxElo: 1600 } },
+      sessions: [],
+      gameStats: {},
+    });
+    expect(invalid.data.settings.normalizationBounds).toBeUndefined();
+    expect(invalid.migrated).toBe(true);
+  });
+
   test("computes correct wins and losses for 3 games with 6 comparisons", () => {
     // g1 beats g2, g1 beats g3, g2 beats g3, g1 beats g2, g3 beats g1, g2 beats g3
     // g1: 3 wins (beat g2 twice, beat g3 once), 1 loss (lost to g3)

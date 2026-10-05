@@ -257,6 +257,37 @@ describe("staged similarity scope and frozen authorization", () => {
     expect(actual.readiness.stageThresholds[0] - actual.readiness.ratedGameCount).toBe(2);
   });
 
+  test("uses frozen asymmetric Elo bounds for staged actual tournament values and invalidates on change", () => {
+    const current = sources({
+      axes: [axis("tournament", "tournament")],
+      games: Array.from({ length: 5 }, (_, index) => game(`rated-${index}`)),
+      tournament: {
+        settings: {
+          kFactorThreshold: 15,
+          normalizationHalfWidth: 400,
+          normalizationBounds: { minElo: 1367.11, maxElo: 1627.91 },
+        },
+        sessions: [],
+        gameStats: Object.fromEntries(
+          [1367.11, 1420, 1500, 1570, 1627.91].map((eloRating, index) => [
+            `rated-${index}`,
+            { eloRating, comparisonCount: 1 },
+          ]),
+        ),
+      } as unknown as TournamentData,
+    });
+    let authoritative = current;
+    const capture = captureStagedSimilaritySources(current, { readCurrent: () => authoritative });
+    const actual = deriveStagedActualAxisContext(capture);
+    if (!actual) throw new Error("Actual-axis context unavailable");
+    expect(actual.ratingValues.get("rated-0")?.get("tournament")).toBe(1);
+    expect(actual.ratingValues.get("rated-4")?.get("tournament")).toBe(10);
+
+    authoritative = structuredClone(current);
+    authoritative.tournament.settings.normalizationBounds = { minElo: 1400, maxElo: 1627.91 };
+    expect(capture.isSourceCurrent()).toBe(false);
+  });
+
   test("builds exact per-axis P, includes previously-owned and vetoed actual refs, and derives current-owned R", () => {
     const current = sources({
       axes: [axis("personal", "personal"), axis("tournament", "tournament")],

@@ -166,15 +166,26 @@ function normalizeSettings(raw: unknown): {
   const normalizationHalfWidth = validPositiveNumber(value.normalizationHalfWidth)
     ? value.normalizationHalfWidth
     : DEFAULT_SETTINGS.normalizationHalfWidth;
-  const settings = { kFactorThreshold, normalizationHalfWidth };
+  const normalizationBounds = validNormalizationBounds(value.normalizationBounds)
+    ? value.normalizationBounds
+    : undefined;
+  const settings = {
+    kFactorThreshold,
+    normalizationHalfWidth,
+    ...(normalizationBounds === undefined ? {} : { normalizationBounds }),
+  };
 
   return {
     settings,
     repaired:
       value.kFactorThreshold !== kFactorThreshold ||
       value.normalizationHalfWidth !== normalizationHalfWidth ||
+      value.normalizationBounds !== normalizationBounds ||
       Object.keys(value).some(
-        (key) => key !== "kFactorThreshold" && key !== "normalizationHalfWidth",
+        (key) =>
+          key !== "kFactorThreshold" &&
+          key !== "normalizationHalfWidth" &&
+          key !== "normalizationBounds",
       ),
   };
 }
@@ -185,4 +196,16 @@ function validPositiveInteger(value: unknown): value is number {
 
 function validPositiveNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function validNormalizationBounds(value: unknown): value is { minElo: number; maxElo: number } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const bounds = value as Record<string, unknown>;
+  return (
+    typeof bounds.minElo === "number" &&
+    Number.isFinite(bounds.minElo) &&
+    typeof bounds.maxElo === "number" &&
+    Number.isFinite(bounds.maxElo) &&
+    bounds.minElo <= bounds.maxElo
+  );
 }

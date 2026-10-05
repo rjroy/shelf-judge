@@ -232,7 +232,8 @@ function actualRating(
     if (!canDisplayTournamentRanking || !stats || stats.comparisonCount <= 0) return null;
     return normalizeElo(
       stats.eloRating ?? 1500,
-      capture.sources.tournament.settings.normalizationHalfWidth,
+      capture.sources.tournament.settings.normalizationBounds ??
+        capture.sources.tournament.settings.normalizationHalfWidth,
     );
   }
   return null;

@@ -3168,6 +3168,13 @@ export const TournamentSettingsUpdateSchema = z
   .object({
     kFactorThreshold: z.number().int().min(1).optional(),
     normalizationHalfWidth: z.number().positive().optional(),
+    normalizationBounds: z
+      .object({ minElo: z.number().finite(), maxElo: z.number().finite() })
+      .refine((bounds) => bounds.minElo <= bounds.maxElo, {
+        message: "Minimum Elo cannot exceed maximum Elo",
+        path: ["maxElo"],
+      })
+      .optional(),
   })
   .strict();
 
@@ -3176,6 +3183,13 @@ export const TournamentSettingsUpdateSchema = z
 export const TournamentSettingsSchema = z.object({
   kFactorThreshold: z.number().int().min(1),
   normalizationHalfWidth: z.number().positive(),
+  normalizationBounds: z
+    .object({ minElo: z.number().finite(), maxElo: z.number().finite() })
+    .refine((bounds) => bounds.minElo <= bounds.maxElo, {
+      message: "Minimum Elo cannot exceed maximum Elo",
+      path: ["maxElo"],
+    })
+    .optional(),
 });
 
 const CachedRecentComparisonSchema = z.object({
