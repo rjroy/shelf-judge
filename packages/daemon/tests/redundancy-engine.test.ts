@@ -200,7 +200,10 @@ describe("createRedundancyFactualContext", () => {
     };
     const collection = [first, second, rangeChanger];
     const weights = { binary: 4 / 7, continuous: 3 / 7 };
-    const context = createRedundancyFactualContext(collection, weights);
+    const encodedGameIds: string[] = [];
+    const context = createRedundancyFactualContext(collection, weights, {
+      onVectorEncoded: (gameId) => encodedGameIds.push(gameId),
+    });
     const vocabulary = buildVocabulary(collection);
     const ranges = computeContinuousRanges(collection);
     const oldCallback = (game: Game) => encodeGame(game, vocabulary, [], {}, ranges);
@@ -214,6 +217,7 @@ describe("createRedundancyFactualContext", () => {
     expect(context.similarity(second, first)).toBe(expected);
     expect(context.getFeatureVector(first)).toBe(context.getFeatureVector(first));
     expect(context.getFeatureVector(first).personalAxes).toBeNull();
+    expect(encodedGameIds).toEqual([first.id, second.id]);
 
     const pairOnly = createRedundancyFactualContext([first, second], weights);
     // Continuous dimensions are weight, rating, min players, max players, ... .

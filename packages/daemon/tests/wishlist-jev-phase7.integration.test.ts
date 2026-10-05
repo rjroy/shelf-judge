@@ -17,7 +17,6 @@ import { createWishlistService } from "../src/services/wishlist-service.js";
 import { createStorageService } from "../src/services/storage-service.js";
 import { createJevRunSourceAdapter } from "../src/services/jev-run-source-adapter.js";
 import { parseBoardgameScoringThings } from "../src/services/bgg-xml-parser.js";
-import { createWishlistCandidateDescriptionResolver } from "../src/services/wishlist-candidate-read-proof.js";
 import { createJevPairReadService } from "../src/services/jev-pair-read-service.js";
 import { encodeWishlistBggMember } from "../src/services/jev-pair-identity.js";
 import { JEV_MODEL_ID } from "../src/services/jev/jev-gateway.js";
@@ -289,7 +288,6 @@ describe("wishlist Jev phase 7 durable integration", () => {
         predictionService: prediction.predictions,
         gameService,
         jevPairCache: cache,
-        resolveWishlistDescriptionSignal: createWishlistCandidateDescriptionResolver(cache),
       });
 
       const first = await wishlist.add(9301);
@@ -389,7 +387,6 @@ describe("wishlist Jev phase 7 durable integration", () => {
         predictionService: restartedPrediction.predictions,
         gameService,
         jevPairCache: cache,
-        resolveWishlistDescriptionSignal: createWishlistCandidateDescriptionResolver(cache),
       });
       const offlineRead = await restartedWishlist.listWithCurrentRedundancy();
       expect(offlineRead).toHaveLength(2);
@@ -529,7 +526,6 @@ describe("wishlist Jev phase 7 durable integration", () => {
         predictionService: prediction.predictions,
         gameService,
         jevPairCache: cache,
-        resolveWishlistDescriptionSignal: createWishlistCandidateDescriptionResolver(cache),
       });
       const refreshedEntry = await wishlist.add(9401);
       const fetch = () => Promise.resolve(gatewayResponse());

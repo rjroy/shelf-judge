@@ -33,8 +33,8 @@ import type { PreparedUnifiedRun } from "./unified-jev-run-preparation.js";
 import {
   validateWishlistCandidateCOnlyRow,
   type WishlistCandidateMembershipIndex,
+  type WishlistDescriptionPairRequest,
 } from "./wishlist-candidate-read-proof.js";
-import type { WishlistDescriptionPairRequest } from "./wishlist-redundancy-scoring.js";
 import {
   encodeOwnedLocalMember,
   encodeWishlistBggMember,

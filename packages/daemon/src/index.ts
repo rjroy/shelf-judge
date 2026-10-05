@@ -9,7 +9,6 @@ import { createTournamentService } from "./services/tournament-service.js";
 import { createProfileService } from "./services/profile-service.js";
 import { createPredictionService } from "./services/prediction-service.js";
 import { createWishlistService } from "./services/wishlist-service.js";
-import { createWishlistCandidateDescriptionResolver } from "./services/wishlist-candidate-read-proof.js";
 import { createAfterWishlistAcquisitionRecovery } from "./services/wishlist-acquisition-startup.js";
 import { createApp } from "./app.js";
 import { createLogger } from "./services/logger.js";
@@ -451,13 +450,7 @@ export async function main() {
       unifiedScoringService,
       gameService,
       coordinator: profileSourceCoordinatorFor(storageService),
-      ...(jevPairCache
-        ? {
-            jevPairCache,
-            resolveWishlistDescriptionSignal:
-              createWishlistCandidateDescriptionResolver(jevPairCache),
-          }
-        : {}),
+      jevPairCache: jevPairCache ?? undefined,
     });
     const resolveSemanticRead = createJevProductionSemanticRead(jevPairCache);
     displayedFitnessService = createDisplayedFitnessService({

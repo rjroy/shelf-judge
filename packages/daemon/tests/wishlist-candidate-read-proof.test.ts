@@ -1,7 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, expect, test } from "bun:test";
 import type { WishlistBggSourceSnapshot } from "@shelf-judge/shared";
 import { JEV_JUDGMENT_CONTRACT } from "../src/services/jev/jev-judgment-contract.js";
 import {
@@ -9,23 +6,9 @@ import {
   encodeOwnedLocalMember,
   encodeWishlistBggMember,
 } from "../src/services/jev-pair-identity.js";
-import {
-  createJevPairCache,
-  type JevPairJudgment,
-} from "../src/services/jev-pair-cache-service.js";
-import {
-  createWishlistCandidateDescriptionResolver,
-  validateWishlistCandidateCOnlyRow,
-} from "../src/services/wishlist-candidate-read-proof.js";
-import type {
-  WishlistDescriptionPairRequest,
-  WishlistDescriptionSignalCaptureRequest,
-} from "../src/services/wishlist-redundancy-scoring.js";
-
-const dirs: string[] = [];
-afterEach(async () =>
-  Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))),
-);
+import type { JevPairJudgment } from "../src/services/jev-pair-cache-service.js";
+import { validateWishlistCandidateCOnlyRow } from "../src/services/wishlist-candidate-read-proof.js";
+import type { WishlistDescriptionPairRequest } from "../src/services/wishlist-candidate-read-proof.js";
 
 const collectionId = "collection-1";
 
@@ -64,22 +47,10 @@ function pair(
   };
 }
 
-function capture(
-  pairs: readonly WishlistDescriptionPairRequest[],
-): WishlistDescriptionSignalCaptureRequest {
+function membership(item: WishlistDescriptionPairRequest) {
   return {
-    collectionId,
-    candidateBggIds: [...new Set(pairs.map((item) => item.candidate.bggId))].sort((a, b) => a - b),
-    eligibleOwnedIds: [...new Set(pairs.map((item) => item.ownedGame.id))].sort(),
-    semanticPolicy: { enabled: true, weights: { factual: 0.4, description: 0.6 } },
-    pairs,
-  };
-}
-
-function membership(request: WishlistDescriptionSignalCaptureRequest) {
-  return {
-    candidateBggIds: new Set(request.candidateBggIds),
-    eligibleOwnedIds: new Set(request.eligibleOwnedIds),
+    candidateBggIds: new Set([item.candidate.bggId]),
+    eligibleOwnedIds: new Set([item.ownedGame.id]),
   };
 }
 
@@ -112,47 +83,13 @@ function candidateRow(item: WishlistDescriptionPairRequest, value: number): JevP
   };
 }
 
-describe("wishlist candidate C-only read proof", () => {
-  test("uses only typed candidate-domain point lookups and reuses an unchanged proof without queries", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "wishlist-candidate-proof-"));
-    dirs.push(dir);
-    const cache = await createJevPairCache(dir);
-    const pairs = [pair(101, "local-1"), pair(101, "local-2"), pair(102, "local-1")];
-    pairs.forEach((item, index) => cache.upsert(candidateRow(item, index / 2)));
-    // An ordinary collection-domain C row with the same encoded members is not candidate evidence.
-    cache.upsert({ ...candidateRow(pairs[0], 0.99), pairDomain: undefined });
-    let lookups = 0;
-    const resolver = createWishlistCandidateDescriptionResolver({
-      available: cache.available,
-      mutationRevision: () => cache.mutationRevision(),
-      lookup: (key) => {
-        lookups++;
-        return cache.lookup(key);
-      },
-    });
-    const request = capture(pairs);
-    expect(await resolver(request)).toEqual([0, 0.5, 1]);
-    expect(lookups).toBe(3);
-    expect(resolver.isCurrent(request)).toBe(true);
-    expect(resolver.isCurrent(request)).toBe(true);
-    expect(lookups).toBe(3);
-    expect(await resolver(request)).toEqual([0, 0.5, 1]);
-    expect(lookups).toBe(3);
-
-    const changed = capture([pairs[0], pairs[1]]);
-    expect(resolver.isCurrent(changed)).toBe(false);
-    expect(await resolver(changed)).toEqual([0, 0.5]);
-    expect(lookups).toBe(5);
-    cache.close();
-  });
-
+describe("wishlist candidate C-only row validation", () => {
   test("accepts C_ONLY without note permission and rejects stale sources or contract provenance", () => {
     const item = pair(103, "local-a");
     const row = candidateRow(item, 0);
-    const request = capture([item]);
     expect(
       validateWishlistCandidateCOnlyRow(row, collectionId, item, {
-        candidateBggIds: new Set(request.candidateBggIds),
+        candidateBggIds: new Set([item.candidate.bggId]),
         eligibleOwnedIds: new Set(["local-a"]),
       }),
     ).toMatchObject({ valid: true, value: 0 });
@@ -170,7 +107,7 @@ describe("wishlist candidate C-only read proof", () => {
           { ...row, [field]: "stale-provenance" },
           collectionId,
           item,
-          membership(request),
+          membership(item),
         ).valid,
       ).toBe(false);
     }
@@ -179,7 +116,7 @@ describe("wishlist candidate C-only read proof", () => {
         row,
         collectionId,
         pair(103, "local-a", { candidate: "changed candidate prose" }),
-        membership(request),
+        membership(item),
       ).valid,
     ).toBe(false);
     expect(
@@ -187,7 +124,7 @@ describe("wishlist candidate C-only read proof", () => {
         row,
         collectionId,
         { ...item, candidate: { ...item.candidate, name: "Renamed candidate" } },
-        membership(request),
+        membership(item),
       ).valid,
     ).toBe(false);
     expect(
@@ -195,7 +132,7 @@ describe("wishlist candidate C-only read proof", () => {
         row,
         collectionId,
         { ...item, ownedGame: { ...item.ownedGame, name: "Renamed owned game" } },
-        membership(request),
+        membership(item),
       ).valid,
     ).toBe(false);
     expect(
@@ -203,7 +140,7 @@ describe("wishlist candidate C-only read proof", () => {
         row,
         collectionId,
         pair(103, "local-a", { owned: "changed owned prose" }),
-        membership(request),
+        membership(item),
       ).valid,
     ).toBe(false);
     expect(
@@ -211,7 +148,7 @@ describe("wishlist candidate C-only read proof", () => {
         { ...row, pairDomain: "collection" },
         collectionId,
         item,
-        membership(request),
+        membership(item),
       ).valid,
     ).toBe(false);
     expect(
@@ -219,7 +156,7 @@ describe("wishlist candidate C-only read proof", () => {
         { ...row, dependencyKind: "SHARED_CD" },
         collectionId,
         item,
-        membership(request),
+        membership(item),
       ).valid,
     ).toBe(false);
     expect(
@@ -233,17 +170,16 @@ describe("wishlist candidate C-only read proof", () => {
         },
         collectionId,
         item,
-        membership(request),
+        membership(item),
       ).valid,
     ).toBe(false);
   });
 
   test("membership proof probes stay constant as the full eligible set grows", () => {
     const pairs = [pair(105, "local-a"), pair(105, "local-b"), pair(106, "local-a")];
-    const requests = capture(pairs);
-    const candidateBggIds = new Set(requests.candidateBggIds);
+    const candidateBggIds = new Set(pairs.map(({ candidate }) => candidate.bggId));
     const eligibleOwnedIds = new Set([
-      ...requests.eligibleOwnedIds,
+      ...pairs.map(({ ownedGame }) => ownedGame.id),
       ...Array.from({ length: 122 }, (_, index) => `unrelated-owned-${index}`),
     ]);
     const probes = { candidate: 0, owned: 0 };
@@ -264,81 +200,5 @@ describe("wishlist candidate C-only read proof", () => {
 
     expect(eligibleOwnedIds.size).toBe(124);
     expect(probes).toEqual({ candidate: 3, owned: 3 });
-  });
-
-  test("source, membership, policy, and cache revisions invalidate currentness without a lookup", async () => {
-    const item = pair(104, "local-b");
-    const row = candidateRow(item, 0.7);
-    let revision: number | null = 3;
-    let lookups = 0;
-    const resolver = createWishlistCandidateDescriptionResolver({
-      available: true,
-      mutationRevision: () => revision,
-      lookup: () => {
-        lookups++;
-        return row;
-      },
-    });
-    const original = capture([item]);
-    expect(await resolver(original)).toEqual([0.7]);
-    const count = lookups;
-    expect(resolver.isCurrent(original)).toBe(true);
-    const changedSource = capture([pair(104, "local-b", { candidate: "new source" })]);
-    expect(resolver.isCurrent(changedSource)).toBe(false);
-    expect(await resolver(changedSource)).toEqual([null]);
-    expect(lookups).toBe(count + 1);
-    expect(
-      resolver.isCurrent({
-        ...original,
-        eligibleOwnedIds: ["local-b", "local-c"],
-      }),
-    ).toBe(false);
-    expect(
-      resolver.isCurrent({
-        ...original,
-        semanticPolicy: { enabled: true, weights: { factual: 0.8, description: 0.2 } },
-      }),
-    ).toBe(false);
-    revision++;
-    expect(resolver.isCurrent(original)).toBe(false);
-    expect(lookups).toBe(count + 1);
-    expect(await resolver(original)).toEqual([0.7]);
-    expect(lookups).toBe(count + 2);
-  });
-
-  test("fails closed when revision changes during reads or a lookup fails", async () => {
-    const item = pair(105, "local-c");
-    const row = candidateRow(item, 0.8);
-    let revision = 1;
-    let lookups = 0;
-    const changing = createWishlistCandidateDescriptionResolver({
-      available: true,
-      mutationRevision: () => revision,
-      lookup: () => {
-        lookups++;
-        revision++;
-        return row;
-      },
-    });
-    expect(await changing(capture([item]))).toEqual([null]);
-    expect(changing.isCurrent(capture([item]))).toBe(false);
-    expect(lookups).toBe(1);
-
-    const failing = createWishlistCandidateDescriptionResolver({
-      available: true,
-      mutationRevision: () => 1,
-      lookup: () => {
-        throw new Error("cache read failed");
-      },
-    });
-    expect(await failing(capture([item]))).toEqual([null]);
-    expect(failing.isCurrent(capture([item]))).toBe(false);
-
-    const unknownRevision = createWishlistCandidateDescriptionResolver({
-      available: true,
-      mutationRevision: () => null,
-      lookup: () => row,
-    });
-    expect(await unknownRevision(capture([item]))).toEqual([null]);
   });
 });

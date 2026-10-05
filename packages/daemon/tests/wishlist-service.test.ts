@@ -14,7 +14,6 @@ import type { StorageService } from "../src/services/storage-service";
 import type { PredictionService, PredictedGameResult } from "../src/services/prediction-service";
 import type { GameService } from "../src/services/game-service";
 import type { BoardgameScoringInput } from "../src/services/bgg-client";
-import type { WishlistDescriptionSignalCaptureRequest } from "../src/services/wishlist-redundancy-scoring.js";
 import { createWishlistService } from "../src/services/wishlist-service";
 import { WishlistAcquisitionRecoveryError } from "../src/services/wishlist-service.js";
 import { parseBoardgameScoringThings } from "../src/services/bgg-xml-parser.js";
@@ -1034,11 +1033,10 @@ describe("wishlist service", () => {
     expect((await service.list())[0]?.predictedScore).toBeNull();
   });
 
-  test("does not invoke legacy scoring when current source capture is unavailable", async () => {
+  test("returns unavailable when current source capture is unavailable", async () => {
     const existing = makeCurrentReadEntry("Original candidate prose");
     storage = createMockStorage([existing]);
     let scoringCalls = 0;
-    let resolverCalls = 0;
     const prediction: PredictionService = {
       ...createMockPredictionService(new Map()),
       listGamesWithPredictionsFromSnapshot: () => {
@@ -1050,19 +1048,11 @@ describe("wishlist service", () => {
       storageService: storage,
       predictionService: prediction,
       gameService,
-      resolveWishlistDescriptionSignal: Object.assign(
-        () => {
-          resolverCalls++;
-          return Promise.resolve([]);
-        },
-        { isCurrent: () => true },
-      ),
     });
     const [result] = await service.listWithCurrentRedundancy();
     expect(result?.prediction.availability).toBe("unavailable");
     expect(result?.entry.predictedScore).toBeNull();
     expect(scoringCalls).toBe(0);
-    expect(resolverCalls).toBe(0);
   });
 
   test("removed candidates are absent from subsequent current projections", async () => {
@@ -1094,28 +1084,6 @@ describe("wishlist service", () => {
     expect(result?.redundancy.orderingScore).toBeNull();
   });
 
-  test("legacy description resolver and cache revision cannot authorize an unavailable current result", async () => {
-    const existing = makeCurrentReadEntry("Candidate prose");
-    storage = createMockStorage([existing], undefined, true);
-    let resolverCalls = 0;
-    const service = createWishlistService({
-      storageService: storage,
-      predictionService,
-      gameService,
-      resolveWishlistDescriptionSignal: Object.assign(
-        () => {
-          resolverCalls++;
-          return Promise.resolve([0.9]);
-        },
-        { isCurrent: () => true },
-      ),
-    });
-    const [result] = await service.listWithCurrentRedundancy();
-    expect(result?.prediction.availability).toBe("unavailable");
-    expect(result?.entry.predictedScore).toBeNull();
-    expect(resolverCalls).toBe(0);
-  });
-
   test("unreadable source authority returns unavailable instead of saved prediction history", async () => {
     const existing = makeCurrentReadEntry("Candidate prose");
     storage = createMockStorage([existing]);
@@ -1145,25 +1113,16 @@ describe("wishlist service", () => {
     const owner = makeGame(903, "Owned with additional BGG identity");
     owner.additionalBggIds = [existing.bggId];
     const storage = createMockStorage([existing], { games: [asDurableGame(owner)] }, true);
-    let resolverCalls = 0;
     const service = createWishlistService({
       storageService: storage,
       predictionService: createMockPredictionService(new Map(), [
         { game: owner, score: makeFitnessResult(5, false) },
       ]),
       gameService,
-      resolveWishlistDescriptionSignal: Object.assign(
-        () => {
-          resolverCalls++;
-          return Promise.resolve([]);
-        },
-        { isCurrent: () => true },
-      ),
     });
 
     expect(await service.list()).toEqual([]);
     expect(await service.listWithCurrentRedundancy()).toEqual([]);
-    expect(resolverCalls).toBe(0);
   });
 
   test("owned additional BGG identities are excluded before wishlist publication", async () => {
@@ -1172,21 +1131,12 @@ describe("wishlist service", () => {
     const owner = makeGame(907, "Owner");
     owner.additionalBggIds = [existing.bggId];
     storage = createMockStorage([existing], { games: [asDurableGame(owner)] }, true);
-    let resolverCalls = 0;
     const service = createWishlistService({
       storageService: storage,
       predictionService,
       gameService,
-      resolveWishlistDescriptionSignal: Object.assign(
-        () => {
-          resolverCalls++;
-          return Promise.resolve([0.8]);
-        },
-        { isCurrent: () => true },
-      ),
     });
     expect(await service.listWithCurrentRedundancy()).toEqual([]);
-    expect(resolverCalls).toBe(0);
   });
 
   test("ownership read failure rejects instead of disclosing saved wishlist metadata", async () => {
@@ -1304,7 +1254,6 @@ describe("wishlist service", () => {
       let ownedLookups = 0;
       let eligibleSetSize = 0;
       const membershipProbes = { candidate: 0, owned: 0 };
-      let candidateResolverCalls = 0;
       const service = createWishlistService({
         storageService: savingStorage,
         predictionService: prediction,
@@ -1313,13 +1262,6 @@ describe("wishlist service", () => {
           addGame: () => Promise.resolve({ game: acquired, bggImported: false }),
         },
         jevPairCache: cache,
-        resolveWishlistDescriptionSignal: Object.assign(
-          (request: WishlistDescriptionSignalCaptureRequest) => {
-            candidateResolverCalls++;
-            return Promise.resolve(request.pairs.map(() => 0.9));
-          },
-          { isCurrent: () => true },
-        ),
         acquisitionObserver: {
           onCollectionIndexBuilt: (gameCount) => {
             indexBuilds++;
@@ -1366,7 +1308,6 @@ describe("wishlist service", () => {
       expect(acquisitionError).toBeInstanceOf(WishlistAcquisitionRecoveryError);
       expect(await service.list()).toEqual([]);
       expect(await service.listWithCurrentRedundancy()).toEqual([]);
-      expect(candidateResolverCalls).toBe(0);
       expect(await savingStorage.loadWishlist()).toHaveLength(1);
       expect(cache.candidateCOnlyPairs(candidateId)).toHaveLength(3);
       expect(indexBuilds).toBe(1);
@@ -1388,7 +1329,6 @@ describe("wishlist service", () => {
       expect(scoringCaptureCalls).toBe(2);
       expect(await savingStorage.loadWishlist()).toHaveLength(1);
       expect(await service.listWithCurrentRedundancy()).toEqual([]);
-      expect(candidateResolverCalls).toBe(0);
       const transferred = cache.lookup({ gameAId: acquired.id, gameBId: other.id, signal: "C" });
       expect(transferred?.value).toBe(0.82);
       expect(transferred?.completedAt).toBe("2026-09-30T12:00:00.000Z");
