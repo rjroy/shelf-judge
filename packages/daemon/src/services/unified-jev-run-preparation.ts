@@ -31,6 +31,17 @@ export interface PreparedUnifiedRun {
   readonly beginExecution: () => void;
 }
 
+function ownedBggIds(
+  games: readonly { bggId: number | null; additionalBggIds?: readonly number[] }[],
+): ReadonlySet<number> {
+  return new Set(
+    games.flatMap((game) => [
+      ...(game.bggId === null ? [] : [game.bggId]),
+      ...(game.additionalBggIds ?? []),
+    ]),
+  );
+}
+
 export async function prepareUnifiedJevRun(options: {
   scoring: UnifiedScoringService;
   sourceAdapter: Pick<JevRunSourceAdapter, "readCurrent">;
@@ -49,12 +60,11 @@ export async function prepareUnifiedJevRun(options: {
       ? frame.wishlistEntries.map((entry) => entry.bggId)
       : (selection?.bggIds ?? [])
     : [];
+  const collectionOwnedBggIds = ownedBggIds(frame.sources.collection.games);
   const request = wishlist
     ? {
         scope: "wishlist" as const,
-        selectedBggIds: selectedWishlistIds.filter(
-          (bggId) => !frame.sources.collection.games.some((game) => game.bggId === bggId),
-        ),
+        selectedBggIds: selectedWishlistIds.filter((bggId) => !collectionOwnedBggIds.has(bggId)),
       }
     : options.request;
   const requestIdentity = stagedRunSelectionIdentity(request);
@@ -246,9 +256,8 @@ function createWishlistPreparation(options: {
   );
   const allEntries = options.frame.wishlistEntries.length;
   const selectedCount = entries.length;
-  const requestedCount = entries.filter(
-    (entry) => !options.capture.collection.games.some((game) => game.bggId === entry.bggId),
-  ).length;
+  const collectionOwnedBggIds = ownedBggIds(options.capture.collection.games);
+  const requestedCount = entries.filter((entry) => !collectionOwnedBggIds.has(entry.bggId)).length;
   const ownedOverlap = selectedCount - requestedCount;
   const disclosure = Object.freeze({
     scope: "wishlist" as const,
