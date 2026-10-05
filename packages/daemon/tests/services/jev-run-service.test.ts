@@ -13,7 +13,11 @@ import {
   createInitialSemanticRedundancyStateV10,
   DEFAULT_JEV_RUN_BUDGET,
 } from "@shelf-judge/shared";
-import { JevRunService, type JevRunCapture } from "../../src/services/jev-run-service.js";
+import {
+  JevRunService,
+  type JevRunCapture,
+  type ValidatedPreparedJevRun,
+} from "../../src/services/jev-run-service.js";
 import { planJevRunScope } from "../../src/services/jev-run-scope.js";
 import * as jevRunScope from "../../src/services/jev-run-scope.js";
 import type {
@@ -235,22 +239,24 @@ async function unifiedFixture(
     storageService: storage,
     predictionService: { listGamesWithPredictionsFromSnapshot: snapshotPrediction },
   });
-  const preparation = await prepareUnifiedJevRun({
-    scoring: context.unifiedScoringService,
-    sourceAdapter,
-    cache,
-    request: { scope: "collection-all" },
-    budget,
-  });
+  const prepare = (selectedBudget = budget) =>
+    prepareUnifiedJevRun({
+      scoring: context.unifiedScoringService,
+      sourceAdapter,
+      cache,
+      request: { scope: "collection-all" },
+      budget: selectedBudget,
+    });
+  const preparation = await prepare();
   if (!preparation.collectionScope) throw new Error("Expected collection scope");
-  return { context, storage, sourceAdapter, preparation };
+  return { context, storage, sourceAdapter, preparation, prepare };
 }
 
-async function reserveUnifiedRunForTest(
+async function validateUnifiedRunForTest(
   service: JevRunService,
   preparation: PreparedUnifiedRun,
   noteTransmissionAuthorized: boolean,
-) {
+): Promise<ValidatedPreparedJevRun> {
   if (!preparation.collectionScope) throw new Error("Expected collection scope");
   const reservation = await service.prepareValidatedPreparedRun({
     scopeKind: "collection",
@@ -261,6 +267,19 @@ async function reserveUnifiedRunForTest(
     providerBudget: preparation.run.disclosure.budget,
   });
   if (!reservation) throw new Error("Expected validated unified preparation");
+  return reservation;
+}
+
+async function reserveUnifiedRunForTest(
+  service: JevRunService,
+  preparation: PreparedUnifiedRun,
+  noteTransmissionAuthorized: boolean,
+) {
+  const reservation = await validateUnifiedRunForTest(
+    service,
+    preparation,
+    noteTransmissionAuthorized,
+  );
   return service.reserveValidatedPreparedRun(reservation);
 }
 
@@ -678,47 +697,55 @@ describe("JevRunService attempt barriers", () => {
     });
   });
 
-  test("owner cancellation settles before a never-ending initial capture and fences late completion", async () => {
-    const capture = fixture();
-    const pendingCapture = deferred<JevRunCapture>();
+  test("owner cancellation settles before a pending provider response and fences late completion", async () => {
     const { cache, progress, rows } = cacheFake();
-    let captureCalls = 0;
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const pendingProvider = deferred<JevPairResult>();
+    const providerStarted = deferred<void>();
     let dispatches = 0;
+    let pendingFirstProvider = true;
     const logs = recordingLogger();
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => {
-        captureCalls++;
-        return captureCalls === 1 ? pendingCapture.promise : Promise.resolve(capture);
-      },
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
-      createGateway: () => ({
-        evaluatePair: () => {
-          dispatches++;
-          return Promise.resolve(scoreResult());
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
+      createGateway: (admit) => ({
+        evaluatePair: async (request) => {
+          await admit({
+            mode: request.mode,
+            attemptId: `provider-${dispatches + 1}`,
+            start: () => {
+              dispatches++;
+              return { response: Promise.resolve(new Response()) };
+            },
+          });
+          if (pendingFirstProvider) {
+            pendingFirstProvider = false;
+            providerStarted.resolve();
+            return pendingProvider.promise;
+          }
+          return scoreResult();
         },
       }),
       logger: logs.logger,
     });
-    const canceled = service.startRun({ noteTransmissionAuthorized: false });
+    const firstPreparation = fixtureData.preparation;
+    const firstReservation = await validateUnifiedRunForTest(service, firstPreparation, false);
+    const canceled = service.reserveValidatedPreparedRun(firstReservation);
+    await providerStarted.promise;
     canceled.cancel();
     const canceledProgress = await canceled.completion;
     expect(canceledProgress).toMatchObject({ state: "interrupted" });
 
-    const replacement = service.startRun({ noteTransmissionAuthorized: false });
+    const replacementPreparation = await fixtureData.prepare();
+    const replacement = await reserveUnifiedRunForTest(service, replacementPreparation, false);
     const replacementProgress = await replacement.completion;
     expect(replacementProgress).toMatchObject({ state: "completed" });
-    pendingCapture.reject(new Error("PRIVATE_CAPTURE_CANARY"));
+    pendingProvider.reject(new Error("PRIVATE_PROVIDER_CANARY"));
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(dispatches).toBe(1);
+    expect(dispatches).toBe(2);
     expect(rows.size).toBe(1);
     expect(progress.at(-1)).toMatchObject({ runId: replacement.runId, state: "completed" });
     const firstRunRecords = logs.records.filter((record) =>
@@ -730,37 +757,42 @@ describe("JevRunService attempt barriers", () => {
     expect(firstRunRecords.filter((record) => record.message === "Jev run terminal")).toHaveLength(
       1,
     );
-    expect(JSON.stringify(logs.records)).not.toContain("PRIVATE_CAPTURE_CANARY");
+    expect(JSON.stringify(logs.records)).not.toContain("PRIVATE_PROVIDER_CANARY");
   });
 
   test("terminal completion settles fail-closed when terminal progress persistence fails", async () => {
-    const capture = fixture();
-    const pendingCapture = deferred<JevRunCapture>();
     const { cache } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const pendingProvider = deferred<JevPairResult>();
+    const providerStarted = deferred<void>();
     const logs = recordingLogger();
-    (cache as unknown as { finishRun: () => void }).finishRun = () => {
+    cache.finishRun = () => {
       throw new Error("simulated terminal persistence failure");
     };
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => pendingCapture.promise,
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
-      createGateway: () => {
-        throw new Error("Canceled run must not construct a gateway");
-      },
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
+      createGateway: (admit) => ({
+        evaluatePair: async (request) => {
+          await admit({
+            mode: request.mode,
+            attemptId: "terminal-persistence",
+            start: () => ({ response: Promise.resolve(new Response()) }),
+          });
+          providerStarted.resolve();
+          return pendingProvider.promise;
+        },
+      }),
       logger: logs.logger,
     });
-    const handle = service.startRun({ noteTransmissionAuthorized: false });
+    const reservation = await validateUnifiedRunForTest(service, fixtureData.preparation, false);
+    const handle = service.reserveValidatedPreparedRun(reservation);
+    await providerStarted.promise;
     handle.cancel();
     expect(await handle.completion).toMatchObject({ state: "interrupted" });
-    pendingCapture.reject(new Error("late capture rejection"));
+    pendingProvider.reject(new Error("late provider rejection"));
     await new Promise<void>((resolve) => setImmediate(resolve));
     const terminalEvents = logs.records.filter((record) => record.message === "Jev run terminal");
     expect(terminalEvents).toHaveLength(1);
@@ -768,14 +800,15 @@ describe("JevRunService attempt barriers", () => {
       persistenceFailureReason: "terminal-status-persistence-failed",
     });
     expect(JSON.stringify(logs.records)).not.toContain("simulated terminal persistence failure");
-    expect(JSON.stringify(logs.records)).not.toContain("late capture rejection");
+    expect(JSON.stringify(logs.records)).not.toContain("late provider rejection");
   });
 
-  test("throwing lifecycle logger cannot strand start or cancellation and a later Run can start", async () => {
-    const capture = fixture();
-    const pendingCapture = deferred<JevRunCapture>();
+  test("throwing lifecycle logger cannot strand cancellation or a later Run", async () => {
     const { cache } = cacheFake();
-    let captureCalls = 0;
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const pendingProvider = deferred<JevPairResult>();
+    const providerStarted = deferred<void>();
+    let pendingFirstProvider = true;
     const throwingLogger = {
       log() {
         throw new Error("private logger canary");
@@ -785,55 +818,61 @@ describe("JevRunService attempt barriers", () => {
       },
     };
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => {
-        captureCalls++;
-        return captureCalls === 1 ? pendingCapture.promise : Promise.resolve(capture);
-      },
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
-      createGateway: () => ({ evaluatePair: () => Promise.resolve(scoreResult()) }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
+      createGateway: (admit) => ({
+        evaluatePair: async (request) => {
+          await admit({
+            mode: request.mode,
+            attemptId: "throwing-logger",
+            start: () => ({ response: Promise.resolve(new Response()) }),
+          });
+          if (pendingFirstProvider) {
+            pendingFirstProvider = false;
+            providerStarted.resolve();
+            return pendingProvider.promise;
+          }
+          return scoreResult();
+        },
+      }),
       logger: throwingLogger,
     });
 
-    const canceled = service.startRun({ noteTransmissionAuthorized: false });
+    const reservation = await validateUnifiedRunForTest(service, fixtureData.preparation, false);
+    const canceled = service.reserveValidatedPreparedRun(reservation);
+    await providerStarted.promise;
     canceled.cancel();
     expect(await canceled.completion).toMatchObject({ state: "interrupted" });
 
-    const next = service.startRun({ noteTransmissionAuthorized: false });
+    const nextPreparation = await fixtureData.prepare();
+    const next = await reserveUnifiedRunForTest(service, nextPreparation, false);
     expect(await next.completion).toMatchObject({ runId: next.runId, state: "completed" });
-    pendingCapture.reject(new Error("late capture rejection"));
+    pendingProvider.reject(new Error("late provider rejection"));
     await new Promise<void>((resolve) => setImmediate(resolve));
   });
 
   test("throwing terminal logger cannot strand deadline completion or the next Run", async () => {
-    const capture = fixture();
     const { cache } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b"], cache, {
+      maxProviderAttempts: 10,
+      reportedTokenStopThreshold: 100_000,
+      maxRunDurationMs: 60_000,
+    });
     let clock = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
       readCurrent: () => {
-        clock += 20;
-        return Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        });
+        clock += 60_000;
+        return fixtureData.sourceAdapter.readCurrent();
       },
       createGateway: () => {
         throw new Error("Deadline must stop before gateway construction");
       },
       now: () => new Date(clock),
-      maxRunMs: 20,
       logger: {
         log() {
           throw new Error("private logger canary");
@@ -844,14 +883,15 @@ describe("JevRunService attempt barriers", () => {
       },
     });
 
-    const expired = service.startRun({ noteTransmissionAuthorized: false });
+    const expired = await reserveUnifiedRunForTest(service, fixtureData.preparation, false);
     expect(await expired.completion).toMatchObject({
       runId: expired.runId,
       state: "failed",
       stopReason: "application-deadline",
     });
 
-    const next = service.startRun({ noteTransmissionAuthorized: false });
+    const nextPreparation = await fixtureData.prepare();
+    const next = await reserveUnifiedRunForTest(service, nextPreparation, false);
     expect(await next.completion).toMatchObject({
       runId: next.runId,
       state: "failed",
@@ -860,42 +900,59 @@ describe("JevRunService attempt barriers", () => {
   });
 
   test("retained cancellation for completed run A cannot overwrite run B progress", async () => {
-    const capture = fixture();
+    const { cache, progress } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
     const queuedRead = deferred<void>();
     const releaseRead = deferred<void>();
-    const { cache, progress } = cacheFake();
-    let readCount = 0;
+    let armReadBarrierForNextRun = false;
+    let blockNextRead = false;
     let evaluationCount = 0;
+    let attemptStarts = 0;
+    const originalSaveRunProgress = cache.saveRunProgress.bind(cache);
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
       readCurrent: async () => {
-        readCount++;
-        if (readCount === 4) {
+        const current = await fixtureData.sourceAdapter.readCurrent();
+        if (blockNextRead) {
+          blockNextRead = false;
           queuedRead.resolve();
           await releaseRead.promise;
         }
-        return {
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        };
+        return current;
       },
-      createGateway: () => ({
-        evaluatePair: () => {
+      createGateway: (admit) => ({
+        evaluatePair: async (request) => {
           evaluationCount++;
+          await admit({
+            mode: request.mode,
+            attemptId: `run-${evaluationCount}`,
+            start: () => {
+              attemptStarts++;
+              return { response: Promise.resolve(new Response()) };
+            },
+          });
           return evaluationCount === 1
             ? Promise.reject(new JevGatewayError("http-failure", "fake failure"))
-            : Promise.resolve(scoreResult());
+            : scoreResult();
         },
       }),
     });
-    const runA = service.startRun({ noteTransmissionAuthorized: false });
+    cache.saveRunProgress = (nextProgress) => {
+      originalSaveRunProgress(nextProgress);
+      if (armReadBarrierForNextRun && nextProgress.state === "running") {
+        armReadBarrierForNextRun = false;
+        blockNextRead = true;
+      }
+    };
+    const runA = await reserveUnifiedRunForTest(service, fixtureData.preparation, false);
     expect(await runA.completion).toMatchObject({ state: "failed" });
 
-    const runB = service.startRun({ noteTransmissionAuthorized: false });
+    const preparationB = await fixtureData.prepare();
+    const reservationB = await validateUnifiedRunForTest(service, preparationB, false);
+    armReadBarrierForNextRun = true;
+    const runB = service.reserveValidatedPreparedRun(reservationB);
     await queuedRead.promise;
     expect(progress.at(-1)).toMatchObject({ runId: runB.runId, state: "running" });
     const writesBeforeRetainedCancel = progress.length;
@@ -905,12 +962,27 @@ describe("JevRunService attempt barriers", () => {
 
     releaseRead.resolve();
     expect(await runB.completion).toMatchObject({ runId: runB.runId, state: "completed" });
+    expect(attemptStarts).toBe(2);
   });
 
   test("a canceled run queued behind another coordinator operation skips its source read", async () => {
-    const capture = fixture();
-    const storage = {};
-    const coordinator = profileSourceCoordinatorFor(storage);
+    const { cache } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const coordinator = profileSourceCoordinatorFor(fixtureData.storage);
+    let sourceReads = 0;
+    const service = new JevRunService({
+      storageService: fixtureData.storage,
+      cache,
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => {
+        sourceReads++;
+        return fixtureData.sourceAdapter.readCurrent();
+      },
+      createGateway: () => {
+        throw new Error("Canceled queued run must not construct a gateway");
+      },
+    });
+    const reservation = await validateUnifiedRunForTest(service, fixtureData.preparation, false);
     const blockerStarted = deferred<void>();
     const releaseBlocker = deferred<void>();
     const blocker = coordinator.runExclusive(async () => {
@@ -918,26 +990,7 @@ describe("JevRunService attempt barriers", () => {
       await releaseBlocker.promise;
     });
     await blockerStarted.promise;
-    const { cache } = cacheFake();
-    let sourceReads = 0;
-    const service = new JevRunService({
-      storageService: storage,
-      cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () => {
-        sourceReads++;
-        return Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        });
-      },
-      createGateway: () => {
-        throw new Error("Canceled queued run must not construct a gateway");
-      },
-    });
-    const handle = service.startRun({ noteTransmissionAuthorized: false });
+    const handle = service.reserveValidatedPreparedRun(reservation);
     await new Promise<void>((resolve) => setImmediate(resolve));
     handle.cancel();
     expect(await handle.completion).toMatchObject({ state: "interrupted" });
@@ -954,31 +1007,41 @@ describe("JevRunService attempt barriers", () => {
   });
 
   test("known application-attempt failure does not wait for another source read", async () => {
-    const capture = fixture(["a", "b", "c"]);
     const { cache } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache, {
+      maxProviderAttempts: 1,
+      reportedTokenStopThreshold: 100_000,
+      maxRunDurationMs: 60_000,
+    });
     let evaluations = 0;
+    let attemptStarts = 0;
     let attemptLimitReached = false;
     let readCountAfterFailure = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
       readCurrent: () => {
         if (attemptLimitReached) {
           readCountAfterFailure++;
-          return new Promise(() => {});
+          return Promise.resolve(fixtureData.sourceAdapter.readCurrent());
         }
-        return Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        });
+        return fixtureData.sourceAdapter.readCurrent();
       },
-      createGateway: () => ({
-        evaluatePair: () => {
+      createGateway: (admit) => ({
+        evaluatePair: async (request) => {
           evaluations++;
-          if (evaluations === 1) return Promise.resolve(scoreResult());
+          if (evaluations === 1) {
+            await admit({
+              mode: request.mode,
+              attemptId: "before-limit",
+              start: () => {
+                attemptStarts++;
+                return { response: Promise.resolve(new Response()) };
+              },
+            });
+            return scoreResult();
+          }
           attemptLimitReached = true;
           return Promise.reject(
             new JevGatewayError("attempt-limit-exhausted", "application attempt limit"),
@@ -987,105 +1050,120 @@ describe("JevRunService attempt barriers", () => {
       }),
     });
 
-    const progress = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    const progress = await runUnifiedForTest(service, fixtureData.preparation, false);
     expect(progress).toMatchObject({ state: "failed", stopReason: "application-attempt-limit" });
+    expect(attemptStarts).toBe(1);
     expect(readCountAfterFailure).toBe(0);
   });
 
   test("deadline settles independently of a blocked coordinated read and blocks its late callback", async () => {
-    const capture = fixture();
-    const readEntered = deferred<void>();
-    const pendingRead = deferred<{
-      collection: Collection;
-      sourceVectorIdentity: string;
-      policyIdentity: string;
-      canTransmitNotes: boolean;
-    }>();
     const { cache, progress } = cacheFake();
-    let reads = 0;
+    const fixtureData = await unifiedFixture(["a", "b"], cache, {
+      maxProviderAttempts: 10,
+      reportedTokenStopThreshold: 100_000,
+      maxRunDurationMs: 60_000,
+    });
+    const readEntered = deferred<void>();
+    const pendingRead =
+      deferred<Awaited<ReturnType<typeof fixtureData.sourceAdapter.readCurrent>>>();
+    let blockExecutionRead = false;
     let dispatches = 0;
+    const releaseReadValue = await fixtureData.sourceAdapter.readCurrent();
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () => {
-        reads++;
-        if (reads === 1) {
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: async () => {
+        const current = await fixtureData.sourceAdapter.readCurrent();
+        if (blockExecutionRead) {
+          blockExecutionRead = false;
           readEntered.resolve();
           return pendingRead.promise;
         }
-        return Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        });
+        return current;
       },
-      createGateway: () => {
+      createGateway: (admit) => {
         dispatches++;
-        return { evaluatePair: () => Promise.resolve(scoreResult()) };
+        return {
+          evaluatePair: async (request) => {
+            await admit({
+              mode: request.mode,
+              attemptId: "blocked-read-late-callback",
+              start: () => ({ response: Promise.resolve(new Response()) }),
+            });
+            return scoreResult();
+          },
+        };
       },
-      maxRunMs: 20,
     });
-    const timed = service.startRun({ noteTransmissionAuthorized: false });
+    const reservation = await validateUnifiedRunForTest(service, fixtureData.preparation, false);
+    blockExecutionRead = true;
+    const timed = service.reserveValidatedPreparedRun(reservation);
     await readEntered.promise;
     const terminal = await timed.completion;
     expect(terminal).toMatchObject({ state: "failed", stopReason: "application-deadline" });
 
-    pendingRead.resolve({
-      collection: capture.collection,
-      sourceVectorIdentity: "vector",
-      policyIdentity: "policy",
-      canTransmitNotes: false,
-    });
+    pendingRead.resolve(releaseReadValue);
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(dispatches).toBe(0);
     expect(progress.at(-1)).toMatchObject({ runId: timed.runId, state: "failed" });
-  });
+  }, 70_000);
 
   test("cancellation releases logical activity while a coordinated read drains without stale writes", async () => {
-    const capture = fixture();
-    const readEntered = deferred<void>();
-    const pendingRead = deferred<{
-      collection: Collection;
-      sourceVectorIdentity: string;
-      policyIdentity: string;
-      canTransmitNotes: boolean;
-    }>();
     const { cache, progress, rows } = cacheFake();
-    let reads = 0;
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const readEntered = deferred<void>();
+    const pendingRead =
+      deferred<Awaited<ReturnType<typeof fixtureData.sourceAdapter.readCurrent>>>();
+    let blockExecutionRead = false;
     let dispatches = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () => {
-        reads++;
-        if (reads === 1) {
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: async () => {
+        const current = await fixtureData.sourceAdapter.readCurrent();
+        if (blockExecutionRead) {
+          blockExecutionRead = false;
           readEntered.resolve();
           return pendingRead.promise;
         }
-        return Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        });
+        return current;
       },
-      createGateway: () => ({
-        evaluatePair: () => {
-          dispatches++;
-          return Promise.resolve(scoreResult());
+      createGateway: (admit) => ({
+        evaluatePair: async (request) => {
+          await admit({
+            mode: request.mode,
+            attemptId: "replacement-after-cancel",
+            start: () => {
+              dispatches++;
+              return { response: Promise.resolve(new Response()) };
+            },
+          });
+          return scoreResult();
         },
       }),
     });
-    const canceled = service.startRun({ noteTransmissionAuthorized: false });
+    const canceledReservation = await validateUnifiedRunForTest(
+      service,
+      fixtureData.preparation,
+      false,
+    );
+    const replacementPreparation = await fixtureData.prepare();
+    const replacementReservation = await validateUnifiedRunForTest(
+      service,
+      replacementPreparation,
+      false,
+    );
+    const releaseReadValue = await fixtureData.sourceAdapter.readCurrent();
+    blockExecutionRead = true;
+    const canceled = service.reserveValidatedPreparedRun(canceledReservation);
     await readEntered.promise;
     canceled.cancel();
     expect(await canceled.completion).toMatchObject({ state: "interrupted" });
 
-    const replacement = service.startRun({ noteTransmissionAuthorized: false });
-    pendingRead.reject(new Error("late private read failure"));
+    const replacement = service.reserveValidatedPreparedRun(replacementReservation);
+    pendingRead.resolve(releaseReadValue);
     const replacementProgress = await replacement.completion;
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -1096,32 +1174,31 @@ describe("JevRunService attempt barriers", () => {
   });
 
   test("not-configured is terminal instead of failing every remaining pair", async () => {
-    const capture = fixture(["a", "b", "c"]);
     const { cache } = cacheFake();
-    let evaluations = 0;
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
+    let transportCalls = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
+      createGateway: (admitAndDispatch, budget) =>
+        createJevGateway({
+          apiKey: "",
+          maxRequests: budget.maxProviderAttempts,
+          maxReportedTokens: budget.reportedTokenStopThreshold,
+          wait: async () => {},
+          admitAndDispatch,
+          fetch: () => {
+            transportCalls++;
+            return Promise.resolve(new Response());
+          },
         }),
-      createGateway: () => ({
-        evaluatePair: () => {
-          evaluations++;
-          return Promise.reject(
-            new JevGatewayError("not-configured", "Provider is not configured"),
-          );
-        },
-      }),
     });
 
-    const progress = await service.startRun({ noteTransmissionAuthorized: false }).completion;
-    expect(evaluations).toBe(1);
+    const progress = await runUnifiedForTest(service, fixtureData.preparation, false);
+    expect(progress.completedPairs).toBe(1);
+    expect(transportCalls).toBe(0);
     expect(progress).toMatchObject({
       state: "failed",
       pairCount: 3,
@@ -1132,56 +1209,59 @@ describe("JevRunService attempt barriers", () => {
   });
 
   test("ordinary gateway failures remain pair-local and have no provider stop reason", async () => {
-    const capture = fixture(["a", "b", "c"]);
     const { cache } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
     let evaluations = 0;
+    let attemptStarts = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
-      createGateway: () => ({
-        evaluatePair: () => {
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
+      createGateway: (admit) => ({
+        evaluatePair: async (request) => {
           evaluations++;
+          await admit({
+            mode: request.mode,
+            attemptId: `ordinary-failure-${evaluations}`,
+            start: () => {
+              attemptStarts++;
+              return { response: Promise.resolve(new Response()) };
+            },
+          });
           return Promise.reject(new JevGatewayError("http-failure", "Temporary fake failure"));
         },
       }),
     });
 
-    const progress = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    const progress = await runUnifiedForTest(service, fixtureData.preparation, false);
     expect(evaluations).toBe(3);
+    expect(attemptStarts).toBe(3);
     expect(progress.state).toBe("failed");
     expect(progress.failedPairs).toBe(3);
     expect(progress.stopReason).toBeUndefined();
   });
 
   test("logs safe continue disposition after an invalid provider response and processes later pairs", async () => {
-    const capture = fixture(["a", "b", "c"]);
-    capture.collection.games = capture.collection.games.map((entry) => ({
+    const { cache } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
+    const collection = await fixtureData.storage.loadCollection();
+    collection.games = collection.games.map((entry) => ({
       ...entry,
       name: "PRIVATE_PAIR_NAME_SENTINEL",
       bggData: entry.bggData ? { ...entry.bggData, description: "PRIVATE_SOURCE_SENTINEL" } : null,
     }));
-    const { cache } = cacheFake();
+    await fixtureData.storage.saveCollection(collection);
+    await fixtureData.storage.hydrateSourceVector?.();
+    const preparation = await fixtureData.prepare();
     const logEntries: unknown[][] = [];
     let evaluations = 0;
+    let attemptStarts = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       logger: {
         log: (...args) => logEntries.push(args),
         error: (...args) => logEntries.push(args),
@@ -1192,7 +1272,10 @@ describe("JevRunService attempt barriers", () => {
           await admit({
             mode: request.mode,
             attemptId: `invalid-then-continue-${evaluations}`,
-            start: () => ({ response: Promise.resolve(new Response()) }),
+            start: () => {
+              attemptStarts++;
+              return { response: Promise.resolve(new Response()) };
+            },
           });
           if (evaluations === 1)
             throw new JevGatewayError("response-invalid", "Malformed synthetic provider result");
@@ -1201,7 +1284,7 @@ describe("JevRunService attempt barriers", () => {
       }),
     });
 
-    const progress = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    const progress = await runUnifiedForTest(service, preparation, false);
     expect(progress).toMatchObject({
       state: "failed",
       pairCount: 3,
@@ -1209,6 +1292,7 @@ describe("JevRunService attempt barriers", () => {
       failedPairs: 1,
     });
     expect(evaluations).toBe(3);
+    expect(attemptStarts).toBe(3);
     const pairFailure = logEntries.find(([message]) => message === "Jev pair outcome");
     expect(pairFailure?.[1]).toEqual({
       outcome: "pair-failed",
@@ -1223,30 +1307,29 @@ describe("JevRunService attempt barriers", () => {
   });
 
   test("each retry re-enters the coordinator and starts only after admission", async () => {
-    const capture = fixture();
     const { cache, rows } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
     let attempts = 0;
     let starts = 0;
+    let currentReads = 0;
+    const readsAtStart: number[] = [];
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => {
+        currentReads++;
+        return fixtureData.sourceAdapter.readCurrent();
+      },
       createGateway: (admit) => ({
         evaluatePair: async (request) => {
-          void request;
           for (let i = 0; i < 2; i++) {
             await admit({
-              mode: "description-only",
+              mode: request.mode,
               attemptId: `attempt-${i}`,
               start: () => {
                 starts++;
+                readsAtStart.push(currentReads);
                 return { response: Promise.resolve(new Response()) };
               },
             });
@@ -1256,31 +1339,26 @@ describe("JevRunService attempt barriers", () => {
         },
       }),
     });
-    const handle = service.startRun({ noteTransmissionAuthorized: false });
-    const done = await handle.completion;
+    const done = await runUnifiedForTest(service, fixtureData.preparation, false);
     expect(attempts).toBe(2);
     expect(starts).toBe(2);
+    expect(readsAtStart).toHaveLength(2);
+    expect(readsAtStart[1]).toBeGreaterThan(readsAtStart[0] ?? -1);
     expect(done.completedPairs).toBe(1);
     expect(rows.size).toBe(1);
   });
 
   test("cancellation at the retry barrier prevents the next dispatch and checkpoint", async () => {
-    const capture = fixture();
     const { cache, rows } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
     let cancel = () => {};
     let starts = 0;
     let admissionCount = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: (admit) => ({
         evaluatePair: async () => {
           await admit({
@@ -1309,7 +1387,8 @@ describe("JevRunService attempt barriers", () => {
         },
       }),
     });
-    const handle = service.startRun({ noteTransmissionAuthorized: false });
+    const reservation = await validateUnifiedRunForTest(service, fixtureData.preparation, false);
+    const handle = service.reserveValidatedPreparedRun(reservation);
     cancel = () => handle.cancel();
     const done = await handle.completion;
     await new Promise<void>((resolve) => setImmediate(resolve));
