@@ -7,9 +7,15 @@ import type { Axis, Collection, Game, WishlistEntry } from "@shelf-judge/shared"
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createFileOps } from "../../src/services/file-ops.js";
 import { createJevPairCache } from "../../src/services/jev-pair-cache-service.js";
-import type { JevPairJudgment } from "../../src/services/jev-pair-cache-service.js";
+import type { JevPairCache, JevPairJudgment } from "../../src/services/jev-pair-cache-service.js";
 import { JEV_JUDGMENT_CONTRACT } from "../../src/services/jev/jev-judgment-contract.js";
-import { buildJevPairDependencies } from "../../src/services/jev-pair-identity.js";
+import {
+  buildJevPairDependencies,
+  encodeOwnedLocalMember,
+  encodeWishlistBggMember,
+} from "../../src/services/jev-pair-identity.js";
+import { createCollectionMutationService } from "../../src/services/collection-mutation-service.js";
+import { createSemanticRedundancyStateService } from "../../src/services/semantic-redundancy-state-service.js";
 import { createStorageService } from "../../src/services/storage-service.js";
 import { createFitnessService } from "../../src/services/fitness-service.js";
 import { createUnifiedScoringService } from "../../src/services/unified-scoring-service.js";
@@ -290,6 +296,210 @@ describe("unified scoring storage composition", () => {
       });
       expect(sourceStale.isCurrent()).toBe(false);
       expect(await service.publishCurrent(sourceStale, () => true)).toBeNull();
+    } finally {
+      cache.close();
+    }
+  });
+
+  test("re-reads retained wishlist C_ONLY evidence after durable note revocation and cleanup failure", async () => {
+    directory = await mkdtemp(join(tmpdir(), "unified-scoring-note-revocation-"));
+    const storage = createStorageService({
+      dataDir: directory,
+      configPath: join(directory, "config.json"),
+      fileOps: createFileOps(),
+    });
+    const cache = await createJevPairCache(directory);
+    try {
+      const collection = await storage.loadCollection();
+      collection.axes = [axis()];
+      const ownedA = game("owned-101", 5);
+      const ownedB = game("owned-102", 8);
+      ownedA.ownerNote = {
+        state: "present",
+        version: 1,
+        updatedAt: observedAt,
+        text: "Private note for ownedA",
+      };
+      ownedB.ownerNote = {
+        state: "present",
+        version: 1,
+        updatedAt: observedAt,
+        text: "Private note for ownedB",
+      };
+      collection.games = [ownedA, ownedB];
+      collection.semanticRedundancy.settings = {
+        ...collection.semanticRedundancy.settings,
+        enabled: true,
+        cachedOwnerNoteUse: true,
+        weights: { factual: 1, description: 1, ownerNote: 0 },
+      };
+      await storage.saveCollection(collection);
+      const initialEntry = wishlistEntry(901);
+      if (!initialEntry.bggSource) throw new Error("Wishlist fixture requires BGG source facts");
+      const entry = wishlistEntry(901, {
+        predictedScore: 8,
+        bggSource: {
+          ...initialEntry.bggSource,
+          description: "Candidate description",
+        },
+      });
+      await storage.saveWishlist([entry]);
+      if (!storage.hydrateSourceVector) throw new Error("Source vector hydration unavailable");
+      await storage.hydrateSourceVector();
+
+      const candidateMember = encodeWishlistBggMember(collection.id, String(entry.bggId));
+      const ownedMember = encodeOwnedLocalMember(collection.id, ownedA.id);
+      const addJudgment = (input: {
+        gameAId: string;
+        gameBId: string;
+        dependencyKind: "C_ONLY" | "SHARED_CD";
+        signal: "C" | "D";
+        left: { name: string; description?: string; note?: { text: string; version: string } };
+        right: { name: string; description?: string; note?: { text: string; version: string } };
+        pairDomain?: "wishlist-candidate";
+      }) => {
+        const { gameAId, gameBId, dependencyKind, signal, left, right, pairDomain } = input;
+        cache.upsert({
+          ...(pairDomain ? { pairDomain } : {}),
+          collectionId: collection.id,
+          ...(dependencyKind === "C_ONLY"
+            ? {}
+            : {
+                consentEpoch: String(
+                  collection.semanticRedundancy.ownerNoteConsentEpoch ??
+                    collection.semanticRedundancy.consentEpoch,
+                ),
+              }),
+          gameAId,
+          gameBId,
+          signal,
+          dependencyKind,
+          value: 0.6,
+          confidence: 1,
+          ...JEV_JUDGMENT_CONTRACT,
+          completedAt: observedAt,
+          dependencies: buildJevPairDependencies(
+            dependencyKind,
+            { gameId: gameAId, ...left },
+            { gameId: gameBId, ...right },
+          ),
+        });
+      };
+
+      const noteSource = (item: Collection["games"][number]) => ({
+        name: item.name,
+        description: item.bggData?.description ?? undefined,
+        note: {
+          text: item.ownerNote.state === "present" ? item.ownerNote.text : "",
+          version: String(item.ownerNote.version),
+        },
+      });
+      addJudgment({
+        gameAId: ownedA.id,
+        gameBId: ownedB.id,
+        dependencyKind: "SHARED_CD",
+        signal: "C",
+        left: noteSource(ownedA),
+        right: noteSource(ownedB),
+      });
+      addJudgment({
+        gameAId: ownedA.id,
+        gameBId: ownedB.id,
+        dependencyKind: "SHARED_CD",
+        signal: "D",
+        left: noteSource(ownedA),
+        right: noteSource(ownedB),
+      });
+      addJudgment({
+        gameAId: candidateMember,
+        gameBId: ownedMember,
+        dependencyKind: "C_ONLY",
+        signal: "C",
+        pairDomain: "wishlist-candidate",
+        left: { name: entry.name, description: entry.bggSource?.description ?? undefined },
+        right: {
+          name: ownedA.name,
+          description: ownedA.bggData?.description ?? undefined,
+        },
+      });
+
+      const service = createUnifiedScoringService({
+        storageService: storage,
+        cache,
+        fitnessService: createFitnessService(),
+      });
+      const beforeRevocationFrame = await service.capture();
+      const beforeRevocationRead = service.calculate(
+        beforeRevocationFrame,
+        { scope: "predict-game", gameId: ownedA.id },
+        { includeRedundancy: true },
+      );
+      expect(
+        beforeRevocationRead.evidence({
+          domain: "collection",
+          gameAId: ownedA.id,
+          gameBId: ownedB.id,
+        })?.description,
+      ).toMatchObject({ state: "available", noteDependent: true });
+
+      const failingCache: JevPairCache = {
+        ...cache,
+        purgeDDependent: () => {
+          throw new Error("injected SQLite cleanup failure");
+        },
+      };
+      const mutationService = createCollectionMutationService({
+        storageService: storage,
+        jevPairCache: failingCache,
+      });
+      const semanticState = createSemanticRedundancyStateService({
+        collectionMutationService: mutationService,
+      });
+      const revoked = await semanticState.updateSettings(
+        { evidenceEpoch: collection.semanticRedundancy.evidenceEpoch, consentEpoch: 0 },
+        { ...collection.semanticRedundancy.settings, cachedOwnerNoteUse: false },
+      );
+      expect(revoked).toMatchObject({ outcome: "accepted", cleanupPending: true });
+      expect(beforeRevocationRead.isCurrent()).toBe(false);
+      expect(
+        cache.lookup({ gameAId: ownedA.id, gameBId: ownedB.id, signal: "C" })?.dependencyKind,
+      ).toBe("SHARED_CD");
+      expect(
+        cache.lookup({
+          gameAId: candidateMember,
+          gameBId: ownedMember,
+          signal: "C",
+          pairDomain: "wishlist-candidate",
+        })?.dependencyKind,
+      ).toBe("C_ONLY");
+
+      const collectionFrame = await service.capture();
+      const collectionRead = service.calculate(
+        collectionFrame,
+        { scope: "predict-game", gameId: ownedA.id },
+        { includeRedundancy: true },
+      );
+      expect(
+        collectionRead.evidence({ domain: "collection", gameAId: ownedA.id, gameBId: ownedB.id })
+          ?.description.state,
+      ).not.toBe("available");
+
+      const wishlistFrame = await service.capture({ includeWishlist: true });
+      const wishlistRead = service.calculate(
+        wishlistFrame,
+        { scope: "wishlist", selectedBggIds: [entry.bggId] },
+        { includeRedundancy: true },
+      );
+      expect(
+        wishlistRead.evidence({
+          domain: "wishlist-candidate",
+          candidateBggId: entry.bggId,
+          ownedGameId: ownedA.id,
+        }),
+      ).toMatchObject({
+        description: { state: "available", value: 0.6, noteDependent: false },
+        ownerNote: { state: "not-requested" },
+      });
     } finally {
       cache.close();
     }
