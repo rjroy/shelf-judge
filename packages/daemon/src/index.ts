@@ -9,7 +9,6 @@ import { createTournamentService } from "./services/tournament-service.js";
 import { createProfileService } from "./services/profile-service.js";
 import { createPredictionService } from "./services/prediction-service.js";
 import { createWishlistService } from "./services/wishlist-service.js";
-import { createWishlistCandidateDescriptionResolver } from "./services/wishlist-candidate-read-proof.js";
 import { createAfterWishlistAcquisitionRecovery } from "./services/wishlist-acquisition-startup.js";
 import { createApp } from "./app.js";
 import { createLogger } from "./services/logger.js";
@@ -86,8 +85,8 @@ export function createJevRunWorker(options: {
     storageService,
     cache,
     ...sourceAdapter,
-    // This factory runs once per explicit startRun, so the gateway's request and
-    // reported-token budgets are fresh for each separately authorized execution.
+    // This factory runs once per unified prepared execution, so each authorized
+    // execution receives fresh request and reported-token budgets.
     createGateway: (admitAndDispatch, providerBudget) =>
       createJevGateway({
         admitAndDispatch,
@@ -104,7 +103,7 @@ export function createJevRunWorker(options: {
 export function composeJevRunController(options: {
   storageService: StorageService;
   predictionService: PredictionService;
-  unifiedScoringService?: ReturnType<typeof createUnifiedScoringService>;
+  unifiedScoringService: ReturnType<typeof createUnifiedScoringService>;
   gameService?: GameService;
   cache: JevPairCache | null;
   runService: JevRunService | null;
@@ -125,8 +124,6 @@ export function composeJevRunController(options: {
     ? createWishlistRunPreparationService({
         storageService: options.storageService,
         gameService: options.gameService,
-        sourceAdapter,
-        cache: options.cache,
       })
     : undefined;
   return new JevRunController({
@@ -135,9 +132,7 @@ export function composeJevRunController(options: {
     cache: options.cache,
     runService: options.runService,
     ...(wishlistPreparation ? { wishlistPreparation } : {}),
-    ...(options.unifiedScoringService
-      ? { unifiedScoringService: options.unifiedScoringService }
-      : {}),
+    unifiedScoringService: options.unifiedScoringService,
   });
 }
 
@@ -451,13 +446,7 @@ export async function main() {
       unifiedScoringService,
       gameService,
       coordinator: profileSourceCoordinatorFor(storageService),
-      ...(jevPairCache
-        ? {
-            jevPairCache,
-            resolveWishlistDescriptionSignal:
-              createWishlistCandidateDescriptionResolver(jevPairCache),
-          }
-        : {}),
+      jevPairCache: jevPairCache ?? undefined,
     });
     const resolveSemanticRead = createJevProductionSemanticRead(jevPairCache);
     displayedFitnessService = createDisplayedFitnessService({

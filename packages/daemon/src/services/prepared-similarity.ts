@@ -19,8 +19,10 @@ import type {
 } from "./jev-pair-cache-service.js";
 import { encodeOwnedLocalMember, encodeWishlistBggMember } from "./jev-pair-identity.js";
 import { validateJevCachedRow } from "./jev-pair-read-proof.js";
-import { validateWishlistCandidateCOnlyRow } from "./wishlist-candidate-read-proof.js";
-import type { WishlistDescriptionPairRequest } from "./wishlist-redundancy-scoring.js";
+import {
+  validateWishlistCandidateCOnlyRow,
+  type WishlistDescriptionPairRequest,
+} from "./wishlist-candidate-read-proof.js";
 import { canonicalSha256 } from "./profile-source-coordinator.js";
 import type {
   StagedSimilarityCapture,

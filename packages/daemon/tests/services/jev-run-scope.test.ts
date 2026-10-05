@@ -1,10 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { CollectionV10, DurableGame, GameWithScore } from "@shelf-judge/shared";
+import type { CollectionV10, DurableGame } from "@shelf-judge/shared";
 import {
   createJevRunCollectionLookup,
   createJevRunScopeFromExactPairs,
   jevRunPairSourcesChanged,
-  planJevRunScope,
   type JevRunPair,
   type JevRunScope,
 } from "../../src/services/jev-run-scope.js";
@@ -40,16 +39,22 @@ function collection(
   } as CollectionV10;
 }
 
-function capture(games: readonly DurableGame[]): GameWithScore[] {
-  return games.map((game) => ({
-    game,
-    score: {
-      score: 1,
-      vetoed: false,
-      ratedAxisCount: 1,
-      predictionMeta: null,
-    } as GameWithScore["score"],
-  }));
+function exactScope(source: CollectionV10, games: readonly DurableGame[]): JevRunScope {
+  const pairs = [];
+  for (let i = 0; i < games.length; i++) {
+    for (let j = i + 1; j < games.length; j++) {
+      const gameA = games[i];
+      const gameB = games[j];
+      if (!gameA || !gameB) continue;
+      pairs.push({
+        gameAId: gameA.id,
+        gameBId: gameB.id,
+        descriptionSignalRequired: true,
+        ownerNoteSignalRequired: true,
+      });
+    }
+  }
+  return createJevRunScopeFromExactPairs(source, pairs);
 }
 
 function firstPair(scope: JevRunScope): JevRunPair | undefined {
@@ -57,11 +62,10 @@ function firstPair(scope: JevRunScope): JevRunPair | undefined {
   return undefined;
 }
 
-describe("Jev run scope planner", () => {
+describe("Jev run scope", () => {
   test("frozen explicit run scope iterates and looks up only authorized pairs", () => {
     const games = [game("a", { description: "a" }), game("b", { description: "b" }), game("c")];
-    const source = collection(games);
-    const scope = createJevRunScopeFromExactPairs(source, [
+    const scope = createJevRunScopeFromExactPairs(collection(games), [
       {
         gameAId: "a",
         gameBId: "b",
@@ -87,114 +91,39 @@ describe("Jev run scope planner", () => {
     expect(scope.pairForIds("c", "a")).toBeDefined();
   });
 
-  test("keeps 19,900 unordered pairs lazy for 200 eligible games", () => {
-    const games = Array.from({ length: 200 }, (_, i) =>
-      game(`g${String(i).padStart(3, "0")}`, { description: "desc", note: "note" }),
-    );
-    const planned = planJevRunScope(collection(games), capture(games));
-    expect(planned.ok).toBe(true);
-    if (!planned.ok) return;
-    expect(planned.scope.totalEligiblePairs).toBe(19_900);
-    expect(planned.scope.descriptionBearingPairCount).toBe(19_900);
-    expect(planned.scope.ownerNoteBearingPairCount).toBe(19_900);
-    let pairCount = 0;
-    let orderedPairs = true;
-    for (const pair of planned.scope.pairs()) {
-      if (pair.gameAId >= pair.gameBId) orderedPairs = false;
-      pairCount++;
-    }
-    expect(pairCount).toBe(19_900);
-    expect(orderedPairs).toBe(true);
-    expect(Object.keys(planned.scope)).not.toContain("pairList");
-    expect(Object.keys(planned.scope)).not.toContain("sourceByGameId");
-    const sourceText = JSON.stringify(
-      planned.scope.eligibleGameIds.map((id) => planned.scope.sourceForGame(id)),
-    );
-    expect(sourceText).not.toContain('"desc"');
-    expect(sourceText).not.toContain('"note"');
-  });
-
-  test("looks up canonical pairs directly with the same captured signals as iteration", () => {
-    const games = [
-      game("c", { description: "c" }),
-      game("a", { description: "a", note: "note-a" }),
-      game("b", { note: "note-b" }),
-      game("ineligible"),
-    ];
-    const scores = capture(games);
-    const ineligibleScore = scores.find((entry) => entry.game.id === "ineligible");
-    if (ineligibleScore?.score) ineligibleScore.score.score = 0;
-    const planned = planJevRunScope(collection(games), scores);
-    expect(planned.ok).toBe(true);
-    if (!planned.ok) return;
-
-    const pair = planned.scope.pairForIds("a", "b");
-    expect(pair).toEqual(
-      [...planned.scope.pairs()].find(({ gameAId, gameBId }) => gameAId === "a" && gameBId === "b"),
-    );
-    expect(pair?.descriptionSignalRequired).toBe(false);
-    expect(pair?.ownerNoteSignalRequired).toBe(true);
-    expect(planned.scope.pairForIds("b", "a")).toBeUndefined();
-    expect(planned.scope.pairForIds("a", "ineligible")).toBeUndefined();
-    expect(planned.scope.pairForIds("", "a")).toBeUndefined();
-    expect(planned.scope.pairForIds("a", "a")).toBeUndefined();
-  });
-
-  test("direct pair lookup does not enumerate the planned pairs", () => {
-    const games = Array.from({ length: 200 }, (_, i) => game(`g${String(i).padStart(3, "0")}`));
-    const planned = planJevRunScope(collection(games), capture(games));
-    expect(planned.ok).toBe(true);
-    if (!planned.ok) return;
-
-    const pair = planned.scope.pairForIds("g197", "g199");
-    expect(pair?.gameAId).toBe("g197");
-    expect(pair?.gameBId).toBe("g199");
-    expect(pair).toBeDefined();
-  });
-
-  test("source edits only stale pairs containing the changed game", () => {
+  test("source edits only stale exact pairs containing the changed game", () => {
     const games = [
       game("a", { description: "a", note: "note-a" }),
       game("b", { description: "b", note: "note-b" }),
       game("c", { description: "c", note: "note-c" }),
     ];
-    const planned = planJevRunScope(collection(games), capture(games));
-    expect(planned.ok).toBe(true);
-    if (!planned.ok) return;
+    const scope = exactScope(collection(games), games);
     const changed = structuredClone(games);
     const target = changed.find((entry) => entry.id === "a");
     if (target?.ownerNote.state === "present") target.ownerNote.text = "edited";
-    expect(jevRunPairSourcesChanged(planned.scope, collection(changed), "a", "b", "D_ONLY")).toBe(
-      true,
-    );
-    expect(jevRunPairSourcesChanged(planned.scope, collection(changed), "b", "c", "D_ONLY")).toBe(
-      false,
-    );
+    expect(jevRunPairSourcesChanged(scope, collection(changed), "a", "b", "D_ONLY")).toBe(true);
+    expect(jevRunPairSourcesChanged(scope, collection(changed), "b", "c", "D_ONLY")).toBe(false);
   });
 
-  test("captures immutable policy and exposes immutable ID/source snapshots", () => {
+  test("captures immutable exact scope and source identities without exposing notes", () => {
     const games = [
       game("a", { description: "desc-a", note: "private-note" }),
       game("b", { description: "desc-b", note: "private-note-b" }),
     ];
     const sourceCollection = collection(games);
-    const planned = planJevRunScope(sourceCollection, capture(games));
-    expect(planned.ok).toBe(true);
-    if (!planned.ok) return;
+    const scope = exactScope(sourceCollection, games);
     sourceCollection.semanticRedundancy.settings.cachedOwnerNoteUse = false;
-    expect(planned.scope.cachedOwnerNoteUse).toBe(true);
-    const pair = firstPair(planned.scope);
-    expect(pair?.ownerNoteSignalRequired).toBe(true);
-    expect(Reflect.set(planned.scope, "cachedOwnerNoteUse", false)).toBe(false);
-    expect(Reflect.set(planned.scope.eligibleGameIds, "0", "other")).toBe(false);
-    const source = planned.scope.sourceForGame("a");
+    expect(scope.cachedOwnerNoteUse).toBe(true);
+    expect(firstPair(scope)?.ownerNoteSignalRequired).toBe(true);
+    expect(Reflect.set(scope, "cachedOwnerNoteUse", false)).toBe(false);
+    expect(Reflect.set(scope.eligibleGameIds, "0", "other")).toBe(false);
+    const source = scope.sourceForGame("a");
     expect(source).toBeDefined();
     if (source) {
       expect(Reflect.set(source, "nameFingerprint", "changed")).toBe(false);
       expect(Reflect.set(source, "ownerNoteFingerprint", "private-note")).toBe(false);
       expect(source.ownerNoteFingerprint).not.toContain("private-note");
     }
-    // Permission must still be rechecked against current collection state before dispatch.
     expect(sourceCollection.semanticRedundancy.settings.cachedOwnerNoteUse).toBe(false);
   });
 
@@ -203,39 +132,29 @@ describe("Jev run scope planner", () => {
       game("a", { description: "desc-a", note: "note-a" }),
       game("b", { description: "desc-b", note: "note-b" }),
     ];
-    const planned = planJevRunScope(collection(games), capture(games));
-    expect(planned.ok).toBe(true);
-    if (!planned.ok) return;
+    const scope = exactScope(collection(games), games);
     const noteChanged = structuredClone(games);
     const noteGame = noteChanged.find((entry) => entry.id === "a");
     if (noteGame?.ownerNote.state === "present") noteGame.ownerNote.text = "edited note";
-    expect(
-      jevRunPairSourcesChanged(planned.scope, collection(noteChanged), "a", "b", "C_ONLY"),
-    ).toBe(false);
-    expect(
-      jevRunPairSourcesChanged(planned.scope, collection(noteChanged), "a", "b", "D_ONLY"),
-    ).toBe(true);
-    expect(
-      jevRunPairSourcesChanged(planned.scope, collection(noteChanged), "a", "b", "SHARED_CD"),
-    ).toBe(true);
+    expect(jevRunPairSourcesChanged(scope, collection(noteChanged), "a", "b", "C_ONLY")).toBe(
+      false,
+    );
+    expect(jevRunPairSourcesChanged(scope, collection(noteChanged), "a", "b", "D_ONLY")).toBe(true);
+    expect(jevRunPairSourcesChanged(scope, collection(noteChanged), "a", "b", "SHARED_CD")).toBe(
+      true,
+    );
 
     const descriptionChanged = structuredClone(games);
     const descriptionGame = descriptionChanged.find((entry) => entry.id === "a");
     if (descriptionGame?.bggData) descriptionGame.bggData.description = "edited description";
     expect(
-      jevRunPairSourcesChanged(planned.scope, collection(descriptionChanged), "a", "b", "C_ONLY"),
+      jevRunPairSourcesChanged(scope, collection(descriptionChanged), "a", "b", "C_ONLY"),
     ).toBe(true);
     expect(
-      jevRunPairSourcesChanged(planned.scope, collection(descriptionChanged), "a", "b", "D_ONLY"),
+      jevRunPairSourcesChanged(scope, collection(descriptionChanged), "a", "b", "D_ONLY"),
     ).toBe(false);
     expect(
-      jevRunPairSourcesChanged(
-        planned.scope,
-        collection(descriptionChanged),
-        "a",
-        "b",
-        "SHARED_CD",
-      ),
+      jevRunPairSourcesChanged(scope, collection(descriptionChanged), "a", "b", "SHARED_CD"),
     ).toBe(true);
   });
 
@@ -248,9 +167,7 @@ describe("Jev run scope planner", () => {
     const changedGames = structuredClone(games);
     const changedA = changedGames.find((entry) => entry.id === "a");
     if (changedA?.ownerNote.state === "present") changedA.ownerNote.text = "new note";
-    const planned = planJevRunScope(capturedCollection, capture(games));
-    expect(planned.ok).toBe(true);
-    if (!planned.ok) return;
+    const scope = exactScope(capturedCollection, games);
     let mapCalls = 0;
     const originalMap = games.map.bind(games);
     games.map = ((...args: Parameters<typeof games.map>) => {
@@ -259,18 +176,18 @@ describe("Jev run scope planner", () => {
     }) as typeof games.map;
     const lookup = createJevRunCollectionLookup(capturedCollection);
 
-    expect(
-      jevRunPairSourcesChanged(planned.scope, capturedCollection, "a", "b", "C_ONLY", lookup),
-    ).toBe(false);
-    expect(
-      jevRunPairSourcesChanged(planned.scope, capturedCollection, "a", "b", "D_ONLY", lookup),
-    ).toBe(false);
+    expect(jevRunPairSourcesChanged(scope, capturedCollection, "a", "b", "C_ONLY", lookup)).toBe(
+      false,
+    );
+    expect(jevRunPairSourcesChanged(scope, capturedCollection, "a", "b", "D_ONLY", lookup)).toBe(
+      false,
+    );
     expect(mapCalls).toBe(1);
 
     const changedCollection = collection(changedGames);
-    expect(
-      jevRunPairSourcesChanged(planned.scope, changedCollection, "a", "b", "D_ONLY", lookup),
-    ).toBe(true);
+    expect(jevRunPairSourcesChanged(scope, changedCollection, "a", "b", "D_ONLY", lookup)).toBe(
+      true,
+    );
   });
 
   test("refreshes a lookup when its captured games array or indexed entry is replaced", () => {
@@ -279,64 +196,21 @@ describe("Jev run scope planner", () => {
       game("b", { description: "desc-b", note: "note-b" }),
     ];
     const capturedCollection = collection(games);
-    const planned = planJevRunScope(capturedCollection, capture(games));
-    expect(planned.ok).toBe(true);
-    if (!planned.ok) return;
+    const scope = exactScope(capturedCollection, games);
     const lookup = createJevRunCollectionLookup(capturedCollection);
 
     capturedCollection.games = structuredClone(games);
     const replacedArrayA = capturedCollection.games.find((entry) => entry.id === "a");
     if (replacedArrayA?.ownerNote.state === "present") replacedArrayA.ownerNote.text = "array edit";
-    expect(
-      jevRunPairSourcesChanged(planned.scope, capturedCollection, "a", "b", "D_ONLY", lookup),
-    ).toBe(true);
+    expect(jevRunPairSourcesChanged(scope, capturedCollection, "a", "b", "D_ONLY", lookup)).toBe(
+      true,
+    );
 
     const replacementA = structuredClone(capturedCollection.games[0]);
-    if (replacementA.ownerNote.state === "present") replacementA.ownerNote.text = "entry edit";
-    capturedCollection.games[0] = replacementA;
-    expect(
-      jevRunPairSourcesChanged(planned.scope, capturedCollection, "a", "b", "D_ONLY", lookup),
-    ).toBe(true);
-  });
-
-  test("missing notes early-out D pairs; C-only policy does not require notes", () => {
-    const games = [game("a", { description: "desc-a" }), game("b", { description: "desc-b" })];
-    const normal = planJevRunScope(collection(games), capture(games));
-    expect(normal.ok).toBe(true);
-    if (normal.ok) {
-      const pair = firstPair(normal.scope);
-      expect(pair?.descriptionSignalRequired).toBe(true);
-      expect(pair?.ownerNoteSignalRequired).toBe(false);
-      expect(normal.scope.ownerNoteBearingPairCount).toBe(0);
-    }
-    const cOnly = planJevRunScope(
-      collection(games, { weights: { factual: 1, description: 1, ownerNote: 0 } }),
-      capture(games),
+    if (replacementA?.ownerNote.state === "present") replacementA.ownerNote.text = "entry edit";
+    if (replacementA) capturedCollection.games[0] = replacementA;
+    expect(jevRunPairSourcesChanged(scope, capturedCollection, "a", "b", "D_ONLY", lookup)).toBe(
+      true,
     );
-    expect(cOnly.ok).toBe(true);
-    if (cOnly.ok) {
-      const pair = firstPair(cOnly.scope);
-      expect(pair?.descriptionSignalRequired).toBe(true);
-      expect(pair?.ownerNoteSignalRequired).toBe(false);
-      expect(pair?.ownerNoteSignalBlocked).toBe(false);
-    }
-  });
-
-  test("reports positive note weight blocked when cached-note permission is absent", () => {
-    const games = [
-      game("a", { description: "d", note: "n1" }),
-      game("b", { description: "d", note: "n2" }),
-    ];
-    const planned = planJevRunScope(
-      collection(games, { cachedOwnerNoteUse: false }),
-      capture(games),
-    );
-    expect(planned.ok).toBe(true);
-    if (planned.ok) {
-      expect(planned.scope.ownerNoteSignalBlocked).toBe(true);
-      const pair = firstPair(planned.scope);
-      expect(pair?.ownerNoteSignalBlocked).toBe(true);
-      expect(pair?.ownerNoteSignalRequired).toBe(false);
-    }
   });
 });

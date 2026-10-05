@@ -68,7 +68,6 @@ import type { createJevStatusService } from "./services/jev-status-service.js";
 import type { createJevRefreshProgressService } from "./services/jev-refresh-progress-service.js";
 import type { JevRunController } from "./services/jev-run-controller.js";
 import type { JevPairCache } from "./services/jev-pair-cache-service.js";
-import { createWishlistCandidateDescriptionResolver } from "./services/wishlist-candidate-read-proof.js";
 import { createCollectionSnapshotRoutes } from "./routes/collection-snapshot.js";
 
 export interface AppDeps {
@@ -146,13 +145,6 @@ export function createApp(deps: AppDeps): AppResult {
       gameService,
       coordinator: deps.profileSourceCoordinator,
       jevPairCache: deps.jevPairCache,
-      ...(deps.jevPairCache
-        ? {
-            resolveWishlistDescriptionSignal: createWishlistCandidateDescriptionResolver(
-              deps.jevPairCache,
-            ),
-          }
-        : {}),
     });
   const purchaseUtilizationService = createPurchaseUtilizationService({
     storageService,

@@ -30,6 +30,7 @@ import {
 import { createFitnessService } from "./fitness-service.js";
 import { projectVerifiedBggCandidate } from "./bgg-candidate-projection.js";
 import { computeUnifiedPrediction, unifiedConfidenceRank } from "./unified-prediction.js";
+import { calculateRedundancyPenalty } from "./redundancy-adjustment-math.js";
 import type { StagedSimilarityPair } from "./prepared-similarity.js";
 import type { SemanticScoringInputProofV2 } from "../../../shared/src/semantic-scoring-input-proof-v2.js";
 
@@ -504,20 +505,16 @@ export function prepareUnifiedCollectionPipeline(options: UnifiedCollectionPipel
         });
         continue;
       }
-      const targetIsFullyPredicted = target.predictionMeta?.actualAxisCount === 0;
-      const better = neighbors.filter((neighbor) => {
-        if (Math.round(target.score * 100) === Math.round(neighbor.score * 100)) return false;
-        if (!targetIsFullyPredicted && neighbor.isPredicted) return false;
-        return neighbor.score > target.score;
-      }).length;
-      const rawPenalty =
-        (better / Math.max(neighbors.length, options.redundancySettings.expectedNeighbors)) *
-        options.redundancySettings.maxPenalty;
-      const penalty = Math.round(rawPenalty * 100) / 100;
+      const penaltyResult = calculateRedundancyPenalty(
+        target.score,
+        target.predictionMeta?.actualAxisCount === 0,
+        neighbors,
+        options.redundancySettings,
+      );
       redundancyAdjustments.set(id, {
-        penalty,
+        penalty: penaltyResult.penalty,
         originalScore: target.score,
-        adjustedScore: Math.round(Math.max(1, target.score - rawPenalty) * 100) / 100,
+        adjustedScore: penaltyResult.adjustedScore,
         nicheNeighbors: neighbors.map((neighbor) => ({
           gameId: neighbor.id,
           gameName: neighbor.game.name,
@@ -525,7 +522,7 @@ export function prepareUnifiedCollectionPipeline(options: UnifiedCollectionPipel
           fitnessScore: neighbor.score,
           isPredicted: neighbor.isPredicted,
         })),
-        nicheRank: better + 1,
+        nicheRank: penaltyResult.betterCount + 1,
         nicheSize: neighbors.length,
       });
     }

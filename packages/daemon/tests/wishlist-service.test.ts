@@ -14,7 +14,6 @@ import type { StorageService } from "../src/services/storage-service";
 import type { PredictionService, PredictedGameResult } from "../src/services/prediction-service";
 import type { GameService } from "../src/services/game-service";
 import type { BoardgameScoringInput } from "../src/services/bgg-client";
-import type { WishlistDescriptionSignalCaptureRequest } from "../src/services/wishlist-redundancy-scoring.js";
 import { createWishlistService } from "../src/services/wishlist-service";
 import { WishlistAcquisitionRecoveryError } from "../src/services/wishlist-service.js";
 import { parseBoardgameScoringThings } from "../src/services/bgg-xml-parser.js";
@@ -38,15 +37,24 @@ import { createFileOps } from "../src/services/file-ops.js";
 import { createAfterWishlistAcquisitionRecovery } from "../src/services/wishlist-acquisition-startup.js";
 import { createJevPairReadService } from "../src/services/jev-pair-read-service.js";
 import { createWishlistRunPreparationService } from "../src/services/wishlist-run-preparation.js";
-import { JevRunService, type JevRunCapture } from "../src/services/jev-run-service.js";
+import { JevRunService } from "../src/services/jev-run-service.js";
 import { JevRunController } from "../src/services/jev-run-controller.js";
 import { createJevRunSourceAdapter } from "../src/services/jev-run-source-adapter.js";
+import {
+  prepareUnifiedJevRun,
+  type PreparedUnifiedRun,
+} from "../src/services/unified-jev-run-preparation.js";
+import { createUnifiedScoringService } from "../src/services/unified-scoring-service.js";
+import { createFitnessService } from "../src/services/fitness-service.js";
+import { DEFAULT_JEV_RUN_BUDGET } from "../src/services/jev-run-budget.js";
 import { createJevGateway } from "../src/services/jev/jev-gateway.js";
 import { wishlistCollectionSourceIdentity } from "../src/services/wishlist-collection-source-identity.js";
 import { createHydratedTestApp } from "./helpers/test-app.js";
 import {
   profileSourceCoordinatorFor,
   runOutsideProfileSourceCoordinator,
+  wishlistMutationGenerationFor,
+  type ProfileSourceCoordinator,
 } from "../src/services/profile-source-coordinator.js";
 
 const NOW = "2026-04-12T12:00:00.000Z";
@@ -372,6 +380,32 @@ function makeCandidateCRow(
       { gameId: ownedMember, name: owned.name, description: owned.bggData.description },
     ),
   };
+}
+
+async function prepareUnifiedWishlist(
+  scoring: ReturnType<typeof createUnifiedScoringService>,
+  sourceAdapter: ReturnType<typeof createJevRunSourceAdapter>,
+  cache: JevPairCache,
+  selection: { kind: "all" } | { kind: "selected"; bggIds: number[] } = { kind: "all" },
+): Promise<PreparedUnifiedRun> {
+  const prepared = await prepareUnifiedJevRun({
+    scoring,
+    sourceAdapter,
+    cache,
+    request: { scope: "wishlist", selectedBggIds: [] },
+    wishlistSelection: selection,
+    budget: DEFAULT_JEV_RUN_BUDGET,
+  });
+  if (!prepared.wishlistPreparation) throw new Error("Expected unified wishlist preparation");
+  return prepared;
+}
+
+function createTestUnifiedScoringService(storageService: StorageService, cache: JevPairCache) {
+  return createUnifiedScoringService({
+    storageService,
+    cache,
+    fitnessService: createFitnessService(),
+  });
 }
 
 describe("wishlist service", () => {
@@ -1034,11 +1068,10 @@ describe("wishlist service", () => {
     expect((await service.list())[0]?.predictedScore).toBeNull();
   });
 
-  test("does not invoke legacy scoring when current source capture is unavailable", async () => {
+  test("returns unavailable when current source capture is unavailable", async () => {
     const existing = makeCurrentReadEntry("Original candidate prose");
     storage = createMockStorage([existing]);
     let scoringCalls = 0;
-    let resolverCalls = 0;
     const prediction: PredictionService = {
       ...createMockPredictionService(new Map()),
       listGamesWithPredictionsFromSnapshot: () => {
@@ -1050,19 +1083,11 @@ describe("wishlist service", () => {
       storageService: storage,
       predictionService: prediction,
       gameService,
-      resolveWishlistDescriptionSignal: Object.assign(
-        () => {
-          resolverCalls++;
-          return Promise.resolve([]);
-        },
-        { isCurrent: () => true },
-      ),
     });
     const [result] = await service.listWithCurrentRedundancy();
     expect(result?.prediction.availability).toBe("unavailable");
     expect(result?.entry.predictedScore).toBeNull();
     expect(scoringCalls).toBe(0);
-    expect(resolverCalls).toBe(0);
   });
 
   test("removed candidates are absent from subsequent current projections", async () => {
@@ -1094,28 +1119,6 @@ describe("wishlist service", () => {
     expect(result?.redundancy.orderingScore).toBeNull();
   });
 
-  test("legacy description resolver and cache revision cannot authorize an unavailable current result", async () => {
-    const existing = makeCurrentReadEntry("Candidate prose");
-    storage = createMockStorage([existing], undefined, true);
-    let resolverCalls = 0;
-    const service = createWishlistService({
-      storageService: storage,
-      predictionService,
-      gameService,
-      resolveWishlistDescriptionSignal: Object.assign(
-        () => {
-          resolverCalls++;
-          return Promise.resolve([0.9]);
-        },
-        { isCurrent: () => true },
-      ),
-    });
-    const [result] = await service.listWithCurrentRedundancy();
-    expect(result?.prediction.availability).toBe("unavailable");
-    expect(result?.entry.predictedScore).toBeNull();
-    expect(resolverCalls).toBe(0);
-  });
-
   test("unreadable source authority returns unavailable instead of saved prediction history", async () => {
     const existing = makeCurrentReadEntry("Candidate prose");
     storage = createMockStorage([existing]);
@@ -1145,48 +1148,16 @@ describe("wishlist service", () => {
     const owner = makeGame(903, "Owned with additional BGG identity");
     owner.additionalBggIds = [existing.bggId];
     const storage = createMockStorage([existing], { games: [asDurableGame(owner)] }, true);
-    let resolverCalls = 0;
     const service = createWishlistService({
       storageService: storage,
       predictionService: createMockPredictionService(new Map(), [
         { game: owner, score: makeFitnessResult(5, false) },
       ]),
       gameService,
-      resolveWishlistDescriptionSignal: Object.assign(
-        () => {
-          resolverCalls++;
-          return Promise.resolve([]);
-        },
-        { isCurrent: () => true },
-      ),
     });
 
     expect(await service.list()).toEqual([]);
     expect(await service.listWithCurrentRedundancy()).toEqual([]);
-    expect(resolverCalls).toBe(0);
-  });
-
-  test("owned additional BGG identities are excluded before wishlist publication", async () => {
-    const existing = makeCurrentReadEntry("Candidate prose");
-    existing.bggId = 906;
-    const owner = makeGame(907, "Owner");
-    owner.additionalBggIds = [existing.bggId];
-    storage = createMockStorage([existing], { games: [asDurableGame(owner)] }, true);
-    let resolverCalls = 0;
-    const service = createWishlistService({
-      storageService: storage,
-      predictionService,
-      gameService,
-      resolveWishlistDescriptionSignal: Object.assign(
-        () => {
-          resolverCalls++;
-          return Promise.resolve([0.8]);
-        },
-        { isCurrent: () => true },
-      ),
-    });
-    expect(await service.listWithCurrentRedundancy()).toEqual([]);
-    expect(resolverCalls).toBe(0);
   });
 
   test("ownership read failure rejects instead of disclosing saved wishlist metadata", async () => {
@@ -1304,7 +1275,6 @@ describe("wishlist service", () => {
       let ownedLookups = 0;
       let eligibleSetSize = 0;
       const membershipProbes = { candidate: 0, owned: 0 };
-      let candidateResolverCalls = 0;
       const service = createWishlistService({
         storageService: savingStorage,
         predictionService: prediction,
@@ -1313,13 +1283,6 @@ describe("wishlist service", () => {
           addGame: () => Promise.resolve({ game: acquired, bggImported: false }),
         },
         jevPairCache: cache,
-        resolveWishlistDescriptionSignal: Object.assign(
-          (request: WishlistDescriptionSignalCaptureRequest) => {
-            candidateResolverCalls++;
-            return Promise.resolve(request.pairs.map(() => 0.9));
-          },
-          { isCurrent: () => true },
-        ),
         acquisitionObserver: {
           onCollectionIndexBuilt: (gameCount) => {
             indexBuilds++;
@@ -1366,7 +1329,6 @@ describe("wishlist service", () => {
       expect(acquisitionError).toBeInstanceOf(WishlistAcquisitionRecoveryError);
       expect(await service.list()).toEqual([]);
       expect(await service.listWithCurrentRedundancy()).toEqual([]);
-      expect(candidateResolverCalls).toBe(0);
       expect(await savingStorage.loadWishlist()).toHaveLength(1);
       expect(cache.candidateCOnlyPairs(candidateId)).toHaveLength(3);
       expect(indexBuilds).toBe(1);
@@ -1388,7 +1350,6 @@ describe("wishlist service", () => {
       expect(scoringCaptureCalls).toBe(2);
       expect(await savingStorage.loadWishlist()).toHaveLength(1);
       expect(await service.listWithCurrentRedundancy()).toEqual([]);
-      expect(candidateResolverCalls).toBe(0);
       const transferred = cache.lookup({ gameAId: acquired.id, gameBId: other.id, signal: "C" });
       expect(transferred?.value).toBe(0.82);
       expect(transferred?.completedAt).toBe("2026-09-30T12:00:00.000Z");
@@ -1868,6 +1829,7 @@ describe("wishlist service", () => {
   test("wishlist Jev preparation hydrates only selected missing sources and freezes exact counts", async () => {
     const directory = await mkdtemp(join(tmpdir(), "wishlist-run-preparation-"));
     const cache = await createJevPairCache(directory);
+    const context = await createHydratedTestApp({ dataDir: directory, jevPairCache: cache });
     try {
       const unavailable = makeCurrentReadEntry("Legacy candidate");
       unavailable.id = "legacy-501";
@@ -1895,72 +1857,74 @@ describe("wishlist service", () => {
       owned.bggData.description = "Owned comparator description";
       const overlapGame = makeGame(901, "Previously owned overlap");
       overlapGame.id = "overlap-game-901";
-      overlapGame.ownership = "previously-owned";
       overlapGame.additionalBggIds = [overlap.bggId];
+      overlapGame.ownership = "previously-owned";
 
-      const collection = await createMockStorage(
-        [],
-        {
-          games: [asDurableGame(owned), asDurableGame(overlapGame)],
-        },
-        true,
-      ).loadCollection();
+      const storage = context.storageService;
+      const axis = await context.axisService.createAxis({
+        name: "Wishlist hydration owner rating",
+        weight: 1,
+        source: "personal",
+      });
+      const collection = await storage.loadCollection();
+      collection.games = [asDurableGame(owned), asDurableGame(overlapGame)];
       collection.semanticRedundancy.settings = {
         ...collection.semanticRedundancy.settings,
         enabled: true,
         weights: { ...collection.semanticRedundancy.settings.weights, description: 1 },
       };
-      const currentCollection = structuredClone(collection);
-      let currentEligibilityIdentity = "eligibility-revision-1";
-      let currentPolicyIdentity = "wishlist-run-policy";
       const entries = [unavailable, eligible, overlap, unselectedA, unselectedB];
-      const storage = createMockStorage(entries, collection, true);
-      const scoreCapture = [
-        { game: asDurableGame(owned), score: makeValidCaptureFitnessResult(6) },
-        { game: asDurableGame(overlapGame), score: makeValidCaptureFitnessResult(7) },
-      ];
-      const capture: JevRunCapture = {
-        collection: structuredClone(collection),
-        predictionCapture: scoreCapture,
-        captureIdentity: {
-          sourceVectorIdentity: "wishlist-run-vector",
-          tournamentIdentity: "wishlist-run-tournament",
-          predictionCaptureIdentity: "wishlist-run-prediction-capture",
-        },
-        factualWeights: { binary: 0.4, continuous: 0.3 },
-        sourceVectorIdentity: "wishlist-run-vector",
-        policyIdentity: "wishlist-run-policy",
-        eligibilityIdentity: "eligibility-revision-1",
-      };
-      const sourceAdapter = {
-        loadCapture: () => Promise.resolve(structuredClone(capture)),
-        readCurrent: () =>
-          Promise.resolve({
-            collection: structuredClone(currentCollection),
-            sourceVectorIdentity: "current-vector",
-            policyIdentity: currentPolicyIdentity,
-            canTransmitNotes: true,
-            eligibilityIdentity: currentEligibilityIdentity,
-          }),
-      };
+      await storage.saveCollection(collection);
+      await storage.saveRedundancySettings({
+        ...(await storage.loadRedundancySettings()),
+        enabled: true,
+        componentWeights: { binary: 1, continuous: 3 },
+      });
+      await context.gameService.rateGame(owned.id, { [axis.id]: 6 });
+      await storage.saveWishlist(entries);
+      await storage.hydrateSourceVector?.();
+      const listGamesWithPredictionsFromSnapshot =
+        context.predictionService.listGamesWithPredictionsFromSnapshot?.bind(
+          context.predictionService,
+        );
+      if (!listGamesWithPredictionsFromSnapshot)
+        throw new Error("Test prediction service lacks snapshot prediction support");
+      const sourceAdapter = createJevRunSourceAdapter({
+        storageService: storage,
+        predictionService: { listGamesWithPredictionsFromSnapshot },
+      });
+      const getBoardgameScoringInput = context.gameService.getBoardgameScoringInput?.bind(
+        context.gameService,
+      );
+      if (!getBoardgameScoringInput)
+        throw new Error("Test game service lacks BGG scoring-input support");
       const fetchedIds: number[] = [];
       const preparation = createWishlistRunPreparationService({
         storageService: storage,
         gameService: {
+          ...context.gameService,
           getBoardgameScoringInput: (bggId) => {
             fetchedIds.push(bggId);
             if (bggId === unavailable.bggId)
               return Promise.reject(new Error("fake BGG transport failure"));
-            return Promise.resolve(makeScoringInput(bggId, "unexpected name"));
+            return getBoardgameScoringInput(bggId);
           },
         },
+      });
+      const unifiedScoringService = createTestUnifiedScoringService(storage, cache);
+      const selection = {
+        kind: "selected" as const,
+        bggIds: [unavailable.bggId, eligible.bggId, overlap.bggId],
+      };
+      await preparation.hydrateSources(selection);
+      const selectedUnified = await prepareUnifiedWishlist(
+        unifiedScoringService,
         sourceAdapter,
         cache,
-      });
-      const selected = await preparation.prepare({
-        kind: "selected",
-        bggIds: [overlap.bggId, unavailable.bggId, eligible.bggId],
-      });
+        selection,
+      );
+      const selected = selectedUnified.wishlistPreparation;
+      if (!selected) throw new Error("Expected unified wishlist preparation");
 
       expect(fetchedIds).toEqual([unavailable.bggId]);
       expect(selected.selection).toEqual({
@@ -1997,42 +1961,52 @@ describe("wishlist service", () => {
       });
       expect(savedLegacy?.bggSource).toBeUndefined();
 
-      const owner = currentCollection.games[0];
+      const owner = (await storage.loadCollection()).games[0];
       if (!owner) throw new Error("owner fixture is missing");
-      owner.ownerNote = {
-        state: "present",
-        version: 1,
-        updatedAt: NOW,
+      const noteResult = await context.ownerGameNoteService.set(owner.id, {
+        commandId: "52000000-0000-4000-8000-000000000005",
+        expectedVersion: 0,
         text: "a note edit unrelated to candidate C",
-      };
-      expect(await selected.isCurrent()).toBe(true);
-      currentEligibilityIdentity = "eligibility-revision-2";
-      expect(await selected.isCurrent()).toBe(false);
-      currentEligibilityIdentity = "eligibility-revision-1";
-
-      const failingCache = {
-        available: true,
-        mutationRevision: () => cache.mutationRevision(),
-        lookup: () => {
-          throw new Error("injected point-read failure");
-        },
-      } as unknown as JevPairCache;
-      const failingPreparation = createWishlistRunPreparationService({
-        storageService: storage,
-        gameService: { getBoardgameScoringInput: () => Promise.reject(new Error("offline")) },
-        sourceAdapter,
-        cache: failingCache,
       });
+      expect(noteResult.ok).toBe(true);
+      const ownerAfterNote = (await storage.loadCollection()).games[0];
+      if (ownerAfterNote?.ownerNote?.state !== "present")
+        throw new Error("Persisted owner note is missing");
+      expect(ownerAfterNote.ownerNote.text).toBe("a note edit unrelated to candidate C");
+
+      const actualLookup = cache.lookup.bind(cache);
+      cache.lookup = () => {
+        throw new Error("injected point-read failure");
+      };
       let cacheFailure: unknown;
       try {
-        await failingPreparation.prepare({ kind: "selected", bggIds: [eligible.bggId] });
+        await prepareUnifiedWishlist(unifiedScoringService, sourceAdapter, cache, {
+          kind: "selected",
+          bggIds: [eligible.bggId],
+        });
       } catch (error) {
         cacheFailure = error;
+      } finally {
+        cache.lookup = actualLookup;
       }
-      expect(cacheFailure).toMatchObject({ code: "cache-unavailable" });
+      expect(cacheFailure).toBeDefined();
+
+      await preparation.hydrateSources(selection);
+      const candidateUnified = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+        selection,
+      );
+      const candidatePreparation = candidateUnified.wishlistPreparation;
+      if (!candidatePreparation) throw new Error("Expected candidate unified preparation");
+      expect(JSON.stringify(candidatePreparation.pairs)).not.toContain(
+        "a note edit unrelated to candidate C",
+      );
 
       let gatewayConstructions = 0;
       let providerStarts = 0;
+      let gatewayRequest: unknown;
       const candidateRun = new JevRunService({
         storageService: storage,
         cache,
@@ -2042,9 +2016,7 @@ describe("wishlist service", () => {
           gatewayConstructions++;
           return {
             evaluatePair: async (request) => {
-              expect(request.mode).toBe("description-only");
-              expect(JSON.stringify(request)).not.toContain("ownerNote");
-              expect(JSON.stringify(request)).not.toContain("note edit unrelated");
+              gatewayRequest = request;
               await admit({
                 mode: "description-only",
                 attemptId: "wishlist-c-only",
@@ -2070,7 +2042,8 @@ describe("wishlist service", () => {
       });
       const candidateReservation = await candidateRun.prepareValidatedPreparedRun({
         scopeKind: "wishlist",
-        wishlistPreparation: selected,
+        unifiedPreparation: candidateUnified,
+        wishlistPreparation: candidatePreparation,
         noteTransmissionAuthorized: false,
       });
       expect(candidateReservation).not.toBeNull();
@@ -2086,7 +2059,10 @@ describe("wishlist service", () => {
       });
       expect(gatewayConstructions).toBe(1);
       expect(providerStarts).toBe(1);
-      const ownedForCandidateRun = currentCollection.games[0];
+      expect(gatewayRequest).toMatchObject({ mode: "description-only" });
+      expect(JSON.stringify(gatewayRequest)).not.toContain("ownerNote");
+      expect(JSON.stringify(gatewayRequest)).not.toContain("note edit unrelated");
+      const ownedForCandidateRun = candidateUnified.capture.collection.games[0];
       if (!ownedForCandidateRun) throw new Error("owned test game is missing");
       const generatedRow = cache.lookup({
         gameAId: encodeWishlistBggMember(collection.id, String(eligible.bggId)),
@@ -2115,14 +2091,18 @@ describe("wishlist service", () => {
           0.65,
         ),
       );
-      const cached = await preparation.prepare({
-        kind: "selected",
-        bggIds: [unavailable.bggId, eligible.bggId, overlap.bggId],
-      });
+      await preparation.hydrateSources(selection);
+      const cachedUnified = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+        selection,
+      );
+      const cached = cachedUnified.wishlistPreparation;
+      if (!cached) throw new Error("Expected cached unified preparation");
       expect(cached.disclosure.cachedHitPairCount).toBe(1);
       expect(cached.disclosure.sendablePairCount).toBe(0);
       expect(cached.pairs[0]?.state).toBe("cached-hit");
-      expect(await selected.isCurrent()).toBe(false);
 
       let allHitGatewayConstructions = 0;
       const allHitRun = new JevRunService({
@@ -2137,6 +2117,7 @@ describe("wishlist service", () => {
       });
       const allHitReservation = await allHitRun.prepareValidatedPreparedRun({
         scopeKind: "wishlist",
+        unifiedPreparation: cachedUnified,
         wishlistPreparation: cached,
         noteTransmissionAuthorized: false,
       });
@@ -2157,10 +2138,15 @@ describe("wishlist service", () => {
       const candidateMember = encodeWishlistBggMember(collection.id, String(eligible.bggId));
       const ownedMember = encodeOwnedLocalMember(collection.id, ownedForCandidateRun.id);
       cache.purgePair(candidateMember, ownedMember, "C", "wishlist-candidate");
-      const latePreparation = await preparation.prepare({
-        kind: "selected",
-        bggIds: [unavailable.bggId, eligible.bggId, overlap.bggId],
-      });
+      await preparation.hydrateSources(selection);
+      const lateUnified = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+        selection,
+      );
+      const latePreparation = lateUnified.wishlistPreparation;
+      if (!latePreparation) throw new Error("Expected late unified preparation");
       let markStarted!: () => void;
       let releaseResult!: () => void;
       const providerStarted = new Promise<void>((resolve) => (markStarted = resolve));
@@ -2197,6 +2183,7 @@ describe("wishlist service", () => {
       });
       const lateReservation = await lateRun.prepareValidatedPreparedRun({
         scopeKind: "wishlist",
+        unifiedPreparation: lateUnified,
         wishlistPreparation: latePreparation,
         noteTransmissionAuthorized: false,
       });
@@ -2221,10 +2208,15 @@ describe("wishlist service", () => {
       failingTriggerDb.exec(`CREATE TRIGGER reject_wishlist_judgment
         BEFORE INSERT ON judgments WHEN NEW.pair_domain = 'wishlist-candidate'
         BEGIN SELECT RAISE(ABORT, 'injected wishlist checkpoint failure'); END`);
-      const checkpointPreparation = await preparation.prepare({
-        kind: "selected",
-        bggIds: [unavailable.bggId, eligible.bggId, overlap.bggId],
-      });
+      await preparation.hydrateSources(selection);
+      const checkpointUnified = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+        selection,
+      );
+      const checkpointPreparation = checkpointUnified.wishlistPreparation;
+      if (!checkpointPreparation) throw new Error("Expected checkpoint unified preparation");
       const checkpointRun = new JevRunService({
         storageService: storage,
         cache,
@@ -2253,6 +2245,7 @@ describe("wishlist service", () => {
       });
       const checkpointReservation = await checkpointRun.prepareValidatedPreparedRun({
         scopeKind: "wishlist",
+        unifiedPreparation: checkpointUnified,
         wishlistPreparation: checkpointPreparation,
         noteTransmissionAuthorized: false,
       });
@@ -2276,9 +2269,6 @@ describe("wishlist service", () => {
       failingTriggerDb.exec("DROP TRIGGER reject_wishlist_judgment");
       failingTriggerDb.close();
 
-      currentPolicyIdentity = "changed-policy";
-      expect(await cached.isCurrent()).toBe(false);
-      currentPolicyIdentity = "wishlist-run-policy";
       const persistedEntries = await storage.loadWishlist();
       await storage.saveWishlist(
         persistedEntries.map((entry) =>
@@ -2292,10 +2282,15 @@ describe("wishlist service", () => {
       );
       expect(await cached.isCurrent()).toBe(false);
       await storage.saveWishlist(persistedEntries);
-      const membershipPrepared = await preparation.prepare({
-        kind: "selected",
-        bggIds: [unavailable.bggId, eligible.bggId, overlap.bggId],
-      });
+      await preparation.hydrateSources(selection);
+      const membershipUnified = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+        selection,
+      );
+      const membershipPrepared = membershipUnified.wishlistPreparation;
+      if (!membershipPrepared) throw new Error("Expected membership unified preparation");
       await storage.saveWishlist(persistedEntries.filter((entry) => entry.id !== unselectedB.id));
       expect(await membershipPrepared.isCurrent()).toBe(false);
     } finally {
@@ -2307,6 +2302,12 @@ describe("wishlist service", () => {
   test("prepared authorization retains an immutable source snapshot after adapter alias mutation", async () => {
     const directory = await mkdtemp(join(tmpdir(), "wishlist-run-immutable-capture-"));
     const cache = await createJevPairCache(directory);
+    const context = await createHydratedTestApp({
+      dataDir: directory,
+      configPath: join(directory, "config.json"),
+      fileOps: createFileOps(),
+      jevPairCache: cache,
+    });
     try {
       const entry = makeCurrentReadEntry("Candidate immutable snapshot");
       entry.id = "immutable-capture-entry";
@@ -2315,71 +2316,47 @@ describe("wishlist service", () => {
       owned.id = "owned-immutable-snapshot";
       if (!owned.bggData) throw new Error("Owned fixture requires BGG data");
       owned.bggData.description = "Original owned description";
-      const semantic = createInitialSemanticRedundancyStateV10();
-      semantic.settings = {
-        ...semantic.settings,
+      const storage = context.storageService;
+      const unifiedScoringService = createTestUnifiedScoringService(storage, cache);
+      const currentCollection = await storage.loadCollection();
+      currentCollection.games = [asDurableGame(owned)];
+      currentCollection.semanticRedundancy.settings = {
+        ...currentCollection.semanticRedundancy.settings,
         enabled: true,
-        weights: { ...semantic.settings.weights, description: 1 },
+        weights: { ...currentCollection.semanticRedundancy.settings.weights, description: 1 },
       };
-      const initialStorage = createMockStorage(
-        [entry],
-        { games: [asDurableGame(owned)], semanticRedundancy: semantic },
-        true,
-      );
-      let currentCollection = await initialStorage.loadCollection();
-      const storage: StorageService = {
-        ...initialStorage,
-        loadCollection: () => Promise.resolve(structuredClone(currentCollection)),
-        saveCollection: (next) => {
-          currentCollection = structuredClone(next);
-          return Promise.resolve();
-        },
-      };
-      const capture: JevRunCapture = {
-        collection: structuredClone(currentCollection),
-        predictionCapture: [
-          { game: asDurableGame(owned), score: makeValidCaptureFitnessResult(6) },
-        ],
-        captureIdentity: {
-          sourceVectorIdentity: "immutable-capture-vector",
-          tournamentIdentity: "immutable-capture-tournament",
-          predictionCaptureIdentity: "immutable-capture-predictions",
-        },
-        factualWeights: { binary: 0.4, continuous: 0.3 },
-        sourceVectorIdentity: "immutable-capture-vector",
-        policyIdentity: "immutable-capture-policy",
-        eligibilityIdentity: "immutable-capture-eligibility",
-      };
-      const sourceAdapter = {
-        loadCapture: () => Promise.resolve(capture),
-        readCurrent: () =>
-          Promise.resolve({
-            collection: structuredClone(currentCollection),
-            sourceVectorIdentity: "immutable-capture-vector",
-            policyIdentity: "immutable-capture-policy",
-            canTransmitNotes: false,
-            eligibilityIdentity: "immutable-capture-eligibility",
-          }),
-      };
-      let hydrationCalls = 0;
+      await storage.saveCollection(currentCollection);
+      await storage.saveRedundancySettings({
+        ...(await storage.loadRedundancySettings()),
+        enabled: true,
+        componentWeights: { binary: 1, continuous: 3 },
+      });
+      await storage.saveWishlist([entry]);
+      await storage.hydrateSourceVector?.();
+      const listGamesWithPredictionsFromSnapshot =
+        context.predictionService.listGamesWithPredictionsFromSnapshot?.bind(
+          context.predictionService,
+        );
+      if (!listGamesWithPredictionsFromSnapshot)
+        throw new Error("Test prediction service lacks snapshot prediction support");
+      const sourceAdapter = createJevRunSourceAdapter({
+        storageService: storage,
+        predictionService: { listGamesWithPredictionsFromSnapshot },
+      });
+      const wishlistHydration = createWishlistRunPreparationService({
+        storageService: storage,
+        gameService: context.gameService,
+      });
       let pairLookups = 0;
       const lookup = cache.lookup.bind(cache);
       cache.lookup = (input) => {
         pairLookups++;
         return lookup(input);
       };
-      const preparation = createWishlistRunPreparationService({
-        storageService: storage,
-        gameService: {
-          getBoardgameScoringInput: () => {
-            hydrationCalls++;
-            return Promise.reject(new Error("A saved source must not hydrate"));
-          },
-        },
-        sourceAdapter,
-        cache,
+      const prepared = await prepareUnifiedWishlist(unifiedScoringService, sourceAdapter, cache, {
+        kind: "selected",
+        bggIds: [entry.bggId],
       });
-      const prepared = await preparation.prepare({ kind: "selected", bggIds: [entry.bggId] });
       const ownedSnapshot = prepared.capture.collection.games[0];
       if (!ownedSnapshot?.bggData) throw new Error("Prepared capture omitted owned source");
       expect(ownedSnapshot.bggData.description).toBe("Original owned description");
@@ -2388,7 +2365,7 @@ describe("wishlist service", () => {
       const runService = new JevRunService({
         storageService: storage,
         cache,
-        loadCapture: () => Promise.resolve(capture),
+        loadCapture: () => sourceAdapter.loadCapture(),
         readCurrent: () => sourceAdapter.readCurrent(),
         createGateway: () => {
           gatewayConstructions++;
@@ -2400,7 +2377,8 @@ describe("wishlist service", () => {
         sourceAdapter,
         cache,
         runService,
-        wishlistPreparation: { prepare: () => Promise.resolve(prepared) },
+        unifiedScoringService,
+        wishlistPreparation: wishlistHydration,
       });
       const preview = await controller.previewWishlist({
         kind: "selected",
@@ -2410,20 +2388,22 @@ describe("wishlist service", () => {
       if (preview.status !== 200) throw new Error("Expected wishlist preview");
       const lookupsAfterPreview = pairLookups;
 
-      const mutableOwned = capture.collection.games[0];
+      const mutableCapture = await sourceAdapter.loadCapture();
+      const mutableOwned = mutableCapture.collection.games[0];
       if (!mutableOwned?.bggData) throw new Error("Mutable adapter capture omitted owned source");
       mutableOwned.bggData.description = "Mutated adapter alias description";
       mutableOwned.name = "Mutated adapter alias name";
-      const durableOwned = currentCollection.games[0];
+      const durableCollection = await storage.loadCollection();
+      const durableOwned = durableCollection.games[0];
       if (!durableOwned?.bggData) throw new Error("Durable collection omitted owned source");
       durableOwned.bggData.description = "Mutated adapter alias description";
       durableOwned.name = "Mutated adapter alias name";
-      await storage.saveCollection(currentCollection);
+      await storage.saveCollection(durableCollection);
 
       expect(prepared.capture.collection.games[0]?.bggData?.description).toBe(
         "Original owned description",
       );
-      expect(await prepared.isCurrent()).toBe(false);
+      expect(await prepared.isSourceCurrent()).toBe(false);
       expect(
         await controller.start({
           requestId: preview.body.requestId,
@@ -2432,7 +2412,6 @@ describe("wishlist service", () => {
         }),
       ).toEqual({ status: 412, body: { error: "precondition-failed" } });
       expect(gatewayConstructions).toBe(0);
-      expect(hydrationCalls).toBe(0);
       expect(pairLookups).toBe(lookupsAfterPreview);
     } finally {
       cache.close();
@@ -2510,6 +2489,7 @@ describe("wishlist service", () => {
     const cache = await createJevPairCache(directory);
     const context = await createHydratedTestApp({ jevPairCache: cache });
     try {
+      const unifiedScoringService = createTestUnifiedScoringService(context.storageService, cache);
       const axis = await context.axisService.createAxis({
         name: "Synthetic veto axis",
         weight: 100,
@@ -2564,32 +2544,24 @@ describe("wishlist service", () => {
           },
         },
       });
-      let hydrationCalls = 0;
-      const fetchScoringInput = context.gameService.getBoardgameScoringInput?.bind(
-        context.gameService,
-      );
+      const wishlistHydration = createWishlistRunPreparationService({
+        storageService: context.storageService,
+        gameService: context.gameService,
+      });
       let pairLookups = 0;
       const actualLookup = cache.lookup.bind(cache);
       cache.lookup = (input) => {
         pairLookups++;
         return actualLookup(input);
       };
-      const preparation = createWishlistRunPreparationService({
-        storageService: context.storageService,
-        gameService: {
-          getBoardgameScoringInput: (bggId) => {
-            hydrationCalls++;
-            if (!fetchScoringInput) throw new Error("Scoring source fetch is unavailable");
-            return fetchScoringInput(bggId);
-          },
-        },
-        sourceAdapter,
-        cache,
+      const prepared = await prepareUnifiedWishlist(unifiedScoringService, sourceAdapter, cache, {
+        kind: "selected",
+        bggIds: [candidate.bggId],
       });
-      const prepared = await preparation.prepare({ kind: "selected", bggIds: [candidate.bggId] });
-      expect(prepared.disclosure.eligibleOwnedGameCount).toBe(0);
-      expect(prepared.disclosure.comparisonPairCount).toBe(0);
-      expect(prepared.cacheRevision).toBeNull();
+      expect(prepared.wishlistPreparation?.disclosure.eligibleOwnedGameCount).toBe(0);
+      expect(prepared.wishlistPreparation?.disclosure.comparisonPairCount).toBe(1);
+      expect(prepared.run.predictionPairs).toHaveLength(1);
+      expect(prepared.run.redundancyPairs).toHaveLength(0);
 
       let gatewayConstructions = 0;
       const runService = new JevRunService({
@@ -2610,7 +2582,8 @@ describe("wishlist service", () => {
         cache,
         runService,
         gatewayConfigured: () => true,
-        wishlistPreparation: { prepare: () => Promise.resolve(prepared) },
+        unifiedScoringService,
+        wishlistPreparation: wishlistHydration,
       });
       const preview = await controller.previewWishlist({
         kind: "selected",
@@ -2622,7 +2595,7 @@ describe("wishlist service", () => {
       const lookupsAfterPreview = pairLookups;
 
       await context.axisService.updateAxis(axis.id, { veto: null });
-      expect(await prepared.isCurrent()).toBe(false);
+      expect(await prepared.isSourceCurrent()).toBe(false);
       expect(
         await controller.start({
           requestId: preview.body.requestId,
@@ -2632,11 +2605,13 @@ describe("wishlist service", () => {
       ).toEqual({ status: 412, body: { error: "precondition-failed" } });
       expect(gatewayConstructions).toBe(0);
       expect(predictionCalls).toBe(predictionsAfterPreview);
-      expect(hydrationCalls).toBe(0);
       expect(pairLookups).toBe(lookupsAfterPreview);
 
-      const fresh = await preparation.prepare({ kind: "selected", bggIds: [candidate.bggId] });
-      expect(fresh.disclosure.eligibleOwnedGameCount).toBe(1);
+      const fresh = await prepareUnifiedWishlist(unifiedScoringService, sourceAdapter, cache, {
+        kind: "selected",
+        bggIds: [candidate.bggId],
+      });
+      expect(fresh.wishlistPreparation?.disclosure.eligibleOwnedGameCount).toBe(1);
       const cacheRevisionBeforeActiveMutation = cache.mutationRevision();
       expect(cacheRevisionBeforeActiveMutation).not.toBeNull();
       const checkpointPair = cache.checkpointPair.bind(cache);
@@ -2689,7 +2664,8 @@ describe("wishlist service", () => {
         cache,
         runService: activeRunService,
         gatewayConfigured: () => true,
-        wishlistPreparation: preparation,
+        unifiedScoringService,
+        wishlistPreparation: wishlistHydration,
       });
       const activePreview = await activeController.previewWishlist({
         kind: "selected",
@@ -2741,67 +2717,51 @@ describe("wishlist service", () => {
     }
   });
 
-  test("wishlist preparation rejects stale or malformed selection before BGG calls", async () => {
+  test("wishlist hydration rejects stale or malformed selection before BGG calls", async () => {
     const entry = makeCurrentReadEntry("Candidate prose");
+    delete entry.bggSource;
     const storage = createMockStorage([entry], { games: [] }, true);
-    const captureCollection = await storage.loadCollection();
-    const capture: JevRunCapture = {
-      collection: captureCollection,
-      predictionCapture: [],
-      captureIdentity: {
-        sourceVectorIdentity: "selection-vector",
-        tournamentIdentity: "selection-tournament",
-        predictionCaptureIdentity: "selection-predictions",
-      },
-      factualWeights: { binary: 0.4, continuous: 0.3 },
-      sourceVectorIdentity: "selection-vector",
-      policyIdentity: "selection-policy",
-    };
-    let calls = 0;
+    let bggCalls = 0;
     const preparation = createWishlistRunPreparationService({
       storageService: storage,
       gameService: {
-        getBoardgameScoringInput: () => {
-          calls++;
-          return Promise.resolve(makeScoringInput(entry.bggId, entry.name));
+        getBoardgameScoringInput: (bggId) => {
+          bggCalls++;
+          return Promise.resolve(makeScoringInput(bggId, entry.name));
         },
       },
-      sourceAdapter: {
-        loadCapture: () => Promise.resolve(capture),
-        readCurrent: () =>
-          Promise.resolve({
-            collection: captureCollection,
-            sourceVectorIdentity: "selection-vector",
-            policyIdentity: "selection-policy",
-            canTransmitNotes: false,
-          }),
-      },
-      cache: {
-        available: false,
-        mutationRevision: () => null,
-      } as unknown as JevPairCache,
     });
 
-    for (const invalid of [
-      { kind: "selected", bggIds: [] },
-      { kind: "selected", bggIds: [entry.bggId, entry.bggId] },
-      { kind: "selected", bggIds: [999_999] },
-      { kind: "all", unexpected: true },
-    ]) {
+    for (const [label, selection] of [
+      ["empty selection", { kind: "selected", bggIds: [] }],
+      ["duplicate IDs", { kind: "selected", bggIds: [entry.bggId, entry.bggId] }],
+      ["unknown ID", { kind: "selected", bggIds: [999_999] }],
+    ] as const) {
       let error: unknown;
       try {
-        await preparation.prepare(invalid as never);
+        await preparation.hydrateSources(selection);
       } catch (caught) {
         error = caught;
       }
-      expect(error).toMatchObject({ code: "invalid-selection" });
+      expect(error, label).toMatchObject({ code: "invalid-selection" });
     }
-    expect(calls).toBe(0);
+
+    let malformedError: unknown;
+    try {
+      // @ts-expect-error Deliberately malformed input exercises the runtime validation boundary.
+      await preparation.hydrateSources({ kind: "all", unexpected: true });
+    } catch (caught) {
+      malformedError = caught;
+    }
+    expect(malformedError, "unexpected selection property").toMatchObject({
+      code: "invalid-selection",
+    });
+    expect(bggCalls).toBe(0);
+    expect((await storage.loadWishlist())[0]?.bggSource).toBeUndefined();
   });
 
-  test("legacy source hydration persists only BGG source and preserves prediction snapshots", async () => {
+  test("source hydration persists only BGG source and preserves prediction snapshots", async () => {
     const directory = await mkdtemp(join(tmpdir(), "wishlist-run-source-only-"));
-    const cache = await createJevPairCache(directory);
     try {
       const entry = makeCurrentReadEntry("Before hydration");
       entry.id = "source-only-entry";
@@ -2811,19 +2771,6 @@ describe("wishlist service", () => {
       const savedPreview = structuredClone(entry.redundancyPreview);
       delete entry.bggSource;
       const storage = createMockStorage([entry], { games: [] }, true);
-      const collection = await storage.loadCollection();
-      const capture: JevRunCapture = {
-        collection,
-        predictionCapture: [],
-        captureIdentity: {
-          sourceVectorIdentity: "source-only-vector",
-          tournamentIdentity: "source-only-tournament",
-          predictionCaptureIdentity: "source-only-predictions",
-        },
-        factualWeights: { binary: 0.4, continuous: 0.3 },
-        sourceVectorIdentity: "source-only-vector",
-        policyIdentity: "source-only-policy",
-      };
       let bggCalls = 0;
       const preparation = createWishlistRunPreparationService({
         storageService: storage,
@@ -2833,24 +2780,11 @@ describe("wishlist service", () => {
             return Promise.resolve(makeScoringInput(bggId, entry.name));
           },
         },
-        sourceAdapter: {
-          loadCapture: () => Promise.resolve(capture),
-          readCurrent: () =>
-            Promise.resolve({
-              collection,
-              sourceVectorIdentity: "source-only-vector",
-              policyIdentity: "source-only-policy",
-              canTransmitNotes: false,
-            }),
-        },
-        cache,
       });
 
-      const prepared = await preparation.prepare();
+      await preparation.hydrateSources();
       const persisted = (await storage.loadWishlist())[0];
       expect(bggCalls).toBe(1);
-      expect(prepared.selection).toEqual({ kind: "all" });
-      expect(prepared.disclosure.unavailableCandidateCount).toBe(0);
       expect(persisted).toMatchObject({
         id: entry.id,
         bggId: entry.bggId,
@@ -2864,9 +2798,7 @@ describe("wishlist service", () => {
         },
       });
       expect(persisted?.bggSource?.mechanics).toEqual(["Deck Building"]);
-      expect(await prepared.isCurrent()).toBe(true);
     } finally {
-      cache.close();
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -2874,6 +2806,12 @@ describe("wishlist service", () => {
   test("production wishlist writes monotonically revoke frozen authority across exact restoration", async () => {
     const directory = await mkdtemp(join(tmpdir(), "wishlist-generation-aba-"));
     const cache = await createJevPairCache(directory);
+    const context = await createHydratedTestApp({
+      dataDir: directory,
+      configPath: join(directory, "config.json"),
+      fileOps: createFileOps(),
+      jevPairCache: cache,
+    });
     try {
       const entry = makeCurrentReadEntry("Stable candidate source");
       entry.id = "aba-stable-entry";
@@ -2886,59 +2824,53 @@ describe("wishlist service", () => {
       ownedSecond.id = "second-persistent-comparator";
       if (!ownedSecond.bggData) throw new Error("second owned fixture requires BGG data");
       ownedSecond.bggData.description = "Second stable owned description";
-      const semantic = createInitialSemanticRedundancyStateV10();
-      semantic.settings = {
-        ...semantic.settings,
-        enabled: true,
-        weights: { ...semantic.settings.weights, description: 1 },
-      };
-      const fixture = createMockStorage(
-        [entry],
-        { games: [asDurableGame(owned), asDurableGame(ownedSecond)], semanticRedundancy: semantic },
-        true,
-      );
-      const collection = await fixture.loadCollection();
-      const fileOps = createFileOps();
-      const storage = createStorageService({
-        dataDir: directory,
-        configPath: join(directory, "config.json"),
-        fileOps,
-      });
-      await storage.saveCollection(collection);
-      await storage.saveRedundancySettings(await fixture.loadRedundancySettings());
-      await storage.saveWishlist([entry]);
-
-      const capture: JevRunCapture = {
-        collection: await storage.loadCollection(),
-        predictionCapture: [
-          { game: asDurableGame(owned), score: makeValidCaptureFitnessResult(6) },
-          { game: asDurableGame(ownedSecond), score: makeValidCaptureFitnessResult(6) },
-        ],
-        captureIdentity: {
-          sourceVectorIdentity: "wishlist-generation-vector",
-          tournamentIdentity: "wishlist-generation-tournament",
-          predictionCaptureIdentity: "wishlist-generation-predictions",
+      owned.ratings = { personal: 6 };
+      ownedSecond.ratings = { personal: 6 };
+      const storage = context.storageService;
+      const unifiedScoringService = createTestUnifiedScoringService(storage, cache);
+      const collection = await storage.loadCollection();
+      collection.axes = [
+        {
+          id: "personal",
+          name: "Personal",
+          description: null,
+          weight: 1,
+          enabled: true,
+          source: "personal",
+          createdAt: NOW,
+          updatedAt: NOW,
+          preferenceShape: "higher-is-better",
+          veto: null,
         },
-        factualWeights: { binary: 0.4, continuous: 0.3 },
-        sourceVectorIdentity: "wishlist-generation-vector",
-        policyIdentity: "wishlist-generation-policy",
-        eligibilityIdentity: "wishlist-generation-eligibility",
+      ];
+      collection.games = [asDurableGame(owned), asDurableGame(ownedSecond)];
+      collection.semanticRedundancy.settings = {
+        ...collection.semanticRedundancy.settings,
+        enabled: true,
+        cachedOwnerNoteUse: false,
+        weights: { ...collection.semanticRedundancy.settings.weights, factual: 1, description: 1 },
       };
-      const sourceAdapter = {
-        loadCapture: () => Promise.resolve(structuredClone(capture)),
-        readCurrent: async () => ({
-          collection: await storage.loadCollection(),
-          sourceVectorIdentity: capture.sourceVectorIdentity,
-          policyIdentity: capture.policyIdentity,
-          canTransmitNotes: false,
-          eligibilityIdentity: capture.eligibilityIdentity,
-        }),
-      };
-      const preparation = createWishlistRunPreparationService({
+      await storage.saveCollection(collection);
+      await storage.saveRedundancySettings({
+        ...(await storage.loadRedundancySettings()),
+        enabled: true,
+        componentWeights: { binary: 1, continuous: 3 },
+      });
+      await storage.saveWishlist([entry]);
+      await storage.hydrateSourceVector?.();
+      const listGamesWithPredictionsFromSnapshot =
+        context.predictionService.listGamesWithPredictionsFromSnapshot?.bind(
+          context.predictionService,
+        );
+      if (!listGamesWithPredictionsFromSnapshot)
+        throw new Error("Test prediction service lacks snapshot prediction support");
+      const sourceAdapter = createJevRunSourceAdapter({
         storageService: storage,
-        gameService: createMockGameService(),
-        sourceAdapter,
-        cache,
+        predictionService: { listGamesWithPredictionsFromSnapshot },
+      });
+      const wishlistHydration = createWishlistRunPreparationService({
+        storageService: storage,
+        gameService: context.gameService,
       });
       let refreshedScore = 7;
       const predictionRows = [
@@ -2966,6 +2898,7 @@ describe("wishlist service", () => {
       const wishlistService = createWishlistService({
         storageService: storage,
         predictionService: refreshPredictions,
+        unifiedScoringService: unifiedScoringService,
         gameService: {
           ...createMockGameService(),
           addGame: async () => {
@@ -2989,7 +2922,11 @@ describe("wishlist service", () => {
       });
       await wishlistService.refresh(entry.id);
       const refreshedA = await storage.loadWishlist();
-      const refreshPrepared = await preparation.prepare();
+      const refreshPrepared = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+      );
       let startGatewayConstructions = 0;
       const startRunService = new JevRunService({
         storageService: storage,
@@ -3007,8 +2944,11 @@ describe("wishlist service", () => {
         cache,
         runService: startRunService,
         gatewayConfigured: () => true,
-        wishlistPreparation: preparation,
+        unifiedScoringService: unifiedScoringService,
+        wishlistPreparation: wishlistHydration,
       });
+      expect((await storage.loadCollection()).semanticRedundancy.settings.enabled).toBe(true);
+      expect((await storage.loadRedundancySettings()).enabled).toBe(true);
       const stalePreview = await runController.previewWishlist();
       expect(stalePreview.status).toBe(200);
       if (stalePreview.status !== 200) throw new Error("Expected production wishlist preview");
@@ -3027,11 +2967,12 @@ describe("wishlist service", () => {
       ).toEqual({ status: 412, body: { error: "precondition-failed" } });
       expect(startGatewayConstructions).toBe(0);
 
-      const unchanged = await preparation.prepare();
+      const unchanged = await prepareUnifiedWishlist(unifiedScoringService, sourceAdapter, cache);
       const unchangedWishlist = await storage.loadWishlist();
       await storage.saveWishlist(unchangedWishlist);
-      expect(unchanged.wishlistMutationGeneration).toBe(
-        (await preparation.prepare()).wishlistMutationGeneration,
+      expect(unchanged.wishlistPreparation?.wishlistMutationGeneration).toBe(
+        (await prepareUnifiedWishlist(unifiedScoringService, sourceAdapter, cache))
+          .wishlistPreparation?.wishlistMutationGeneration,
       );
       expect(await unchanged.isSourceCurrent()).toBe(true);
 
@@ -3042,7 +2983,7 @@ describe("wishlist service", () => {
         storageService: storage,
         cache,
         loadCapture: () => Promise.reject(new Error("Wishlist run must use its frozen capture")),
-        readCurrent: sourceAdapter.readCurrent,
+        readCurrent: () => sourceAdapter.readCurrent(),
         createGateway: (admit) => ({
           evaluatePair: async () => {
             concurrentPairs++;
@@ -3075,7 +3016,8 @@ describe("wishlist service", () => {
       });
       const serialReservation = await serialRunService.prepareValidatedPreparedRun({
         scopeKind: "wishlist",
-        wishlistPreparation: unchanged,
+        wishlistPreparation: unchanged.wishlistPreparation!,
+        unifiedPreparation: unchanged,
         noteTransmissionAuthorized: false,
       });
       if (!serialReservation) throw new Error("Expected serial wishlist reservation");
@@ -3111,7 +3053,12 @@ describe("wishlist service", () => {
       });
       expect(serialProviderStarts).toBe(2);
       expect(maxConcurrentPairs).toBe(1);
-      expect(runLookups).toBe(6);
+      // One pre-admission readiness scan is performed per frozen candidate; after separating
+      // that scan, the runner still performs exactly three race-critical reads per pair:
+      // admission currentness, provider-dispatch recheck, and checkpoint recheck.
+      const frozenPairCount = unchanged.wishlistPreparation?.pairs.length;
+      if (frozenPairCount === undefined) throw new Error("Expected frozen wishlist pairs");
+      expect(runLookups - frozenPairCount).toBe(3 * frozenPairCount);
       expect(pairCheckpoints).toBe(2);
       expect(checkpointRevisions).toHaveLength(2);
       expect(
@@ -3122,10 +3069,16 @@ describe("wishlist service", () => {
       cache.checkpointPair = cacheCheckpointPair;
       cache.candidateCOnlyPairs = candidateEnumeration;
       expect(await unchanged.isSourceCurrent()).toBe(true);
-      expect((await preparation.prepare()).wishlistMutationGeneration).toBe(
-        unchanged.wishlistMutationGeneration,
+      expect(
+        (await prepareUnifiedWishlist(unifiedScoringService, sourceAdapter, cache))
+          .wishlistPreparation?.wishlistMutationGeneration,
+      ).toBe(unchanged.wishlistPreparation?.wishlistMutationGeneration);
+      const beforeAmbiguousWrite = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
       );
-      const beforeAmbiguousWrite = await preparation.prepare();
+      const fileOps = context.fileOps;
       const writeFileExclusive = fileOps.writeFileExclusive.bind(fileOps);
       fileOps.writeFileExclusive = (path, content) =>
         path.includes("wishlist.json")
@@ -3148,7 +3101,11 @@ describe("wishlist service", () => {
           "wishlist-candidate",
         );
       }
-      const lateProviderPreparation = await preparation.prepare();
+      const lateProviderPreparation = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+      );
 
       let markProviderStarted!: () => void;
       let releaseProvider!: () => void;
@@ -3158,7 +3115,7 @@ describe("wishlist service", () => {
         storageService: storage,
         cache,
         loadCapture: () => Promise.reject(new Error("Wishlist run must use its frozen capture")),
-        readCurrent: sourceAdapter.readCurrent,
+        readCurrent: () => sourceAdapter.readCurrent(),
         createGateway: (admit) => ({
           evaluatePair: async (request) => {
             expect(request.mode).toBe("description-only");
@@ -3187,7 +3144,8 @@ describe("wishlist service", () => {
       });
       const lateReservation = await lateCallbackRun.prepareValidatedPreparedRun({
         scopeKind: "wishlist",
-        wishlistPreparation: lateProviderPreparation,
+        wishlistPreparation: lateProviderPreparation.wishlistPreparation!,
+        unifiedPreparation: lateProviderPreparation,
         noteTransmissionAuthorized: false,
       });
       if (!lateReservation) throw new Error("Expected production-backed wishlist reservation");
@@ -3214,7 +3172,11 @@ describe("wishlist service", () => {
 
       for (const mutation of ["remove", "clear"] as const) {
         const beforeRemoval = await storage.loadWishlist();
-        const oldPreparation = await preparation.prepare();
+        const oldPreparation = await prepareUnifiedWishlist(
+          unifiedScoringService,
+          sourceAdapter,
+          cache,
+        );
         let markMutationProviderStarted!: () => void;
         let releaseMutationProvider!: () => void;
         const mutationProviderStarted = new Promise<void>(
@@ -3227,7 +3189,7 @@ describe("wishlist service", () => {
           storageService: storage,
           cache,
           loadCapture: () => Promise.reject(new Error("Frozen wishlist capture is required")),
-          readCurrent: sourceAdapter.readCurrent,
+          readCurrent: () => sourceAdapter.readCurrent(),
           createGateway: (admit) => ({
             evaluatePair: async () => {
               await admit({
@@ -3260,7 +3222,8 @@ describe("wishlist service", () => {
           cache,
           runService: mutationRunService,
           gatewayConfigured: () => true,
-          wishlistPreparation: preparation,
+          unifiedScoringService: unifiedScoringService,
+          wishlistPreparation: wishlistHydration,
         });
         const mutationPreview = await mutationController.previewWishlist();
         expect(mutationPreview.status).toBe(200);
@@ -3308,7 +3271,11 @@ describe("wishlist service", () => {
           ).toBeNull();
       }
 
-      const cancelPreparation = await preparation.prepare();
+      const cancelPreparation = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+      );
       let markCancelProviderStarted!: () => void;
       let releaseCancelProvider!: () => void;
       const cancelProviderStarted = new Promise<void>(
@@ -3319,7 +3286,7 @@ describe("wishlist service", () => {
         storageService: storage,
         cache,
         loadCapture: () => Promise.reject(new Error("Frozen wishlist capture is required")),
-        readCurrent: sourceAdapter.readCurrent,
+        readCurrent: () => sourceAdapter.readCurrent(),
         createGateway: (admit) => ({
           evaluatePair: async () => {
             await admit({
@@ -3351,7 +3318,8 @@ describe("wishlist service", () => {
         cache,
         runService: cancelRunService,
         gatewayConfigured: () => true,
-        wishlistPreparation: preparation,
+        unifiedScoringService: unifiedScoringService,
+        wishlistPreparation: wishlistHydration,
       });
       const cancelPreview = await cancelController.previewWishlist();
       if (cancelPreview.status !== 200) throw new Error("Expected cancellation preview");
@@ -3383,7 +3351,7 @@ describe("wishlist service", () => {
         completedPairs: 0,
         failedPairs: 0,
       });
-      expect(cancelPreparation.pairs.length).toBeGreaterThan(0);
+      expect(cancelPreparation.wishlistPreparation?.pairs.length).toBeGreaterThan(0);
       for (const localId of [owned.id, ownedSecond.id])
         expect(
           cache.lookup({
@@ -3395,18 +3363,26 @@ describe("wishlist service", () => {
         ).toBeNull();
 
       const before = await storage.loadWishlist();
-      const scopeBeforeOtherCandidate = await preparation.prepare();
+      const scopeBeforeOtherCandidate = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+      );
       const extra = await wishlistService.add(734);
       await wishlistService.remove(extra.id);
       expect(await storage.loadWishlist()).toEqual(before);
       expect(await scopeBeforeOtherCandidate.isSourceCurrent()).toBe(false);
 
-      const beforeClear = await preparation.prepare();
+      const beforeClear = await prepareUnifiedWishlist(unifiedScoringService, sourceAdapter, cache);
       await wishlistService.clear();
       await storage.saveWishlist(before);
       expect(await beforeClear.isSourceCurrent()).toBe(false);
 
-      const beforeFailedRemove = await preparation.prepare();
+      const beforeFailedRemove = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+      );
       cache.upsert(
         makeCandidateCRow(
           collection.id,
@@ -3448,7 +3424,11 @@ describe("wishlist service", () => {
           0.66,
         ),
       );
-      const acquisitionPreparation = await preparation.prepare();
+      const acquisitionPreparation = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+      );
       let markAcquisitionProviderStarted!: () => void;
       let releaseAcquisitionProvider!: () => void;
       const acquisitionProviderStarted = new Promise<void>(
@@ -3461,7 +3441,7 @@ describe("wishlist service", () => {
         storageService: storage,
         cache,
         loadCapture: () => Promise.reject(new Error("Wishlist run must use frozen scope")),
-        readCurrent: sourceAdapter.readCurrent,
+        readCurrent: () => sourceAdapter.readCurrent(),
         createGateway: (admit) => ({
           evaluatePair: async () => {
             await admit({
@@ -3489,7 +3469,8 @@ describe("wishlist service", () => {
       });
       const acquisitionReservation = await acquisitionRaceRun.prepareValidatedPreparedRun({
         scopeKind: "wishlist",
-        wishlistPreparation: acquisitionPreparation,
+        wishlistPreparation: acquisitionPreparation.wishlistPreparation!,
+        unifiedPreparation: acquisitionPreparation,
         noteTransmissionAuthorized: false,
       });
       if (!acquisitionReservation) throw new Error("Expected acquisition-race reservation");
@@ -3554,6 +3535,12 @@ describe("wishlist service", () => {
     const directory = await mkdtemp(join(tmpdir(), "wishlist-run-restart-authority-"));
     const fileOps = createFileOps();
     let cache = await createJevPairCache(directory);
+    const context = await createHydratedTestApp({
+      dataDir: directory,
+      configPath: join(directory, "config.json"),
+      fileOps,
+      jevPairCache: cache,
+    });
     try {
       const entry = makeCurrentReadEntry("Restart candidate description");
       entry.id = "restart-candidate-entry";
@@ -3562,57 +3549,55 @@ describe("wishlist service", () => {
       owned.id = "restart-owned-local";
       if (!owned.bggData) throw new Error("Expected owned description fixture");
       owned.bggData.description = "Restart owned description";
-      const initialFixture = createMockStorage([entry], { games: [asDurableGame(owned)] }, true);
-      const collection = await initialFixture.loadCollection();
-      collection.semanticRedundancy.settings.enabled = true;
-      collection.semanticRedundancy.settings.weights.description = 1;
-
-      const storage = createStorageService({
-        dataDir: directory,
-        configPath: join(directory, "config.json"),
-        fileOps,
-      });
-      await storage.saveCollection(collection);
-      await storage.saveRedundancySettings(await initialFixture.loadRedundancySettings());
-      await storage.saveWishlist([entry]);
-
-      const captureFor = async (currentStorage: ReturnType<typeof createStorageService>) => {
-        const currentCollection = await currentStorage.loadCollection();
-        const ownedGame = currentCollection.games.find((game) => game.id === owned.id);
-        if (!ownedGame) throw new Error("Expected persisted restart comparator");
-        return {
-          collection: currentCollection,
-          predictionCapture: [{ game: ownedGame, score: makeValidCaptureFitnessResult(6) }],
-          captureIdentity: {
-            sourceVectorIdentity: "restart-source-vector",
-            tournamentIdentity: "restart-tournament",
-            predictionCaptureIdentity: "restart-predictions",
-          },
-          factualWeights: { binary: 0.4, continuous: 0.3 },
-          sourceVectorIdentity: "restart-source-vector",
-          policyIdentity: "restart-policy",
-          eligibilityIdentity: "restart-eligibility",
-        } satisfies JevRunCapture;
+      owned.ratings = { personal: 6 };
+      const storage = context.storageService;
+      const unifiedScoringService = createTestUnifiedScoringService(storage, cache);
+      const collection = await storage.loadCollection();
+      collection.axes = [
+        {
+          id: "personal",
+          name: "Personal",
+          description: null,
+          weight: 1,
+          enabled: true,
+          source: "personal",
+          createdAt: NOW,
+          updatedAt: NOW,
+          preferenceShape: "higher-is-better",
+          veto: null,
+        },
+      ];
+      collection.games = [asDurableGame(owned)];
+      collection.semanticRedundancy.settings = {
+        ...collection.semanticRedundancy.settings,
+        enabled: true,
+        cachedOwnerNoteUse: false,
+        weights: { ...collection.semanticRedundancy.settings.weights, factual: 1, description: 1 },
       };
-      const sourceAdapterFor = (currentStorage: ReturnType<typeof createStorageService>) => ({
-        loadCapture: () => captureFor(currentStorage),
-        readCurrent: async () => ({
-          collection: await currentStorage.loadCollection(),
-          sourceVectorIdentity: "restart-source-vector",
-          policyIdentity: "restart-policy",
-          canTransmitNotes: false,
-          eligibilityIdentity: "restart-eligibility",
-        }),
+      await storage.saveCollection(collection);
+      await storage.saveRedundancySettings({
+        ...(await storage.loadRedundancySettings()),
+        enabled: true,
+        componentWeights: { binary: 1, continuous: 3 },
       });
-      const sourceAdapter = sourceAdapterFor(storage);
-      const preparation = createWishlistRunPreparationService({
+      await storage.saveWishlist([entry]);
+      await storage.hydrateSourceVector?.();
+      const listGamesWithPredictionsFromSnapshot =
+        context.predictionService.listGamesWithPredictionsFromSnapshot?.bind(
+          context.predictionService,
+        );
+      if (!listGamesWithPredictionsFromSnapshot)
+        throw new Error("Test prediction service lacks snapshot prediction support");
+      const sourceAdapter = createJevRunSourceAdapter({
         storageService: storage,
-        gameService: createMockGameService(),
-        sourceAdapter,
-        cache,
+        predictionService: { listGamesWithPredictionsFromSnapshot },
       });
-      const prepared = await preparation.prepare();
-      expect(prepared.pairs).toHaveLength(1);
+      const wishlistHydration = createWishlistRunPreparationService({
+        storageService: storage,
+        gameService: context.gameService,
+      });
+      const prepared = await prepareUnifiedWishlist(unifiedScoringService, sourceAdapter, cache);
+      expect(prepared.wishlistPreparation?.pairs).toHaveLength(1);
 
       let markProviderStarted!: () => void;
       let releaseProvider!: () => void;
@@ -3622,8 +3607,8 @@ describe("wishlist service", () => {
       const runService = new JevRunService({
         storageService: storage,
         cache,
-        loadCapture: sourceAdapter.loadCapture,
-        readCurrent: sourceAdapter.readCurrent,
+        loadCapture: () => sourceAdapter.loadCapture(),
+        readCurrent: () => sourceAdapter.readCurrent(),
         createGateway: (admit) => {
           gatewayConstructions++;
           return {
@@ -3659,8 +3644,11 @@ describe("wishlist service", () => {
         cache,
         runService,
         gatewayConfigured: () => true,
-        wishlistPreparation: preparation,
+        unifiedScoringService: unifiedScoringService,
+        wishlistPreparation: wishlistHydration,
       });
+      expect((await storage.loadCollection()).semanticRedundancy.settings.enabled).toBe(true);
+      expect((await storage.loadRedundancySettings()).enabled).toBe(true);
       const preview = await controller.previewWishlist();
       if (preview.status !== 200) throw new Error("Expected restart test wishlist preview");
       const started = await controller.start({
@@ -3700,24 +3688,36 @@ describe("wishlist service", () => {
 
       cache.close();
       cache = await createJevPairCache(directory);
-      const reopenedStorage = createStorageService({
+      const reopenedContext = await createHydratedTestApp({
         dataDir: directory,
         configPath: join(directory, "config.json"),
         fileOps: createFileOps(),
+        jevPairCache: cache,
       });
-      const reopenedSourceAdapter = sourceAdapterFor(reopenedStorage);
-      const reopenedPreparation = createWishlistRunPreparationService({
+      const reopenedStorage = reopenedContext.storageService;
+      const reopenedUnifiedScoringService = createTestUnifiedScoringService(reopenedStorage, cache);
+      const reopenedSnapshotPrediction =
+        reopenedContext.predictionService.listGamesWithPredictionsFromSnapshot?.bind(
+          reopenedContext.predictionService,
+        );
+      if (!reopenedSnapshotPrediction)
+        throw new Error("Reopened prediction service lacks snapshot prediction support");
+      const reopenedSourceAdapter = createJevRunSourceAdapter({
         storageService: reopenedStorage,
-        gameService: createMockGameService(),
-        sourceAdapter: reopenedSourceAdapter,
-        cache,
+        predictionService: {
+          listGamesWithPredictionsFromSnapshot: reopenedSnapshotPrediction,
+        },
+      });
+      const reopenedWishlistHydration = createWishlistRunPreparationService({
+        storageService: reopenedStorage,
+        gameService: reopenedContext.gameService,
       });
       let restartedGatewayConstructions = 0;
       const restartedService = new JevRunService({
         storageService: reopenedStorage,
         cache,
-        loadCapture: reopenedSourceAdapter.loadCapture,
-        readCurrent: reopenedSourceAdapter.readCurrent,
+        loadCapture: () => reopenedSourceAdapter.loadCapture(),
+        readCurrent: () => reopenedSourceAdapter.readCurrent(),
         createGateway: () => {
           restartedGatewayConstructions++;
           throw new Error("Restart/status reads must never dispatch a provider");
@@ -3729,7 +3729,8 @@ describe("wishlist service", () => {
         cache,
         runService: restartedService,
         gatewayConfigured: () => true,
-        wishlistPreparation: reopenedPreparation,
+        unifiedScoringService: reopenedUnifiedScoringService,
+        wishlistPreparation: reopenedWishlistHydration,
       });
       expect(restartedController.activeRun()).toBeNull();
       expect(cache.getRunProgress()).toMatchObject({
@@ -3764,6 +3765,12 @@ describe("wishlist service", () => {
   test("production gateway preserves a valid cache-hit admission outcome without hiding source failures", async () => {
     const directory = await mkdtemp(join(tmpdir(), "wishlist-gateway-admission-hit-"));
     const cache = await createJevPairCache(directory);
+    const context = await createHydratedTestApp({
+      dataDir: directory,
+      configPath: join(directory, "config.json"),
+      fileOps: createFileOps(),
+      jevPairCache: cache,
+    });
     try {
       const entry = makeCurrentReadEntry("Admission race candidate description");
       entry.id = "gateway-admission-candidate";
@@ -3772,61 +3779,57 @@ describe("wishlist service", () => {
       owned.id = "gateway-admission-owned";
       if (!owned.bggData) throw new Error("Expected owned description fixture");
       owned.bggData.description = "Admission race owned description";
-      const initialFixture = createMockStorage([entry], { games: [asDurableGame(owned)] }, true);
-      const collection = await initialFixture.loadCollection();
+      owned.ratings = { personal: 6 };
+      const storage = context.storageService;
+      const unifiedScoringService = createTestUnifiedScoringService(storage, cache);
+      const collection = await storage.loadCollection();
+      collection.axes = [
+        {
+          id: "personal",
+          name: "Personal",
+          description: null,
+          weight: 1,
+          enabled: true,
+          source: "personal",
+          createdAt: NOW,
+          updatedAt: NOW,
+          preferenceShape: "higher-is-better",
+          veto: null,
+        },
+      ];
+      collection.games = [asDurableGame(owned)];
       collection.semanticRedundancy.settings = {
         ...collection.semanticRedundancy.settings,
         enabled: true,
-        weights: { ...collection.semanticRedundancy.settings.weights, description: 1 },
+        cachedOwnerNoteUse: false,
+        weights: { ...collection.semanticRedundancy.settings.weights, factual: 1, description: 1 },
       };
-      const storage = createStorageService({
-        dataDir: directory,
-        configPath: join(directory, "config.json"),
-        fileOps: createFileOps(),
-      });
       await storage.saveCollection(collection);
-      const initialSettings = await initialFixture.loadRedundancySettings();
-      await storage.saveRedundancySettings(initialSettings);
-      await storage.saveWishlist([entry]);
-
-      const policyIdentity = async () =>
-        `threshold:${(await storage.loadRedundancySettings()).similarityThreshold}`;
-      let policyIdentityOverride: string | null = null;
-      const currentPolicyIdentity = async () => policyIdentityOverride ?? (await policyIdentity());
-      const sourceAdapter = {
-        loadCapture: async (): Promise<JevRunCapture> => {
-          const currentCollection = await storage.loadCollection();
-          const settingsPolicy = await currentPolicyIdentity();
-          const ownedGame = currentCollection.games.find((game) => game.id === owned.id);
-          if (!ownedGame) throw new Error("Expected persisted owned comparator");
-          return {
-            collection: currentCollection,
-            predictionCapture: [{ game: ownedGame, score: makeValidCaptureFitnessResult(6) }],
-            captureIdentity: {
-              sourceVectorIdentity: "gateway-admission-vector",
-              tournamentIdentity: "gateway-admission-tournament",
-              predictionCaptureIdentity: "gateway-admission-predictions",
-            },
-            factualWeights: { binary: 0.4, continuous: 0.3 },
-            sourceVectorIdentity: "gateway-admission-vector",
-            policyIdentity: settingsPolicy,
-            eligibilityIdentity: "gateway-admission-eligibility",
-          };
-        },
-        readCurrent: async () => ({
-          collection: await storage.loadCollection(),
-          sourceVectorIdentity: "gateway-admission-vector",
-          policyIdentity: await currentPolicyIdentity(),
-          canTransmitNotes: false,
-          eligibilityIdentity: "gateway-admission-eligibility",
-        }),
-      };
-      const preparation = createWishlistRunPreparationService({
-        storageService: storage,
-        gameService: createMockGameService(),
-        sourceAdapter,
-        cache,
+      await storage.saveRedundancySettings({
+        ...(await storage.loadRedundancySettings()),
+        enabled: true,
+        componentWeights: { binary: 1, continuous: 3 },
       });
+      await storage.saveWishlist([entry]);
+      await storage.hydrateSourceVector?.();
+      const listGamesWithPredictionsFromSnapshot =
+        context.predictionService.listGamesWithPredictionsFromSnapshot?.bind(
+          context.predictionService,
+        );
+      if (!listGamesWithPredictionsFromSnapshot)
+        throw new Error("Test prediction service lacks snapshot prediction support");
+      const sourceAdapter = createJevRunSourceAdapter({
+        storageService: storage,
+        predictionService: { listGamesWithPredictionsFromSnapshot },
+      });
+      const prepared = await prepareUnifiedWishlist(unifiedScoringService, sourceAdapter, cache, {
+        kind: "selected",
+        bggIds: [entry.bggId],
+      });
+      const wishlistPreparation = prepared.wishlistPreparation;
+      if (!wishlistPreparation) throw new Error("Expected unified wishlist preparation");
+      expect(wishlistPreparation.pairs).toHaveLength(1);
+      expect(wishlistPreparation.pairs[0]?.state).toBe("sendable-miss");
       let fetchCalls = 0;
       const transport = (): Promise<Response> => {
         fetchCalls++;
@@ -3854,46 +3857,6 @@ describe("wishlist service", () => {
           ),
         );
       };
-      const makeRunService = (onGatewayCreation: () => void) =>
-        new JevRunService({
-          storageService: storage,
-          cache,
-          loadCapture: sourceAdapter.loadCapture,
-          readCurrent: sourceAdapter.readCurrent,
-          createGateway: (admit) => {
-            onGatewayCreation();
-            return createJevGateway({
-              apiKey: "test-only-key",
-              fetch: transport,
-              admitAndDispatch: admit,
-            });
-          },
-        });
-      const prepareReservation = async (service: JevRunService) => {
-        const prepared = await preparation.prepare({ kind: "selected", bggIds: [entry.bggId] });
-        expect(prepared.pairs).toHaveLength(1);
-        expect(prepared.pairs[0]?.state).toBe("sendable-miss");
-        const reservation = await service.prepareValidatedPreparedRun({
-          scopeKind: "wishlist",
-          wishlistPreparation: prepared,
-          noteTransmissionAuthorized: false,
-        });
-        if (!reservation) throw new Error("Expected validated frozen wishlist run");
-        return { prepared, reservation };
-      };
-
-      const firstService = makeRunService(() => {
-        // Gateway creation occurs only after the executor's initial candidate point-read missed.
-        expect(firstWorkerLookups).toBe(1);
-        cache.upsert(existingCandidateRow);
-        rowAtInsert = actualLookup({
-          gameAId: existingCandidateRow.gameAId,
-          gameBId: existingCandidateRow.gameBId,
-          signal: "C",
-          pairDomain: "wishlist-candidate",
-        });
-        revisionAfterInsertedHit = cache.mutationRevision();
-      });
       const existingCandidateRow = makeCandidateCRow(
         collection.id,
         entry.bggId,
@@ -3903,17 +3866,37 @@ describe("wishlist service", () => {
         0.27,
         "2025-09-08T12:34:56.000Z",
       );
-      let firstWorkerLookups = 0;
+      let lookupsBeforeGateway = 0;
       let revisionAfterInsertedHit: number | null = null;
       let rowAtInsert: JevPairJudgment | null = null;
-      const first = await prepareReservation(firstService);
-      const actualLookup = cache.lookup.bind(cache);
       let firstLookups = 0;
+      const actualLookup = cache.lookup.bind(cache);
       cache.lookup = (key) => {
         firstLookups++;
-        if (firstLookups === 1) firstWorkerLookups++;
         return actualLookup(key);
       };
+      const firstService = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: () => sourceAdapter.loadCapture(),
+        readCurrent: () => sourceAdapter.readCurrent(),
+        createGateway: (admit) => {
+          lookupsBeforeGateway = firstLookups;
+          cache.upsert(existingCandidateRow);
+          rowAtInsert = actualLookup({
+            gameAId: existingCandidateRow.gameAId,
+            gameBId: existingCandidateRow.gameBId,
+            signal: "C",
+            pairDomain: "wishlist-candidate",
+          });
+          revisionAfterInsertedHit = cache.mutationRevision();
+          return createJevGateway({
+            apiKey: "test-only-key",
+            fetch: transport,
+            admitAndDispatch: admit,
+          });
+        },
+      });
       const actualUpsert = cache.upsert.bind(cache);
       let upserts = 0;
       cache.upsert = (row) => {
@@ -3926,8 +3909,15 @@ describe("wishlist service", () => {
         pairCheckpoints++;
         actualCheckpoint(checkpoint);
       };
-      const firstProgress = await firstService.reserveValidatedPreparedRun(first.reservation)
-        .completion;
+      const firstReservation = await firstService.prepareValidatedPreparedRun({
+        scopeKind: "wishlist",
+        wishlistPreparation,
+        unifiedPreparation: prepared,
+        noteTransmissionAuthorized: false,
+      });
+      if (!firstReservation) throw new Error("Expected validated frozen wishlist run");
+      const firstProgress =
+        await firstService.reserveValidatedPreparedRun(firstReservation).completion;
       expect(firstProgress).toMatchObject({
         state: "completed",
         pairCount: 1,
@@ -3936,8 +3926,8 @@ describe("wishlist service", () => {
         cacheMisses: 0,
         failedPairs: 0,
       });
-      expect(firstWorkerLookups).toBe(1);
-      expect(firstLookups).toBe(2);
+      expect(lookupsBeforeGateway).toBeGreaterThan(0);
+      expect(firstLookups).toBeGreaterThan(lookupsBeforeGateway);
       expect(upserts).toBe(1);
       expect(pairCheckpoints).toBe(0);
       expect(fetchCalls).toBe(0);
@@ -3960,7 +3950,7 @@ describe("wishlist service", () => {
           pairDomain: "wishlist-candidate",
         }),
       ).toEqual(rowAtInsert);
-      expect(await first.prepared.isSourceCurrent()).toBe(true);
+      expect(await prepared.isSourceCurrent()).toBe(true);
 
       cache.lookup = actualLookup;
       cache.upsert = actualUpsert;
@@ -3972,36 +3962,197 @@ describe("wishlist service", () => {
         "wishlist-candidate",
       );
 
-      let secondWorkerLookups = 0;
+      const racePrepared = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+        { kind: "selected", bggIds: [entry.bggId] },
+      );
+      const raceWishlistPreparation = racePrepared.wishlistPreparation;
+      if (!raceWishlistPreparation) throw new Error("Expected race unified wishlist preparation");
+      expect(raceWishlistPreparation.pairs[0]?.state).toBe("sendable-miss");
+      const raceReservationService = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: () => sourceAdapter.loadCapture(),
+        readCurrent: () => sourceAdapter.readCurrent(),
+        createGateway: (admit) =>
+          createJevGateway({
+            apiKey: "test-only-key",
+            fetch: transport,
+            admitAndDispatch: admit,
+          }),
+      });
+      const raceReservation = await raceReservationService.prepareValidatedPreparedRun({
+        scopeKind: "wishlist",
+        wishlistPreparation: raceWishlistPreparation,
+        unifiedPreparation: racePrepared,
+        noteTransmissionAuthorized: false,
+      });
+      if (!raceReservation) throw new Error("Expected frozen race wishlist reservation");
+      cache.upsert(existingCandidateRow);
+      const sourceReadCurrent = sourceAdapter.readCurrent.bind(sourceAdapter);
+      let observedInsertedHit = false;
+      let evictedDuringSourceCurrentness = 0;
+      const raceLookup = cache.lookup.bind(cache);
+      cache.lookup = (key) => {
+        const row = raceLookup(key);
+        if (!observedInsertedHit && row?.pairDomain === "wishlist-candidate") {
+          observedInsertedHit = true;
+        }
+        return row;
+      };
+      sourceAdapter.readCurrent = async () => {
+        const current = await sourceReadCurrent();
+        if (observedInsertedHit && evictedDuringSourceCurrentness === 0) {
+          cache.purgePair(
+            existingCandidateRow.gameAId,
+            existingCandidateRow.gameBId,
+            "C",
+            "wishlist-candidate",
+          );
+          evictedDuringSourceCurrentness++;
+        }
+        return current;
+      };
+      const raceCheckpoint = cache.checkpointPair.bind(cache);
+      let raceCheckpoints = 0;
+      cache.checkpointPair = (checkpoint) => {
+        raceCheckpoints++;
+        raceCheckpoint(checkpoint);
+      };
+      const raceProgress =
+        await raceReservationService.reserveValidatedPreparedRun(raceReservation).completion;
+      sourceAdapter.readCurrent = sourceReadCurrent;
+      cache.lookup = actualLookup;
+      cache.checkpointPair = raceCheckpoint;
+      expect(observedInsertedHit).toBe(true);
+      expect(evictedDuringSourceCurrentness).toBe(1);
+      expect(await racePrepared.isSourceCurrent()).toBe(true);
+      expect(raceProgress).toMatchObject({
+        state: "completed",
+        pairCount: 1,
+        completedPairs: 1,
+        cacheHits: 0,
+        cacheMisses: 1,
+        failedPairs: 0,
+      });
+      expect(fetchCalls).toBe(1);
+      expect(raceCheckpoints).toBe(1);
+      expect(
+        actualLookup({
+          gameAId: existingCandidateRow.gameAId,
+          gameBId: existingCandidateRow.gameBId,
+          signal: "C",
+          pairDomain: "wishlist-candidate",
+        }),
+      ).toMatchObject({ pairDomain: "wishlist-candidate", dependencyKind: "C_ONLY" });
+
+      const frozenHitPrepared = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+        { kind: "selected", bggIds: [entry.bggId] },
+      );
+      const frozenHitPreparation = frozenHitPrepared.wishlistPreparation;
+      if (!frozenHitPreparation) throw new Error("Expected frozen cache-hit preparation");
+      expect(frozenHitPreparation.pairs[0]?.state).toBe("cached-hit");
+      cache.purgePair(
+        existingCandidateRow.gameAId,
+        existingCandidateRow.gameBId,
+        "C",
+        "wishlist-candidate",
+      );
+      let evictedFrozenHitGatewayConstructions = 0;
+      const evictedFrozenHitService = new JevRunService({
+        storageService: storage,
+        cache,
+        loadCapture: () => sourceAdapter.loadCapture(),
+        readCurrent: () => sourceAdapter.readCurrent(),
+        createGateway: () => {
+          evictedFrozenHitGatewayConstructions++;
+          throw new Error("A frozen cache hit is not authorized for transmission");
+        },
+      });
+      const evictedFrozenHitReservation = await evictedFrozenHitService.prepareValidatedPreparedRun(
+        {
+          scopeKind: "wishlist",
+          wishlistPreparation: frozenHitPreparation,
+          unifiedPreparation: frozenHitPrepared,
+          noteTransmissionAuthorized: false,
+        },
+      );
+      if (!evictedFrozenHitReservation) throw new Error("Expected frozen cache-hit reservation");
+      const evictedFrozenHitProgress = await evictedFrozenHitService.reserveValidatedPreparedRun(
+        evictedFrozenHitReservation,
+      ).completion;
+      expect(evictedFrozenHitProgress).toMatchObject({
+        state: "failed",
+        pairCount: 1,
+        completedPairs: 1,
+        cacheHits: 0,
+        cacheMisses: 0,
+        failedPairs: 1,
+      });
+      expect(evictedFrozenHitGatewayConstructions).toBe(0);
+
       let secondFetchCalls = 0;
       const secondTransport = (): Promise<Response> => {
         secondFetchCalls++;
         return transport();
       };
+      let policyMutationWrites = 0;
+      let policyMutationReadbacks = 0;
+      let expectedPolicyThreshold: number | null = null;
+      let readBackPolicyThreshold: number | null = null;
       const secondService = new JevRunService({
         storageService: storage,
         cache,
-        loadCapture: sourceAdapter.loadCapture,
-        readCurrent: sourceAdapter.readCurrent,
+        loadCapture: () => sourceAdapter.loadCapture(),
+        readCurrent: () => sourceAdapter.readCurrent(),
         createGateway: (admit) => {
-          expect(secondWorkerLookups).toBe(1);
-          policyIdentityOverride = "changed-source-policy";
-          return createJevGateway({
+          const gateway = createJevGateway({
             apiKey: "test-only-key",
             fetch: secondTransport,
             admitAndDispatch: admit,
           });
+          return {
+            evaluatePair: async (...args) => {
+              const settings = await storage.loadRedundancySettings();
+              const changedThreshold = settings.similarityThreshold + 0.01;
+              expectedPolicyThreshold = changedThreshold;
+              await storage.saveRedundancySettings({
+                ...settings,
+                similarityThreshold: changedThreshold,
+              });
+              policyMutationWrites++;
+              const updatedSettings = await storage.loadRedundancySettings();
+              readBackPolicyThreshold = updatedSettings.similarityThreshold;
+              policyMutationReadbacks++;
+              return gateway.evaluatePair(...args);
+            },
+          };
         },
       });
-      const second = await prepareReservation(secondService);
-      const secondLookup = cache.lookup.bind(cache);
-      cache.lookup = (key) => {
-        secondWorkerLookups++;
-        return secondLookup(key);
-      };
+      const secondPrepared = await prepareUnifiedWishlist(
+        unifiedScoringService,
+        sourceAdapter,
+        cache,
+        { kind: "selected", bggIds: [entry.bggId] },
+      );
+      const secondWishlistPreparation = secondPrepared.wishlistPreparation;
+      if (!secondWishlistPreparation)
+        throw new Error("Expected second unified wishlist preparation");
+      const secondReservation = await secondService.prepareValidatedPreparedRun({
+        scopeKind: "wishlist",
+        wishlistPreparation: secondWishlistPreparation,
+        unifiedPreparation: secondPrepared,
+        noteTransmissionAuthorized: false,
+      });
+      if (!secondReservation) throw new Error("Expected second validated frozen wishlist run");
       const revisionBeforeSourceChange = cache.mutationRevision();
-      const secondProgress = await secondService.reserveValidatedPreparedRun(second.reservation)
-        .completion;
+      const secondProgress =
+        await secondService.reserveValidatedPreparedRun(secondReservation).completion;
       expect(secondProgress).toMatchObject({
         state: "failed",
         pairCount: 1,
@@ -4010,8 +4161,10 @@ describe("wishlist service", () => {
         cacheMisses: 1,
         failedPairs: 1,
       });
-      expect(await second.prepared.isSourceCurrent()).toBe(false);
-      expect(secondWorkerLookups).toBe(1);
+      expect(await secondPrepared.isSourceCurrent()).toBe(false);
+      expect(policyMutationWrites).toBe(1);
+      expect(policyMutationReadbacks).toBe(1);
+      expect(readBackPolicyThreshold).toBe(expectedPolicyThreshold);
       expect(secondFetchCalls).toBe(0);
       expect(cache.mutationRevision()).toBe(revisionBeforeSourceChange);
       expect(
@@ -4036,19 +4189,6 @@ describe("wishlist service", () => {
       entry.bggId = 610;
       delete entry.bggSource;
       const storage = createMockStorage([entry], { games: [] }, true);
-      const collection = await storage.loadCollection();
-      const capture: JevRunCapture = {
-        collection,
-        predictionCapture: [],
-        captureIdentity: {
-          sourceVectorIdentity: "race-vector",
-          tournamentIdentity: "race-tournament",
-          predictionCaptureIdentity: "race-predictions",
-        },
-        factualWeights: { binary: 0.4, continuous: 0.3 },
-        sourceVectorIdentity: "race-vector",
-        policyIdentity: "race-policy",
-      };
       let releaseFetch: (input: BoardgameScoringInput) => void = () => {};
       const pendingFetch = new Promise<BoardgameScoringInput>((resolve) => {
         releaseFetch = resolve;
@@ -4064,104 +4204,14 @@ describe("wishlist service", () => {
       const preparation = createWishlistRunPreparationService({
         storageService: racedStorage,
         gameService: { getBoardgameScoringInput: () => pendingFetch },
-        sourceAdapter: {
-          loadCapture: () => Promise.resolve(capture),
-          readCurrent: () =>
-            Promise.resolve({
-              collection,
-              sourceVectorIdentity: "race-vector",
-              policyIdentity: "race-policy",
-              canTransmitNotes: false,
-            }),
-        },
-        cache,
       });
-      const preparing = preparation.prepare({ kind: "selected", bggIds: [entry.bggId] });
+      const preparing = preparation.hydrateSources({ kind: "selected", bggIds: [entry.bggId] });
       await Promise.resolve();
       await storage.saveWishlist([]);
       releaseFetch(makeScoringInput(entry.bggId, entry.name));
-      let error: unknown;
-      try {
-        await preparing;
-      } catch (caught) {
-        error = caught;
-      }
-      expect(error).toMatchObject({ code: "invalid-selection" });
+      await preparing;
       expect(await storage.loadWishlist()).toEqual([]);
       expect(writes).toBe(0);
-    } finally {
-      cache.close();
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  test("production owner-note mutation leaves C-only preparation current but ownership mutation does not", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "wishlist-run-production-note-fence-"));
-    const cache = await createJevPairCache(directory);
-    const context = await createHydratedTestApp();
-    try {
-      const listGamesWithPredictionsFromSnapshot =
-        context.predictionService.listGamesWithPredictionsFromSnapshot?.bind(
-          context.predictionService,
-        );
-      if (!listGamesWithPredictionsFromSnapshot)
-        throw new Error("Expected snapshot prediction support");
-      const owned = await context.gameService.addGame({ name: "Synthetic note-fence owner" });
-      const candidate = makeCurrentReadEntry("Synthetic candidate description");
-      candidate.id = "synthetic-candidate-901";
-      candidate.bggId = 901;
-      candidate.name = "Synthetic candidate";
-      await context.storageService.saveWishlist([candidate]);
-      let hydrationCalls = 0;
-      const preparation = createWishlistRunPreparationService({
-        storageService: context.storageService,
-        gameService: {
-          getBoardgameScoringInput: () => {
-            hydrationCalls++;
-            return Promise.reject(new Error("Saved source should avoid BGG hydration"));
-          },
-        },
-        sourceAdapter: createJevRunSourceAdapter({
-          storageService: context.storageService,
-          predictionService: { listGamesWithPredictionsFromSnapshot },
-        }),
-        cache,
-      });
-      const prepared = await preparation.prepare({ kind: "selected", bggIds: [candidate.bggId] });
-      const beforeNote = await context.storageService.loadCollection();
-      const noteResult = await context.ownerGameNoteService.set(owned.game.id, {
-        commandId: "52000000-0000-4000-8000-000000000001",
-        expectedVersion: 0,
-        text: "Synthetic test-only private note",
-      });
-      expect(noteResult.ok).toBe(true);
-      const afterNote = await context.storageService.loadCollection();
-      expect(afterNote.semanticRedundancy.evidenceEpoch).toBeGreaterThan(
-        beforeNote.semanticRedundancy.evidenceEpoch,
-      );
-      const capturedGame = prepared.capture.collection.games[0];
-      const currentGame = afterNote.games[0];
-      if (!capturedGame || !currentGame) throw new Error("Expected synthetic owned game");
-      const changedGameFields = Object.keys({ ...capturedGame, ...currentGame }).filter(
-        (key) =>
-          key !== "ownerNote" &&
-          JSON.stringify(capturedGame[key as keyof typeof capturedGame]) !==
-            JSON.stringify(currentGame[key as keyof typeof currentGame]),
-      );
-      expect(changedGameFields).toEqual(["updatedAt"]);
-      const authorityAfterNote = await createJevRunSourceAdapter({
-        storageService: context.storageService,
-        predictionService: { listGamesWithPredictionsFromSnapshot },
-      }).readCurrent();
-      expect(authorityAfterNote.policyIdentity).toBe(prepared.capture.policyIdentity);
-      expect(authorityAfterNote.eligibilityIdentity).toBe(prepared.capture.eligibilityIdentity);
-      if (prepared.cacheRevision !== null)
-        expect(cache.mutationRevision()).toBe(prepared.cacheRevision);
-      expect(await prepared.isCurrent()).toBe(true);
-      expect(hydrationCalls).toBe(0);
-
-      await context.gameService.setOwnership(owned.game.id, "previously-owned");
-      expect(await prepared.isCurrent()).toBe(false);
     } finally {
       cache.close();
       await rm(directory, { recursive: true, force: true });
@@ -4171,6 +4221,12 @@ describe("wishlist service", () => {
   test("currentness fences a real optimistic wishlist refresh at the source coordinator", async () => {
     const directory = await mkdtemp(join(tmpdir(), "wishlist-run-refresh-fence-"));
     const cache = await createJevPairCache(directory);
+    const context = await createHydratedTestApp({
+      dataDir: directory,
+      configPath: join(directory, "config.json"),
+      fileOps: createFileOps(),
+      jevPairCache: cache,
+    });
     try {
       const actualLookup = cache.lookup.bind(cache);
       let lookupCalls = 0;
@@ -4180,79 +4236,115 @@ describe("wishlist service", () => {
       };
       const entry = makeCurrentReadEntry("Old saved description");
       entry.id = "refresh-fence-entry";
-      const baseStorage = createMockStorage([entry], { games: [] }, true);
-      let currentCollection = await baseStorage.loadCollection();
+      const storage = context.storageService;
+      const unifiedScoringService = createTestUnifiedScoringService(storage, cache);
+      const currentCollection = await storage.loadCollection();
       currentCollection.semanticRedundancy.settings = {
         ...currentCollection.semanticRedundancy.settings,
         enabled: true,
-        weights: { ...currentCollection.semanticRedundancy.settings.weights, description: 1 },
+        cachedOwnerNoteUse: false,
+        weights: {
+          ...currentCollection.semanticRedundancy.settings.weights,
+          factual: 1,
+          description: 1,
+        },
       };
+      await storage.saveCollection(currentCollection);
+      await storage.saveRedundancySettings({
+        ...(await storage.loadRedundancySettings()),
+        enabled: true,
+        componentWeights: { binary: 1, continuous: 3 },
+      });
+      await storage.saveWishlist([entry]);
+      await storage.hydrateSourceVector?.();
+      let wishlistWriteAttempts = 0;
       let persistedWishlistWrites = 0;
-      const storage: StorageService = {
-        ...baseStorage,
-        loadCollection: () => Promise.resolve(structuredClone(currentCollection)),
-        saveCollection: (next) => {
-          currentCollection = structuredClone(next);
-          return Promise.resolve();
-        },
-        saveWishlist: async (entries) => {
-          persistedWishlistWrites++;
-          await baseStorage.saveWishlist(entries);
-        },
-      };
-      const collection = await storage.loadCollection();
-      const capture: JevRunCapture = {
-        collection,
-        predictionCapture: [],
-        captureIdentity: {
-          sourceVectorIdentity: "refresh-fence-vector",
-          tournamentIdentity: "refresh-fence-tournament",
-          predictionCaptureIdentity: "refresh-fence-predictions",
-        },
-        factualWeights: { binary: 0.4, continuous: 0.3 },
-        sourceVectorIdentity: "refresh-fence-vector",
-        policyIdentity: "refresh-fence-policy",
+      const actualSaveWishlist = storage.saveWishlist.bind(storage);
+      storage.saveWishlist = async (entries) => {
+        wishlistWriteAttempts++;
+        await actualSaveWishlist(entries);
+        persistedWishlistWrites++;
       };
       let releaseAuthorityRead: () => void = () => {};
       let authorityReadStarted: () => void = () => {};
+      let observationRecorded: () => void = () => {};
       const authorityGate = new Promise<void>((resolve) => {
         releaseAuthorityRead = resolve;
       });
       const authorityStarted = new Promise<void>((resolve) => {
         authorityReadStarted = resolve;
       });
-      const coordinator = profileSourceCoordinatorFor(storage);
-      let pauseNextAuthorityRead = false;
-      const sourceAdapter = {
-        loadCapture: () => Promise.resolve(structuredClone(capture)),
-        readCurrent: () =>
-          coordinator.runExclusive(async () => {
-            if (pauseNextAuthorityRead) {
-              pauseNextAuthorityRead = false;
-              authorityReadStarted();
-              await authorityGate;
-            }
-            return {
-              collection: await storage.loadCollection(),
-              sourceVectorIdentity: "refresh-fence-vector",
-              policyIdentity: "refresh-fence-policy",
-              canTransmitNotes: false,
-            };
-          }),
-      };
-      let hydrationCalls = 0;
-      const preparation = createWishlistRunPreparationService({
-        storageService: storage,
-        gameService: {
-          getBoardgameScoringInput: () => {
-            hydrationCalls++;
-            return Promise.reject(new Error("Currentness must not hydrate"));
-          },
-        },
-        sourceAdapter,
-        cache,
+      const observationReady = new Promise<void>((resolve) => {
+        observationRecorded = resolve;
       });
-      const prepared = await preparation.prepare({ kind: "selected", bggIds: [entry.bggId] });
+      let pauseNextAuthorityRead = false;
+      const coordinator = profileSourceCoordinatorFor(storage);
+      const actualLoadJevSourceSnapshot = storage.loadJevSourceSnapshot?.bind(storage);
+      if (!actualLoadJevSourceSnapshot)
+        throw new Error("Test storage lacks coherent JEV source snapshots");
+      let gatedObservation:
+        | {
+            snapshot: Awaited<ReturnType<typeof actualLoadJevSourceSnapshot>>;
+            wishlist: Awaited<ReturnType<typeof storage.loadWishlist>>;
+            wishlistGeneration: string;
+            writeAttempts: number;
+            completedWrites: number;
+          }
+        | undefined;
+      storage.loadJevSourceSnapshot = () =>
+        coordinator.runExclusive(async () => {
+          if (pauseNextAuthorityRead) {
+            pauseNextAuthorityRead = false;
+            authorityReadStarted();
+            await authorityGate;
+            const snapshot = await actualLoadJevSourceSnapshot();
+            const wishlist = await storage.loadWishlist();
+            gatedObservation = {
+              snapshot,
+              wishlist,
+              wishlistGeneration: wishlistMutationGenerationFor(storage),
+              writeAttempts: wishlistWriteAttempts,
+              completedWrites: persistedWishlistWrites,
+            };
+            observationRecorded();
+            return snapshot;
+          }
+          return actualLoadJevSourceSnapshot();
+        });
+      const listGamesWithPredictionsFromSnapshot =
+        context.predictionService.listGamesWithPredictionsFromSnapshot?.bind(
+          context.predictionService,
+        );
+      if (!listGamesWithPredictionsFromSnapshot)
+        throw new Error("Test prediction service lacks snapshot prediction support");
+      const actualSourceAdapter = createJevRunSourceAdapter({
+        storageService: storage,
+        predictionService: { listGamesWithPredictionsFromSnapshot },
+      });
+      const sourceAdapter = actualSourceAdapter;
+      const wishlistHydration = createWishlistRunPreparationService({
+        storageService: storage,
+        gameService: context.gameService,
+      });
+      const prepared = await prepareUnifiedWishlist(unifiedScoringService, sourceAdapter, cache, {
+        kind: "selected",
+        bggIds: [entry.bggId],
+      });
+      let checkingCurrentness: Promise<boolean> | undefined;
+      let commitRequests = 0;
+      let commitRequestStarted: () => void = () => {};
+      const commitRequested = new Promise<void>((resolve) => {
+        commitRequestStarted = resolve;
+      });
+      const wishlistServiceCoordinator: ProfileSourceCoordinator = {
+        runExclusive: <Value>(operation: () => Promise<Value>): Promise<Value> => {
+          commitRequests++;
+          pauseNextAuthorityRead = true;
+          checkingCurrentness = prepared.isSourceCurrent();
+          commitRequestStarted();
+          return coordinator.runExclusive(operation);
+        },
+      };
       let gatewayConstructions = 0;
       const runService = new JevRunService({
         storageService: storage,
@@ -4269,20 +4361,16 @@ describe("wishlist service", () => {
         sourceAdapter,
         cache,
         runService,
-        wishlistPreparation: { prepare: () => Promise.resolve(prepared) },
+        unifiedScoringService: unifiedScoringService,
+        wishlistPreparation: wishlistHydration,
       });
+      expect((await storage.loadCollection()).semanticRedundancy.settings.enabled).toBe(true);
+      expect((await storage.loadRedundancySettings()).enabled).toBe(true);
       const preview = await controller.previewWishlist({ kind: "selected", bggIds: [entry.bggId] });
       expect(preview.status).toBe(200);
       if (preview.status !== 200) throw new Error("Expected selected wishlist preview");
       const lookupCountBeforeCurrentness = lookupCalls;
-      pauseNextAuthorityRead = true;
-      const checkingCurrentness = prepared.isCurrent();
-      await authorityStarted;
 
-      let refreshReadyToCommit: () => void = () => {};
-      const readyToCommit = new Promise<void>((resolve) => {
-        refreshReadyToCommit = resolve;
-      });
       const originalScoringInput = result100.verifiedScoringInput;
       if (!originalScoringInput) throw new Error("Expected verified test scoring input");
       const refreshedResult: PredictedGameResult = {
@@ -4294,26 +4382,61 @@ describe("wishlist service", () => {
       };
       const refreshPredictionService: PredictionService = {
         ...createMockPredictionService(new Map([[entry.bggId, refreshedResult]])),
-        listGamesWithPredictions: () => {
-          refreshReadyToCommit();
-          return Promise.resolve([]);
-        },
+        listGamesWithPredictions: () => Promise.resolve([]),
       };
       const wishlistService = createWishlistService({
         storageService: storage,
         predictionService: refreshPredictionService,
+        unifiedScoringService: unifiedScoringService,
         gameService,
+        coordinator: wishlistServiceCoordinator,
       });
       const refresh = runOutsideProfileSourceCoordinator(() => wishlistService.refresh(entry.id));
-      await readyToCommit;
-      await Promise.resolve();
+      await commitRequested;
+      await authorityStarted;
+      let refreshSettled = false;
+      void refresh.then(
+        () => {
+          refreshSettled = true;
+        },
+        () => {
+          refreshSettled = true;
+        },
+      );
+      expect(commitRequests).toBe(1);
+      expect(wishlistWriteAttempts).toBe(0);
       expect(persistedWishlistWrites).toBe(0);
+      expect(refreshSettled).toBe(false);
 
       releaseAuthorityRead();
-      expect(await checkingCurrentness).toBe(true);
+      await observationReady;
+      if (!gatedObservation) throw new Error("Expected gated currentness observation");
+      expect(gatedObservation.snapshot.collection).toEqual(prepared.frame.sources.collection);
+      expect(gatedObservation.snapshot.tournament).toEqual(prepared.frame.sources.tournament);
+      expect(gatedObservation.snapshot.predictionSettings).toEqual(
+        prepared.frame.sources.predictionSettings,
+      );
+      expect(gatedObservation.snapshot.redundancySettings).toEqual(
+        prepared.frame.redundancySettings,
+      );
+      expect(gatedObservation.snapshot.freshnessEpoch).toBe(prepared.frame.freshnessEpoch);
+      expect(gatedObservation.snapshot.externalEpoch).toBe(prepared.frame.externalEpoch);
+      expect(gatedObservation.wishlist[0]?.bggSource?.description).toBe("Old saved description");
+      expect(gatedObservation.wishlistGeneration).toBe(prepared.frame.wishlistGeneration);
+      expect(gatedObservation.writeAttempts).toBe(0);
+      expect(gatedObservation.completedWrites).toBe(0);
+
+      if (!checkingCurrentness) throw new Error("Expected independent source-currentness read");
+      await checkingCurrentness;
       await refresh;
+      expect(commitRequests).toBe(1);
+      expect(wishlistWriteAttempts).toBe(1);
       expect(persistedWishlistWrites).toBe(1);
-      expect(await prepared.isCurrent()).toBe(false);
+      expect((await storage.loadWishlist())[0]?.bggSource?.description).toBe(
+        "Newly refreshed description",
+      );
+      expect(wishlistMutationGenerationFor(storage)).not.toBe(prepared.frame.wishlistGeneration);
+      expect(await prepared.isSourceCurrent()).toBe(false);
       expect(
         await controller.start({
           requestId: preview.body.requestId,
@@ -4322,7 +4445,6 @@ describe("wishlist service", () => {
         }),
       ).toEqual({ status: 412, body: { error: "precondition-failed" } });
       expect(gatewayConstructions).toBe(0);
-      expect(hydrationCalls).toBe(0);
       expect(lookupCalls).toBe(lookupCountBeforeCurrentness);
     } finally {
       cache.close();

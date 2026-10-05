@@ -378,32 +378,11 @@ describe("staged similarity scope and frozen authorization", () => {
         game("local-old", { ownership: "previously-owned", personal: 9 }),
       ],
     });
-    let injectedWishlistPair:
-      | { domain: "wishlist-candidate"; candidateBggId: number; ownedGameId: string }
-      | undefined;
-    let injectedWishlistPairKey: string | undefined;
-    let wishlistMutationResult: boolean | undefined;
     const { result } = setup(
       current,
       { scope: "wishlist", selectedBggIds: [901, 902] },
       (input) => {
         expect(input.pairSimilarities.size).toBe(2);
-        const pair = input.axisPairs[0]?.pair;
-        if (!pair || pair.domain !== "wishlist-candidate")
-          throw new Error("expected wishlist pair");
-        injectedWishlistPair = Object.freeze({ ...pair });
-        injectedWishlistPairKey = JSON.stringify([
-          "wishlist-candidate",
-          pair.candidateBggId,
-          pair.ownedGameId,
-        ]);
-        wishlistMutationResult = Reflect.set(
-          pair as unknown as Record<string, unknown>,
-          "candidateBggId",
-          777,
-        );
-        expect(wishlistMutationResult).toBe(false);
-        expect(pair).toEqual(injectedWishlistPair);
         return new Map([
           ["local-a", { score: 0.8, vetoed: false }],
           ["local-old", { score: 0.7, vetoed: false }],
@@ -424,28 +403,76 @@ describe("staged similarity scope and frozen authorization", () => {
     expect(run.authorizedPairs.every((entry) => entry.requiredSignals.join("") === "C")).toBe(true);
     expect(run.authorizedPairs.some((entry) => "gameAId" in entry.pair)).toBe(false);
     expect(run.authorizedPairs.every((entry) => Object.isFrozen(entry.pair))).toBe(true);
-    if (!injectedWishlistPair || !injectedWishlistPairKey) return;
-    expect(run.predictionPairs[0]?.key).toBe(injectedWishlistPairKey);
-    expect(run.predictionPairs[0]?.pair).toEqual(injectedWishlistPair);
-    expect(
-      run.authorizedPairs.find((entry) => entry.key === injectedWishlistPairKey)?.pair,
-    ).toEqual(injectedWishlistPair);
-    expect(wishlistMutationResult).toBe(false);
-    const wishlistAuthorizationIdentity = run.disclosure.authorizationIdentity;
-    const authorizedWishlistPair = run.authorizedPairs[0]?.pair;
-    expect(authorizedWishlistPair).toBeDefined();
-    if (!authorizedWishlistPair) return;
-    expect(
-      Reflect.set(
-        authorizedWishlistPair as unknown as Record<string, unknown>,
-        "candidateBggId",
-        777,
-      ),
-    ).toBe(false);
-    expect(authorizedWishlistPair).toEqual(injectedWishlistPair);
-    expect(run.disclosure.authorizationIdentity).toBe(wishlistAuthorizationIdentity);
-    expect(run.isAuthorized()).toBe(true);
     expect(run.disclosure.previousOwnedReferenceIds).toContain("local-old");
+  });
+
+  test("keeps wishlist pair keys and authorization immutable across fitness and returned scope", () => {
+    const candidate: StagedWishlistCandidateSource = {
+      bggId: 901,
+      name: "Wishlist game",
+      bggSource: {
+        observedAt: NOW,
+        description: "Wishlist description",
+        mechanics: ["Drafting"],
+        categories: ["Strategy"],
+        weight: 2,
+        communityRating: 7,
+        minPlayers: 2,
+        maxPlayers: 4,
+        bestPlayers: 3,
+        playingTime: 60,
+      },
+    };
+    const current = sources({
+      wishlistCandidates: [candidate],
+      games: [game("local-a", { personal: 7 })],
+    });
+    let callbackPairKey: string | undefined;
+    let callbackPairSnapshot:
+      | {
+          readonly domain: "wishlist-candidate";
+          readonly candidateBggId: number;
+          readonly ownedGameId: string;
+        }
+      | undefined;
+    const scoped = setup(current, { scope: "wishlist", selectedBggIds: [901] }, (input) => {
+      const axisPair = input.axisPairs[0];
+      expect(axisPair).toBeDefined();
+      if (!axisPair || axisPair.pair.domain !== "wishlist-candidate")
+        throw new Error("expected a wishlist pair");
+      const pair = axisPair.pair;
+      callbackPairKey = JSON.stringify([
+        "wishlist-candidate",
+        pair.candidateBggId,
+        pair.ownedGameId,
+      ]);
+      callbackPairSnapshot = Object.freeze({ ...pair });
+      expect(Object.isFrozen(pair)).toBe(true);
+      expect(Reflect.set(pair as unknown as Record<string, unknown>, "candidateBggId", 777)).toBe(
+        false,
+      );
+      expect(pair).toEqual(callbackPairSnapshot);
+      return new Map([["local-a", { score: 0.8, vetoed: false }]]);
+    });
+    expect(scoped.result.ok).toBe(true);
+    if (!scoped.result.ok || !callbackPairKey || !callbackPairSnapshot) return;
+    const run = scoped.result.run;
+    const predictionPair = run.predictionPairs.find((entry) => entry.key === callbackPairKey);
+    const authorizedPair = run.authorizedPairs.find((entry) => entry.key === callbackPairKey);
+    expect(predictionPair?.pair).toEqual(callbackPairSnapshot);
+    expect(authorizedPair?.pair).toEqual(callbackPairSnapshot);
+    if (!predictionPair || !authorizedPair) return;
+    const authorizationIdentity = run.disclosure.authorizationIdentity;
+    for (const pair of [predictionPair.pair, authorizedPair.pair]) {
+      expect(Object.isFrozen(pair)).toBe(true);
+      expect(Reflect.set(pair, "candidateBggId", 777)).toBe(false);
+      expect(pair).toEqual(callbackPairSnapshot);
+    }
+    expect(run.predictionPairs.find((entry) => entry.key === callbackPairKey)?.key).toBe(
+      callbackPairKey,
+    );
+    expect(run.disclosure.authorizationIdentity).toBe(authorizationIdentity);
+    expect(run.isAuthorized()).toBe(true);
   });
 
   test("keeps owned-fitness cache dependencies outside wishlist-authorized P/R/U0", () => {
@@ -512,9 +539,6 @@ describe("staged similarity scope and frozen authorization", () => {
     if (!fitnessInput) throw new Error("Wishlist fitness input was not captured");
     expect(run.predictionPairs.length).toBeGreaterThan(0);
     expect(run.targets.every((target) => target.kind === "wishlist")).toBe(true);
-    expect(run.predictionPairs.every((pair) => pair.pair.domain === "wishlist-candidate")).toBe(
-      true,
-    );
     expect(
       run.predictionPairs.every(
         (pair) => pair.pair.domain === "wishlist-candidate" && pair.pair.candidateBggId === 901,
@@ -542,9 +566,6 @@ describe("staged similarity scope and frozen authorization", () => {
     expect(fitnessInput.calculationDependencySimilarities.size).toBe(
       fitnessInput.calculationDependencyPairs.length,
     );
-    expect(run.redundancyPairs.every((pair) => pair.pair.domain === "wishlist-candidate")).toBe(
-      true,
-    );
     expect(
       run.redundancyPairs.every(
         (pair) => pair.pair.domain === "wishlist-candidate" && pair.pair.candidateBggId === 901,
@@ -557,9 +578,6 @@ describe("staged similarity scope and frozen authorization", () => {
         )
         .sort(),
     ).toEqual(["owned-target", "ref-a", "ref-b"]);
-    expect(run.authorizedPairs.every((pair) => pair.pair.domain === "wishlist-candidate")).toBe(
-      true,
-    );
     expect(
       run.authorizedPairs.every(
         (pair) => pair.pair.domain === "wishlist-candidate" && pair.pair.candidateBggId === 901,
@@ -593,9 +611,6 @@ describe("staged similarity scope and frozen authorization", () => {
     runResult.setCacheRevision(2);
     expect(run.isAuthorized()).toBe(true);
     expect(run.isCalculationCurrent()).toBe(false);
-    expect(run.authorizedPairs.every((pair) => pair.pair.domain === "wishlist-candidate")).toBe(
-      true,
-    );
     expect(run.authorizedPairs).toHaveLength(3);
 
     const nextPreview = setup(
@@ -753,9 +768,11 @@ describe("staged similarity scope and frozen authorization", () => {
     expect(mutationAttemptResult).toBe(false);
     const authorizationIdentity = run.disclosure.authorizationIdentity;
     expect(Reflect.set(predictionAxisPair.pair, "gameBId", "unapproved-reference")).toBe(false);
+    expect(Reflect.set(authorizedAxisPair.pair, "gameBId", "unapproved-reference")).toBe(false);
     expect(run.disclosure.authorizationIdentity).toBe(authorizationIdentity);
     expect(run.isAuthorized()).toBe(true);
     expect(predictionAxisPair.pair).toEqual(callbackPairSnapshot);
+    expect(authorizedAxisPair.pair).toEqual(callbackPairSnapshot);
     expect(callbackSimilarity).toBeNull();
   });
 

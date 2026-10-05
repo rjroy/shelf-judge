@@ -20,7 +20,6 @@ import type {
 import type { GameService } from "./game-service.js";
 import { computeNicheImpact } from "./niche-engine.js";
 import { computeRedundancyPreview } from "./redundancy-preview.js";
-import { type WishlistDescriptionSignalResolver } from "./wishlist-redundancy-scoring.js";
 import {
   advanceWishlistMutationGeneration,
   canonicalSha256,
@@ -57,7 +56,6 @@ export interface WishlistServiceDeps {
   predictionService: PredictionService;
   unifiedScoringService?: UnifiedScoringService;
   gameService: GameService;
-  resolveWishlistDescriptionSignal?: WishlistDescriptionSignalResolver;
   coordinator?: ProfileSourceCoordinator;
   jevPairCache?: JevPairCache;
   acquisitionObserver?: {

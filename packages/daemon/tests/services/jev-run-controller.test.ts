@@ -1,439 +1,548 @@
-import { describe, expect, test } from "bun:test";
-import type { Collection, GameWithScore } from "@shelf-judge/shared";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
-  createInitialSemanticRedundancyStateV10,
+  createInitialEntityMetadata,
   DEFAULT_JEV_RUN_BUDGET,
+  type Axis,
+  type Collection,
+  type DurableGame,
+  type WishlistEntry,
 } from "@shelf-judge/shared";
-import { JevRunController } from "../../src/services/jev-run-controller.js";
-import { JevRunService, type JevRunCapture } from "../../src/services/jev-run-service.js";
-import type { PreparedWishlistRun } from "../../src/services/wishlist-run-preparation.js";
-import type { JevRunSourceAdapter } from "../../src/services/jev-run-source-adapter.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createFileOps } from "../../src/services/file-ops.js";
 import {
+  createJevPairCache,
   type JevPairCache,
-  type JevPairCheckpoint,
   type JevPairJudgment,
-  type JevRunProgress,
 } from "../../src/services/jev-pair-cache-service.js";
-import {
-  JEV_GATEWAY_LIMITS,
-  JEV_MODEL_ID,
-  JEV_QUESTION_VERSION,
-  JEV_RUBRIC_VERSION,
-} from "../../src/services/jev/jev-gateway.js";
+import { JevRunController } from "../../src/services/jev-run-controller.js";
+import { createJevRunWorker } from "../../src/index.js";
+import { JEV_GATEWAY_LIMITS, JEV_MODEL_ID } from "../../src/services/jev/jev-gateway.js";
 import { JEV_JUDGMENT_CONTRACT } from "../../src/services/jev/jev-judgment-contract.js";
 import { buildJevPairDependencies } from "../../src/services/jev-pair-identity.js";
-import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
+import {
+  encodeOwnedLocalMember,
+  encodeWishlistBggMember,
+} from "../../src/services/jev-pair-identity.js";
+import { createJevRunSourceAdapter } from "../../src/services/jev-run-source-adapter.js";
+import { createWishlistRunPreparationService } from "../../src/services/wishlist-run-preparation.js";
+import { validateWishlistCandidateCOnlyRow } from "../../src/services/wishlist-candidate-read-proof.js";
+import { createTestApp } from "../helpers/test-app.js";
 
-function makeCapture(ids = ["a", "b"], notes = false): JevRunCapture {
-  const semantic = {
-    ...createInitialSemanticRedundancyStateV10(),
-    settings: {
-      enabled: true,
-      weights: { factual: 0, description: 1, ownerNote: notes ? 1 : 0 },
-      cachedOwnerNoteUse: true,
-    },
-  };
-  const collection = {
-    id: "controller-collection",
-    name: "Controller fixture",
-    schemaVersion: 10,
-    revision: 1,
-    axes: [],
-    games: ids.map((id) => ({
-      id,
-      name: `Name ${id}`,
-      ownership: "owned",
-      bggData: { description: `Description ${id}`, mechanics: [], categories: [] },
-      ownerNote: notes
-        ? { state: "present", version: 1, updatedAt: "test", text: `Private note ${id}` }
-        : { state: "cleared", version: 0, updatedAt: "test" },
-    })),
-    semanticRedundancy: semantic,
-  } as unknown as Collection;
-  const predictionCapture = ids.map((id) => ({
-    game: { id, ownership: "owned" },
-    score: { score: 1, vetoed: false, ratedAxisCount: 1, predictionMeta: null },
-  })) as unknown as GameWithScore[];
+const observedAt = "2026-10-04T00:00:00.000Z";
+const directories: string[] = [];
+const caches: JevPairCache[] = [];
+const initialApiKey = process.env.TYPESAFE_API_KEY;
+afterEach(async () => {
+  if (initialApiKey === undefined) delete process.env.TYPESAFE_API_KEY;
+  else process.env.TYPESAFE_API_KEY = initialApiKey;
+  for (const cache of caches.splice(0)) cache.close();
+  await Promise.all(directories.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+function axis(): Axis {
   return {
-    collection,
-    predictionCapture,
-    captureIdentity: {
-      sourceVectorIdentity: "durable-vector",
-      tournamentIdentity: "tournament",
-      predictionCaptureIdentity: "predictions",
-    },
-    factualWeights: { binary: 0, continuous: 0 },
-    sourceVectorIdentity: "vector-1",
-    policyIdentity: "policy-1",
+    id: "personal",
+    name: "Personal",
+    description: null,
+    weight: 1,
+    enabled: true,
+    source: "personal",
+    createdAt: observedAt,
+    updatedAt: observedAt,
   };
 }
 
-function makeResult(mode: string) {
-  const score = {
-    score: 0.5,
-    confidence: null,
-    modelId: JEV_MODEL_ID,
-    rubricVersion: JEV_RUBRIC_VERSION,
-    questionVersion: JEV_QUESTION_VERSION,
-  } as const;
+function game(id: string, rating: number | null, notes = false): DurableGame {
+  const bggId = Number(id.replace(/\D/g, "")) || id.charCodeAt(0) + 500;
   return {
-    description: mode === "owner-notes-only" ? null : score,
-    ownerNote: mode === "description-only" ? null : score,
-    usage: { inputTokens: 1, outputTokens: 1 },
+    id,
+    bggId,
+    entityMetadata: createInitialEntityMetadata(bggId),
+    name: `Game ${id}`,
+    yearPublished: 2020,
+    minPlayers: 2,
+    maxPlayers: 4,
+    bestPlayers: 3,
+    playingTime: 60,
+    imageUrl: null,
+    numPlays: null,
+    latestPlayCountCheck: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
+    bggData: {
+      communityRating: 7,
+      bayesAverage: 7,
+      weight: 2.5,
+      numWeightVotes: 3,
+      description: `Description ${id}`,
+      mechanics: [{ id: 1, name: "Draft" }],
+      categories: [{ id: 2, name: "Strategy" }],
+      families: [],
+      subdomains: [],
+      bestPlayerCount: null,
+      fetchedAt: observedAt,
+    },
+    ownership: "owned",
+    boxDimensions: null,
+    manualShelfId: null,
+    ratings: rating === null ? {} : { personal: rating },
+    createdAt: observedAt,
+    updatedAt: observedAt,
+    ownerNote: notes
+      ? { state: "present", version: 1, updatedAt: observedAt, text: `Private note ${id}` }
+      : { state: "cleared", version: 1, updatedAt: observedAt },
   };
 }
 
-function fakeCache() {
-  const progress: JevRunProgress[] = [];
-  const rows = new Map<string, JevPairJudgment>();
-  let revision = 0;
-  const cache = {
-    available: true,
-    mutationRevision: () => revision,
-    lookup: (key: { gameAId: string; gameBId: string; signal: string }) =>
-      rows.get(key.gameAId + key.gameBId + key.signal) ?? null,
-    upsert: () => {
-      revision++;
+function wishlistEntry(bggId = 501): WishlistEntry {
+  return {
+    id: `wishlist-${bggId}`,
+    bggId,
+    name: `Wishlist ${bggId}`,
+    yearPublished: 2024,
+    thumbnailUrl: null,
+    predictedScore: 5,
+    predictionConfidence: "weak",
+    predictedBreakdown: [],
+    nicheImpact: null,
+    redundancyPreview: null,
+    addedAt: observedAt,
+    bggSource: {
+      observedAt,
+      description: `Candidate ${bggId}`,
+      mechanics: ["Draft"],
+      categories: ["Strategy"],
+      weight: 2.5,
+      communityRating: 7,
+      minPlayers: 2,
+      maxPlayers: 4,
+      bestPlayers: 3,
+      playingTime: 60,
     },
-    purgePair: () => {
-      revision++;
-      return 0;
-    },
-    purgeGame: () => 0,
-    invalidateGame: () => 0,
-    purgeDDependent: () => 0,
-    saveRunProgress: (value: JevRunProgress) => progress.push(value),
-    checkpointPair: ({ judgments, progress: value }: JevPairCheckpoint) => {
-      for (const row of judgments) rows.set(row.gameAId + row.gameBId + row.signal, row);
-      revision++;
-      progress.push(value);
-    },
-    finishRun: ({ progress: value }: { progress: JevRunProgress }) => progress.push(value),
-    getRunProgress: () => progress.at(-1) ?? null,
-    setActivation: () => {},
-    getActivation: () => null,
-    compact: () => {},
-    reset: () => {},
-    close: () => {},
-  } as unknown as JevPairCache;
-  return { cache, progress, rows };
+  };
 }
 
-function deferred<Value>() {
-  let resolve!: (value: Value) => void;
-  const promise = new Promise<Value>((finish) => {
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((finish) => {
     resolve = finish;
   });
   return { promise, resolve };
 }
 
-function harness(
+async function harness(
   options: {
-    initial?: JevRunCapture;
+    ids?: string[];
+    notes?: boolean;
     pending?: boolean;
-    startBarrier?: () => void;
-    maxPairs?: number;
     gatewayConfigured?: boolean;
-    noteTransmissionPermitted?: boolean;
-    wishlistPreparation?: { prepare: () => Promise<PreparedWishlistRun> };
+    maxPairs?: number;
     receiptTtlMs?: number;
     maxReceipts?: number;
+    afterValidated?: (
+      armAfterAuthorityRead: (callback: () => void | Promise<void>) => void,
+    ) => void | Promise<void>;
   } = {},
 ) {
-  const { cache, rows, progress } = fakeCache();
-  const storage = {
-    loadRedundancySettings: () =>
-      Promise.resolve({
-        enabled: true,
-        stage: "integrated" as const,
-        similarityThreshold: 0.7,
-        maxPenalty: 0.2,
-        componentWeights: { binary: 0, continuous: 0 },
-        minNeighbors: 1,
-        expectedNeighbors: 5,
-      }),
+  const dir = await mkdtemp(join(tmpdir(), "jev-controller-"));
+  directories.push(dir);
+  const cache = await createJevPairCache(join(dir, "cache"));
+  caches.push(cache);
+  const context = createTestApp({
+    dataDir: join(dir, "data"),
+    configPath: join(dir, "config.json"),
+    fileOps: createFileOps(),
+    jevPairCache: cache,
+    bggClient: { getGame: () => Promise.reject(new Error("Unexpected BGG hydration")) } as never,
+  });
+  const storage = context.storageService;
+  const collection = await storage.loadCollection();
+  collection.axes = [axis()];
+  collection.games = (options.ids ?? ["a", "b"]).map((id) => game(id, 6, options.notes));
+  collection.semanticRedundancy.settings = {
+    ...collection.semanticRedundancy.settings,
+    enabled: true,
+    cachedOwnerNoteUse: options.notes ?? false,
+    weights: { factual: 1, description: 1, ownerNote: options.notes ? 1 : 0 },
   };
-  let current = options.initial ?? makeCapture();
-  let gatewayConstructions = 0;
-  let starts = 0;
-  let captures = 0;
-  let providerConfigured = options.gatewayConfigured ?? true;
-  const gatewayRequests: unknown[] = [];
-  const approvedBudgets: unknown[] = [];
-  const started = deferred<void>();
-  const release = deferred<void>();
-  let fakeNowMs = Date.now();
-  const sourceAdapter: JevRunSourceAdapter = {
-    loadCapture: () => {
-      captures++;
-      return Promise.resolve(structuredClone(current));
+  await storage.saveCollection(collection);
+  await storage.saveRedundancySettings({
+    ...(await storage.loadRedundancySettings()),
+    enabled: true,
+    stage: "integrated",
+    similarityThreshold: 0,
+    minNeighbors: 1,
+    expectedNeighbors: 5,
+    maxPenalty: 1,
+    componentWeights: { binary: 1, continuous: 3 },
+  });
+  await storage.saveWishlist([wishlistEntry()]);
+  await storage.hydrateSourceVector?.();
+  process.env.TYPESAFE_API_KEY = "controller-test-key";
+  let fakeNow = Date.now();
+  let gatewayConfigured = options.gatewayConfigured ?? true;
+  let gatewayCalls = 0;
+  const requests: unknown[] = [];
+  const preparedAuthorizationBudgets: unknown[] = [];
+  const started = deferred();
+  let pendingProvider = options.pending ?? false;
+  let release = deferred();
+  const listGamesWithPredictionsFromSnapshot =
+    context.predictionService.listGamesWithPredictionsFromSnapshot?.bind(context.predictionService);
+  if (!listGamesWithPredictionsFromSnapshot)
+    throw new Error("Test prediction service lacks snapshot prediction support");
+  const sourceAdapterBase = createJevRunSourceAdapter({
+    storageService: storage,
+    predictionService: { listGamesWithPredictionsFromSnapshot },
+  });
+  let afterAuthorityRead: (() => void | Promise<void>) | undefined;
+  const sourceAdapter = {
+    ...sourceAdapterBase,
+    readCurrent: async () => {
+      const current = await sourceAdapterBase.readCurrent();
+      const callback = afterAuthorityRead;
+      afterAuthorityRead = undefined;
+      await callback?.();
+      return current;
     },
-    readCurrent: () => {
-      options.startBarrier?.();
-      return Promise.resolve({
-        collection: structuredClone(current.collection),
-        sourceVectorIdentity: current.sourceVectorIdentity,
-        policyIdentity: current.policyIdentity,
-        canTransmitNotes: options.noteTransmissionPermitted ?? true,
+  };
+  const runService = createJevRunWorker({
+    storageService: storage,
+    predictionService: context.predictionService,
+    cache,
+    fetch: async (_url, init) => {
+      gatewayCalls++;
+      requests.push(typeof init?.body === "string" ? JSON.parse(init.body) : null);
+      started.resolve();
+      if (pendingProvider) await release.promise;
+      return Response.json({
+        model: JEV_MODEL_ID,
+        answers: {
+          description_similarity: {
+            type: "score",
+            score: 1,
+            legend: { "0": "unrelated", "1": "broad", "2": "similar", "3": "very similar" },
+            probabilities: { "0": 0, "1": 1, "2": 0, "3": 0 },
+            confidence: 0.8,
+          },
+        },
+        usage: { input_tokens: 1, output_tokens: 1 },
       });
     },
-  };
-  const runService = new JevRunService({
-    storageService: storage,
-    cache,
-    ...(options.maxPairs === undefined ? {} : { maxPairs: options.maxPairs }),
-    loadCapture: () => sourceAdapter.loadCapture(),
-    readCurrent: () => sourceAdapter.readCurrent(),
-    createGateway: (admit, providerBudget) => {
-      gatewayConstructions++;
-      approvedBudgets.push(providerBudget);
-      return {
-        evaluatePair: async (request) => {
-          gatewayRequests.push(request);
-          await admit({
-            mode: request.mode,
-            attemptId: `fake-${starts + 1}`,
-            start: () => {
-              starts++;
-              started.resolve();
-              return { response: Promise.resolve(new Response()) };
-            },
-          });
-          if (options.pending) await release.promise;
-          return makeResult(request.mode);
-        },
-      };
-    },
   });
+  if (!runService) throw new Error("Expected a cache-backed worker");
+  const prepareValidated = runService.prepareValidatedPreparedRun.bind(runService);
+  runService.prepareValidatedPreparedRun = async (input) => {
+    preparedAuthorizationBudgets.push(input.unifiedPreparation.run.disclosure.budget);
+    const prepared = await prepareValidated(input);
+    await options.afterValidated?.((callback) => {
+      afterAuthorityRead = callback;
+    });
+    return prepared;
+  };
+  if (options.maxPairs !== undefined)
+    Object.defineProperty(runService, "effectiveLimits", {
+      value: { ...runService.effectiveLimits, maxEligiblePairs: options.maxPairs },
+    });
   const controller = new JevRunController({
     storageService: storage,
     sourceAdapter,
     cache,
     runService,
-    now: () => new Date(fakeNowMs),
-    gatewayConfigured: () => providerConfigured,
+    wishlistPreparation: createWishlistRunPreparationService({
+      storageService: storage,
+      gameService: context.gameService,
+    }),
+    unifiedScoringService: context.unifiedScoringService,
+    now: () => new Date(fakeNow),
+    gatewayConfigured: () => gatewayConfigured,
     ...(options.receiptTtlMs === undefined ? {} : { receiptTtlMs: options.receiptTtlMs }),
     ...(options.maxReceipts === undefined ? {} : { maxReceipts: options.maxReceipts }),
-    ...(options.wishlistPreparation === undefined
-      ? {}
-      : { wishlistPreparation: options.wishlistPreparation }),
   });
   return {
     controller,
     cache,
-    rows,
-    progress,
-    gatewayRequests,
-    approvedBudgets,
+    requests,
     sourceAdapter,
     storage,
     runService,
+    unifiedScoringService: context.unifiedScoringService,
     started: started.promise,
     release: () => release.resolve(),
-    setCurrent: (value: JevRunCapture) => {
-      current = value;
+    setProviderPending: (value: boolean) => {
+      pendingProvider = value;
+      if (value) release = deferred();
     },
+    preparedAuthorizationBudgets,
     setGatewayConfigured: (value: boolean) => {
-      providerConfigured = value;
+      gatewayConfigured = value;
     },
     advanceTime: (milliseconds: number) => {
-      fakeNowMs += milliseconds;
+      fakeNow += milliseconds;
     },
-    now: () => new Date(fakeNowMs),
-    get current() {
-      return current;
+    setCollection: async (value: Awaited<ReturnType<typeof storage.loadCollection>>) => {
+      await storage.saveCollection(value);
+      await storage.hydrateSourceVector?.();
     },
-    get gatewayConstructions() {
-      return gatewayConstructions;
-    },
-    get starts() {
-      return starts;
-    },
-    get captures() {
-      return captures;
+    get gatewayCalls() {
+      return gatewayCalls;
     },
   };
 }
 
-describe("JevRunController", () => {
-  test("wishlist preview binds frozen preparation and start fails closed until executor exists", async () => {
-    const capture = makeCapture();
-    let current = true;
-    const preparation = {
-      prepare: () =>
-        Promise.resolve({
-          scope: "wishlist",
-          selection: { kind: "selected", bggIds: [501] },
-          selectionIdentity: "selection",
-          capture,
-          entries: [],
-          unavailableCandidateBggIds: [],
-          eligibleOwnedIds: ["owned-a"],
-          pairs: [],
-          disclosure: {
-            scope: "wishlist",
-            wishlistEntryCount: 1,
-            selectedCandidateCount: 1,
-            unselectedEntryCount: 0,
-            ownedOverlapCandidateCount: 0,
-            requestedCandidateCount: 1,
-            eligibleCandidateCount: 1,
-            unavailableCandidateCount: 0,
-            eligibleOwnedGameCount: 1,
-            comparisonPairCount: 1,
-            cachedHitPairCount: 0,
-            sendablePairCount: 1,
-          },
-          cacheRevision: 0,
-          wishlistMutationGeneration: "0",
-          identity: "frozen-wishlist-preparation",
-          isSourceCurrent: () => Promise.resolve(current),
-          isCurrent: () => Promise.resolve(current),
-        } as PreparedWishlistRun),
-    };
-    const h = harness({ wishlistPreparation: preparation });
-    const preview = await h.controller.previewWishlist({ kind: "selected", bggIds: [501] });
-    expect(preview.status).toBe(200);
-    if (preview.status !== 200) throw new Error("Expected wishlist preview");
-    expect(preview.body).toMatchObject({
-      scope: { scope: "wishlist", selectedCandidateCount: 1, sendablePairCount: 1 },
-      selection: { kind: "selected", bggIds: [501] },
-      provider: "TypeSafe",
-      noteTransmissionPermitted: false,
-      signalScope: { description: true, ownerNotes: false },
-    });
-    expect(preview.body.limits.maxProviderAttempts).toBeGreaterThan(0);
-    expect(preview.body).not.toHaveProperty("retentionCaveat");
-    expect(JSON.stringify(preview.body)).not.toMatch(/retention/i);
-    expect(JSON.stringify(preview.body)).not.toContain(
-      "TypeSafe's default retention duration is unspecified",
-    );
-    expect(JSON.stringify(preview.body)).not.toContain("do not promise provider-side erasure");
+async function waitForRun(cache: JevPairCache, runId?: string): Promise<void> {
+  for (let attempt = 0; attempt < 300; attempt++) {
+    const progress = cache.getRunProgress();
+    if (progress && (!runId || progress.runId === runId) && progress.state !== "running") return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("JEV run did not finish within bounded event-loop turns");
+}
 
-    const startInput = {
-      requestId: preview.body.requestId,
-      precondition: preview.body.precondition,
-      noteTransmissionAuthorized: false,
-    };
-    const started = await h.controller.start(startInput);
-    expect(started.status).toBe(200);
-    expect(h.gatewayConstructions).toBe(0);
-    if (started.status === 200) await startedRunCompletion(h);
+async function waitForGatewayCalls(h: { gatewayCalls: number }, count: number): Promise<void> {
+  for (let attempt = 0; attempt < 300; attempt++) {
+    if (h.gatewayCalls >= count) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("JEV gateway call did not begin within bounded event-loop turns");
+}
 
-    const secondPreview = await h.controller.previewWishlist({ kind: "selected", bggIds: [501] });
-    if (secondPreview.status !== 200) throw new Error("Expected second wishlist preview");
-    current = false;
-    const changed = await h.controller.start({
-      requestId: secondPreview.body.requestId,
-      precondition: secondPreview.body.precondition,
-      noteTransmissionAuthorized: false,
-    });
-    expect(changed).toEqual({ status: 412, body: { error: "precondition-failed" } });
-    expect(h.gatewayConstructions).toBe(0);
-    expect(h.starts).toBe(0);
-  });
+function collectionCOnlyJudgment(collection: Collection): JevPairJudgment {
+  const [a, b] = collection.games;
+  if (!a || !b || !a.bggData?.description || !b.bggData?.description)
+    throw new Error("Expected persisted descriptions for the first pair");
+  return {
+    collectionId: collection.id,
+    gameAId: a.id,
+    gameBId: b.id,
+    signal: "C",
+    dependencyKind: "C_ONLY",
+    value: 0.6,
+    confidence: 1,
+    ...JEV_JUDGMENT_CONTRACT,
+    completedAt: observedAt,
+    dependencies: buildJevPairDependencies(
+      "C_ONLY",
+      { gameId: a.id, name: a.name, description: a.bggData.description },
+      { gameId: b.id, name: b.name, description: b.bggData.description },
+    ),
+  };
+}
 
-  test("preview exposes and binds validated per-run budget through opaque authorization", async () => {
-    const h = harness();
-    const selected = {
+describe("JevRunController unified lifecycle", () => {
+  test("previews actual durable collection facts without exposing private values and binds budget", async () => {
+    const h = await harness({ ids: ["a", "b", "c"], notes: true });
+    const budget = {
       maxProviderAttempts: 501,
       reportedTokenStopThreshold: 40_000,
       maxRunDurationMs: 60_000,
     };
-    const preview = await h.controller.preview(selected);
-    expect(preview.status).toBe(200);
-    if (preview.status !== 200) throw new Error("Expected budget preview");
-    expect(preview.body.limits).toMatchObject(selected);
-    expect(preview.body).toMatchObject({
-      provider: "TypeSafe",
-      modelId: JEV_MODEL_ID,
-      noteTransmissionPermitted: true,
-      signalScope: { description: true, ownerNotes: false },
-    });
-    expect(preview.body).not.toHaveProperty("retentionCaveat");
-    expect(JSON.stringify(preview.body)).not.toMatch(/retention/i);
-    expect(JSON.stringify(preview.body)).not.toContain(
-      "TypeSafe's default retention duration is unspecified",
-    );
-    expect(JSON.stringify(preview.body)).not.toContain("do not promise provider-side erasure");
-    const started = await h.controller.start({
-      requestId: preview.body.requestId,
-      precondition: preview.body.precondition,
-      noteTransmissionAuthorized: false,
-    });
-    expect(started.status).toBe(200);
-    await startedRunCompletion(h);
-    expect(h.approvedBudgets).toEqual([selected]);
-  });
-
-  test("rejects invalid per-run budgets without creating authorization", async () => {
-    const h = harness();
-    const invalid = [
-      { maxProviderAttempts: 0, reportedTokenStopThreshold: 1, maxRunDurationMs: 60_000 },
-      { maxProviderAttempts: 75_001, reportedTokenStopThreshold: 1, maxRunDurationMs: 60_000 },
-      { maxProviderAttempts: 1.5, reportedTokenStopThreshold: 1, maxRunDurationMs: 60_000 },
-      { maxProviderAttempts: 1, reportedTokenStopThreshold: 0, maxRunDurationMs: 60_000 },
-      { maxProviderAttempts: 1, reportedTokenStopThreshold: 1, maxRunDurationMs: 59_999 },
-      { maxProviderAttempts: 1, reportedTokenStopThreshold: 1, maxRunDurationMs: 43_200_001 },
-    ];
-    for (const budget of invalid) expect((await h.controller.preview(budget)).status).toBe(400);
-    expect(h.gatewayConstructions).toBe(0);
-  });
-
-  test("preview is aggregate-only, provider-free, and reports enforced limits", async () => {
-    const h = harness({ initial: makeCapture(["a", "b", "c"], true) });
-    const preview = await h.controller.preview();
+    const preview = await h.controller.preview(budget);
     expect(preview.status).toBe(200);
     if (preview.status !== 200) throw new Error("Expected preview");
     expect(preview.body).toMatchObject({
-      provider: "TypeSafe",
-      modelId: JEV_MODEL_ID,
-      eligibleGameCount: 3,
       pairCount: 3,
       noteBearingPairCount: 3,
-      descriptionBearingPairCount: 3,
-      scoringEffect: "integrated-fitness",
-      limits: {
-        maxEligiblePairs: h.runService.effectiveLimits.maxEligiblePairs,
-        maxProviderAttempts: DEFAULT_JEV_RUN_BUDGET.maxProviderAttempts,
-        maxRetriesPerEvaluation: JEV_GATEWAY_LIMITS.maxRetriesPerEvaluation,
-        maxRunDurationMs: h.runService.effectiveLimits.maxRunDurationMs,
-        reportedTokenStopThreshold: DEFAULT_JEV_RUN_BUDGET.reportedTokenStopThreshold,
-        reportedTokenThresholdIsBilledCeiling: false,
-      },
+      signalScope: { description: true, ownerNotes: true },
     });
-    const json = JSON.stringify(preview.body);
-    for (const privateValue of ["Name a", "Private note", "vector-1", "policy-1", "game-a"])
-      expect(json).not.toContain(privateValue);
-    expect(h.gatewayConstructions).toBe(0);
-    expect(h.starts).toBe(0);
+    expect(preview.body.limits).toMatchObject(budget);
+    expect(JSON.stringify(preview.body)).not.toContain("Private note");
+    expect(h.gatewayCalls).toBe(0);
+    expect(
+      await h.controller.start({
+        requestId: preview.body.requestId,
+        precondition: preview.body.precondition,
+        noteTransmissionAuthorized: false,
+      }),
+    ).toMatchObject({ status: 200, body: { state: "started" } });
+    await waitForRun(h.cache);
+    expect(h.preparedAuthorizationBudgets).toEqual([budget]);
+    expect(h.requests.join(" ")).not.toContain("Private note");
+    expect(h.runService.effectiveLimits.maxEligiblePairs).toBeGreaterThan(0);
+    expect(
+      (await h.controller.preview({ ...DEFAULT_JEV_RUN_BUDGET, maxProviderAttempts: 0 })).status,
+    ).toBe(400);
+    expect(JEV_GATEWAY_LIMITS.maxRetriesPerEvaluation).toBeGreaterThan(0);
   });
 
-  test("provider-free preview reports missing provider configuration", async () => {
-    const h = harness({ gatewayConfigured: false });
+  test("over-limit start returns 409; keyless misses return 503 without consuming authorization and can retry", async () => {
+    const limited = await harness({ ids: ["a", "b", "c"], maxPairs: 2 });
+    const over = await limited.controller.preview();
+    if (over.status !== 200) throw new Error("Expected truthful over-limit preview");
+    expect(over.body.withinPairLimit).toBe(false);
+    expect(
+      await limited.controller.start({
+        requestId: over.body.requestId,
+        precondition: over.body.precondition,
+        noteTransmissionAuthorized: false,
+      }),
+    ).toEqual({ status: 409, body: { error: "scope-over-limit" } });
+    expect(limited.gatewayCalls).toBe(0);
+
+    const h = await harness({ gatewayConfigured: false });
     const preview = await h.controller.preview();
-    expect(preview.status).toBe(200);
-    if (preview.status !== 200) throw new Error("Expected provider-free preview");
-    expect(preview.body.providerConfigured).toBe(false);
-    expect(h.captures).toBe(1);
-    expect(h.gatewayConstructions).toBe(0);
-  });
-
-  test("unavailable cache returns a safe 503 without capture work", async () => {
-    const h = harness();
-    Object.defineProperty(h.cache, "available", { value: false });
-    expect(await h.controller.preview()).toEqual({
+    if (preview.status !== 200) throw new Error("Expected preview");
+    const request = {
+      requestId: preview.body.requestId,
+      precondition: preview.body.precondition,
+      noteTransmissionAuthorized: false,
+    };
+    expect(await h.controller.start(request)).toEqual({
       status: 503,
       body: { error: "run-unavailable" },
     });
-    expect(h.captures).toBe(0);
+    expect(h.gatewayCalls).toBe(0);
+    h.setGatewayConfigured(true);
+    expect((await h.controller.start(request)).status).toBe(200);
+    await waitForRun(h.cache);
+
+    const evicted = await harness({ gatewayConfigured: false });
+    const collection = await evicted.storage.loadCollection();
+    const row = collectionCOnlyJudgment(collection);
+    evicted.cache.upsert(row);
+    const cachedPreview = await evicted.controller.preview();
+    if (cachedPreview.status !== 200) throw new Error("Expected cached preview");
+    expect(evicted.cache.purgePair(row.gameAId, row.gameBId, "C", "collection")).toBe(1);
+    const cachedRequest = {
+      requestId: cachedPreview.body.requestId,
+      precondition: cachedPreview.body.precondition,
+      noteTransmissionAuthorized: false,
+    };
+    expect(await evicted.controller.start(cachedRequest)).toEqual({
+      status: 503,
+      body: { error: "run-unavailable" },
+    });
+    expect(evicted.gatewayCalls).toBe(0);
+    evicted.cache.upsert(row);
+    expect((await evicted.controller.start(cachedRequest)).status).toBe(200);
+    await waitForRun(evicted.cache);
+    expect(evicted.gatewayCalls).toBe(0);
   });
 
-  test("expired precondition is rejected", async () => {
-    const h = harness();
+  test("keyless readiness rescans when C_ONLY evidence appears after preview", async () => {
+    const h = await harness({ gatewayConfigured: false });
     const preview = await h.controller.preview();
     if (preview.status !== 200) throw new Error("Expected preview");
-    h.advanceTime(120_001);
+    const row = collectionCOnlyJudgment(await h.storage.loadCollection());
+    h.cache.upsert(row);
+    const response = await h.controller.start({
+      requestId: preview.body.requestId,
+      precondition: preview.body.precondition,
+      noteTransmissionAuthorized: false,
+    });
+    expect(response).toMatchObject({ status: 200 });
+    await waitForRun(h.cache);
+    expect(h.gatewayCalls).toBe(0);
+  });
+
+  test("keyless admission rescans after cache mutation during final authority read", async () => {
+    let mutate = false;
+    const h = await harness({
+      gatewayConfigured: false,
+      afterValidated: (armAfterRead) => {
+        if (!mutate) return;
+        mutate = false;
+        armAfterRead(async () =>
+          h.cache.upsert(collectionCOnlyJudgment(await h.storage.loadCollection())),
+        );
+      },
+    });
+    const preview = await h.controller.preview();
+    if (preview.status !== 200) throw new Error("Expected preview");
+    mutate = true;
+    const response = await h.controller.start({
+      requestId: preview.body.requestId,
+      precondition: preview.body.precondition,
+      noteTransmissionAuthorized: false,
+    });
+    expect(response).toMatchObject({ status: 200 });
+    await waitForRun(h.cache);
+    expect(h.gatewayCalls).toBe(0);
+  });
+
+  test("missing description and unauthorized D-only work do not require a provider", async () => {
+    const h = await harness({ gatewayConfigured: false, notes: true });
+    const collection = await h.storage.loadCollection();
+    const firstGame = collection.games[0];
+    if (!firstGame?.bggData) throw new Error("Expected persisted source facts");
+    firstGame.bggData.description = null;
+    await h.setCollection(collection);
+    const preview = await h.controller.preview();
+    if (preview.status !== 200) throw new Error("Expected preview");
+    const response = await h.controller.start({
+      requestId: preview.body.requestId,
+      precondition: preview.body.precondition,
+      noteTransmissionAuthorized: false,
+    });
+    expect(response).toMatchObject({ status: 200 });
+    await waitForRun(h.cache);
+    expect(h.gatewayCalls).toBe(0);
+  });
+
+  test("source edits and expiration after final authority await reject before provider admission", async () => {
+    const changedHarness = await harness();
+    const preview = await changedHarness.controller.preview();
+    if (preview.status !== 200) throw new Error("Expected preview");
+    const changed = await changedHarness.storage.loadCollection();
+    changed.games[0].name = "Persisted concurrent change";
+    await changedHarness.setCollection(changed);
+    expect(
+      await changedHarness.controller.start({
+        requestId: preview.body.requestId,
+        precondition: preview.body.precondition,
+        noteTransmissionAuthorized: false,
+      }),
+    ).toMatchObject({ status: 412 });
+    expect(changedHarness.gatewayCalls).toBe(0);
+
+    let expireAfterPreparation = false;
+    const expiring = await harness({
+      afterValidated: (armAfterRead) => {
+        if (!expireAfterPreparation) return;
+        expireAfterPreparation = false;
+        armAfterRead(() => expiring.advanceTime(120_001));
+      },
+    });
+    const expiringPreview = await expiring.controller.preview();
+    if (expiringPreview.status !== 200) throw new Error("Expected preview");
+    expireAfterPreparation = true;
+    expect(
+      await expiring.controller.start({
+        requestId: expiringPreview.body.requestId,
+        precondition: expiringPreview.body.precondition,
+        noteTransmissionAuthorized: false,
+      }),
+    ).toEqual({ status: 412, body: { error: "precondition-failed" } });
+    expect(expiring.gatewayCalls).toBe(0);
+  });
+
+  test("unified admission source mutation fences reservation after preparation", async () => {
+    let mutateAfterValidation = false;
+    let mutate: () => Promise<void> = () => Promise.resolve();
+    const h = await harness({ afterValidated: () => mutate() });
+    mutate = async () => {
+      if (!mutateAfterValidation) return;
+      mutateAfterValidation = false;
+      const current = await h.storage.loadCollection();
+      current.games[0].name = "Changed after validated preparation";
+      await h.setCollection(current);
+    };
+    const preview = await h.controller.preview();
+    if (preview.status !== 200) throw new Error("Expected preview");
+    mutateAfterValidation = true;
     expect(
       await h.controller.start({
         requestId: preview.body.requestId,
@@ -441,379 +550,122 @@ describe("JevRunController", () => {
         noteTransmissionAuthorized: false,
       }),
     ).toEqual({ status: 412, body: { error: "precondition-failed" } });
-    expect(h.starts).toBe(0);
+    expect(h.gatewayCalls).toBe(0);
   });
 
-  test("invalid request does not reserve its request ID", async () => {
-    const h = harness();
+  test("C_ONLY evidence can satisfy the real cache without provider configuration", async () => {
+    const h = await harness({ gatewayConfigured: false });
+    const semanticCollection = await h.storage.loadCollection();
+    semanticCollection.semanticRedundancy.settings.weights.factual = 0;
+    await h.setCollection(semanticCollection);
+    const collection = await h.storage.loadCollection();
+    const [a, b] = collection.games;
+    if (!a || !b) throw new Error("Expected persisted games");
+    const descriptionA = a.bggData?.description;
+    const descriptionB = b.bggData?.description;
+    if (!descriptionA || !descriptionB) throw new Error("Expected persisted game descriptions");
+    h.cache.upsert({
+      collectionId: collection.id,
+      gameAId: "a",
+      gameBId: "b",
+      signal: "C",
+      dependencyKind: "C_ONLY",
+      value: 0.6,
+      confidence: 1,
+      ...JEV_JUDGMENT_CONTRACT,
+      completedAt: observedAt,
+      dependencies: buildJevPairDependencies(
+        "C_ONLY",
+        { gameId: a.id, name: a.name, description: descriptionA },
+        { gameId: b.id, name: b.name, description: descriptionB },
+      ),
+    } satisfies JevPairJudgment);
     const preview = await h.controller.preview();
-    if (preview.status !== 200) throw new Error("Expected preview");
-    expect(
-      await h.controller.start({
-        requestId: preview.body.requestId,
-        precondition: "invalid-opaque-token",
-        noteTransmissionAuthorized: false,
-      }),
-    ).toEqual({ status: 412, body: { error: "precondition-failed" } });
-    const accepted = await h.controller.start({
-      requestId: preview.body.requestId,
-      precondition: preview.body.precondition,
-      noteTransmissionAuthorized: false,
-    });
-    expect(accepted.status).toBe(200);
-    await startedRunCompletion(h);
-  });
-
-  test("precondition expiring during final authority read is rejected before reservation", async () => {
-    const harnessRef: { current?: ReturnType<typeof harness> } = {};
-    let expireDuringRead = false;
-    const h = harness({
-      startBarrier: () => {
-        if (expireDuringRead) {
-          expireDuringRead = false;
-          harnessRef.current?.advanceTime(120_001);
-        }
-      },
-    });
-    harnessRef.current = h;
-    const preview = await h.controller.preview();
-    if (preview.status !== 200) throw new Error("Expected preview");
-    expireDuringRead = true;
-    const response = await h.controller.start({
-      requestId: preview.body.requestId,
-      precondition: preview.body.precondition,
-      noteTransmissionAuthorized: false,
-    });
-    expect(response).toEqual({ status: 412, body: { error: "precondition-failed" } });
-    expect(h.starts).toBe(0);
-    expect(h.gatewayConstructions).toBe(0);
-  });
-
-  test("over-limit preview is truthful and start rejects before provider construction", async () => {
-    const h = harness({ initial: makeCapture(["a", "b", "c"]), maxPairs: 2 });
-    const preview = await h.controller.preview();
-    expect(preview.status).toBe(200);
-    if (preview.status !== 200) throw new Error("Expected preview");
-    expect(preview.body).toMatchObject({ pairCount: 3, withinPairLimit: false });
-    const result = await h.controller.start({
-      requestId: preview.body.requestId,
-      precondition: preview.body.precondition,
-      noteTransmissionAuthorized: false,
-    });
-    expect(result).toEqual({ status: 409, body: { error: "scope-over-limit" } });
-    expect(h.gatewayConstructions).toBe(0);
-    expect(h.starts).toBe(0);
-  });
-
-  test("unchanged preview scope starts once and false note authorization sends C-only", async () => {
-    const h = harness({ initial: makeCapture(["a", "b"], true) });
-    const preview = await h.controller.preview();
-    if (preview.status !== 200) throw new Error("Expected preview");
+    if (preview.status !== 200) throw new Error("Expected cache preview");
     const started = await h.controller.start({
       requestId: preview.body.requestId,
       precondition: preview.body.precondition,
       noteTransmissionAuthorized: false,
     });
     expect(started.status).toBe(200);
-    if (started.status !== 200) throw new Error("Expected run start");
-    expect(started.body.state).toBe("started");
-    await h.started;
-    expect(h.starts).toBe(1);
-    expect(h.gatewayRequests).toHaveLength(1);
-    expect(JSON.stringify(h.gatewayRequests[0])).not.toContain("Private note");
-    expect(h.gatewayRequests[0]).toMatchObject({ mode: "description-only" });
-    await startedRunCompletion(h);
-    const row = h.rows.get("abC");
-    expect(row?.dependencyKind).toBe("C_ONLY");
-    expect(row?.dependencies.every((dependency) => dependency.noteFingerprint === undefined)).toBe(
-      true,
-    );
+    if (started.status === 200) expect(started.body.state).toBe("started");
+    await waitForRun(h.cache);
+    expect(h.gatewayCalls).toBe(0);
   });
 
-  test("preview reports durable note transmission permission independently of signal settings", async () => {
-    const h = harness({ initial: makeCapture(["a", "b"], true), noteTransmissionPermitted: false });
-    const preview = await h.controller.preview();
-    expect(preview.status).toBe(200);
-    if (preview.status !== 200) throw new Error("Expected preview");
-    expect(preview.body.signalScope.ownerNotes).toBe(true);
-    expect(preview.body.noteTransmissionPermitted).toBe(false);
-  });
-
-  test("same-count note edits and membership swaps invalidate the prepared precondition", async () => {
-    for (const mutation of ["note", "membership"] as const) {
-      const h = harness({ initial: makeCapture(["a", "b"], true) });
-      const preview = await h.controller.preview();
-      if (preview.status !== 200) throw new Error("Expected preview");
-      const changed = structuredClone(h.current);
-      if (mutation === "note") {
-        changed.collection.games[0].ownerNote = {
-          state: "present",
-          version: 2,
-          updatedAt: "changed",
-          text: "changed private note",
-        };
-      } else {
-        changed.collection.games[0].id = "c";
-        changed.predictionCapture[0].game.id = "c";
-      }
-      changed.sourceVectorIdentity = `changed-${mutation}`;
-      h.setCurrent(changed);
-      const response = await h.controller.start({
-        requestId: preview.body.requestId,
-        precondition: preview.body.precondition,
-        noteTransmissionAuthorized: true,
-      });
-      expect(response.status).toBe(412);
-      expect(h.starts).toBe(0);
-      expect(h.gatewayConstructions).toBe(0);
-    }
-  });
-
-  test("pre-admission source change is rejected under the coordinator", async () => {
-    let mutateAfterCapture: (() => void) | null = null;
-    const h = harness({
-      startBarrier: () => {
-        mutateAfterCapture?.();
-      },
-    });
-    const preview = await h.controller.preview();
-    if (preview.status !== 200) throw new Error("Expected preview");
-    const changed = structuredClone(h.current);
-    changed.sourceVectorIdentity = "moved-before-reservation";
-    mutateAfterCapture = () => h.setCurrent(changed);
-    const response = await h.controller.start({
-      requestId: preview.body.requestId,
-      precondition: preview.body.precondition,
-      noteTransmissionAuthorized: false,
-    });
-    expect(response.status).toBe(412);
-    expect(h.gatewayConstructions).toBe(0);
-    expect(h.starts).toBe(0);
-  });
-
-  test("zero-pair cache-only scope starts without constructing a gateway", async () => {
-    const h = harness({ initial: makeCapture(["only-game"]), gatewayConfigured: false });
-    const preview = await h.controller.preview();
-    if (preview.status !== 200) throw new Error("Expected preview");
-    const result = await h.controller.start({
-      requestId: preview.body.requestId,
-      precondition: preview.body.precondition,
-      noteTransmissionAuthorized: false,
-    });
-    expect(result.status).toBe(200);
-    if (result.status !== 200) throw new Error("Expected cache-only start");
-    await startedRunCompletion(h);
-    expect(h.gatewayConstructions).toBe(0);
-    expect(h.starts).toBe(0);
-  });
-
-  test("a fully cached required scope constructs no gateway", async () => {
-    const h = harness({ gatewayConfigured: false });
-    const [a, b] = h.current.collection.games;
-    if (!a || !b) throw new Error("Expected fixture pair");
-    const source = (game: typeof a) => ({
-      gameId: game.id,
-      name: game.name,
-      description: game.bggData!.description!,
-    });
-    h.rows.set("abC", {
-      collectionId: h.current.collection.id,
-      gameAId: "a",
-      gameBId: "b",
-      signal: "C",
-      dependencyKind: "C_ONLY",
-      value: 0.6,
-      modelId: JEV_JUDGMENT_CONTRACT.modelId,
-      rubricVersion: JEV_JUDGMENT_CONTRACT.rubricVersion,
-      questionVersion: JEV_JUDGMENT_CONTRACT.questionVersion,
-      requestSchemaVersion: JEV_JUDGMENT_CONTRACT.requestSchemaVersion,
-      scoreMappingVersion: JEV_JUDGMENT_CONTRACT.scoreMappingVersion,
-      semanticPolicyId: JEV_JUDGMENT_CONTRACT.semanticPolicyId,
-      completedAt: "fixture-time",
-      dependencies: buildJevPairDependencies("C_ONLY", source(a), source(b)),
-    });
-    const preview = await h.controller.preview();
-    if (preview.status !== 200) throw new Error("Expected preview");
-    const result = await h.controller.start({
-      requestId: preview.body.requestId,
-      precondition: preview.body.precondition,
-      noteTransmissionAuthorized: false,
-    });
-    expect(result.status).toBe(200);
-    if (result.status !== 200) throw new Error("Expected cached start");
-    await startedRunCompletion(h);
-    expect(h.gatewayConstructions).toBe(0);
-    expect(h.starts).toBe(0);
-  });
-
-  test("keyless cache pre-scan stays outside coordinator and lets queued mutation fence admission", async () => {
-    const h = harness({ gatewayConfigured: false });
-    const [a, b] = h.current.collection.games;
-    if (!a || !b) throw new Error("Expected fixture pair");
-    h.rows.set("abC", {
-      collectionId: h.current.collection.id,
-      gameAId: "a",
-      gameBId: "b",
-      signal: "C",
-      dependencyKind: "C_ONLY",
-      value: 0.6,
-      modelId: JEV_JUDGMENT_CONTRACT.modelId,
-      rubricVersion: JEV_JUDGMENT_CONTRACT.rubricVersion,
-      questionVersion: JEV_JUDGMENT_CONTRACT.questionVersion,
-      requestSchemaVersion: JEV_JUDGMENT_CONTRACT.requestSchemaVersion,
-      scoreMappingVersion: JEV_JUDGMENT_CONTRACT.scoreMappingVersion,
-      semanticPolicyId: JEV_JUDGMENT_CONTRACT.semanticPolicyId,
-      completedAt: "fixture-time",
-      dependencies: buildJevPairDependencies(
-        "C_ONLY",
-        { gameId: a.id, name: a.name, description: a.bggData!.description! },
-        { gameId: b.id, name: b.name, description: b.bggData!.description! },
-      ),
-    });
-
-    const coordinator = profileSourceCoordinatorFor(h.storage);
-    const runExclusive = coordinator.runExclusive.bind(coordinator);
-    let exclusiveDepth = 0;
-    coordinator.runExclusive = (operation) =>
-      runExclusive(async () => {
-        exclusiveDepth++;
-        try {
-          return await operation();
-        } finally {
-          exclusiveDepth--;
-        }
-      });
-    const lookup = h.cache.lookup.bind(h.cache);
-    let mutationPromise: Promise<void> | undefined;
-    let mutationCompleted = false;
-    h.cache.lookup = (key) => {
-      // The keyless cache scan must not keep the shared source coordinator held.
-      expect(exclusiveDepth).toBe(0);
-      mutationPromise ??= coordinator.runExclusive(() =>
-        Promise.resolve().then(() => {
-          const changed = structuredClone(h.current);
-          changed.sourceVectorIdentity = "changed-during-keyless-prescan";
-          h.setCurrent(changed);
-          mutationCompleted = true;
-        }),
-      );
-      return lookup(key);
-    };
-
-    const preview = await h.controller.preview();
-    if (preview.status !== 200) throw new Error("Expected preview");
-    const response = await h.controller.start({
-      requestId: preview.body.requestId,
-      precondition: preview.body.precondition,
-      noteTransmissionAuthorized: false,
-    });
-    await mutationPromise;
-    expect(response).toEqual({ status: 412, body: { error: "precondition-failed" } });
-    expect(mutationCompleted).toBe(true);
-    expect(h.starts).toBe(0);
-    expect(h.gatewayConstructions).toBe(0);
-  });
-
-  test("unconfigured provider rejects a real cache miss before constructing gateway", async () => {
-    const h = harness({ gatewayConfigured: false });
-    const preview = await h.controller.preview();
-    if (preview.status !== 200) throw new Error("Expected preview");
-    expect(preview.body.providerConfigured).toBe(false);
-    const response = await h.controller.start({
-      requestId: preview.body.requestId,
-      precondition: preview.body.precondition,
-      noteTransmissionAuthorized: false,
-    });
-    expect(response).toEqual({ status: 503, body: { error: "run-unavailable" } });
-    expect(h.starts).toBe(0);
-    expect(h.gatewayConstructions).toBe(0);
-    expect(h.rows.size).toBe(0);
-    h.setGatewayConfigured(true);
-    const retried = await h.controller.start({
-      requestId: preview.body.requestId,
-      precondition: preview.body.precondition,
-      noteTransmissionAuthorized: false,
-    });
-    expect(retried.status).toBe(200);
-    await startedRunCompletion(h);
-  });
-
-  test("concurrent duplicate starts are idempotent; different run conflicts", async () => {
-    const h = harness({ pending: true });
-    const firstPreview = await h.controller.preview();
-    const secondPreview = await h.controller.preview();
-    if (firstPreview.status !== 200 || secondPreview.status !== 200)
-      throw new Error("Expected previews");
+  test("duplicate starts, conflicting starts, cancellation, receipt replay and restart remain fenced", async () => {
+    const h = await harness({ pending: true, receiptTtlMs: 50, maxReceipts: 2 });
+    const first = await h.controller.preview();
+    const second = await h.controller.preview();
+    if (first.status !== 200 || second.status !== 200) throw new Error("Expected previews");
     const request = {
-      requestId: firstPreview.body.requestId,
-      precondition: firstPreview.body.precondition,
+      requestId: first.body.requestId,
+      precondition: first.body.precondition,
       noteTransmissionAuthorized: false,
     };
-    const first = h.controller.start(request);
-    const duplicate = h.controller.start(request);
-    const [one, two] = await Promise.all([first, duplicate]);
-    expect(one).toEqual(two);
+    const [accepted, duplicate] = await Promise.all([
+      h.controller.start(request),
+      h.controller.start(request),
+    ]);
+    expect(accepted).toEqual(duplicate);
+    if (accepted.status !== 200) throw new Error("Expected accepted run");
     await h.started;
-    expect(await h.controller.start({ ...request, noteTransmissionAuthorized: true })).toEqual({
-      status: 409,
-      body: { error: "run-conflict" },
-    });
+    expect(
+      (await h.controller.start({ ...request, noteTransmissionAuthorized: true })).status,
+    ).toBe(409);
     const conflicting = await h.controller.start({
-      requestId: secondPreview.body.requestId,
-      precondition: secondPreview.body.precondition,
+      requestId: second.body.requestId,
+      precondition: second.body.precondition,
       noteTransmissionAuthorized: false,
     });
-    expect(conflicting.status).toBe(409);
-    expect(h.starts).toBe(1);
-    expect(h.gatewayConstructions).toBe(1);
+    expect(conflicting).toEqual({ status: 409, body: { error: "run-conflict" } });
+    h.advanceTime(51);
+    expect(await h.controller.start(request)).toEqual(accepted);
+    expect(h.controller.cancel({ runId: accepted.body.runId }).status).toBe(200);
     h.release();
-    await startedRunCompletion(h);
-  });
-
-  test("active run exposes only its live ID and clears after cancellation completion", async () => {
-    const h = harness({ pending: true });
-    const preview = await h.controller.preview();
-    if (preview.status !== 200) throw new Error("Expected preview");
-    const started = await h.controller.start({
-      requestId: preview.body.requestId,
-      precondition: preview.body.precondition,
-      noteTransmissionAuthorized: false,
-    });
-    if (started.status !== 200) throw new Error("Expected run start");
-    await h.started;
-
-    expect(h.controller.activeRun()).toEqual({ runId: started.body.runId, scope: "collection" });
-    expect(Object.keys(h.controller.activeRun()!)).toEqual(["runId", "scope"]);
-    expect(h.controller.cancel({ runId: started.body.runId })).toEqual({
-      status: 200,
-      body: { state: "cancellation-requested" },
-    });
-    const internals = h.controller as unknown as {
-      activeHandle: { runId: string; completion: Promise<unknown> } | null;
-    };
-    const acceptedHandle = internals.activeHandle;
-    if (!acceptedHandle) throw new Error("Expected controller active handle");
-    await acceptedHandle.completion;
-    expect(h.controller.activeRun()).toBeNull();
-
-    h.release();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(h.controller.activeRun()).toBeNull();
-    expect(h.progress.at(-1)).toMatchObject({ runId: started.body.runId, state: "interrupted" });
-    expect(h.rows.size).toBe(0);
-
+    await waitForRun(h.cache, accepted.body.runId);
+    expect(await h.controller.start(request)).toEqual(accepted);
     const restarted = new JevRunController({
       storageService: h.storage,
       sourceAdapter: h.sourceAdapter,
       cache: h.cache,
       runService: h.runService,
+      unifiedScoringService: h.unifiedScoringService,
       gatewayConfigured: () => true,
     });
-    expect(restarted.activeRun()).toBeNull();
+    expect((await restarted.start(request)).status).toBe(412);
   });
 
-  test("stale old completion does not clear a replaced active run identity", async () => {
-    const h = harness({ pending: true });
+  test("active receipts survive TTL and enforce receipt-capacity pressure", async () => {
+    const h = await harness({ pending: true, receiptTtlMs: 50, maxReceipts: 1 });
+    const activePreview = await h.controller.preview();
+    const pressurePreview = await h.controller.preview();
+    if (activePreview.status !== 200 || pressurePreview.status !== 200)
+      throw new Error("Expected previews");
+    const request = {
+      requestId: activePreview.body.requestId,
+      precondition: activePreview.body.precondition,
+      noteTransmissionAuthorized: false,
+    };
+    const accepted = await h.controller.start(request);
+    if (accepted.status !== 200) throw new Error("Expected accepted run");
+    await h.started;
+    h.advanceTime(51);
+    expect(
+      await h.controller.start({
+        requestId: pressurePreview.body.requestId,
+        precondition: pressurePreview.body.precondition,
+        noteTransmissionAuthorized: false,
+      }),
+    ).toEqual({ status: 503, body: { error: "run-unavailable" } });
+    expect(await h.controller.start(request)).toEqual(accepted);
+    h.release();
+    await waitForRun(h.cache, accepted.body.runId);
+    expect(await h.controller.start(request)).toEqual(accepted);
+  });
+
+  test("completion from an earlier handle cannot clear the current active handle", async () => {
+    const h = await harness({ pending: true });
     const preview = await h.controller.preview();
     if (preview.status !== 200) throw new Error("Expected preview");
     const started = await h.controller.start({
@@ -827,67 +679,37 @@ describe("JevRunController", () => {
     type Handle = { runId: string; completion: Promise<unknown>; cancel(): void };
     const internals = h.controller as unknown as { activeHandle: Handle | null };
     const oldHandle = internals.activeHandle;
-    if (!oldHandle) throw new Error("Expected controller active handle");
+    if (!oldHandle) throw new Error("Expected active handle");
     const replacement: Handle = {
       runId: crypto.randomUUID(),
-      completion: Promise.resolve(undefined),
+      completion: Promise.resolve(),
       cancel: () => {},
     };
     internals.activeHandle = replacement;
-
     h.release();
     await oldHandle.completion;
     expect(h.controller.activeRun()).toEqual({ runId: replacement.runId });
     internals.activeHandle = null;
   });
 
-  test("active receipt survives TTL and capacity pressure through run and replay window", async () => {
-    const h = harness({ pending: true, receiptTtlMs: 50, maxReceipts: 1 });
-    const activePreview = await h.controller.preview();
-    if (activePreview.status !== 200) throw new Error("Expected first preview");
-    const activeRequest = {
-      requestId: activePreview.body.requestId,
-      precondition: activePreview.body.precondition,
-      noteTransmissionAuthorized: false,
-    };
-    const activeResponse = await h.controller.start(activeRequest);
-    if (activeResponse.status !== 200) throw new Error("Expected active run");
-    await h.started;
-
-    h.advanceTime(51);
-    const pressurePreview = await h.controller.preview();
-    if (pressurePreview.status !== 200) throw new Error("Expected pressure preview");
-    expect(
-      await h.controller.start({
-        requestId: pressurePreview.body.requestId,
-        precondition: pressurePreview.body.precondition,
-        noteTransmissionAuthorized: false,
-      }),
-    ).toEqual({ status: 503, body: { error: "run-unavailable" } });
-    expect(await h.controller.start(activeRequest)).toEqual(activeResponse);
-    expect(h.starts).toBe(1);
-
-    h.release();
-    await startedRunCompletion(h);
-    expect(await h.controller.start(activeRequest)).toEqual(activeResponse);
-    expect(h.starts).toBe(1);
-  });
-
-  test("a prior run ID cannot cancel the newer active run", async () => {
-    const h = harness({ initial: makeCapture(["only-game"]) });
+  test("cancelling an earlier run ID cannot affect a newly active run", async () => {
+    const h = await harness();
     const firstPreview = await h.controller.preview();
-    if (firstPreview.status !== 200) throw new Error("Expected preview");
+    if (firstPreview.status !== 200) throw new Error("Expected first preview");
     const first = await h.controller.start({
       requestId: firstPreview.body.requestId,
       precondition: firstPreview.body.precondition,
       noteTransmissionAuthorized: false,
     });
-    if (first.status !== 200) throw new Error("Expected first run");
-    await startedRunCompletion(h);
-    await Promise.resolve();
-    const secondCapture = makeCapture(["a", "b"]);
-    secondCapture.sourceVectorIdentity = "vector-2";
-    h.setCurrent(secondCapture);
+    if (first.status !== 200) throw new Error("Expected first run start");
+    await waitForRun(h.cache, first.body.runId);
+
+    const changed = await h.storage.loadCollection();
+    const firstGame = changed.games[0];
+    if (!firstGame) throw new Error("Expected persisted game");
+    firstGame.name = "Changed source for second run";
+    await h.setCollection(changed);
+    h.setProviderPending(true);
     const secondPreview = await h.controller.preview();
     if (secondPreview.status !== 200) throw new Error("Expected second preview");
     const second = await h.controller.start({
@@ -895,48 +717,135 @@ describe("JevRunController", () => {
       precondition: secondPreview.body.precondition,
       noteTransmissionAuthorized: false,
     });
-    if (second.status !== 200) throw new Error("Expected second run");
-    await h.started;
-    expect(h.controller.cancel({ runId: first.body.runId }).status).toBe(409);
-    expect(h.controller.cancel({ runId: second.body.runId })).toEqual({
-      status: 200,
-      body: { state: "cancellation-requested" },
+    if (second.status !== 200) throw new Error("Expected second run start");
+    await waitForGatewayCalls(h, 2);
+    expect(h.controller.activeRun()).toEqual({ runId: second.body.runId, scope: "collection" });
+    expect(h.controller.cancel({ runId: first.body.runId })).toEqual({
+      status: 409,
+      body: { error: "run-conflict" },
     });
+    expect(h.controller.activeRun()).toEqual({ runId: second.body.runId, scope: "collection" });
+    expect(h.controller.cancel({ runId: second.body.runId }).status).toBe(200);
     h.release();
-    await startedRunCompletion(h);
+    await waitForRun(h.cache, second.body.runId);
   });
 
-  test("a controller restart invalidates process-local preconditions", async () => {
-    const h = harness();
+  test("invalid opaque request does not prevent the same authorized request from starting", async () => {
+    const h = await harness();
     const preview = await h.controller.preview();
     if (preview.status !== 200) throw new Error("Expected preview");
-    const restarted = new JevRunController({
-      storageService: h.storage,
-      sourceAdapter: h.sourceAdapter,
-      cache: h.cache,
-      runService: h.runService,
-      gatewayConfigured: () => true,
+    expect(
+      await h.controller.start({
+        requestId: preview.body.requestId,
+        precondition: "not-the-preview-token",
+        noteTransmissionAuthorized: false,
+      }),
+    ).toEqual({ status: 412, body: { error: "precondition-failed" } });
+    expect(
+      (
+        await h.controller.start({
+          requestId: preview.body.requestId,
+          precondition: preview.body.precondition,
+          noteTransmissionAuthorized: false,
+        })
+      ).status,
+    ).toBe(200);
+    await waitForRun(h.cache);
+  });
+
+  test("wishlist preview uses persisted candidate and collection pairs, never fabricated misses", async () => {
+    const h = await harness();
+    const preview = await h.controller.previewWishlist({ kind: "selected", bggIds: [501] });
+    expect(preview.status).toBe(200);
+    if (preview.status !== 200) throw new Error("Expected wishlist preview");
+    expect(preview.body).toMatchObject({
+      selection: { kind: "selected", bggIds: [501] },
+      scope: {
+        scope: "wishlist",
+        selectedCandidateCount: 1,
+        eligibleOwnedGameCount: 2,
+        comparisonPairCount: 2,
+        sendablePairCount: 2,
+      },
+      noteTransmissionPermitted: false,
     });
-    const response = await restarted.start({
+    expect(JSON.stringify(preview.body)).not.toContain("Private note");
+    expect(
+      (
+        await h.controller.start({
+          requestId: preview.body.requestId,
+          precondition: preview.body.precondition,
+          noteTransmissionAuthorized: false,
+        })
+      ).status,
+    ).toBe(200);
+    await waitForRun(h.cache);
+    expect(h.gatewayCalls).toBe(2);
+  });
+
+  test("wishlist readiness recognizes a frozen sendable miss satisfied after preview", async () => {
+    const h = await harness({ gatewayConfigured: false, ids: ["a"] });
+    const preview = await h.controller.previewWishlist({ kind: "selected", bggIds: [501] });
+    if (preview.status !== 200) throw new Error("Expected wishlist preview");
+    const collection = await h.storage.loadCollection();
+    const owned = collection.games[0];
+    const entry = (await h.storage.loadWishlist())[0];
+    if (!owned?.bggData?.description || !entry?.bggSource)
+      throw new Error("Expected persisted wishlist and owned descriptions");
+    const candidateMember = encodeWishlistBggMember(collection.id, String(entry.bggId));
+    const ownedMember = encodeOwnedLocalMember(collection.id, owned.id);
+    h.cache.upsert({
+      pairDomain: "wishlist-candidate",
+      collectionId: collection.id,
+      gameAId: candidateMember,
+      gameBId: ownedMember,
+      signal: "C",
+      dependencyKind: "C_ONLY",
+      value: 0.6,
+      confidence: 1,
+      ...JEV_JUDGMENT_CONTRACT,
+      completedAt: observedAt,
+      dependencies: buildJevPairDependencies(
+        "C_ONLY",
+        {
+          gameId: candidateMember,
+          name: entry.name,
+          description: entry.bggSource.description ?? undefined,
+        },
+        { gameId: ownedMember, name: owned.name, description: owned.bggData.description },
+      ),
+    } satisfies JevPairJudgment);
+    expect(
+      validateWishlistCandidateCOnlyRow(
+        h.cache.lookup({
+          gameAId: candidateMember,
+          gameBId: ownedMember,
+          signal: "C",
+          pairDomain: "wishlist-candidate",
+        }),
+        collection.id,
+        {
+          candidate: { bggId: entry.bggId, name: entry.name, bggSource: entry.bggSource },
+          ownedGame: {
+            id: owned.id,
+            bggId: owned.bggId,
+            name: owned.name,
+            description: owned.bggData.description,
+          },
+        },
+        {
+          candidateBggIds: new Set([entry.bggId]),
+          eligibleOwnedIds: new Set(collection.games.map((item) => item.id)),
+        },
+      ).valid,
+    ).toBe(true);
+    const response = await h.controller.start({
       requestId: preview.body.requestId,
       precondition: preview.body.precondition,
       noteTransmissionAuthorized: false,
     });
-    expect(response.status).toBe(412);
-    expect(h.starts).toBe(0);
+    expect(response).toMatchObject({ status: 200 });
+    await waitForRun(h.cache);
+    expect(h.gatewayCalls).toBe(0);
   });
 });
-
-async function startedRunCompletion(h: ReturnType<typeof harness>): Promise<void> {
-  // Controller intentionally returns no internal handle; await the persisted terminal marker.
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (
-      h.progress.at(-1)?.state === "completed" ||
-      h.progress.at(-1)?.state === "failed" ||
-      h.progress.at(-1)?.state === "interrupted"
-    )
-      return;
-    await Promise.resolve();
-  }
-  throw new Error("Run did not reach a terminal state");
-}

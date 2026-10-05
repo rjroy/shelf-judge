@@ -5,22 +5,15 @@ import {
   type WishlistBggSourceSnapshot,
   type WishlistEntry,
 } from "@shelf-judge/shared";
-import type { JevPairCache } from "./jev-pair-cache-service.js";
 import type { FrozenStagedSimilarityRun } from "./staged-similarity-scope.js";
-import { encodeOwnedLocalMember, encodeWishlistBggMember } from "./jev-pair-identity.js";
 import type { GameService } from "./game-service.js";
 import type { JevRunCapture } from "./jev-run-service.js";
-import { planJevRunScope } from "./jev-run-scope.js";
 import {
   canonicalSha256,
   profileSourceCoordinatorFor,
-  wishlistMutationGenerationFor,
   type ProfileSourceCoordinator,
 } from "./profile-source-coordinator.js";
-import type { JevRunSourceAdapter } from "./jev-run-source-adapter.js";
 import type { StorageService } from "./storage-service.js";
-import { validateWishlistCandidateCOnlyRow } from "./wishlist-candidate-read-proof.js";
-import { wishlistCollectionSourceIdentity } from "./wishlist-collection-source-identity.js";
 
 export type FrozenWishlistRunPair = Readonly<{
   candidateEntryId: string;
@@ -53,13 +46,7 @@ export interface PreparedWishlistRun {
 }
 
 export class WishlistRunPreparationError extends Error {
-  constructor(
-    readonly code:
-      | "invalid-selection"
-      | "source-unavailable"
-      | "scope-changed"
-      | "cache-unavailable",
-  ) {
+  constructor(readonly code: "invalid-selection" | "source-unavailable") {
     super(`Wishlist Jev preparation failed: ${code}`);
     this.name = "WishlistRunPreparationError";
   }
@@ -72,15 +59,12 @@ export type WishlistRunPreparationStorage = Pick<
 
 export interface WishlistRunPreparationService {
   /** Explicit-run preparation may hydrate missing selected compact facts before scoring. */
-  hydrateSources?(selection?: JevWishlistCandidateSelection): Promise<void>;
-  prepare(selection?: JevWishlistCandidateSelection): Promise<PreparedWishlistRun>;
+  hydrateSources(selection?: JevWishlistCandidateSelection): Promise<void>;
 }
 
 export function createWishlistRunPreparationService(options: {
   storageService: WishlistRunPreparationStorage & object;
   gameService: Pick<GameService, "getBoardgameScoringInput">;
-  sourceAdapter: Pick<JevRunSourceAdapter, "loadCapture" | "readCurrent">;
-  cache: JevPairCache;
   coordinator?: ProfileSourceCoordinator;
 }): WishlistRunPreparationService {
   const coordinator = options.coordinator ?? profileSourceCoordinatorFor(options.storageService);
@@ -164,277 +148,8 @@ export function createWishlistRunPreparationService(options: {
   }
 
   return {
-    hydrateSources: hydrateMissingSources,
-    async prepare(requestedSelection): Promise<PreparedWishlistRun> {
-      const selection = normalizeSelection(requestedSelection);
-      await hydrateMissingSources(selection);
-
-      let capture: JevRunCapture;
-      try {
-        capture = await options.sourceAdapter.loadCapture();
-      } catch {
-        throw new WishlistRunPreparationError("source-unavailable");
-      }
-      // All proof, disclosure, and currentness work must use one immutable
-      // snapshot, never a mutable object retained by the source adapter.
-      capture = freezeValue(structuredClone(capture));
-      const finalSources = await coordinator.runExclusive(async () => {
-        const [entries, collection] = await Promise.all([
-          options.storageService.loadWishlist(),
-          options.storageService.loadCollection(),
-        ]);
-        return {
-          entries,
-          collection,
-          wishlistMutationGeneration: wishlistMutationGenerationFor(options.storageService),
-        };
-      });
-      const capturedCollection = freezeValue(structuredClone(finalSources.collection));
-      const capturedEntries = freezeValue(structuredClone(finalSources.entries));
-      const capturedCollectionIdentity = wishlistCollectionSourceIdentity(capturedCollection);
-      if (capturedCollectionIdentity !== wishlistCollectionSourceIdentity(capture.collection))
-        throw new WishlistRunPreparationError("scope-changed");
-
-      const selectedIds = canonicalSelectionIds(selection, capturedEntries);
-      if (selection.kind === "selected") {
-        for (const bggId of selection.bggIds)
-          if (!selectedIds.has(bggId)) throw new WishlistRunPreparationError("scope-changed");
-      }
-      const ownedIds = ownedBggIds(capturedCollection.games);
-      const selectedEntries = capturedEntries.filter((entry) => selectedIds.has(entry.bggId));
-      const requestedEntries = selectedEntries.filter((entry) => !ownedIds.has(entry.bggId));
-      const eligibleEntries = requestedEntries.filter(hasSource);
-      const plan = planJevRunScope(capture.collection, capture.predictionCapture);
-      if (!plan.ok) throw new WishlistRunPreparationError("source-unavailable");
-      const eligibleOwnedIds = plan.scope.eligibleGameIds;
-      const ownedById = new Map(capture.collection.games.map((game) => [game.id, game]));
-      const candidateBggIds = new Set(eligibleEntries.map((entry) => entry.bggId));
-      const redundancy = await options.storageService.loadRedundancySettings();
-      const semantic = capture.collection.semanticRedundancy.settings;
-      const descriptionRequired =
-        redundancy.enabled &&
-        semantic.enabled &&
-        Number.isFinite(semantic.weights.description) &&
-        semantic.weights.description > 0;
-      const usableCandidates = descriptionRequired
-        ? eligibleEntries.filter(hasUsableSourceDescription)
-        : [];
-      const sendCandidates: Array<{
-        entry: WishlistEntry;
-        ownedGame: NonNullable<ReturnType<typeof ownedById.get>>;
-      }> = [];
-      for (const entry of usableCandidates) {
-        for (const ownedGameId of eligibleOwnedIds) {
-          const ownedGame = ownedById.get(ownedGameId);
-          if (!ownedGame || !usableDescription(ownedGame.bggData?.description ?? null)) continue;
-          sendCandidates.push({ entry, ownedGame });
-        }
-      }
-
-      let revision: number | null = null;
-      if (sendCandidates.length > 0) {
-        try {
-          if (!options.cache.available) throw new Error("cache unavailable");
-          revision = options.cache.mutationRevision();
-          if (revision === null || !Number.isSafeInteger(revision) || revision < 0)
-            throw new Error("invalid revision");
-        } catch {
-          throw new WishlistRunPreparationError("cache-unavailable");
-        }
-      }
-
-      const membership = {
-        candidateBggIds,
-        eligibleOwnedIds: new Set(eligibleOwnedIds),
-      };
-      const pairs: FrozenWishlistRunPair[] = [];
-      try {
-        for (const { entry, ownedGame } of sendCandidates) {
-          const candidateSource = entry.bggSource;
-          if (!validSource(candidateSource)) continue;
-          const candidateMember = encodeWishlistBggMember(
-            capture.collection.id,
-            String(entry.bggId),
-          );
-          const ownedMember = encodeOwnedLocalMember(capture.collection.id, ownedGame.id);
-          const row = options.cache.lookup({
-            gameAId: candidateMember,
-            gameBId: ownedMember,
-            signal: "C",
-            pairDomain: "wishlist-candidate",
-          });
-          const proof = validateWishlistCandidateCOnlyRow(
-            row,
-            capture.collection.id,
-            {
-              candidate: { bggId: entry.bggId, name: entry.name, bggSource: candidateSource },
-              ownedGame: {
-                id: ownedGame.id,
-                bggId: ownedGame.bggId,
-                name: ownedGame.name,
-                description: ownedGame.bggData?.description ?? null,
-              },
-            },
-            membership,
-          );
-          pairs.push(
-            Object.freeze({
-              candidateEntryId: entry.id,
-              candidateBggId: entry.bggId,
-              ownedGameId: ownedGame.id,
-              gameAId: candidateMember,
-              gameBId: ownedMember,
-              state: proof.valid ? "cached-hit" : "sendable-miss",
-              cachedValue: proof.valid ? proof.value : null,
-            }),
-          );
-        }
-        if (revision !== null && options.cache.mutationRevision() !== revision)
-          throw new Error("cache changed during candidate reads");
-      } catch {
-        throw new WishlistRunPreparationError("cache-unavailable");
-      }
-
-      const hitCount = pairs.filter((pair) => pair.state === "cached-hit").length;
-      const missCount = pairs.length - hitCount;
-      const disclosure: Extract<JevRunScopeDisclosure, { scope: "wishlist" }> = Object.freeze({
-        scope: "wishlist",
-        wishlistEntryCount: capturedEntries.length,
-        selectedCandidateCount: selectedEntries.length,
-        unselectedEntryCount: capturedEntries.length - selectedEntries.length,
-        ownedOverlapCandidateCount: selectedEntries.length - requestedEntries.length,
-        requestedCandidateCount: requestedEntries.length,
-        eligibleCandidateCount: eligibleEntries.length,
-        unavailableCandidateCount: requestedEntries.length - eligibleEntries.length,
-        eligibleOwnedGameCount: eligibleOwnedIds.length,
-        comparisonPairCount: eligibleEntries.length * eligibleOwnedIds.length,
-        cachedHitPairCount: hitCount,
-        sendablePairCount: missCount,
-      });
-      const selectionIdentity = canonicalSha256(selection);
-      const identity = canonicalSha256({
-        selection,
-        collectionIdentity: capturedCollectionIdentity,
-        policyIdentity: capture.policyIdentity,
-        eligibilityIdentity: capture.eligibilityIdentity ?? null,
-        entries: selectedEntries.map((entry) => ({
-          id: entry.id,
-          bggId: entry.bggId,
-          name: entry.name,
-          bggSource: validSource(entry.bggSource) ? entry.bggSource : null,
-        })),
-        eligibleOwnedIds,
-        pairs,
-        disclosure,
-        cacheRevision: revision,
-        wishlistMutationGeneration: finalSources.wishlistMutationGeneration,
-      });
-      const frozenEntries = freezeValue(selectedEntries.map((entry) => structuredClone(entry)));
-      const frozenAllEntries = capturedEntries;
-      const unavailableCandidateBggIds = freezeValue(
-        requestedEntries
-          .filter((entry) => !validSource(entry.bggSource))
-          .map((entry) => entry.bggId),
-      );
-      const prepared: PreparedWishlistRun = {
-        scope: "wishlist",
-        selection: freezeValue(selection),
-        selectionIdentity,
-        capture,
-        entries: frozenEntries,
-        unavailableCandidateBggIds,
-        eligibleOwnedIds: freezeValue([...eligibleOwnedIds]),
-        pairs: freezeValue(pairs),
-        disclosure,
-        cacheRevision: revision,
-        wishlistMutationGeneration: finalSources.wishlistMutationGeneration,
-        identity,
-        isSourceCurrent: async () =>
-          isPreparedCurrent({
-            selection,
-            allEntries: frozenAllEntries,
-            capture,
-            collectionIdentity: capturedCollectionIdentity,
-            revision: null,
-            wishlistMutationGeneration: finalSources.wishlistMutationGeneration,
-            sourceAdapter: options.sourceAdapter,
-            storageService: options.storageService,
-            coordinator,
-            cache: options.cache,
-          }),
-        isCurrent: async () =>
-          isPreparedCurrent({
-            selection,
-            allEntries: frozenAllEntries,
-            capture,
-            collectionIdentity: capturedCollectionIdentity,
-            revision,
-            wishlistMutationGeneration: finalSources.wishlistMutationGeneration,
-            sourceAdapter: options.sourceAdapter,
-            storageService: options.storageService,
-            coordinator,
-            cache: options.cache,
-          }),
-      };
-      if (!(await prepared.isCurrent())) throw new WishlistRunPreparationError("scope-changed");
-      return Object.freeze(prepared);
-    },
+    hydrateSources: async (selection) => hydrateMissingSources(normalizeSelection(selection)),
   };
-}
-
-async function isPreparedCurrent(input: {
-  selection: JevWishlistCandidateSelection;
-  allEntries: readonly WishlistEntry[];
-  capture: JevRunCapture;
-  collectionIdentity: string;
-  revision: number | null;
-  wishlistMutationGeneration: string;
-  sourceAdapter: Pick<JevRunSourceAdapter, "readCurrent">;
-  storageService: WishlistRunPreparationStorage;
-  coordinator: ProfileSourceCoordinator;
-  cache: JevPairCache;
-}): Promise<boolean> {
-  try {
-    return await input.coordinator.runExclusive(async () => {
-      if (wishlistMutationGenerationFor(input.storageService) !== input.wishlistMutationGeneration)
-        return false;
-      const authority = await input.sourceAdapter.readCurrent();
-      const [entries, collection] = await Promise.all([
-        input.storageService.loadWishlist(),
-        input.storageService.loadCollection(),
-      ]);
-      const liveCollectionIdentity = wishlistCollectionSourceIdentity(collection);
-      const authorityCollectionMatches =
-        input.capture.eligibilityIdentity !== undefined &&
-        authority.eligibilityIdentity !== undefined
-          ? authority.eligibilityIdentity === input.capture.eligibilityIdentity
-          : wishlistCollectionSourceIdentity(authority.collection) === input.collectionIdentity;
-      if (
-        authority.policyIdentity !== input.capture.policyIdentity ||
-        !authorityCollectionMatches ||
-        liveCollectionIdentity !== input.collectionIdentity
-      )
-        return false;
-      const selectedIds = canonicalSelectionIds(input.selection, entries);
-      if (
-        input.selection.kind === "selected" &&
-        input.selection.bggIds.some((bggId) => !selectedIds.has(bggId))
-      )
-        return false;
-      if (
-        canonicalSha256(entries.map((entry) => canonicalSha256(entry)).sort()) !==
-        canonicalSha256(input.allEntries.map((entry) => canonicalSha256(entry)).sort())
-      )
-        return false;
-      if (input.revision !== null && input.cache.mutationRevision() !== input.revision)
-        return false;
-      return (
-        wishlistMutationGenerationFor(input.storageService) === input.wishlistMutationGeneration
-      );
-    });
-  } catch {
-    return false;
-  }
 }
 
 function normalizeSelection(
@@ -481,22 +196,6 @@ function validSource(value: unknown): value is WishlistBggSourceSnapshot {
   return WishlistBggSourceSnapshotSchema.safeParse(value).success;
 }
 
-function hasSource(
-  entry: WishlistEntry,
-): entry is WishlistEntry & { bggSource: WishlistBggSourceSnapshot } {
-  return validSource(entry.bggSource);
-}
-
-function hasUsableSourceDescription(
-  entry: WishlistEntry,
-): entry is WishlistEntry & { bggSource: WishlistBggSourceSnapshot } {
-  return hasSource(entry) && usableDescription(entry.bggSource.description);
-}
-
-function usableDescription(value: string | null): value is string {
-  return value !== null && value.trim().length > 0;
-}
-
 function ownedBggIds(
   games: readonly { bggId: number | null; additionalBggIds?: readonly number[] }[],
 ): Set<number> {
@@ -506,12 +205,4 @@ function ownedBggIds(
       ...(game.additionalBggIds ?? []),
     ]),
   );
-}
-
-function freezeValue<T>(value: T): T {
-  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const child of Object.values(value)) freezeValue(child);
-  }
-  return value;
 }
