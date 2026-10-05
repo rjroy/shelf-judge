@@ -7,6 +7,7 @@ import { createLogger } from "../services/logger.js";
 import { performance } from "node:perf_hooks";
 
 let requestSequence = 0;
+const SLOW_COLLECTION_SNAPSHOT_REQUEST_MS = 3_000;
 
 export function createCollectionSnapshotRoutes(
   service: CollectionSnapshotCacheService,
@@ -16,7 +17,7 @@ export function createCollectionSnapshotRoutes(
   routes.get("/collection/snapshot", async (c) => {
     const requestId = `collection-${++requestSequence}`;
     const startedAt = performance.now();
-    logger.log("collection snapshot request attempt", {
+    logger.debug?.("collection snapshot request attempt", {
       requestId,
       method: "GET",
       path: "/collection/snapshot",
@@ -29,14 +30,20 @@ export function createCollectionSnapshotRoutes(
       } else {
         c.header("Cache-Control", "no-store");
       }
-      logger.log("collection snapshot request completed", {
+      const elapsedMs = Math.max(0, performance.now() - startedAt);
+      const completion = {
         requestId,
-        elapsedMs: Math.max(0, performance.now() - startedAt),
+        elapsedMs,
         status: decision.snapshotStatus ?? decision.status,
         gameCount: decision.gameCount ?? 0,
         httpStatus: decision.status,
-        outcome: "success",
-      });
+        outcome: elapsedMs >= SLOW_COLLECTION_SNAPSHOT_REQUEST_MS ? "slow-success" : "success",
+      };
+      if (elapsedMs >= SLOW_COLLECTION_SNAPSHOT_REQUEST_MS) {
+        logger.warn("collection snapshot request completed", completion);
+      } else {
+        logger.log("collection snapshot request completed", completion);
+      }
       if (decision.status === 304) return c.body(null, 304);
       c.header("Content-Type", "application/json; charset=UTF-8");
       return c.body(decision.body ?? "", 200);

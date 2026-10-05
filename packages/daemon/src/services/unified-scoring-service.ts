@@ -456,7 +456,7 @@ export function createUnifiedScoringService(
     const existingFlight = shareFlight ? captureFlights.get(flightKey) : undefined;
     if (existingFlight) {
       const existingFlightId = captureFlightIds.get(existingFlight) ?? "unlabeled-flight";
-      logger.log("unified source capture join", {
+      logger.debug?.("unified source capture join", {
         callId,
         flightId: existingFlightId,
         includeWishlist,
@@ -464,7 +464,7 @@ export function createUnifiedScoringService(
       });
       try {
         const frame = await existingFlight;
-        logger.log("unified source capture completed", {
+        logger.debug?.("unified source capture completed", {
           callId,
           flightId: existingFlightId,
           elapsedMs: Math.max(0, performance.now() - startedAt),
@@ -482,7 +482,7 @@ export function createUnifiedScoringService(
       }
     }
     const flightId = shareFlight ? `unified-capture-flight-${++captureFlightSequence}` : null;
-    logger.log("unified source capture attempt", {
+    logger.debug?.("unified source capture attempt", {
       callId,
       flightId,
       includeWishlist,
@@ -490,13 +490,13 @@ export function createUnifiedScoringService(
       captureMode: shareFlight ? "shareable" : "owner-local-bypass",
     });
     const enqueuedAt = performance.now();
-    logger.log("unified source capture coordinator queued", {
+    logger.debug?.("unified source capture coordinator queued", {
       callId,
       flightId,
       captureMode: shareFlight ? "shareable" : "owner-local-bypass",
     });
     const work = coordinator.runExclusive(async () => {
-      logger.log("unified source capture coordinator entered", {
+      logger.debug?.("unified source capture coordinator entered", {
         callId,
         flightId,
         waitMs: Math.max(0, performance.now() - enqueuedAt),
@@ -561,7 +561,7 @@ export function createUnifiedScoringService(
         sourceVector: captured.sources.sourceVector,
       });
       if (includeWishlist) privateWishlistCandidateBaselines.set(frame, candidateBaselines);
-      logger.log("unified source capture frame prepared", {
+      logger.debug?.("unified source capture frame prepared", {
         callId,
         flightId,
         gameCount: frame.sources.collection.games.length,
@@ -574,7 +574,7 @@ export function createUnifiedScoringService(
       const registeredFlightId = flightId ?? `unified-capture-flight-${++captureFlightSequence}`;
       captureFlightIds.set(work, registeredFlightId);
       captureFlights.set(flightKey, work);
-      logger.log("unified source capture flight registered", {
+      logger.debug?.("unified source capture flight registered", {
         callId,
         flightId: registeredFlightId,
         flightCount: captureFlights.size,
@@ -583,7 +583,7 @@ export function createUnifiedScoringService(
     }
     try {
       const frame = await work;
-      logger.log("unified source capture completed", {
+      logger.debug?.("unified source capture completed", {
         callId,
         flightId: flightId ?? `owner-local-${callId}`,
         elapsedMs: Math.max(0, performance.now() - startedAt),

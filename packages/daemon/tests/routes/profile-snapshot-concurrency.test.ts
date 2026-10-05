@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,13 +42,23 @@ async function bounded<Value>(promise: Promise<Value>, timeoutMs = 5_000) {
 
 describe("Profile and collection snapshot concurrent requests", () => {
   let cleanup: (() => Promise<void>) | null = null;
+  const originalNodeDebug = process.env.NODE_DEBUG;
+  const logSpy = spyOn(console, "log").mockImplementation(() => {});
+  const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+  const errorSpy = spyOn(console, "error").mockImplementation(() => {});
 
   afterEach(async () => {
     await cleanup?.();
     cleanup = null;
+    logSpy.mockReset();
+    warnSpy.mockReset();
+    errorSpy.mockReset();
+    if (originalNodeDebug === undefined) delete process.env.NODE_DEBUG;
+    else process.env.NODE_DEBUG = originalNodeDebug;
   });
 
   test("completes overlapping real routes when a Profile owner captures its own frame", async () => {
+    delete process.env.NODE_DEBUG;
     let providerCalls = 0;
     const failProvider = () => {
       providerCalls += 1;
@@ -195,5 +205,25 @@ describe("Profile and collection snapshot concurrent requests", () => {
     const healthySnapshot = await run.ctx.app.request("http://localhost/api/collection/snapshot");
     expect(healthySnapshot.status).toBe(200);
     expect(CollectionSnapshotSchema.safeParse(await healthySnapshot.json()).success).toBe(true);
+
+    const routeSummaries = logSpy.mock.calls.filter(
+      (call) => call[1] === "collection snapshot request completed",
+    );
+    expect(routeSummaries).toHaveLength(3);
+    const hasDetailedMessages = (calls: unknown[][]) =>
+      calls.some((call) => {
+        const message = call[1];
+        return (
+          typeof message === "string" &&
+          /coordinator wait|source load attempt|phase attempt|cache publication enqueue|response validation enqueue|capture flight registered|profile source operation start/.test(
+            message,
+          )
+        );
+      });
+    expect(
+      hasDetailedMessages(logSpy.mock.calls) ||
+        hasDetailedMessages(warnSpy.mock.calls) ||
+        hasDetailedMessages(errorSpy.mock.calls),
+    ).toBe(false);
   });
 });

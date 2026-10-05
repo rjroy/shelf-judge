@@ -133,7 +133,7 @@ export function createCollectionSnapshotCacheService(
       ifNoneMatch !== null &&
       ifNoneMatch !== undefined &&
       matchesIfNoneMatch(ifNoneMatch, candidate.etag);
-    logger.log("collection snapshot cache hit completed", {
+    logger.debug?.("collection snapshot cache hit completed", {
       outcome: notModified ? "not-modified" : "body",
       gameCount: candidate.gameCount,
       bytes: notModified ? 0 : Buffer.byteLength(candidate.serializedBody),
@@ -156,7 +156,7 @@ export function createCollectionSnapshotCacheService(
     const reservationId = `snapshot-reservation-${++reservationSequence}`;
     const queuedFlightId = flight?.id ?? null;
     const candidateFlightId = queuedFlightId ?? `snapshot-flight-${flightSequence + 1}`;
-    logger.log("collection snapshot reservation enqueue", {
+    logger.debug?.("collection snapshot reservation enqueue", {
       requestId,
       reservationId,
       flightId: queuedFlightId,
@@ -164,7 +164,7 @@ export function createCollectionSnapshotCacheService(
       operation: "reserve",
     });
     return deps.coordinator.runExclusive(async () => {
-      logger.log("collection snapshot reservation entered", {
+      logger.debug?.("collection snapshot reservation entered", {
         requestId,
         reservationId,
         flightId: flight?.id ?? null,
@@ -180,7 +180,7 @@ export function createCollectionSnapshotCacheService(
         return { kind: "hit", decision: decisionForEntry(entry!, ifNoneMatch) };
       }
       if (entry && (semanticIsEnabled || !isUsable(entry, current, now))) {
-        logger.log("collection snapshot cache invalidation", {
+        logger.debug?.("collection snapshot cache invalidation", {
           outcome: "invalidated",
           cachedChangeToken: entry.sourceVector.changeToken,
           currentChangeToken: current?.changeToken ?? null,
@@ -193,7 +193,7 @@ export function createCollectionSnapshotCacheService(
         entry = null;
       }
       if (flight && flight.semanticEnabled === semanticIsEnabled) {
-        logger.log("collection snapshot cache miss", {
+        logger.debug?.("collection snapshot cache miss", {
           requestId,
           reservationId,
           flightId: flight.id,
@@ -205,7 +205,7 @@ export function createCollectionSnapshotCacheService(
       }
       const created = createFlight(semanticIsEnabled, `snapshot-flight-${++flightSequence}`);
       flight = created;
-      logger.log("collection snapshot cache miss", {
+      logger.debug?.("collection snapshot cache miss", {
         requestId,
         reservationId,
         flightId: created.id,
@@ -224,7 +224,7 @@ export function createCollectionSnapshotCacheService(
     operationId: string,
   ): Promise<void> {
     const startedAt = performance.now();
-    logger.log("collection snapshot cache build attempt", {
+    logger.debug?.("collection snapshot cache build attempt", {
       requestId,
       operationId,
       flightId: buildFlight.id,
@@ -234,7 +234,7 @@ export function createCollectionSnapshotCacheService(
       const built = await deps.builder.buildSnapshot({ requestId, operationId });
       const serializedBody = serialize(built.snapshot);
       const publicationEnqueuedAt = performance.now();
-      logger.log("collection snapshot cache publication enqueue", {
+      logger.debug?.("collection snapshot cache publication enqueue", {
         requestId,
         operationId,
         flightId: buildFlight.id,
@@ -242,7 +242,7 @@ export function createCollectionSnapshotCacheService(
       });
       const result = await deps.coordinator
         .runExclusive(async (): Promise<CompletedBuild> => {
-          logger.log("collection snapshot cache publication entered", {
+          logger.debug?.("collection snapshot cache publication entered", {
             requestId,
             operationId,
             flightId: buildFlight.id,
@@ -288,7 +288,7 @@ export function createCollectionSnapshotCacheService(
           }
           if (built.snapshot.status !== "complete") {
             if (flight === buildFlight) flight = null;
-            logger.log("collection snapshot cache build completed", {
+            logger.debug?.("collection snapshot cache build completed", {
               outcome: "degraded-not-cached",
               gameCount: built.snapshot.games.length,
               bytes: Buffer.byteLength(serializedBody),
@@ -311,7 +311,7 @@ export function createCollectionSnapshotCacheService(
           }
           if (semanticIsEnabled) {
             if (flight === buildFlight) flight = null;
-            logger.log("collection snapshot cache build completed", {
+            logger.debug?.("collection snapshot cache build completed", {
               outcome: "semantic-redundancy-no-store",
               gameCount: built.snapshot.games.length,
               bytes: Buffer.byteLength(serializedBody),
@@ -341,7 +341,7 @@ export function createCollectionSnapshotCacheService(
             etag,
             gameCount: built.snapshot.games.length,
           };
-          logger.log("collection snapshot cache build completed", {
+          logger.debug?.("collection snapshot cache build completed", {
             outcome: "published",
             changeToken: built.sourceVector.changeToken,
             gameCount: built.snapshot.games.length,
@@ -367,7 +367,7 @@ export function createCollectionSnapshotCacheService(
         })
         .then(
           (completed) => {
-            logger.log("collection snapshot cache publication completed", {
+            logger.debug?.("collection snapshot cache publication completed", {
               requestId,
               operationId,
               flightId: buildFlight.id,
@@ -393,7 +393,7 @@ export function createCollectionSnapshotCacheService(
       // Publication/removal is atomic with source validation; resolve outside the
       // lock only after no later caller can join this completed flight.
       buildFlight.resolve(result);
-      logger.log("collection snapshot cache build completed", {
+      logger.debug?.("collection snapshot cache build completed", {
         requestId,
         operationId,
         flightId: buildFlight.id,
@@ -427,7 +427,7 @@ export function createCollectionSnapshotCacheService(
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const reservation = await reserve(ifNoneMatch, requestId);
         if (reservation.kind === "hit") {
-          logger.log("collection snapshot resolve completed", {
+          logger.debug?.("collection snapshot resolve completed", {
             requestId,
             elapsedMs: Math.max(0, performance.now() - startedAt),
             cache: "hit",
@@ -447,7 +447,7 @@ export function createCollectionSnapshotCacheService(
           throw error;
         }
         const validationEnqueuedAt = performance.now();
-        logger.log("collection snapshot response validation enqueue", {
+        logger.debug?.("collection snapshot response validation enqueue", {
           requestId,
           flightId: reservation.flight.id,
           phase: "response-validation",
@@ -455,7 +455,7 @@ export function createCollectionSnapshotCacheService(
         });
         const decision = await deps.coordinator
           .runExclusive(async () => {
-            logger.log("collection snapshot response validation entered", {
+            logger.debug?.("collection snapshot response validation entered", {
               requestId,
               flightId: reservation.flight.id,
               phase: "response-validation",
@@ -519,7 +519,7 @@ export function createCollectionSnapshotCacheService(
           })
           .then(
             (validated) => {
-              logger.log("collection snapshot response validation completed", {
+              logger.debug?.("collection snapshot response validation completed", {
                 requestId,
                 flightId: reservation.flight.id,
                 phase: "response-validation",
@@ -543,7 +543,7 @@ export function createCollectionSnapshotCacheService(
             },
           );
         if (decision) {
-          logger.log("collection snapshot resolve completed", {
+          logger.debug?.("collection snapshot resolve completed", {
             requestId,
             elapsedMs: Math.max(0, performance.now() - startedAt),
             flightId: reservation.flight.id,

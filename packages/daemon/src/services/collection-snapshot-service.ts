@@ -159,13 +159,13 @@ export function createCollectionSnapshotService(
     operationId: string;
   }): Promise<CapturedInputs> {
     const queueStartedAt = performance.now();
-    logger.log("collection snapshot coordinator wait", {
+    logger.debug?.("collection snapshot coordinator wait", {
       ...context,
       phase: "attempt",
       operation: "capture",
     });
     return coordinator.runExclusive(async () => {
-      logger.log("collection snapshot coordinator acquired", {
+      logger.debug?.("collection snapshot coordinator acquired", {
         ...context,
         operation: "capture",
         waitMs: Math.max(0, performance.now() - queueStartedAt),
@@ -176,13 +176,13 @@ export function createCollectionSnapshotService(
       );
       if (hasStartupMarker && storageService.hydrateSourceVector) {
         const hydrationStartedAt = performance.now();
-        logger.log("collection snapshot startup hydration attempt", {
+        logger.debug?.("collection snapshot startup hydration attempt", {
           ...context,
           changeToken: before?.changeToken ?? null,
         });
         try {
           await storageService.hydrateSourceVector();
-          logger.log("collection snapshot startup hydration completed", {
+          logger.debug?.("collection snapshot startup hydration completed", {
             ...context,
             changeToken: storageService.sourceVector?.()?.changeToken ?? null,
             elapsedMs: Math.max(0, performance.now() - hydrationStartedAt),
@@ -199,7 +199,7 @@ export function createCollectionSnapshotService(
         }
         before = storageService.sourceVector?.();
       }
-      logger.log("collection snapshot capture attempt", {
+      logger.debug?.("collection snapshot capture attempt", {
         ...context,
         changeToken: before?.changeToken ?? null,
         available: before?.available ?? false,
@@ -207,14 +207,14 @@ export function createCollectionSnapshotService(
       if (!before) throw new CollectionSnapshotUnavailableError();
       const load = <Value>(source: string, read: () => Promise<Value>): Promise<Value> => {
         const loadStartedAt = performance.now();
-        logger.log("collection snapshot source load attempt", {
+        logger.debug?.("collection snapshot source load attempt", {
           ...context,
           source,
           changeToken: before.changeToken,
         });
         return read().then(
           (value) => {
-            logger.log("collection snapshot source load completed", {
+            logger.debug?.("collection snapshot source load completed", {
               ...context,
               source,
               outcome: "loaded",
@@ -285,7 +285,7 @@ export function createCollectionSnapshotService(
           "Collection snapshot sources changed during capture",
         );
       }
-      logger.log("collection snapshot capture completed", {
+      logger.debug?.("collection snapshot capture completed", {
         ...context,
         collectionId: collectionResult.value.id,
         changeToken: after.changeToken,
@@ -327,19 +327,19 @@ export function createCollectionSnapshotService(
     context: { requestId: string; operationId: string },
   ): Promise<void> {
     const queueStartedAt = performance.now();
-    logger.log("collection snapshot coordinator wait", {
+    logger.debug?.("collection snapshot coordinator wait", {
       ...context,
       phase: "attempt",
       operation: "publication-check",
     });
     await coordinator.runExclusive(() =>
       Promise.resolve().then(() => {
-        logger.log("collection snapshot coordinator acquired", {
+        logger.debug?.("collection snapshot coordinator acquired", {
           ...context,
           operation: "publication-check",
           waitMs: Math.max(0, performance.now() - queueStartedAt),
         });
-        logger.log("collection snapshot source verification attempt", {
+        logger.debug?.("collection snapshot source verification attempt", {
           ...context,
           changeToken: token,
         });
@@ -359,7 +359,7 @@ export function createCollectionSnapshotService(
             "Collection snapshot sources changed during computation",
           );
         }
-        logger.log("collection snapshot source verification completed", {
+        logger.debug?.("collection snapshot source verification completed", {
           ...context,
           changeToken: token,
           outcome: "current",
@@ -373,9 +373,13 @@ export function createCollectionSnapshotService(
       const operationId = context?.operationId ?? `snapshot-build-${++buildSequence}`;
       const requestId = context?.requestId ?? operationId;
       const operationStartedAt = performance.now();
-      logger.log("collection snapshot build attempt", { requestId, operationId, phase: "capture" });
+      logger.debug?.("collection snapshot build attempt", {
+        requestId,
+        operationId,
+        phase: "capture",
+      });
       const input = await capture({ requestId, operationId });
-      logger.log("collection snapshot phase completed", {
+      logger.debug?.("collection snapshot phase completed", {
         requestId,
         operationId,
         phase: "capture",
@@ -394,7 +398,7 @@ export function createCollectionSnapshotService(
       const noteDegraded = (feature: string, reason: string) => degraded.push({ feature, reason });
       let ordinary: GameWithScore[];
       const ordinaryStartedAt = performance.now();
-      logger.log("collection snapshot phase attempt", {
+      logger.debug?.("collection snapshot phase attempt", {
         requestId,
         operationId,
         phase: "ordinary-scoring",
@@ -407,7 +411,7 @@ export function createCollectionSnapshotService(
         for (const entry of ordinary) {
           if (entry.score !== null) FitnessResultResponseSchema.parse(entry.score);
         }
-        logger.log("collection snapshot phase completed", {
+        logger.debug?.("collection snapshot phase completed", {
           requestId,
           operationId,
           phase: "ordinary-scoring",
@@ -429,7 +433,7 @@ export function createCollectionSnapshotService(
       let prepared: PreparedPredictionList | undefined;
       if (input.predictionSettings) {
         const preparedStartedAt = performance.now();
-        logger.log("collection snapshot phase attempt", {
+        logger.debug?.("collection snapshot phase attempt", {
           requestId,
           operationId,
           phase: "prediction-preparation",
@@ -444,7 +448,7 @@ export function createCollectionSnapshotService(
             input.predictionSettings,
             { requestId, operationId },
           );
-          logger.log("collection snapshot phase completed", {
+          logger.debug?.("collection snapshot phase completed", {
             requestId,
             operationId,
             phase: "prediction-preparation",
@@ -467,7 +471,7 @@ export function createCollectionSnapshotService(
       let predicted: GameWithScore[] | undefined;
       if (prepared) {
         const predictionStartedAt = performance.now();
-        logger.log("collection snapshot phase attempt", {
+        logger.debug?.("collection snapshot phase attempt", {
           requestId,
           operationId,
           phase: "prediction-resolution",
@@ -479,7 +483,7 @@ export function createCollectionSnapshotService(
           for (const entry of predicted) {
             if (entry.score !== null) FitnessResultResponseSchema.parse(entry.score);
           }
-          logger.log("collection snapshot phase completed", {
+          logger.debug?.("collection snapshot phase completed", {
             requestId,
             operationId,
             phase: "prediction-resolution",
@@ -547,7 +551,7 @@ export function createCollectionSnapshotService(
         !unifiedCalculated
       ) {
         const redundancyStartedAt = performance.now();
-        logger.log("collection snapshot phase attempt", {
+        logger.debug?.("collection snapshot phase attempt", {
           requestId,
           operationId,
           phase: "redundancy-adjustment",
@@ -636,7 +640,7 @@ export function createCollectionSnapshotService(
           }
           ordinaryDisplay = mergeByGame(ordinary, adjusted.ordinary);
           predictedDisplay = mergeByGame(predicted, adjusted.predicted);
-          logger.log("collection snapshot phase completed", {
+          logger.debug?.("collection snapshot phase completed", {
             requestId,
             operationId,
             phase: "redundancy-adjustment",
@@ -826,7 +830,7 @@ export function createCollectionSnapshotService(
             .map((entry) => entry.score?.score ?? null),
         ),
       });
-      logger.log("collection snapshot phase completed", {
+      logger.debug?.("collection snapshot phase completed", {
         requestId,
         operationId,
         phase: "public-projection",
@@ -838,7 +842,7 @@ export function createCollectionSnapshotService(
           "Unified scoring inputs changed before snapshot publication",
         );
       await stillCurrent(input.token, input.sourceVector, { requestId, operationId });
-      logger.log("collection snapshot build completed", {
+      logger.debug?.("collection snapshot build completed", {
         requestId,
         operationId,
         elapsedMs: Math.max(0, performance.now() - operationStartedAt),

@@ -319,9 +319,9 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
     getProfile(): Promise<CollectionProfileResult> {
       const operationId = `profile-${++operationSequence}`;
       const enqueuedAt = performance.now();
-      logger.log("profile source operation start", { operationId, phase: "enqueue" });
+      logger.debug?.("profile source operation start", { operationId, phase: "enqueue" });
       const operation = coordinator.runExclusive(async () => {
-        logger.log("profile source operation entered", {
+        logger.debug?.("profile source operation entered", {
           operationId,
           waitMs: Math.max(0, performance.now() - enqueuedAt),
         });
@@ -574,11 +574,22 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
       });
       return operation.then(
         (result) => {
-          logger.log("profile source operation completed", {
+          const completion = {
             operationId,
             elapsedMs: Math.max(0, performance.now() - enqueuedAt),
-            outcome: result.status === "unavailable" ? "unavailable" : "available",
-          });
+          };
+          if (result.status === "unavailable") {
+            logger.warn("profile source operation completed", {
+              ...completion,
+              outcome: "unavailable",
+              failureKind: result.error.kind,
+            });
+          } else {
+            logger.debug?.("profile source operation completed", {
+              ...completion,
+              outcome: "available",
+            });
+          }
           return result;
         },
         (error: unknown) => {

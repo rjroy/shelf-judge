@@ -53,6 +53,7 @@ function fixture(
       | CollectionSnapshotBuildResult["semanticRead"]
       | (() => CollectionSnapshotBuildResult["semanticRead"]);
     logger?: {
+      debug?(...args: unknown[]): void;
       log(...args: unknown[]): void;
       warn(...args: unknown[]): void;
       error(...args: unknown[]): void;
@@ -156,6 +157,7 @@ describe("CollectionSnapshotCacheService", () => {
       });
     };
     const logger = {
+      debug: record("debug"),
       log: record("log"),
       warn: record("warn"),
       error: record("error"),

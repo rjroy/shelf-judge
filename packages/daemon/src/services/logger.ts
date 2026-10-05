@@ -1,6 +1,8 @@
 import { toErrorMessage } from "@shelf-judge/shared";
+import { debuglog } from "node:util";
 
 export interface Logger {
+  debug?(...args: unknown[]): void;
   log(...args: unknown[]): void;
   warn(...args: unknown[]): void;
   error(...args: unknown[]): void;
@@ -40,7 +42,13 @@ function formatArguments(args: unknown[]): unknown[] {
 
 export function createLogger(name: string): Logger {
   const prefix = `[${name}]`;
+  const debug = debuglog(name.toUpperCase());
   return {
+    debug(...args: unknown[]): void {
+      if (!process.env.NODE_DEBUG) return;
+      const message = typeof args[0] === "string" ? args[0] : "";
+      debug(message, ...formatArguments(args.slice(1)));
+    },
     log(...args: unknown[]): void {
       console.log(prefix, ...formatArguments(args));
     },

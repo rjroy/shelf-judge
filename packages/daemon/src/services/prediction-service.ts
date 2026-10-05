@@ -974,11 +974,11 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       };
       if (unifiedScoringService) {
         const captureStartedAt = performance.now();
-        logger.log("snapshot prediction phase attempt", { ...context, phase: "capture" });
+        logger.debug?.("snapshot prediction phase attempt", { ...context, phase: "capture" });
         let frame: Awaited<ReturnType<UnifiedScoringService["capture"]>>;
         try {
           frame = await unifiedScoringService.capture();
-          logger.log("snapshot prediction phase completed", {
+          logger.debug?.("snapshot prediction phase completed", {
             ...context,
             phase: "capture",
             elapsedMs: Math.max(0, performance.now() - captureStartedAt),
@@ -996,7 +996,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         if (!sameSnapshotPredictionSources(frame, collection, tournamentData, settings))
           throw new Error("Snapshot prediction sources do not match the current private capture");
         const calculationStartedAt = performance.now();
-        logger.log("snapshot prediction phase attempt", {
+        logger.debug?.("snapshot prediction phase attempt", {
           ...context,
           phase: "calculation",
           gameCount: frame.sources.collection.games.length,
@@ -1008,7 +1008,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
             { scope: "collection-all" },
             { includeRedundancy: true },
           );
-          logger.log("snapshot prediction phase completed", {
+          logger.debug?.("snapshot prediction phase completed", {
             ...context,
             phase: "calculation",
             gameCount: frame.sources.collection.games.length,
@@ -1025,11 +1025,11 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
           throw error;
         }
         const publicationStartedAt = performance.now();
-        logger.log("snapshot prediction phase attempt", { ...context, phase: "publication" });
+        logger.debug?.("snapshot prediction phase attempt", { ...context, phase: "publication" });
         let accepted: boolean | null;
         try {
           accepted = await unifiedScoringService.publishCurrent(calculation, () => true);
-          logger.log("snapshot prediction phase completed", {
+          logger.debug?.("snapshot prediction phase completed", {
             ...context,
             phase: "publication",
             elapsedMs: Math.max(0, performance.now() - publicationStartedAt),
