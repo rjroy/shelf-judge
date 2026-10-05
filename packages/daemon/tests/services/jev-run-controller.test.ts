@@ -256,7 +256,7 @@ function harness(
 }
 
 describe("JevRunController", () => {
-  test("wishlist preview binds frozen preparation and start fails closed until executor exists", async () => {
+  test("wishlist preview binds frozen preparation and starts only while current", async () => {
     const capture = makeCapture();
     let current = true;
     const preparation = {

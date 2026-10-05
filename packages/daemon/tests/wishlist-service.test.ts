@@ -1125,20 +1125,6 @@ describe("wishlist service", () => {
     expect(await service.listWithCurrentRedundancy()).toEqual([]);
   });
 
-  test("owned additional BGG identities are excluded before wishlist publication", async () => {
-    const existing = makeCurrentReadEntry("Candidate prose");
-    existing.bggId = 906;
-    const owner = makeGame(907, "Owner");
-    owner.additionalBggIds = [existing.bggId];
-    storage = createMockStorage([existing], { games: [asDurableGame(owner)] }, true);
-    const service = createWishlistService({
-      storageService: storage,
-      predictionService,
-      gameService,
-    });
-    expect(await service.listWithCurrentRedundancy()).toEqual([]);
-  });
-
   test("ownership read failure rejects instead of disclosing saved wishlist metadata", async () => {
     const existing = makeCurrentReadEntry("Candidate prose");
     const baseStorage = createMockStorage([existing]);

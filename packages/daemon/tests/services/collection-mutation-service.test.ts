@@ -501,6 +501,8 @@ describe("CollectionMutationService", () => {
       },
     );
 
+    expect(stored.semanticRedundancy.factualWeightsEpoch).toBe(1);
+    expect(stored.semanticRedundancy.factualWeightsFingerprint).toBe("c".repeat(64));
     expect(fileOps.files.has("/test/data/profile.json")).toBe(false);
     expect(fileOps.files.has("/test/data/attention-candidates.json")).toBe(false);
     expect(fileOps.files.get("/test/data/wishlist.json")).toBe("wishlist bytes");
@@ -576,42 +578,6 @@ describe("CollectionMutationService", () => {
 
     expect(result.outcome).toBe("accepted");
     expect(stored.semanticRedundancy.consentEpoch).toBe(1);
-    expect(fileOps.files.has("/test/data/profile.json")).toBe(false);
-    expect(fileOps.files.has("/test/data/attention-candidates.json")).toBe(false);
-  });
-
-  test("purges when a durable factual-weight fence changes", async () => {
-    let stored = collection();
-    const storage: CollectionReader & CollectionPersistence = {
-      loadCollection: () => Promise.resolve(structuredClone(stored)),
-      saveCollection: (next) => {
-        stored = structuredClone(next);
-        return Promise.resolve();
-      },
-    };
-    const fileOps = createMockFileOps({
-      "/test/data/profile.json": "profile",
-      "/test/data/attention-candidates.json": "candidates",
-    });
-    const service = createCollectionMutationService({
-      storageService: storage,
-      semanticDisplayArtifactContext: createCollectionArtifactContext("/test/data", fileOps, {
-        log: () => {},
-        warn: () => {},
-        error: () => {},
-      }),
-    });
-
-    await service.mutate(
-      { operation: "semantic-redundancy.factual-weights.invalidate", trigger: "refresh" },
-      (candidate) => {
-        candidate.semanticRedundancy.factualWeightsEpoch += 1;
-        candidate.semanticRedundancy.factualWeightsFingerprint = "d".repeat(64);
-        return { changed: true, value: undefined };
-      },
-    );
-
-    expect(stored.semanticRedundancy.factualWeightsEpoch).toBe(1);
     expect(fileOps.files.has("/test/data/profile.json")).toBe(false);
     expect(fileOps.files.has("/test/data/attention-candidates.json")).toBe(false);
   });

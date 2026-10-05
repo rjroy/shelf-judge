@@ -236,281 +236,281 @@ describe("Jev typed gateway", () => {
     expect(result.ownerNote).not.toBeNull();
   });
 
-  test("rejects malformed, partial, extra, and out-of-range answers instead of inventing scores", async () => {
-    const make = (payload: Record<string, unknown>) =>
-      createJevGateway({
-        apiKey: "secret-key",
-        fetch: async () =>
-          await Promise.resolve(new Response(JSON.stringify(payload), { status: 200 })),
-      });
-    const request: JevPairRequest = {
-      mode: "description-only",
-      gameA: { name: "A", bggDescription: "Description A" },
-      gameB: { name: "B", bggDescription: "Description B" },
-    };
-    const invalidResponses = [
-      { model: JEV_MODEL_ID, answers: {}, usage: { input_tokens: 1, output_tokens: 1 } },
-      {
-        model: JEV_MODEL_ID,
-        answers: {
+  const privateValues = [
+    "PRIVATE_API_KEY_SENTINEL",
+    "PRIVATE_GAME_NAME_SENTINEL",
+    "PRIVATE_NOTE_SENTINEL",
+    "PRIVATE_DESCRIPTION_SENTINEL",
+    "PRIVATE_PROVIDER_TEXT_SENTINEL",
+    "PRIVATE_ANSWER_ID_SENTINEL",
+    "PRIVATE_PROBABILITY_KEY_SENTINEL",
+  ] as const;
+  const descriptionRequest: JevPairRequest = {
+    mode: "description-only",
+    gameA: { name: privateValues[1], bggDescription: privateValues[3] },
+    gameB: { name: "Game B", bggDescription: "Description B" },
+  };
+  type MalformedResponseCase = {
+    name: string;
+    reason: string;
+    fieldPath: string;
+    makeResponse: () => Response;
+    code?: "response-invalid" | "model-mismatch";
+    extra?: Record<string, unknown>;
+    request?: JevPairRequest;
+  };
+  const malformedResponses: MalformedResponseCase[] = [
+    {
+      name: "missing answer",
+      reason: "unexpected-answer-ids",
+      fieldPath: "answers",
+      extra: { answerCount: 0, expectedAnswerCount: 1 },
+      makeResponse: () => response({}),
+    },
+    {
+      name: "missing scalar score",
+      reason: "invalid-score-value",
+      fieldPath: "answers.description_similarity.score",
+      makeResponse: () =>
+        response({
           description_similarity: {
             type: "score",
             legend: scoreAnswer(0).legend,
             probabilities: scoreAnswer(0).probabilities,
             confidence: 0.7,
           },
-        },
-        usage: { input_tokens: 1, output_tokens: 1 },
-      },
-      {
-        model: JEV_MODEL_ID,
-        answers: { description_similarity: { ...scoreAnswer(0), score: 4 } },
-        usage: { input_tokens: 1, output_tokens: 1 },
-      },
-      {
-        model: JEV_MODEL_ID,
-        answers: { description_similarity: { type: "noul", noul: 0.5 } },
-        usage: { input_tokens: 1, output_tokens: 1 },
-      },
-      {
-        model: JEV_MODEL_ID,
-        answers: { description_similarity: { ...scoreAnswer(2), extra: "not accepted" } },
-        usage: { input_tokens: 1, output_tokens: 1 },
-      },
-      {
-        model: JEV_MODEL_ID,
-        answers: { description_similarity: scoreAnswer(2), extra: {} },
-        usage: { input_tokens: 1, output_tokens: 1 },
-      },
-      {
-        model: JEV_MODEL_ID,
-        answers: {
+        }),
+    },
+    {
+      name: "score above range",
+      reason: "invalid-score-value",
+      fieldPath: "answers.description_similarity.score",
+      makeResponse: () => response({ description_similarity: { ...scoreAnswer(0), score: 4 } }),
+    },
+    {
+      name: "wrong answer type",
+      reason: "invalid-answer-shape",
+      fieldPath: "answers.description_similarity",
+      makeResponse: () => response({ description_similarity: { type: "noul", noul: 0.5 } }),
+    },
+    {
+      name: "extra answer property",
+      reason: "invalid-answer-shape",
+      fieldPath: "answers.description_similarity",
+      makeResponse: () =>
+        response({
+          description_similarity: { ...scoreAnswer(2), [privateValues[4]]: "not accepted" },
+        }),
+    },
+    {
+      name: "extra answer id",
+      reason: "unexpected-answer-ids",
+      fieldPath: "answers",
+      extra: { answerCount: 2, expectedAnswerCount: 1 },
+      makeResponse: () =>
+        response({ ...answers({ description: 1 }), [privateValues[5]]: privateValues[4] }),
+    },
+    {
+      name: "incomplete probability keys",
+      reason: "invalid-score-probabilities",
+      fieldPath: "answers.description_similarity.probabilities",
+      makeResponse: () =>
+        response({
           description_similarity: {
             ...scoreAnswer(2),
             probabilities: { "0": 0.5, "1": 0.5 },
           },
-        },
-        usage: { input_tokens: 1, output_tokens: 1 },
-      },
-      {
-        model: JEV_MODEL_ID,
-        answers: {
+        }),
+    },
+    {
+      name: "probability mass does not sum to one",
+      reason: "invalid-score-probabilities",
+      fieldPath: "answers.description_similarity.probabilities",
+      makeResponse: () =>
+        response({
           description_similarity: {
             ...scoreAnswer(2),
             probabilities: { "0": 0.1, "1": 0.1, "2": 0.1, "3": 0.1 },
           },
-        },
-        usage: { input_tokens: 1, output_tokens: 1 },
-      },
-      {
-        model: JEV_MODEL_ID,
-        answers: {
+        }),
+    },
+    {
+      name: "incomplete legend",
+      reason: "invalid-answer-schema",
+      fieldPath: "answers.description_similarity.legend",
+      makeResponse: () =>
+        response({
           description_similarity: {
-            ...scoreAnswer(2),
+            ...scoreAnswer(1),
             legend: { "0": "Level 0", "1": "Level 1", "2": "Level 2" },
           },
-        },
-        usage: { input_tokens: 1, output_tokens: 1 },
-      },
-      {
-        model: JEV_MODEL_ID,
-        answers: {
+        }),
+    },
+    {
+      name: "noncanonical legend key",
+      reason: "invalid-answer-schema",
+      fieldPath: "answers.description_similarity.legend",
+      makeResponse: () =>
+        response({
           description_similarity: {
             ...scoreAnswer(2),
             legend: { "00": "Level 0", "1": "Level 1", "2": "Level 2", "3": "Level 3" },
           },
-        },
-        usage: { input_tokens: 1, output_tokens: 1 },
-      },
-    ];
-    for (const invalid of invalidResponses) {
-      let failure: unknown;
-      try {
-        await make(invalid).evaluatePair(request);
-      } catch (error) {
-        failure = error;
-      }
-      expect(failure).toBeInstanceOf(JevGatewayError);
-      expect((failure as JevGatewayError).code).toBe("response-invalid");
-    }
-  });
-
-  test("classifies response validation failures with safe bounded context", async () => {
-    const privateValues = [
-      "PRIVATE_API_KEY_SENTINEL",
-      "PRIVATE_GAME_NAME_SENTINEL",
-      "PRIVATE_NOTE_SENTINEL",
-      "PRIVATE_DESCRIPTION_SENTINEL",
-      "PRIVATE_PROVIDER_TEXT_SENTINEL",
-      "PRIVATE_ANSWER_ID_SENTINEL",
-      "PRIVATE_PROBABILITY_KEY_SENTINEL",
-    ];
-    const invalidCases: Array<{
-      reason: string;
-      fieldPath: string;
-      makeResponse: () => Response;
-      extra?: Record<string, unknown>;
-    }> = [
-      {
-        reason: "invalid-json",
-        fieldPath: "response",
-        makeResponse: () =>
-          ({
+        }),
+    },
+    {
+      name: "invalid JSON response",
+      reason: "invalid-json",
+      fieldPath: "response",
+      makeResponse: () =>
+        ({
+          status: 200,
+          ok: true,
+          headers: new Headers(),
+          json: () => Promise.reject(new Error(privateValues[4])),
+        }) as Response,
+    },
+    {
+      name: "missing model envelope field",
+      reason: "invalid-envelope",
+      fieldPath: "model",
+      makeResponse: () =>
+        new Response(
+          JSON.stringify({
+            answers: answers({ description: 1 }),
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+          { status: 200 },
+        ),
+    },
+    {
+      name: "missing usage envelope field",
+      reason: "invalid-envelope",
+      fieldPath: "usage",
+      makeResponse: () =>
+        new Response(
+          JSON.stringify({ model: JEV_MODEL_ID, answers: answers({ description: 1 }) }),
+          {
             status: 200,
-            ok: true,
-            headers: new Headers(),
-            json: () => Promise.reject(new Error(privateValues[4])),
-          }) as Response,
-      },
-      {
-        reason: "invalid-envelope",
-        fieldPath: "usage.input_tokens",
-        makeResponse: () =>
-          new Response(
-            JSON.stringify({
-              model: JEV_MODEL_ID,
-              answers: answers({ description: 1 }),
-              usage: { input_tokens: -1, output_tokens: 1 },
-              privateProviderText: privateValues[4],
-            }),
-            { status: 200 },
-          ),
-      },
-      {
-        reason: "unexpected-answer-ids",
-        fieldPath: "answers",
-        extra: { answerCount: 2, expectedAnswerCount: 1 },
-        makeResponse: () =>
-          response({
-            ...answers({ description: 1 }),
-            [privateValues[5]]: privateValues[4],
+          },
+        ),
+    },
+    {
+      name: "negative usage count",
+      reason: "invalid-envelope",
+      fieldPath: "usage.input_tokens",
+      makeResponse: () =>
+        new Response(
+          JSON.stringify({
+            model: JEV_MODEL_ID,
+            answers: answers({ description: 1 }),
+            usage: { input_tokens: -1, output_tokens: 1 },
+            privateProviderText: privateValues[4],
           }),
-      },
-      {
-        reason: "invalid-answer-shape",
-        fieldPath: "answers.description_similarity",
-        makeResponse: () => response({ description_similarity: { private: privateValues[4] } }),
-      },
-      {
-        reason: "invalid-score-value",
-        fieldPath: "answers.description_similarity.score",
-        makeResponse: () => response({ description_similarity: { ...scoreAnswer(0), score: 4 } }),
-      },
-      {
-        reason: "invalid-score-value",
-        fieldPath: "answers.description_similarity.score",
-        makeResponse: () => response({ description_similarity: { ...scoreAnswer(0), score: -1 } }),
-      },
-      {
-        reason: "invalid-score-probabilities",
-        fieldPath: "answers.description_similarity.probabilities",
-        makeResponse: () =>
-          response({
-            description_similarity: {
-              ...scoreAnswer(0),
-              probabilities: { "0": 0.25, "1": 0.25, "2": 0.25, "3": privateValues[4] },
-            },
-          }),
-      },
-      {
-        reason: "invalid-score-probabilities",
-        fieldPath: "answers.description_similarity.probabilities",
-        makeResponse: () =>
-          response({
-            description_similarity: {
-              ...scoreAnswer(0),
-              probabilities: {
-                ...scoreAnswer(0).probabilities,
-                [privateValues[6]]: 0,
-              },
-            },
-          }),
-      },
-      {
-        reason: "invalid-score-probabilities",
-        fieldPath: "answers.description_similarity.probabilities",
-        makeResponse: () =>
-          response({
-            description_similarity: {
-              ...scoreAnswer(2),
-              probabilities: { "0": 0.1, "1": 0.1, "2": 0.1, "3": 0.1 },
-            },
-          }),
-      },
-      {
-        reason: "invalid-answer-schema",
-        fieldPath: "answers.description_similarity.legend",
-        makeResponse: () =>
-          response({
-            description_similarity: {
-              ...scoreAnswer(1),
-              legend: { "0": "Level 0", "1": "Level 1", "2": "Level 2" },
-            },
-          }),
-      },
-      {
-        reason: "unexpected-model",
-        fieldPath: "model",
-        makeResponse: () =>
-          response(answers({ description: 1 }), undefined, 200, undefined, privateValues[4]),
-      },
-    ];
-    const request: JevPairRequest = {
-      mode: "description-only",
-      gameA: { name: privateValues[1], bggDescription: privateValues[3] },
-      gameB: { name: "Game B", bggDescription: "Description B" },
+          { status: 200 },
+        ),
+    },
+    {
+      name: "unexpected model",
+      reason: "unexpected-model",
+      fieldPath: "model",
+      code: "model-mismatch",
+      makeResponse: () =>
+        response(answers({ description: 1 }), undefined, 200, undefined, privateValues[4]),
+    },
+    {
+      name: "negative scalar score",
+      reason: "invalid-score-value",
+      fieldPath: "answers.description_similarity.score",
+      makeResponse: () => response({ description_similarity: { ...scoreAnswer(0), score: -1 } }),
+    },
+    {
+      name: "non-numeric probability",
+      reason: "invalid-score-probabilities",
+      fieldPath: "answers.description_similarity.probabilities",
+      makeResponse: () =>
+        response({
+          description_similarity: {
+            ...scoreAnswer(0),
+            probabilities: { "0": 0.25, "1": 0.25, "2": 0.25, "3": privateValues[4] },
+          },
+        }),
+    },
+    {
+      name: "unexpected probability key",
+      reason: "invalid-score-probabilities",
+      fieldPath: "answers.description_similarity.probabilities",
+      makeResponse: () =>
+        response({
+          description_similarity: {
+            ...scoreAnswer(0),
+            probabilities: { ...scoreAnswer(0).probabilities, [privateValues[6]]: 0 },
+          },
+        }),
+    },
+    {
+      name: "partial C and D response",
+      reason: "unexpected-answer-ids",
+      fieldPath: "answers",
+      extra: { answerCount: 1, expectedAnswerCount: 2 },
+      request: {
+        mode: "description-and-owner-notes",
+        gameA: { name: "Game A", bggDescription: "Description A", ownerNote: privateValues[2] },
+        gameB: { name: "Game B", bggDescription: "Description B", ownerNote: "Played once." },
+      } satisfies JevPairRequest,
+      makeResponse: () => response(answers({ description: 1 })),
+    },
+  ];
+
+  test.each(malformedResponses)("rejects $name with safe bounded context", async (item) => {
+    const entries: unknown[][] = [];
+    const logger: Logger = {
+      log: (...args) => entries.push(args),
+      warn: (...args) => entries.push(args),
+      error: (...args) => entries.push(args),
     };
-
-    for (const item of invalidCases) {
-      const entries: unknown[][] = [];
-      const logger: Logger = {
-        log: (...args) => entries.push(args),
-        warn: (...args) => entries.push(args),
-        error: (...args) => entries.push(args),
-      };
-      let failure: unknown;
-      try {
-        await createJevGateway({
-          apiKey: privateValues[0],
-          logger,
-          fetch: async () => await Promise.resolve(item.makeResponse()),
-        }).evaluatePair(request);
-      } catch (error) {
-        failure = error;
-      }
-
-      expect(failure).toBeInstanceOf(JevGatewayError);
-      expect((failure as JevGatewayError).code).toBe(
-        item.reason === "unexpected-model" ? "model-mismatch" : "response-invalid",
-      );
-      expect((failure as JevGatewayError).context).toMatchObject({
-        reason: item.reason,
-        fieldPath: item.fieldPath,
-        ...item.extra,
-      });
-      const attempts = entries.find(([message]) => message === "jev request attempt");
-      expect(attempts?.[1]).toMatchObject({
-        operationId: 1,
-        requestAttempt: 1,
-        mode: request.mode,
-      });
-      const outcome = entries.find(([message]) => message === "jev request outcome");
-      expect(outcome?.[1]).toMatchObject({
-        operationId: 1,
-        outcome: "failed",
-        attempt: 1,
-        mode: request.mode,
-        code: item.reason === "unexpected-model" ? "model-mismatch" : "response-invalid",
-        ...(item.reason === "unexpected-model" ? {} : { retryDisposition: "not-retried" }),
-        ...item.extra,
-        reason: item.reason,
-        fieldPath: item.fieldPath,
-      });
-      const serializedLogs = JSON.stringify(entries);
-      for (const privateValue of privateValues) expect(serializedLogs).not.toContain(privateValue);
-      expect(serializedLogs).not.toContain("Game B");
-      expect(serializedLogs).not.toContain("Description B");
+    let failure: unknown;
+    const request = item.request ?? descriptionRequest;
+    try {
+      await createJevGateway({
+        apiKey: privateValues[0],
+        logger,
+        fetch: async () => await Promise.resolve(item.makeResponse()),
+      }).evaluatePair(request);
+    } catch (error) {
+      failure = error;
     }
+
+    expect(failure).toBeInstanceOf(JevGatewayError);
+    const expectedCode = item.code ?? "response-invalid";
+    expect((failure as JevGatewayError).code).toBe(expectedCode);
+    expect((failure as JevGatewayError).context).toMatchObject({
+      reason: item.reason,
+      fieldPath: item.fieldPath,
+      ...item.extra,
+    });
+    const attempts = entries.find(([message]) => message === "jev request attempt");
+    expect(attempts?.[1]).toMatchObject({
+      operationId: 1,
+      requestAttempt: 1,
+      mode: request.mode,
+    });
+    const outcome = entries.find(([message]) => message === "jev request outcome");
+    expect(outcome?.[1]).toMatchObject({
+      operationId: 1,
+      outcome: "failed",
+      attempt: 1,
+      mode: request.mode,
+      code: expectedCode,
+      ...(expectedCode === "response-invalid" ? { retryDisposition: "not-retried" } : {}),
+      ...item.extra,
+      reason: item.reason,
+      fieldPath: item.fieldPath,
+    });
+    const serializedLogs = JSON.stringify(entries);
+    for (const privateValue of privateValues) expect(serializedLogs).not.toContain(privateValue);
+    expect(serializedLogs).not.toContain("Game B");
+    expect(serializedLogs).not.toContain("Description B");
   });
 
   test("logs attempt and successful outcome with only safe operation metadata", async () => {
@@ -543,7 +543,7 @@ describe("Jev typed gateway", () => {
     expect(serializedLogs).not.toContain("Game A");
   });
 
-  test("accepts zero and fractional Scores while rejecting missing fields, wrong models, and partial answers", async () => {
+  test("accepts zero and follows the distribution when scalar score disagrees", async () => {
     const request: JevPairRequest = {
       mode: "description-only",
       gameA: { name: "A", bggDescription: "Description A" },
@@ -570,53 +570,6 @@ describe("Jev typed gateway", () => {
     // The provider's scalar (1.5) disagrees with the distribution's expected level (0.6).
     // Similarity follows the validated distribution, not the untrusted scalar.
     expect(fractional.description?.score).toBeCloseTo(0.2);
-
-    const invalidPayloads = [
-      { answers: answers({ description: 1 }), usage: { input_tokens: 1, output_tokens: 1 } },
-      { model: JEV_MODEL_ID, answers: answers({ description: 1 }) },
-    ];
-    for (const payload of invalidPayloads) {
-      let failure: unknown;
-      try {
-        await createJevGateway({
-          apiKey: "secret-key",
-          fetch: async () =>
-            await Promise.resolve(new Response(JSON.stringify(payload), { status: 200 })),
-        }).evaluatePair(request);
-      } catch (error) {
-        failure = error;
-      }
-      expect((failure as JevGatewayError).code).toBe("response-invalid");
-    }
-
-    let wrongModel: unknown;
-    try {
-      await createJevGateway({
-        apiKey: "secret-key",
-        fetch: async () =>
-          await Promise.resolve(
-            response(answers({ description: 1 }), undefined, 200, undefined, "jev-latest"),
-          ),
-      }).evaluatePair(request);
-    } catch (error) {
-      wrongModel = error;
-    }
-    expect((wrongModel as JevGatewayError).code).toBe("model-mismatch");
-
-    let partialCombined: unknown;
-    try {
-      await createJevGateway({
-        apiKey: "secret-key",
-        fetch: async () => await Promise.resolve(response(answers({ description: 1 }))),
-      }).evaluatePair({
-        mode: "description-and-owner-notes",
-        gameA: { name: "A", bggDescription: "Description A", ownerNote: "Played once." },
-        gameB: { name: "B", bggDescription: "Description B", ownerNote: "Played once." },
-      });
-    } catch (error) {
-      partialCombined = error;
-    }
-    expect((partialCombined as JevGatewayError).code).toBe("response-invalid");
   });
 
   test("retries 429 and 529 within a bounded retry budget and reports usage", async () => {
