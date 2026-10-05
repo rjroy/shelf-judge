@@ -495,7 +495,7 @@ export class JevRunController {
       return { status: 400, body: { error: "precondition-failed" } };
     }
     try {
-      await this.options.wishlistPreparation?.hydrateSources?.(normalizedSelection);
+      await this.options.wishlistPreparation?.hydrateSources(normalizedSelection);
     } catch {
       return { status: 503, body: { error: "status-unavailable" } };
     }

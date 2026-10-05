@@ -124,8 +124,6 @@ export function composeJevRunController(options: {
     ? createWishlistRunPreparationService({
         storageService: options.storageService,
         gameService: options.gameService,
-        sourceAdapter,
-        cache: options.cache,
       })
     : undefined;
   return new JevRunController({

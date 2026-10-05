@@ -265,8 +265,6 @@ async function harness(
     wishlistPreparation: createWishlistRunPreparationService({
       storageService: storage,
       gameService: context.gameService,
-      sourceAdapter,
-      cache,
     }),
     unifiedScoringService: context.unifiedScoringService,
     now: () => new Date(fakeNow),

@@ -1,7 +1,7 @@
 ---
 title: "Simplification notes: accumulated code cleanup"
 date: 2026-10-05
-status: in_progress
+status: complete
 tags: [simplification, cleanup, similarity, wishlist, privacy]
 source: .lore/work/plans/unified-similarity-prediction-redundancy.md
 modules: [daemon-services, wishlist, jev-cache]
@@ -11,7 +11,7 @@ modules: [daemon-services, wishlist, jev-cache]
 
 ## Scope
 
-Two bounded checkpoints remove disconnected cleanup debt while keeping the live unified scoring and privacy contracts. No synthetic publication replacement was introduced.
+Completed the previously identified cleanup of disconnected wishlist scoring, synthetic publication tests, duplicated test and production logic, and superseded JEV execution/preparation paths. Retained live unified scoring, privacy, hydration, authority, cancellation, budget, and publication contracts. No agent workflow or skill changes were made; newly discovered cleanup is not part of this completed scope.
 
 ## Verified checkpoint: `shelf-judge-iyoj` (`9c385c0`)
 
@@ -120,3 +120,11 @@ Final independent validation and review accepted `.2.4` and `.2.5`, closing link
 Removed unprepared worker startup, optional local planning, execution recapture/replanning, and selective continuation. Both execution domains require exact unified preparation and one-use validated reservations. Final advisory coverage still recaptures with source, policy, cancellation, and cache-revision publication fences. Execution attempts, tokens, and duration now come exclusively from the frozen authorization budget; the separate worker override/default path and redundant caller arguments are gone.
 
 Independent pinned Bun 1.4.0 validation passed with the required environment exclusions: 3,933 tests, one existing skip, no failures, and all quality gates including a fresh build. Independent review accepted the worker retirement and closed budget-authority finding X7Z7-2-SOURCE-R1. Net worker source reduction: 217 lines. The already-identified `.4` obsolete wishlist builder/planner cleanup remains the next scope; new cleanup candidates are deferred, not started.
+
+## Verified checkpoint: `shelf-judge-x7z7.4`
+
+The test-only `WishlistRunPreparationService.prepare` builder and its private currentness/cache/source-adapter machinery are removed. Production hydration remains on `hydrateSources`; wishlist fixtures that need hydration call that live API, and the six following scoring/currentness assertions continue through actual unified preparations. The legacy selection/currentness-only cases were retired. Hydration assertions still verify selected-source fetching, persisted-field preservation, and that a late fetch cannot recreate a removed entry.
+
+Removed `planJevRunScope` and its planner-only tests. Retained exact-pair scope construction, pair source-comparison, collection indexing/refresh, and captured source immutability tests now exercise `createJevRunScopeFromExactPairs` directly. Review restored the live hydration selection-validation case: empty, duplicate, unknown-ID, and malformed selections reject before BGG calls, without persisting a source. Independent pinned Bun 1.4.0 validation passed: 3,927 tests, one existing skip, no failures; all quality gates passed. Independent review accepted `.4` and closed X7Z7-4-R1.
+
+All implementation beads identified for this cleanup are verified. No additional cleanup or investigation was started after the user's scope limit. This records completion of the identified work, not a claim that the repository contains no other cleanup opportunities.
