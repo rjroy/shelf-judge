@@ -614,6 +614,7 @@ describe("Jev run production composition", () => {
         composeJevRunController({
           storageService: sources.storage,
           predictionService: sources.predictionService,
+          unifiedScoringService: sources.unifiedScoringService,
           cache: { available: false } as JevPairCache,
           runService: worker,
         }),

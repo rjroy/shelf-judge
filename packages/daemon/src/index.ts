@@ -103,7 +103,7 @@ export function createJevRunWorker(options: {
 export function composeJevRunController(options: {
   storageService: StorageService;
   predictionService: PredictionService;
-  unifiedScoringService?: ReturnType<typeof createUnifiedScoringService>;
+  unifiedScoringService: ReturnType<typeof createUnifiedScoringService>;
   gameService?: GameService;
   cache: JevPairCache | null;
   runService: JevRunService | null;
@@ -134,9 +134,7 @@ export function composeJevRunController(options: {
     cache: options.cache,
     runService: options.runService,
     ...(wishlistPreparation ? { wishlistPreparation } : {}),
-    ...(options.unifiedScoringService
-      ? { unifiedScoringService: options.unifiedScoringService }
-      : {}),
+    unifiedScoringService: options.unifiedScoringService,
   });
 }
 
