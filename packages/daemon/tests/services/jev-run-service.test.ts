@@ -2,23 +2,13 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type {
-  Collection,
-  DurableGame,
-  GameWithScore,
-  SemanticRedundancySettings,
-} from "@shelf-judge/shared";
-import {
-  createInitialEntityMetadata,
-  createInitialSemanticRedundancyStateV10,
-  DEFAULT_JEV_RUN_BUDGET,
-} from "@shelf-judge/shared";
+import type { DurableGame, SemanticRedundancySettings } from "@shelf-judge/shared";
+import { createInitialEntityMetadata, DEFAULT_JEV_RUN_BUDGET } from "@shelf-judge/shared";
 import {
   JevRunService,
   type JevRunCapture,
   type ValidatedPreparedJevRun,
 } from "../../src/services/jev-run-service.js";
-import { planJevRunScope } from "../../src/services/jev-run-scope.js";
 import * as jevRunScope from "../../src/services/jev-run-scope.js";
 import type {
   JevPairCache,
@@ -57,6 +47,7 @@ import {
   JEV_RUBRIC_VERSION,
 } from "../../src/services/jev/jev-judgment-contract.js";
 import { createTestApp } from "../helpers/test-app.js";
+import { createMockFileOps } from "../helpers/mock-file-ops.js";
 
 function game(id: string): DurableGame {
   return {
@@ -108,49 +99,6 @@ function game(id: string): DurableGame {
   };
 }
 
-function fixture(ids = ["a", "b"]): JevRunCapture {
-  const state = createInitialSemanticRedundancyStateV10();
-  const collection = {
-    id: "collection",
-    name: "test",
-    schemaVersion: 10,
-    revision: 1,
-    axes: [],
-    games: ids.map(game),
-    intentions: [],
-    commandReceipts: [],
-    entertainmentBenchmark: null,
-    createdAt: "now",
-    updatedAt: "now",
-    attentionDispositions: [],
-    semanticRedundancy: {
-      ...state,
-      settings: {
-        enabled: true,
-        weights: { factual: 0, description: 1, ownerNote: 0 },
-        cachedOwnerNoteUse: false,
-      },
-      consentEpoch: 0,
-    },
-  } as unknown as Collection;
-  const predictionCapture = ids.map((id) => ({
-    game: { id, ownership: "owned" },
-    score: { score: 1, vetoed: false, ratedAxisCount: 1, predictionMeta: null },
-  })) as unknown as GameWithScore[];
-  return {
-    collection,
-    predictionCapture,
-    captureIdentity: {
-      sourceVectorIdentity: "vector",
-      tournamentIdentity: "tournament",
-      predictionCaptureIdentity: "capture",
-    },
-    factualWeights: { binary: 0, continuous: 0 },
-    sourceVectorIdentity: "vector",
-    policyIdentity: "policy",
-  };
-}
-
 function deferred<Value>() {
   let resolve!: (value: Value) => void;
   let reject!: (error: unknown) => void;
@@ -187,21 +135,13 @@ function scoreResult(): JevPairResult {
   };
 }
 
-async function runPreparedForTest(
-  service: JevRunService,
-  input: Parameters<JevRunService["prepareValidatedPreparedRun"]>[0],
-): Promise<JevRunProgress> {
-  const reservation = await service.prepareValidatedPreparedRun(input);
-  if (!reservation) throw new Error("Expected a validated prepared run");
-  return service.reserveValidatedPreparedRun(reservation).completion;
-}
-
 async function unifiedFixture(
   ids: readonly string[],
   cache: JevPairCache,
   budget: Readonly<typeof DEFAULT_JEV_RUN_BUDGET> = DEFAULT_JEV_RUN_BUDGET,
+  fileOps: ReturnType<typeof createMockFileOps> = createMockFileOps(),
 ) {
-  const context = createTestApp({ jevPairCache: cache });
+  const context = createTestApp({ jevPairCache: cache, fileOps });
   const storage = context.storageService;
   const collection = await storage.loadCollection();
   collection.axes = [
@@ -2077,34 +2017,33 @@ describe("JevRunService attempt barriers", () => {
 
   test("a note edit between attempts fences retries for that original pair", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-note-edit-"));
-    const capture = fixture();
-    for (const [index, game] of capture.collection.games.entries()) {
-      game.ownerNote = {
+    const cache = await createJevPairCache(dir);
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const collection = await fixtureData.storage.loadCollection();
+    for (const [index, entry] of collection.games.entries()) {
+      entry.ownerNote = {
         state: "present",
         version: 1,
-        updatedAt: "before",
+        updatedAt: "2026-01-01T00:00:00Z",
         text: `private-${index}`,
       };
     }
-    capture.collection.semanticRedundancy.settings = {
+    collection.semanticRedundancy.settings = {
+      ...collection.semanticRedundancy.settings,
       enabled: true,
       weights: { factual: 0, description: 0, ownerNote: 1 },
       cachedOwnerNoteUse: true,
     };
-    const cache = await createJevPairCache(dir);
+    await fixtureData.storage.saveCollection(collection);
+    await fixtureData.storage.hydrateSourceVector?.();
+    const preparation = await fixtureData.prepare();
     let starts = 0;
     let retryRejected = false;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: capture.sourceVectorIdentity,
-          policyIdentity: "policy",
-          canTransmitNotes: true,
-        }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: (admit) => ({
         evaluatePair: async () => {
           await admit({
@@ -2115,13 +2054,17 @@ describe("JevRunService attempt barriers", () => {
               return { response: Promise.resolve(new Response()) };
             },
           });
-          capture.collection.games[0].ownerNote = {
+          const current = await fixtureData.storage.loadCollection();
+          const firstGame = current.games[0];
+          if (!firstGame) throw new Error("Expected first note-bearing game");
+          firstGame.ownerNote = {
             state: "present",
             version: 2,
-            updatedAt: "after",
+            updatedAt: "2026-01-02T00:00:00Z",
             text: "edited-private-note",
           };
-          capture.sourceVectorIdentity = "vector-after-note-edit";
+          await fixtureData.storage.saveCollection(current);
+          await fixtureData.storage.hydrateSourceVector?.();
           try {
             await admit({
               mode: "owner-notes-only",
@@ -2143,36 +2086,31 @@ describe("JevRunService attempt barriers", () => {
       }),
     });
     try {
-      const result = await service.startRun({ noteTransmissionAuthorized: true }).completion;
+      const result = await runUnifiedForTest(service, preparation, true);
       expect(starts).toBe(1);
       expect(retryRejected).toBe(true);
       expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "D" })).toBeNull();
       expect(result.state).toBe("failed");
+      expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })).toBeNull();
     } finally {
       cache.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  test("an unrelated source edit does not fence a retry for an unchanged pair", async () => {
-    const capture = fixture(["a", "b", "c"]);
+  test("an unrelated source edit fences retries for the original prepared scope", async () => {
     const { cache, rows } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
+    const preparation = await fixtureData.prepare();
     let starts = 0;
-    let evaluations = 0;
+    let retryRejected = false;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: capture.sourceVectorIdentity,
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: (admit) => ({
         evaluatePair: async () => {
-          evaluations++;
           await admit({
             mode: "description-only",
             attemptId: "unrelated-first",
@@ -2181,9 +2119,13 @@ describe("JevRunService attempt barriers", () => {
               return { response: Promise.resolve(new Response()) };
             },
           });
-          if (evaluations === 1) {
-            capture.collection.games[2].name = "Unrelated renamed game";
-            capture.sourceVectorIdentity = "vector-after-unrelated-edit";
+          const current = await fixtureData.storage.loadCollection();
+          const unrelated = current.games[2];
+          if (!unrelated) throw new Error("Expected unrelated third game");
+          unrelated.name = "Unrelated renamed game";
+          await fixtureData.storage.saveCollection(current);
+          await fixtureData.storage.hydrateSourceVector?.();
+          try {
             await admit({
               mode: "description-only",
               attemptId: "unrelated-retry",
@@ -2192,48 +2134,30 @@ describe("JevRunService attempt barriers", () => {
                 return { response: Promise.resolve(new Response()) };
               },
             });
+          } catch {
+            retryRejected = true;
           }
           return scoreResult();
         },
       }),
     });
-    await service.startRun({ noteTransmissionAuthorized: false }).completion;
-    expect(starts).toBe(2);
-    expect(rows.has("abC")).toBe(true);
+    const result = await runUnifiedForTest(service, preparation, false);
+    expect(starts).toBe(1);
+    expect(retryRejected).toBe(true);
+    expect(rows.has("abC")).toBe(false);
+    expect(result.state).toBe("failed");
   });
 
-  test("unrelated edit racing checkpoint capture retries and checkpoints unchanged pair", async () => {
-    const capture = fixture(["a", "b", "c"]);
+  test("unrelated source edit before checkpoint rejects the original pair", async () => {
     const { cache, rows } = cacheFake();
-    let vector = "vector";
-    let reads = 0;
-    let loads = 0;
-    let scopePlans = 0;
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
+    const preparation = await fixtureData.prepare();
     let dispatches = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => {
-        loads++;
-        return Promise.resolve(structuredClone({ ...capture, sourceVectorIdentity: vector }));
-      },
-      readCurrent: () => {
-        reads++;
-        if (reads === 6) {
-          capture.collection.games[2].name = "Edited unrelated source";
-          vector = "vector-after-unrelated-edit";
-        }
-        return Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: vector,
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        });
-      },
-      planScope: (collection, predictionCapture) => {
-        scopePlans++;
-        return planJevRunScope(collection, predictionCapture);
-      },
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: (admit) => ({
         evaluatePair: async () => {
           await admit({
@@ -2244,102 +2168,82 @@ describe("JevRunService attempt barriers", () => {
               return { response: Promise.resolve(new Response()) };
             },
           });
+          const current = await fixtureData.storage.loadCollection();
+          const unrelated = current.games[2];
+          if (!unrelated) throw new Error("Expected unrelated third game");
+          unrelated.name = "Edited unrelated source";
+          await fixtureData.storage.saveCollection(current);
+          await fixtureData.storage.hydrateSourceVector?.();
           return scoreResult();
         },
       }),
     });
-    await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    const result = await runUnifiedForTest(service, preparation, false);
     expect(dispatches).toBe(1);
-    expect(loads).toBe(2);
-    expect(scopePlans).toBe(2);
-    expect(rows.has("abC")).toBe(true);
+    expect(rows.has("abC")).toBe(false);
+    expect(result.state).toBe("failed");
   });
 
-  test("refreshed ownership scope is installed before skipping original pairs", async () => {
-    const original = fixture(["a", "b", "c"]);
-    const refreshedCollection = structuredClone(original.collection);
-    refreshedCollection.games[0].ownership = "previously-owned";
-    const refreshed = {
-      ...original,
-      collection: refreshedCollection,
-      predictionCapture: original.predictionCapture.map((entry) =>
-        entry.game.id === "a"
-          ? { ...entry, game: { ...entry.game, ownership: "previously-owned" as const } }
-          : entry,
-      ),
-      sourceVectorIdentity: "vector-after-ownership-change",
-      captureIdentity: {
-        ...original.captureIdentity,
-        sourceVectorIdentity: "vector-after-ownership-change",
-      },
-    };
+  test("ownership change fences the frozen Run scope without installing refreshed pairs", async () => {
     const { cache, rows } = cacheFake();
-    let current = original;
-    let initialAuthorityRead = true;
-    const requests: string[] = [];
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
+    const preparation = await fixtureData.prepare();
+    let ownershipChanged = false;
+    let dispatches = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(current === original ? original : refreshed),
-      readCurrent: () => {
-        if (initialAuthorityRead) {
-          initialAuthorityRead = false;
-          current = refreshed;
-          return Promise.resolve({
-            collection: original.collection,
-            sourceVectorIdentity: "vector",
-            policyIdentity: "policy",
-            canTransmitNotes: false,
-          });
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: async () => {
+        if (!ownershipChanged) {
+          ownershipChanged = true;
+          const collection = await fixtureData.storage.loadCollection();
+          const firstGame = collection.games[0];
+          if (!firstGame) throw new Error("Expected first owned game");
+          firstGame.ownership = "previously-owned";
+          await fixtureData.storage.saveCollection(collection);
+          await fixtureData.storage.hydrateSourceVector?.();
         }
-        return Promise.resolve({
-          collection: current.collection,
-          sourceVectorIdentity: current.sourceVectorIdentity,
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        });
+        return fixtureData.sourceAdapter.readCurrent();
       },
       createGateway: (admit) => ({
-        evaluatePair: async (request) => {
-          if (request.mode !== "description-only")
-            throw new Error("Unexpected note-bearing request");
-          requests.push(`${request.gameA.name}/${request.gameB.name}`);
+        evaluatePair: async () => {
           await admit({
             mode: "description-only",
-            attemptId: "refreshed-scope",
-            start: () => ({ response: Promise.resolve(new Response()) }),
+            attemptId: "ownership-change",
+            start: () => {
+              dispatches++;
+              return { response: Promise.resolve(new Response()) };
+            },
           });
           return scoreResult();
         },
       }),
     });
-    const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
-    expect(requests).toEqual(["Game b/Game c"]);
-    expect(rows.has("abC")).toBe(false);
-    expect(rows.has("acC")).toBe(false);
-    expect(rows.has("bcC")).toBe(true);
+    const handle = await reserveUnifiedRunForTest(service, preparation, false);
+    const result = await handle.completion;
+    expect(ownershipChanged).toBe(true);
+    expect(preparation.collectionScope?.totalEligiblePairs).toBe(3);
+    expect(result.pairCount).toBe(3);
+    expect(dispatches).toBe(0);
+    expect(rows.size).toBe(0);
     expect(cache.getActivation()).toBeNull();
     expect(result.state).toBe("failed");
   });
 
   test("checkpoint storage failure stops further paid requests", async () => {
-    const capture = fixture(["a", "b", "c"]);
     const { cache } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
+    const preparation = await fixtureData.prepare();
     cache.checkpointPair = () => {
       throw new Error("sqlite write failed");
     };
     let dispatches = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: (admit) => ({
         evaluatePair: async () => {
           await admit({
@@ -2354,49 +2258,43 @@ describe("JevRunService attempt barriers", () => {
         },
       }),
     });
-    const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    const result = await runUnifiedForTest(service, preparation, false);
     expect(dispatches).toBe(1);
     expect(result.state).toBe("failed");
   });
 
   test("prepared authorization is not replaced when source capture changes before first admission", async () => {
-    const original = fixture();
-    const planned = planJevRunScope(original.collection, original.predictionCapture);
-    if (!planned.ok) throw new Error("Expected valid prepared scope");
-    const changed = structuredClone(original);
-    changed.collection.games[0].bggData = {
-      ...changed.collection.games[0].bggData!,
-      description: "changed before first admission",
-    };
-    changed.sourceVectorIdentity = "vector-after-edit";
-    const originalFingerprint = planned.scope.sourceForGame("a")?.descriptionFingerprint;
-    const changedPlan = planJevRunScope(changed.collection, changed.predictionCapture);
-    if (!changedPlan.ok) throw new Error("Expected valid changed scope");
-    expect(changedPlan.scope.sourceForGame("a")?.descriptionFingerprint).not.toBe(
-      originalFingerprint,
-    );
-    let current = original;
-    let reads = 0;
-    let captureLoads = 0;
+    const { cache, rows } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const preparation = await fixtureData.prepare();
+    const originalFingerprint =
+      preparation.collectionScope?.sourceForGame("a")?.descriptionFingerprint;
+    let descriptionMutation: Promise<void> | undefined;
+    let executionCaptureLoads = 0;
     let gatewayConstructions = 0;
     let starts = 0;
-    const { cache, rows } = cacheFake();
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
       loadCapture: () => {
-        captureLoads++;
-        return Promise.resolve(changed);
+        executionCaptureLoads++;
+        return fixtureData.sourceAdapter.loadCapture();
       },
       readCurrent: () => {
-        reads++;
-        if (reads >= 2) current = changed;
-        return Promise.resolve({
-          collection: current.collection,
-          sourceVectorIdentity: current.sourceVectorIdentity,
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        });
+        if (!descriptionMutation) {
+          const coordinator = profileSourceCoordinatorFor(fixtureData.storage);
+          descriptionMutation = runOutsideProfileSourceCoordinator(() =>
+            coordinator.runExclusive(async () => {
+              const collection = await fixtureData.storage.loadCollection();
+              const firstGame = collection.games[0];
+              if (!firstGame?.bggData) throw new Error("Expected first game's BGG data");
+              firstGame.bggData.description = "changed before first admission";
+              await fixtureData.storage.saveCollection(collection);
+              await fixtureData.storage.hydrateSourceVector?.();
+            }),
+          );
+        }
+        return fixtureData.sourceAdapter.readCurrent();
       },
       createGateway: (admit) => {
         gatewayConstructions++;
@@ -2416,78 +2314,65 @@ describe("JevRunService attempt barriers", () => {
       },
     });
 
-    const result = await runPreparedForTest(service, {
-      capture: original,
-      scope: planned.scope,
-      noteTransmissionAuthorized: false,
-    });
-
-    expect(captureLoads).toBe(1);
+    const handle = await reserveUnifiedRunForTest(service, preparation, false);
+    const result = await handle.completion;
+    await descriptionMutation;
+    expect(descriptionMutation).toBeDefined();
+    expect(await preparation.isSourceCurrent()).toBe(false);
+    expect(executionCaptureLoads).toBe(0);
     expect(gatewayConstructions).toBe(0);
     expect(starts).toBe(0);
     expect(rows.size).toBe(0);
-    expect(planned.scope.sourceForGame("a")?.descriptionFingerprint).toBe(originalFingerprint);
+    expect(preparation.collectionScope?.sourceForGame("a")?.descriptionFingerprint).toBe(
+      originalFingerprint,
+    );
     expect(result.state).toBe("failed");
   });
 
   test("prepared no-required-signal run never constructs its gateway", async () => {
-    const capture = fixture();
-    capture.collection.semanticRedundancy.settings.weights = {
+    const { cache } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const collection = await fixtureData.storage.loadCollection();
+    collection.semanticRedundancy.settings.weights = {
       factual: 0,
       description: 0,
       ownerNote: 0,
     };
-    const planned = planJevRunScope(capture.collection, capture.predictionCapture);
-    if (!planned.ok) throw new Error("Expected valid prepared scope");
-    const { cache } = cacheFake();
+    await fixtureData.storage.saveCollection(collection);
+    await fixtureData.storage.hydrateSourceVector?.();
+    const preparation = await fixtureData.prepare();
     let gatewayConstructions = 0;
-    let captureLoads = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => {
-        captureLoads++;
-        return Promise.resolve(capture);
-      },
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: capture.sourceVectorIdentity,
-          policyIdentity: capture.policyIdentity,
-          canTransmitNotes: false,
-        }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: () => {
         gatewayConstructions++;
         return { evaluatePair: () => Promise.resolve(scoreResult()) };
       },
     });
-    const result = await runPreparedForTest(service, {
-      capture,
-      scope: planned.scope,
-      noteTransmissionAuthorized: false,
-    });
+    const result = await runUnifiedForTest(service, preparation, false);
     expect(gatewayConstructions).toBe(0);
-    expect(captureLoads).toBe(1); // final coverage only; not a replacement start capture
+    expect(preparation.collectionScope).toBeDefined();
+    expect(
+      preparation.capture.predictionCapture.every((entry) => (entry.score?.score ?? 0) > 0),
+    ).toBe(true);
+    expect(preparation.collectionScope?.totalEligiblePairs).toBe(1);
+    expect(result.completedPairs).toBe(1);
     expect(result.state).toBe("completed");
   });
 
   test("prepared C-only pair with absent notes sends descriptions without note authorization", async () => {
-    const capture = fixture();
-    const planned = planJevRunScope(capture.collection, capture.predictionCapture);
-    if (!planned.ok) throw new Error("Expected valid prepared scope");
     const { cache, rows } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const preparation = await fixtureData.prepare();
     let starts = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: capture.sourceVectorIdentity,
-          policyIdentity: capture.policyIdentity,
-          canTransmitNotes: false,
-        }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: (admit) => ({
         evaluatePair: async (request) => {
           expect(request.mode).toBe("description-only");
@@ -2503,36 +2388,28 @@ describe("JevRunService attempt barriers", () => {
         },
       }),
     });
-    const result = await runPreparedForTest(service, {
-      capture,
-      scope: planned.scope,
-      noteTransmissionAuthorized: false,
-    });
+    const result = await runUnifiedForTest(service, preparation, false);
     expect(starts).toBe(1);
     expect(rows.has("abC")).toBe(true);
     expect(result.state).toBe("completed");
   });
 
   test("prepared scope mismatch fails closed before current-state read or gateway construction", async () => {
-    const capture = fixture(["a", "b"]);
-    const wrongCapture = fixture(["a", "c"]);
-    const wrongPlan = planJevRunScope(wrongCapture.collection, wrongCapture.predictionCapture);
-    if (!wrongPlan.ok) throw new Error("Expected valid mismatched scope");
     const { cache, rows } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const otherFixture = await unifiedFixture(["a", "c"], cache);
+    const preparation = await fixtureData.prepare();
+    const otherPreparation = await otherFixture.prepare();
+    if (!otherPreparation.collectionScope) throw new Error("Expected second collection scope");
     let currentReads = 0;
     let gatewayConstructions = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
       loadCapture: () => Promise.reject(new Error("Prepared execution must not recapture")),
       readCurrent: () => {
         currentReads++;
-        return Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: capture.sourceVectorIdentity,
-          policyIdentity: capture.policyIdentity,
-          canTransmitNotes: false,
-        });
+        return fixtureData.sourceAdapter.readCurrent();
       },
       createGateway: () => {
         gatewayConstructions++;
@@ -2540,9 +2417,12 @@ describe("JevRunService attempt barriers", () => {
       },
     });
     const reservation = await service.prepareValidatedPreparedRun({
-      capture,
-      scope: wrongPlan.scope,
+      scopeKind: "collection",
+      capture: preparation.capture,
+      scope: otherPreparation.collectionScope,
+      unifiedPreparation: otherPreparation,
       noteTransmissionAuthorized: false,
+      providerBudget: preparation.run.disclosure.budget,
     });
     expect(reservation).toBeNull();
     expect(currentReads).toBe(0);
@@ -2551,59 +2431,35 @@ describe("JevRunService attempt barriers", () => {
   });
 
   test("wishlist execution uses its typed executor and never recaptures collection scope", async () => {
-    const capture = fixture(["a", "b"]);
     const { cache, rows } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const unifiedPreparation = await prepareUnifiedJevRun({
+      scoring: fixtureData.context.unifiedScoringService,
+      sourceAdapter: fixtureData.sourceAdapter,
+      cache,
+      request: { scope: "wishlist", selectedBggIds: [] },
+      budget: DEFAULT_JEV_RUN_BUDGET,
+    });
+    if (!unifiedPreparation.wishlistPreparation)
+      throw new Error("Expected prepared wishlist scope");
     let gatewayConstructions = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
       loadCapture: () => Promise.reject(new Error("Wishlist scope must not recapture")),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: capture.sourceVectorIdentity,
-          policyIdentity: capture.policyIdentity,
-          canTransmitNotes: false,
-        }),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: () => {
         gatewayConstructions++;
         return { evaluatePair: () => Promise.resolve(scoreResult()) };
       },
     });
 
-    const wishlistPreparation = {
-      scope: "wishlist" as const,
-      selection: { kind: "all" as const },
-      selectionIdentity: "selection",
-      capture,
-      entries: [],
-      unavailableCandidateBggIds: [],
-      eligibleOwnedIds: [],
-      pairs: [],
-      disclosure: {
-        scope: "wishlist" as const,
-        wishlistEntryCount: 0,
-        selectedCandidateCount: 0,
-        unselectedEntryCount: 0,
-        ownedOverlapCandidateCount: 0,
-        requestedCandidateCount: 0,
-        eligibleCandidateCount: 0,
-        unavailableCandidateCount: 0,
-        eligibleOwnedGameCount: 0,
-        comparisonPairCount: 0,
-        cachedHitPairCount: 0,
-        sendablePairCount: 0,
-      },
-      cacheRevision: null,
-      wishlistMutationGeneration: "0",
-      identity: "identity",
-      isSourceCurrent: () => Promise.resolve(true),
-      isCurrent: () => Promise.resolve(true),
-    };
     const reservation = await service.prepareValidatedPreparedRun({
       scopeKind: "wishlist",
-      wishlistPreparation,
+      wishlistPreparation: unifiedPreparation.wishlistPreparation,
+      unifiedPreparation,
       noteTransmissionAuthorized: false,
+      providerBudget: unifiedPreparation.run.disclosure.budget,
     });
     expect(reservation).not.toBeNull();
     if (!reservation) throw new Error("Expected frozen wishlist reservation");
@@ -2613,153 +2469,182 @@ describe("JevRunService attempt barriers", () => {
     expect(rows.size).toBe(0);
   });
 
-  test("prepared scope validation yields outside the coordinator and reservation does no pair scan", async () => {
-    const capture = fixture(Array.from({ length: 200 }, (_, index) => `game-${index}`));
-    const planned = planJevRunScope(capture.collection, capture.predictionCapture);
-    if (!planned.ok) throw new Error("Expected valid 200-game scope");
-    const storage = {};
-    const coordinator = profileSourceCoordinatorFor(storage);
-    let currentVector = capture.sourceVectorIdentity;
-    let mutationCompleted = false;
-    let mutationDuringValidation = false;
-    let validationInProgress = true;
-    let mutationPromise: Promise<void> = Promise.resolve();
-    let mutationQueued = false;
-    let insideAdmission = false;
-    let plannerCalls = 0;
-    let plannersInsideAdmission = 0;
-    const suppliedScope = Object.freeze({
-      ...planned.scope,
-      pairs: function* () {
-        if (!mutationQueued) {
-          mutationQueued = true;
-          mutationPromise = coordinator.runExclusive(() => {
-            currentVector = "source-mutated-during-preparation";
-            mutationCompleted = true;
-            mutationDuringValidation = validationInProgress;
-            return Promise.resolve();
-          });
-        }
-        yield* planned.scope.pairs();
-      },
-    });
-    const { cache } = cacheFake();
+  test("validated reservation returns synchronously without cache or source reads", async () => {
+    const cacheFixture = cacheFake();
+    const budget = { ...DEFAULT_JEV_RUN_BUDGET, maxProviderAttempts: 1 };
+    const fixtureData = await unifiedFixture(
+      Array.from({ length: 200 }, (_, index) => `game-${index}`),
+      cacheFixture.cache,
+      budget,
+    );
+    const preparation = fixtureData.preparation;
+    const collectionScope = preparation.collectionScope;
+    if (!collectionScope) throw new Error("Expected prepared collection scope");
+    let sourceReads = 0;
     let gatewayConstructions = 0;
     const service = new JevRunService({
-      storageService: storage,
-      cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: currentVector,
-          policyIdentity: capture.policyIdentity,
-          canTransmitNotes: false,
-        }),
-      planScope: (collection, predictions) => {
-        plannerCalls++;
-        if (insideAdmission) plannersInsideAdmission++;
-        return planJevRunScope(collection, predictions);
+      storageService: fixtureData.storage,
+      cache: cacheFixture.cache,
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => {
+        sourceReads++;
+        return fixtureData.sourceAdapter.readCurrent();
       },
-      createGateway: () => {
+      createGateway: (admit) => {
         gatewayConstructions++;
-        return { evaluatePair: () => Promise.resolve(scoreResult()) };
+        return {
+          evaluatePair: async (request) => {
+            await admit({
+              mode: request.mode,
+              attemptId: "bounded-reservation",
+              start: () => ({ response: Promise.resolve(new Response()) }),
+            });
+            return scoreResult();
+          },
+        };
       },
     });
-
-    const reservation = await service.prepareValidatedPreparedRun({
-      capture,
-      scope: suppliedScope,
-      noteTransmissionAuthorized: false,
-    });
-    validationInProgress = false;
-    expect(reservation).not.toBeNull();
-    if (!mutationQueued) throw new Error("Expected validation-triggered source mutation");
-    await mutationPromise;
-    expect(mutationCompleted).toBe(true);
-    expect(mutationDuringValidation).toBe(true);
-    expect(plannerCalls).toBe(1);
-    const plannerCountBeforeAdmission = plannerCalls;
-    const reservedHandles: ReturnType<JevRunService["reserveValidatedPreparedRun"]>[] = [];
-    await coordinator.runExclusive(() => {
-      insideAdmission = true;
-      try {
-        reservedHandles.push(service.reserveValidatedPreparedRun(reservation!));
-      } finally {
-        insideAdmission = false;
-      }
-      return Promise.resolve();
-    });
-    expect(plannerCalls).toBe(plannerCountBeforeAdmission);
-    expect(plannersInsideAdmission).toBe(0);
-    const handle = reservedHandles[0];
-    if (!handle) throw new Error("Expected synchronous active-run reservation");
-    const progress = await handle.completion;
-    expect(progress.state).toBe("failed");
-    expect(gatewayConstructions).toBe(0);
+    const loadSnapshot = fixtureData.storage.loadJevSourceSnapshot?.bind(fixtureData.storage);
+    if (!loadSnapshot) throw new Error("Expected storage source snapshots");
+    let sourceSnapshotReads = 0;
+    let snapshotReadsWhileCoordinatorHeld = -1;
+    fixtureData.storage.loadJevSourceSnapshot = async () => {
+      const snapshot = await loadSnapshot();
+      sourceSnapshotReads++;
+      return snapshot;
+    };
+    const validationSettled = deferred<void>();
+    let validationSettledWhileCoordinatorHeld = false;
+    let validation: Promise<ValidatedPreparedJevRun | null> | undefined;
+    try {
+      await profileSourceCoordinatorFor(fixtureData.storage).runExclusive(async () => {
+        const startedValidation = service.prepareValidatedPreparedRun({
+          scopeKind: "collection",
+          capture: preparation.capture,
+          scope: collectionScope,
+          unifiedPreparation: preparation,
+          noteTransmissionAuthorized: false,
+          providerBudget: preparation.run.disclosure.budget,
+        });
+        validation = startedValidation;
+        void startedValidation.then(
+          () => validationSettled.resolve(),
+          () => validationSettled.resolve(),
+        );
+        validationSettledWhileCoordinatorHeld = await Promise.race([
+          validationSettled.promise.then(() => true),
+          new Promise<boolean>((resolve) => setImmediate(() => resolve(false))),
+        ]);
+        snapshotReadsWhileCoordinatorHeld = sourceSnapshotReads;
+      });
+      if (!validation) throw new Error("Validation did not start");
+      const reservation = await validation;
+      expect(validationSettledWhileCoordinatorHeld).toBe(false);
+      expect(snapshotReadsWhileCoordinatorHeld).toBe(0);
+      expect(reservation).not.toBeNull();
+      if (!reservation) throw new Error("Expected validated unified preparation");
+      expect(sourceSnapshotReads).toBeGreaterThan(0);
+      cacheFixture.resetLookupCalls();
+      const handle = service.reserveValidatedPreparedRun(reservation);
+      handle.cancel();
+      expect(cacheFixture.lookupCalls).toBe(0);
+      expect(sourceReads).toBe(0);
+      const progress = await handle.completion;
+      expect(progress.state).toBe("interrupted");
+      expect(preparation.collectionScope?.totalEligiblePairs).toBe(19_900);
+      expect(gatewayConstructions).toBe(0);
+    } finally {
+      fixtureData.storage.loadJevSourceSnapshot = loadSnapshot;
+    }
   });
 
   test("run-progress storage failure before dispatch stops all paid requests", async () => {
-    const capture = fixture(["a", "b", "c"]);
     const { cache } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
+    const preparation = await fixtureData.prepare();
     const saveProgress = cache.saveRunProgress.bind(cache);
-    let saves = 0;
+    const failedProgressAttempts: Array<
+      Pick<JevRunProgress, "state" | "pairCount" | "completedPairs">
+    > = [];
+    let initialProgressFailed = false;
     cache.saveRunProgress = (progress) => {
-      saves++;
-      if (saves === 2) throw new Error("one-shot progress persistence failure");
+      if (
+        !initialProgressFailed &&
+        progress.state === "running" &&
+        progress.completedPairs === 0 &&
+        progress.pairCount === 3
+      ) {
+        initialProgressFailed = true;
+        failedProgressAttempts.push({
+          state: progress.state,
+          pairCount: progress.pairCount,
+          completedPairs: progress.completedPairs,
+        });
+        throw new Error("initial run progress persistence failure");
+      }
       saveProgress(progress);
     };
     let dispatches = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
-      createGateway: () => ({
-        evaluatePair: () => {
-          dispatches++;
-          return Promise.resolve(scoreResult());
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
+      createGateway: (admit) => ({
+        evaluatePair: async (request) => {
+          await admit({
+            mode: request.mode,
+            attemptId: "initial-progress-failure",
+            start: () => {
+              dispatches++;
+              return { response: Promise.resolve(new Response()) };
+            },
+          });
+          return scoreResult();
         },
       }),
     });
-    const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    const result = await runUnifiedForTest(service, preparation, false);
     expect(dispatches).toBe(0);
-    expect(saves).toBe(2);
+    expect(failedProgressAttempts).toEqual([{ state: "running", pairCount: 3, completedPairs: 0 }]);
     expect(result.state).toBe("failed");
   });
 
   test("outcome progress write failure after malformed response blocks later pairs", async () => {
-    const capture = fixture(["a", "b", "c"]);
     const { cache } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
+    const preparation = await fixtureData.prepare();
     const saveProgress = cache.saveRunProgress.bind(cache);
-    let saves = 0;
+    const failedProgressAttempts: Array<
+      Pick<JevRunProgress, "state" | "completedPairs" | "failedPairs">
+    > = [];
     cache.saveRunProgress = (progress) => {
-      saves++;
-      if (saves === 3) throw new Error("one-shot outcome persistence failure");
+      if (
+        progress.state === "running" &&
+        progress.completedPairs === 1 &&
+        progress.failedPairs === 1
+      ) {
+        failedProgressAttempts.push({
+          state: progress.state,
+          completedPairs: progress.completedPairs,
+          failedPairs: progress.failedPairs,
+        });
+        throw new Error("malformed-result outcome persistence failure");
+      }
       saveProgress(progress);
     };
     let paidCalls = 0;
+    const description = scoreResult().description;
+    if (!description) throw new Error("Expected description result fixture");
     const invalid = {
       ...scoreResult(),
-      description: { ...scoreResult().description!, score: 2 },
-    } as JevPairResult;
+      description: { ...description, score: 2 },
+    };
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: (admit) => ({
         evaluatePair: async () => {
           await admit({
@@ -2774,153 +2659,128 @@ describe("JevRunService attempt barriers", () => {
         },
       }),
     });
-    const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    const result = await runUnifiedForTest(service, preparation, false);
     expect(paidCalls).toBe(1);
-    expect(saves).toBe(3);
+    expect(failedProgressAttempts).toEqual([
+      { state: "running", completedPairs: 1, failedPairs: 1 },
+    ]);
     expect(result.state).toBe("failed");
   });
 
-  test("description edit before first admission fences changed pairs but preserves unchanged pair", async () => {
-    const original = fixture(["a", "b", "c"]);
-    const edited = structuredClone(original);
-    edited.collection.games[0].bggData!.description = "edited description before admission";
-    edited.sourceVectorIdentity = "vector-after-description-edit";
-    edited.captureIdentity = {
-      ...edited.captureIdentity,
-      sourceVectorIdentity: "vector-after-description-edit",
-    };
-    let current = original;
-    let initialReadStarted!: () => void;
-    let releaseInitialRead!: () => void;
-    const initialReadBarrier = new Promise<void>((resolve) => {
-      initialReadStarted = resolve;
-    });
-    const initialReadPending = new Promise<void>((resolve) => {
-      releaseInitialRead = resolve;
-    });
-    let reads = 0;
+  test("description edit before admission rejects the frozen scope without sending stale or new payloads", async () => {
     const { cache, rows } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
+    const preparation = await fixtureData.prepare();
+    const initialReadStarted = deferred<void>();
+    const releaseInitialRead = deferred<void>();
+    let firstAuthorityRead = true;
+    let executionCaptureLoads = 0;
+    let gatewayConstructions = 0;
     const dispatched: string[] = [];
     const dispatchedDescriptions: string[] = [];
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(current),
+      loadCapture: () => {
+        executionCaptureLoads++;
+        return fixtureData.sourceAdapter.loadCapture();
+      },
       readCurrent: async () => {
-        reads++;
-        if (reads === 1) {
-          initialReadStarted();
-          await initialReadPending;
-          return {
-            collection: original.collection,
-            sourceVectorIdentity: original.sourceVectorIdentity,
-            policyIdentity: "policy",
-            canTransmitNotes: false,
-          };
+        if (firstAuthorityRead) {
+          firstAuthorityRead = false;
+          initialReadStarted.resolve();
+          await releaseInitialRead.promise;
         }
+        return fixtureData.sourceAdapter.readCurrent();
+      },
+      createGateway: (admit) => {
+        gatewayConstructions++;
         return {
-          collection: current.collection,
-          sourceVectorIdentity: current.sourceVectorIdentity,
-          policyIdentity: "policy",
-          canTransmitNotes: false,
+          evaluatePair: async (request) => {
+            if (request.mode !== "description-only") throw new Error("Unexpected note request");
+            dispatched.push(`${request.gameA.name}/${request.gameB.name}`);
+            dispatchedDescriptions.push(
+              `${request.gameA.bggDescription}`,
+              `${request.gameB.bggDescription}`,
+            );
+            await admit({
+              mode: "description-only",
+              attemptId: "description-edit",
+              start: () => ({ response: Promise.resolve(new Response()) }),
+            });
+            return scoreResult();
+          },
         };
       },
-      createGateway: (admit) => ({
-        evaluatePair: async (request) => {
-          if (request.mode !== "description-only") throw new Error("Unexpected note request");
-          dispatched.push(`${request.gameA.name}/${request.gameB.name}`);
-          dispatchedDescriptions.push(
-            `${request.gameA.bggDescription}`,
-            `${request.gameB.bggDescription}`,
-          );
-          await admit({
-            mode: "description-only",
-            attemptId: "description-edit",
-            start: () => ({ response: Promise.resolve(new Response()) }),
-          });
-          return scoreResult();
-        },
-      }),
     });
-    const handle = service.startRun({ noteTransmissionAuthorized: false });
-    await initialReadBarrier;
-    current = edited;
-    releaseInitialRead();
-    const result = await handle.completion;
-    expect(dispatched).toEqual(["Game b/Game c"]);
-    expect(dispatched).not.toContain("Game a/Game b");
-    expect(dispatched).not.toContain("Game a/Game c");
-    expect(dispatchedDescriptions).not.toContain("desc a");
-    expect(dispatchedDescriptions).not.toContain("edited description before admission");
-    expect(rows.has("bcC")).toBe(true);
-    expect(result.state).toBe("failed");
+    try {
+      const handle = await reserveUnifiedRunForTest(service, preparation, false);
+      await initialReadStarted.promise;
+      const coordinator = profileSourceCoordinatorFor(fixtureData.storage);
+      const mutation = runOutsideProfileSourceCoordinator(() =>
+        coordinator.runExclusive(async () => {
+          const collection = await fixtureData.storage.loadCollection();
+          const firstGame = collection.games[0];
+          if (!firstGame?.bggData) throw new Error("Expected first game's BGG data");
+          firstGame.bggData.description = "edited description before admission";
+          await fixtureData.storage.saveCollection(collection);
+          await fixtureData.storage.hydrateSourceVector?.();
+        }),
+      );
+      releaseInitialRead.resolve();
+      const result = await handle.completion;
+      await mutation;
+      expect(dispatched).toEqual([]);
+      expect(dispatchedDescriptions).toEqual([]);
+      expect(executionCaptureLoads).toBe(0);
+      expect(gatewayConstructions).toBe(0);
+      expect(rows.size).toBe(0);
+      expect(result.state).toBe("failed");
+    } finally {
+      releaseInitialRead.resolve();
+    }
   });
 
   test("source and permission mutation under shared coordinator fences pending C and D result", async () => {
-    const storageService = {};
-    const coordinator = profileSourceCoordinatorFor(storageService);
-    const capture = fixture();
-    for (const [index, capturedGame] of capture.collection.games.entries()) {
+    const { cache, rows } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const coordinator = profileSourceCoordinatorFor(fixtureData.storage);
+    const collection = await fixtureData.storage.loadCollection();
+    for (const [index, capturedGame] of collection.games.entries()) {
       capturedGame.ownerNote = {
         state: "present",
         version: 1,
-        updatedAt: "before",
+        updatedAt: "2026-01-01T00:00:00Z",
         text: `private-${index}`,
       };
     }
-    capture.collection.semanticRedundancy.settings = {
+    collection.semanticRedundancy.settings = {
+      ...collection.semanticRedundancy.settings,
       enabled: true,
       weights: { factual: 0, description: 1, ownerNote: 1 },
       cachedOwnerNoteUse: true,
     };
-    const editedCapture = structuredClone(capture);
-    editedCapture.collection.games[0].ownerNote = {
-      state: "present",
-      version: 2,
-      updatedAt: "after",
-      text: "changed while provider pending",
-    };
-    editedCapture.sourceVectorIdentity = "vector-after-note-edit";
-    editedCapture.captureIdentity = {
-      ...editedCapture.captureIdentity,
-      sourceVectorIdentity: "vector-after-note-edit",
-    };
-    const { cache, rows } = cacheFake();
-    let currentCapture = capture;
-    let sourceIdentity = "vector";
-    let canTransmitNotes = true;
-    let captureLoads = 0;
-    let providerStarted!: () => void;
-    let resolveProvider!: (response: Response) => void;
-    const providerBarrier = new Promise<void>((resolve) => {
-      providerStarted = resolve;
-    });
-    const providerResponse = new Promise<Response>((resolve) => {
-      resolveProvider = resolve;
-    });
+    await fixtureData.storage.saveCollection(collection);
+    await fixtureData.storage.hydrateSourceVector?.();
+    const preparation = await fixtureData.prepare();
+    const providerBarrier = deferred<void>();
+    const providerResponse = deferred<Response>();
     let mutationCompleted = false;
+    let paidStarts = 0;
     const service = new JevRunService({
-      storageService,
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => {
-        captureLoads++;
-        return Promise.resolve(currentCapture);
-      },
-      readCurrent: () =>
-        Promise.resolve({
-          collection: currentCapture.collection,
-          sourceVectorIdentity: sourceIdentity,
-          policyIdentity: "policy",
-          canTransmitNotes,
-        }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: (admit) => ({
         evaluatePair: async () => {
           const receipt = await admit({
             mode: "description-and-owner-notes",
             attemptId: "pending-provider",
             start: () => {
-              providerStarted();
-              return { response: providerResponse };
+              paidStarts++;
+              providerBarrier.resolve();
+              return { response: providerResponse.promise };
             },
           });
           await receipt.response;
@@ -2931,19 +2791,28 @@ describe("JevRunService attempt barriers", () => {
         },
       }),
     });
-    const handle = service.startRun({ noteTransmissionAuthorized: true });
-    await providerBarrier;
+    const handle = await reserveUnifiedRunForTest(service, preparation, true);
+    await providerBarrier.promise;
     await coordinator.runExclusive(async () => {
-      currentCapture = editedCapture;
-      sourceIdentity = "vector-after-note-edit";
-      canTransmitNotes = false;
+      const current = await fixtureData.storage.loadCollection();
+      const firstGame = current.games[0];
+      if (!firstGame) throw new Error("Expected first note-bearing game");
+      firstGame.ownerNote = {
+        state: "present",
+        version: 2,
+        updatedAt: "2026-01-02T00:00:00Z",
+        text: "changed while provider pending",
+      };
+      current.semanticRedundancy.settings.cachedOwnerNoteUse = false;
+      await fixtureData.storage.saveCollection(current);
+      await fixtureData.storage.hydrateSourceVector?.();
       mutationCompleted = true;
-      await Promise.resolve();
     });
     expect(mutationCompleted).toBe(true);
-    resolveProvider(new Response());
+    providerResponse.resolve(new Response());
     const result = await handle.completion;
-    expect(captureLoads).toBe(2);
+    expect(preparation.collectionScope?.totalEligiblePairs).toBe(1);
+    expect(paidStarts).toBe(1);
     expect(rows.size).toBe(0);
     expect(cache.getActivation()).toBeNull();
     expect(result.state).toBe("failed");
@@ -2951,30 +2820,21 @@ describe("JevRunService attempt barriers", () => {
 
   test("SQLite interrupted run reopens without provider work and fresh run fills only missing pairs", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-sqlite-resume-"));
-    const capture = fixture(["a", "b", "c"]);
-    const storageService = {};
+    const fileOps = createMockFileOps();
     let providerCalls = 0;
     const requestedPairs: string[] = [];
-    let secondProviderStarted!: () => void;
-    const secondProviderBarrier = new Promise<void>((resolve) => {
-      secondProviderStarted = resolve;
-    });
-    let resolveSecondProvider!: (response: Response) => void;
-    const secondProviderResponse = new Promise<Response>((resolve) => {
-      resolveSecondProvider = resolve;
-    });
-    const makeService = (cache: JevPairCache, pauseSecondRequest: boolean) =>
+    const secondProviderBarrier = deferred<void>();
+    const secondProviderResponse = deferred<Response>();
+    const makeService = (
+      fixtureData: Awaited<ReturnType<typeof unifiedFixture>>,
+      cache: JevPairCache,
+      pauseSecondRequest: boolean,
+    ) =>
       new JevRunService({
-        storageService,
+        storageService: fixtureData.storage,
         cache,
-        loadCapture: () => Promise.resolve(capture),
-        readCurrent: () =>
-          Promise.resolve({
-            collection: capture.collection,
-            sourceVectorIdentity: capture.sourceVectorIdentity,
-            policyIdentity: "policy",
-            canTransmitNotes: false,
-          }),
+        loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+        readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
         createGateway: (admit) => ({
           evaluatePair: async (request) => {
             providerCalls++;
@@ -2985,8 +2845,8 @@ describe("JevRunService attempt barriers", () => {
               attemptId: `sqlite-resume-${pairNumber}`,
               start: () => {
                 if (pauseSecondRequest && pairNumber === 2) {
-                  secondProviderStarted();
-                  return { response: secondProviderResponse };
+                  secondProviderBarrier.resolve();
+                  return { response: secondProviderResponse.promise };
                 }
                 return { response: Promise.resolve(new Response()) };
               },
@@ -2997,12 +2857,23 @@ describe("JevRunService attempt barriers", () => {
         }),
       });
     let cache = await createJevPairCache(dir);
+    const initialFixture = await unifiedFixture(
+      ["a", "b", "c"],
+      cache,
+      DEFAULT_JEV_RUN_BUDGET,
+      fileOps,
+    );
+    const originalCollectionId = (await initialFixture.storage.loadCollection()).id;
     try {
-      const firstService = makeService(cache, true);
-      const interruptedHandle = firstService.startRun({ noteTransmissionAuthorized: false });
-      await secondProviderBarrier;
+      const firstService = makeService(initialFixture, cache, true);
+      const interruptedHandle = await reserveUnifiedRunForTest(
+        firstService,
+        initialFixture.preparation,
+        false,
+      );
+      await secondProviderBarrier.promise;
       interruptedHandle.cancel();
-      resolveSecondProvider(new Response());
+      secondProviderResponse.resolve(new Response());
       const interrupted = await interruptedHandle.completion;
       expect(interrupted.state).toBe("interrupted");
       expect(providerCalls).toBe(2);
@@ -3014,15 +2885,21 @@ describe("JevRunService attempt barriers", () => {
 
       cache.close();
       cache = await createJevPairCache(dir);
-      const reopenedService = makeService(cache, false);
+      const reopenedFixture = await unifiedFixture(
+        ["a", "b", "c"],
+        cache,
+        DEFAULT_JEV_RUN_BUDGET,
+        fileOps,
+      );
+      expect((await reopenedFixture.storage.loadCollection()).id).toBe(originalCollectionId);
+      const reopenedService = makeService(reopenedFixture, cache, false);
       const startupProgress = await reopenedService.reconcileInterruptedProgress();
       expect(startupProgress?.state).toBe("interrupted");
       expect(cache.getRunProgress()?.state).toBe("interrupted");
       expect(providerCalls).toBe(2);
       expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })?.value).toBe(0.5);
 
-      const resumed = await reopenedService.startRun({ noteTransmissionAuthorized: false })
-        .completion;
+      const resumed = await runUnifiedForTest(reopenedService, reopenedFixture.preparation, false);
       expect(providerCalls).toBe(4);
       expect(requestedPairs.slice(2)).toEqual(["Game a/Game c", "Game b/Game c"]);
       expect(resumed.state).toBe("completed");
