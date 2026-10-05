@@ -39,8 +39,12 @@ import {
   computeRedundancyAdjustments,
   DEFAULT_REDUNDANCY_SETTINGS,
 } from "../../src/services/redundancy-engine.js";
+import { createRedundancyFactualContext } from "../../src/services/redundancy-factual.js";
 import type { RedundancyPairTable } from "../../src/services/redundancy-engine.js";
-import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
+import {
+  profileSourceCoordinatorFor,
+  runOutsideProfileSourceCoordinator,
+} from "../../src/services/profile-source-coordinator.js";
 import {
   createJevGateway,
   JEV_MODEL_ID,
@@ -1401,21 +1405,15 @@ describe("JevRunService attempt barriers", () => {
 
   test("real SQLite cache checkpoints a complete run and activates only complete coverage", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-service-"));
-    const capture = fixture();
     const cache = await createJevPairCache(dir);
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
     let dispatches = 0;
     try {
       const service = new JevRunService({
-        storageService: {},
+        storageService: fixtureData.storage,
         cache,
-        loadCapture: () => Promise.resolve(capture),
-        readCurrent: () =>
-          Promise.resolve({
-            collection: capture.collection,
-            sourceVectorIdentity: "vector",
-            policyIdentity: "policy",
-            canTransmitNotes: false,
-          }),
+        loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+        readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
         createGateway: (admit) => ({
           evaluatePair: async () => {
             await admit({
@@ -1430,7 +1428,7 @@ describe("JevRunService attempt barriers", () => {
           },
         }),
       });
-      const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+      const result = await runUnifiedForTest(service, fixtureData.preparation, false);
       expect(dispatches).toBe(1);
       expect(result.state).toBe("completed");
       expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })?.value).toBe(0.5);
@@ -1461,58 +1459,40 @@ describe("JevRunService attempt barriers", () => {
     "weight-only changes preserve $kind cache rows for explicit Runs",
     async ({ kind, before, after }) => {
       const dir = await mkdtemp(join(tmpdir(), "jev-run-weight-cache-"));
-      const base = fixture();
       const cache = await createJevPairCache(dir);
-      const notedGames = base.collection.games.map((entry, index) => ({
+      const fixtureData = await unifiedFixture(["a", "b"], cache);
+      const storageService = fixtureData.storage;
+      const collection = await storageService.loadCollection();
+      collection.games = collection.games.map((entry, index) => ({
         ...entry,
         ownerNote: {
-          state: "present" as const,
+          state: "present",
           version: 1,
           updatedAt: "2026-01-01T00:00:00Z",
-          text: `synthetic note ${index}`,
+          text: `private note ${index}`,
         },
       }));
-      let stored: Collection = {
-        ...base.collection,
-        games: notedGames,
-        semanticRedundancy: {
-          ...base.collection.semanticRedundancy,
-          settings: {
-            enabled: true,
-            weights: before,
-            cachedOwnerNoteUse: true,
-          },
-        },
+      collection.semanticRedundancy.settings = {
+        ...collection.semanticRedundancy.settings,
+        enabled: true,
+        weights: before,
+        cachedOwnerNoteUse: true,
       };
-      const storageService = {
-        loadCollection: () => Promise.resolve(structuredClone(stored)),
-        saveCollection: (next: Collection) => {
-          stored = structuredClone(next);
-          return Promise.resolve();
-        },
-      };
-      const mutations = createCollectionMutationService({ storageService, jevPairCache: cache });
+      await storageService.saveCollection(collection);
+      await storageService.hydrateSourceVector?.();
+      const mutations = createCollectionMutationService({
+        storageService,
+        jevPairCache: cache,
+      });
       const semanticState = createSemanticRedundancyStateService({
         collectionMutationService: mutations,
       });
       let providerCalls = 0;
-      const loadCapture = (): Promise<JevRunCapture> =>
-        Promise.resolve({
-          ...base,
-          collection: structuredClone(stored),
-          policyIdentity: `policy-${stored.semanticRedundancy.consentEpoch}`,
-        });
       const service = new JevRunService({
         storageService,
         cache,
-        loadCapture,
-        readCurrent: () =>
-          Promise.resolve({
-            collection: structuredClone(stored),
-            sourceVectorIdentity: "vector",
-            policyIdentity: `policy-${stored.semanticRedundancy.consentEpoch}`,
-            canTransmitNotes: true,
-          }),
+        loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+        readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
         createGateway: (admit) => ({
           evaluatePair: async (request) => {
             const requestMode = request.mode;
@@ -1541,7 +1521,8 @@ describe("JevRunService attempt barriers", () => {
       });
 
       try {
-        const first = await service.startRun({ noteTransmissionAuthorized: true }).completion;
+        const firstPreparation = await fixtureData.prepare();
+        const first = await runUnifiedForTest(service, firstPreparation, true);
         expect(first.state).toBe("completed");
         expect(providerCalls).toBe(1);
         const cRow = cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" });
@@ -1552,40 +1533,46 @@ describe("JevRunService attempt barriers", () => {
         expect(dRow?.dependencyKind).toBe(
           kind === "D_ONLY" ? "D_ONLY" : kind === "SHARED_CD" ? "SHARED_CD" : undefined,
         );
+        const firstCapture = firstPreparation.capture;
+        let stored = await storageService.loadCollection();
         const cachedOwnerNoteEpoch = stored.semanticRedundancy.ownerNoteConsentEpoch;
         const initialIdentity = computeJevPairCoverage({
-          collection: stored,
-          predictionCapture: base.predictionCapture,
-          captureIdentity: base.captureIdentity,
-          factualWeights: base.factualWeights,
+          collection: firstCapture.collection,
+          predictionCapture: firstCapture.predictionCapture,
+          captureIdentity: firstCapture.captureIdentity,
+          factualWeights: firstCapture.factualWeights,
           cache,
         }).identity;
 
         const updateWeights = async (weights: SemanticRedundancySettings["weights"]) => {
-          const current = stored.semanticRedundancy;
+          const current = (await storageService.loadCollection()).semanticRedundancy;
           const result = await semanticState.updateSettings(
             { evidenceEpoch: current.evidenceEpoch, consentEpoch: current.consentEpoch },
             { ...current.settings, weights },
           );
           expect(result.outcome).toBe("accepted");
+          await storageService.hydrateSourceVector?.();
         };
         await updateWeights({ factual: 3, description: 0, ownerNote: 0 });
-        const zeroRun = await service.startRun({ noteTransmissionAuthorized: true }).completion;
+        const zeroPreparation = await fixtureData.prepare();
+        const zeroRun = await runUnifiedForTest(service, zeroPreparation, true);
         expect(zeroRun.state).toBe("completed");
         expect(providerCalls).toBe(1);
 
         await updateWeights(after);
-        const finalRun = await service.startRun({ noteTransmissionAuthorized: true }).completion;
+        const finalPreparation = await fixtureData.prepare();
+        const finalRun = await runUnifiedForTest(service, finalPreparation, true);
         expect(finalRun.state).toBe("completed");
         expect(finalRun.cacheHits).toBe(1);
         expect(providerCalls).toBe(1);
+        stored = await storageService.loadCollection();
         expect(stored.semanticRedundancy.ownerNoteConsentEpoch).toBe(cachedOwnerNoteEpoch);
 
         const freshCoverage = computeJevPairCoverage({
-          collection: stored,
-          predictionCapture: base.predictionCapture,
-          captureIdentity: base.captureIdentity,
-          factualWeights: base.factualWeights,
+          collection: finalPreparation.capture.collection,
+          predictionCapture: finalPreparation.capture.predictionCapture,
+          captureIdentity: finalPreparation.capture.captureIdentity,
+          factualWeights: finalPreparation.capture.factualWeights,
           cache,
         });
         expect(freshCoverage.identity).not.toBe(initialIdentity);
@@ -1619,15 +1606,19 @@ describe("JevRunService attempt barriers", () => {
             },
           ],
         };
+        const factualContext = createRedundancyFactualContext(
+          finalPreparation.capture.collection.games,
+          finalPreparation.capture.factualWeights,
+        );
         const freshScores = computeRedundancyAdjustments(
-          [...base.predictionCapture],
+          [...finalPreparation.capture.predictionCapture],
           {
             ...DEFAULT_REDUNDANCY_SETTINGS,
             enabled: true,
             similarityThreshold: 0,
             minNeighbors: 1,
           },
-          () => ({ binary: [], continuous: [], personalAxes: [] }),
+          (game) => factualContext.getFeatureVector(game),
           table,
         );
         const freshSimilarity = freshScores.get("a")?.nicheNeighbors[0]?.similarity;
@@ -1656,38 +1647,56 @@ describe("JevRunService attempt barriers", () => {
 
   test("purge after a successful scoped Run leaves it completed without stale activation", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-purge-race-"));
-    const capture = fixture();
     const cache = await createJevPairCache(dir);
-    const storageService = {};
-    const coordinator = profileSourceCoordinatorFor(storageService);
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const coordinator = profileSourceCoordinatorFor(fixtureData.storage);
     const revision = cache.mutationRevision.bind(cache);
-    let revisionReads = 0;
+    let coverageCaptureReturned = false;
+    let waitForPostDigestRevision = false;
     let purgePromise: Promise<void> | undefined;
+    let coverageCapture: JevRunCapture | undefined;
+    const completionActivationPublications: Array<string | null> = [];
+    const publicationOrder: string[] = [];
+    const finishRun = cache.finishRun.bind(cache);
+    cache.finishRun = (finish) => {
+      if (finish.progress.state === "completed") {
+        completionActivationPublications.push(finish.activation?.identity ?? null);
+        publicationOrder.push(
+          finish.activation ? "completed-with-activation" : "completed-without-activation",
+        );
+      }
+      finishRun(finish);
+    };
     cache.mutationRevision = () => {
       const current = revision();
-      revisionReads++;
-      if (revisionReads === 2) {
-        // Models purge succeeding under the shared coordinator while collection persistence fails:
-        // authoritative source identity remains unchanged, but cached coverage was withdrawn.
-        purgePromise = coordinator.runExclusive(async () => {
-          cache.purgePair("a", "b", "C");
-          await Promise.resolve();
-        });
+      if (coverageCaptureReturned) {
+        coverageCaptureReturned = false;
+        waitForPostDigestRevision = true;
+      } else if (waitForPostDigestRevision && !purgePromise) {
+        waitForPostDigestRevision = false;
+        purgePromise = runOutsideProfileSourceCoordinator(() =>
+          coordinator.runExclusive(() => {
+            cache.purgePair("a", "b", "C");
+            publicationOrder.push("purged");
+            return Promise.resolve();
+          }),
+        );
       }
       return current;
     };
     try {
       const service = new JevRunService({
-        storageService,
+        storageService: fixtureData.storage,
         cache,
-        loadCapture: () => Promise.resolve(capture),
-        readCurrent: () =>
-          Promise.resolve({
-            collection: capture.collection,
-            sourceVectorIdentity: "vector",
-            policyIdentity: "policy",
-            canTransmitNotes: false,
-          }),
+        loadCapture: async () => {
+          const capture = await fixtureData.sourceAdapter.loadCapture();
+          if (!coverageCapture) {
+            coverageCapture = capture;
+            coverageCaptureReturned = true;
+          }
+          return capture;
+        },
+        readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
         createGateway: (admit) => ({
           evaluatePair: async () => {
             await admit({
@@ -1699,11 +1708,24 @@ describe("JevRunService attempt barriers", () => {
           },
         }),
       });
-      const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
-      await purgePromise;
+      const result = await runUnifiedForTest(service, fixtureData.preparation, false);
+      const completedPurge = purgePromise;
+      if (!completedPurge) throw new Error("Expected coverage-phase cache purge");
+      await completedPurge;
+      const finalCapture = coverageCapture;
+      if (!finalCapture) throw new Error("Expected actual final coverage capture");
+      const current = await fixtureData.sourceAdapter.readCurrent();
+      expect(finalCapture.sourceVectorIdentity).toBe(
+        fixtureData.preparation.capture.sourceVectorIdentity,
+      );
+      expect(finalCapture.policyIdentity).toBe(fixtureData.preparation.capture.policyIdentity);
+      expect(current.sourceVectorIdentity).toBe(finalCapture.sourceVectorIdentity);
+      expect(current.policyIdentity).toBe(finalCapture.policyIdentity);
       expect(result.state).toBe("completed");
       expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })).toBeNull();
       expect(cache.getActivation()).toBeNull();
+      expect(completionActivationPublications).toEqual([null]);
+      expect(publicationOrder).toEqual(["purged", "completed-without-activation"]);
     } finally {
       cache.close();
       await rm(dir, { recursive: true, force: true });
@@ -1712,31 +1734,26 @@ describe("JevRunService attempt barriers", () => {
 
   test("three eligible games with one genuinely missing description can complete coverage", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-missing-description-"));
-    const capture = fixture(["a", "b", "c"]);
-    capture.collection.games[2].bggData = null;
     const cache = await createJevPairCache(dir);
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
+    const collection = await fixtureData.storage.loadCollection();
+    const missingDescriptionGame = collection.games[2];
+    if (!missingDescriptionGame) throw new Error("Expected third fixture game");
+    missingDescriptionGame.bggData = null;
+    await fixtureData.storage.saveCollection(collection);
+    await fixtureData.storage.hydrateSourceVector?.();
+    const preparation = await fixtureData.prepare();
+    let coverageCapture: JevRunCapture | undefined;
     let dispatches = 0;
-    let captureLoads = 0;
-    let scopePlans = 0;
     try {
       const service = new JevRunService({
-        storageService: {},
+        storageService: fixtureData.storage,
         cache,
-        loadCapture: () => {
-          captureLoads++;
-          return Promise.resolve(capture);
+        loadCapture: async () => {
+          coverageCapture = await fixtureData.sourceAdapter.loadCapture();
+          return coverageCapture;
         },
-        readCurrent: () =>
-          Promise.resolve({
-            collection: capture.collection,
-            sourceVectorIdentity: "vector",
-            policyIdentity: "policy",
-            canTransmitNotes: false,
-          }),
-        planScope: (collection, predictionCapture) => {
-          scopePlans++;
-          return planJevRunScope(collection, predictionCapture);
-        },
+        readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
         createGateway: (admit) => ({
           evaluatePair: async () => {
             await admit({
@@ -1751,18 +1768,18 @@ describe("JevRunService attempt barriers", () => {
           },
         }),
       });
-      const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+      const result = await runUnifiedForTest(service, preparation, false);
       expect(dispatches).toBe(1);
-      expect(captureLoads).toBe(2);
-      expect(scopePlans).toBe(1);
       expect(result.pairCount).toBe(3);
       expect(result.failedPairs).toBe(0);
       expect(result.state).toBe("completed");
+      const freshCapture = coverageCapture;
+      if (!freshCapture) throw new Error("Expected final coverage capture");
       const coverage = computeJevPairCoverage({
-        collection: capture.collection,
-        predictionCapture: capture.predictionCapture,
-        captureIdentity: capture.captureIdentity,
-        factualWeights: capture.factualWeights,
+        collection: freshCapture.collection,
+        predictionCapture: freshCapture.predictionCapture,
+        captureIdentity: freshCapture.captureIdentity,
+        factualWeights: freshCapture.factualWeights,
         cache,
       });
       expect(coverage.complete).toBe(true);
@@ -1777,36 +1794,23 @@ describe("JevRunService attempt barriers", () => {
 
   test("newly eligible games remain outside the successful Run scope without failing its outcome", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-added-game-"));
-    const original = fixture();
-    const expandedBase = fixture(["a", "b", "c"]);
-    const expanded = {
-      ...expandedBase,
-      sourceVectorIdentity: "vector-after-addition",
-      captureIdentity: {
-        ...expandedBase.captureIdentity,
-        sourceVectorIdentity: "vector-after-addition",
-      },
-    };
-    let current = original;
-    let captureCalls = 0;
-    let dispatches = 0;
     const cache = await createJevPairCache(dir);
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    let coverageCapture: JevRunCapture | undefined;
+    let dispatches = 0;
     try {
       const service = new JevRunService({
-        storageService: {},
+        storageService: fixtureData.storage,
         cache,
-        loadCapture: () => {
-          captureCalls++;
-          if (captureCalls === 2) current = expanded;
-          return Promise.resolve(current);
+        loadCapture: async () => {
+          const collection = await fixtureData.storage.loadCollection();
+          collection.games = [...collection.games, game("c")];
+          await fixtureData.storage.saveCollection(collection);
+          await fixtureData.storage.hydrateSourceVector?.();
+          coverageCapture = await fixtureData.sourceAdapter.loadCapture();
+          return coverageCapture;
         },
-        readCurrent: () =>
-          Promise.resolve({
-            collection: current.collection,
-            sourceVectorIdentity: current.sourceVectorIdentity,
-            policyIdentity: "policy",
-            canTransmitNotes: false,
-          }),
+        readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
         createGateway: (admit) => ({
           evaluatePair: async () => {
             await admit({
@@ -1821,12 +1825,23 @@ describe("JevRunService attempt barriers", () => {
           },
         }),
       });
-      const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+      const result = await runUnifiedForTest(service, fixtureData.preparation, false);
       expect(dispatches).toBe(1);
       expect(result.state).toBe("completed");
       expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })?.value).toBe(0.5);
       expect(cache.lookup({ gameAId: "a", gameBId: "c", signal: "C" })).toBeNull();
       expect(cache.getActivation()).toBeNull();
+      const freshCapture = coverageCapture;
+      if (!freshCapture) throw new Error("Expected final coverage capture after source addition");
+      const coverage = computeJevPairCoverage({
+        collection: freshCapture.collection,
+        predictionCapture: freshCapture.predictionCapture,
+        captureIdentity: freshCapture.captureIdentity,
+        factualWeights: freshCapture.factualWeights,
+        cache,
+      });
+      expect(coverage.pairs).toHaveLength(3);
+      expect(coverage.complete).toBe(false);
     } finally {
       cache.close();
       await rm(dir, { recursive: true, force: true });
@@ -1834,84 +1849,94 @@ describe("JevRunService attempt barriers", () => {
   });
 
   test("cancellation while final coherent capture is pending fences activation", async () => {
-    const capture = fixture();
-    const { cache, progress } = cacheFake();
-    let captureCalls = 0;
-    let finalCaptureReady!: () => void;
-    let releaseFinalCapture!: () => void;
-    const finalCaptureBarrier = new Promise<void>((resolve) => {
-      finalCaptureReady = resolve;
-    });
-    const finalCapturePending = new Promise<JevRunCapture>((resolve) => {
-      releaseFinalCapture = () => resolve(capture);
-    });
+    const dir = await mkdtemp(join(tmpdir(), "jev-run-final-capture-cancel-"));
+    const cache = await createJevPairCache(dir);
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const finalCaptureBarrier = deferred<void>();
+    const releaseFinalCapture = deferred<void>();
+    const finalCaptureSettled = deferred<void>();
+    let captureGateReached = false;
+    let gatewayCalls = 0;
+    let paidDispatches = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => {
-        captureCalls++;
-        if (captureCalls === 2) {
-          finalCaptureReady();
-          return finalCapturePending;
+      loadCapture: async () => {
+        finalCaptureBarrier.resolve();
+        await releaseFinalCapture.promise;
+        try {
+          return await fixtureData.sourceAdapter.loadCapture();
+        } finally {
+          finalCaptureSettled.resolve();
         }
-        return Promise.resolve(capture);
       },
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
-      createGateway: (admit) => ({
-        evaluatePair: async () => {
-          await admit({
-            mode: "description-only",
-            attemptId: "final-barrier",
-            start: () => ({ response: Promise.resolve(new Response()) }),
-          });
-          return scoreResult();
-        },
-      }),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
+      createGateway: (admit) => {
+        gatewayCalls++;
+        return {
+          evaluatePair: async () => {
+            await admit({
+              mode: "description-only",
+              attemptId: "final-barrier",
+              start: () => {
+                paidDispatches++;
+                return { response: Promise.resolve(new Response()) };
+              },
+            });
+            return scoreResult();
+          },
+        };
+      },
     });
-    const handle = service.startRun({ noteTransmissionAuthorized: false });
-    await finalCaptureBarrier;
-    handle.cancel();
-    releaseFinalCapture();
-    const result = await handle.completion;
-    expect(result.state).toBe("interrupted");
-    expect(progress.at(-1)?.state).toBe("interrupted");
+    try {
+      const handle = await reserveUnifiedRunForTest(service, fixtureData.preparation, false);
+      await finalCaptureBarrier.promise;
+      captureGateReached = true;
+      handle.cancel();
+      const result = await handle.completion;
+      const progressAtCancellation = cache.getRunProgress();
+      releaseFinalCapture.resolve();
+      await finalCaptureSettled.promise;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(result.state).toBe("interrupted");
+      expect(cache.getRunProgress()?.state).toBe("interrupted");
+      expect(cache.getRunProgress()).toEqual(progressAtCancellation);
+      expect(cache.getActivation()).toBeNull();
+      expect(gatewayCalls).toBe(1);
+      expect(paidDispatches).toBe(1);
+    } finally {
+      releaseFinalCapture.resolve();
+      if (captureGateReached) {
+        await finalCaptureSettled.promise;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      cache.close();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("cancellation while final readCurrent is pending persists interrupted status", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-final-read-cancel-"));
-    const capture = fixture();
     const cache = await createJevPairCache(dir);
-    let currentReads = 0;
-    let finalReadStarted!: () => void;
-    let releaseFinalRead!: () => void;
-    const barrier = new Promise<void>((resolve) => {
-      finalReadStarted = resolve;
-    });
-    const pendingRead = new Promise<void>((resolve) => {
-      releaseFinalRead = resolve;
-    });
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const barrier = deferred<void>();
+    const pendingRead = deferred<void>();
+    let finalCoverageStarted = false;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
+      loadCapture: async () => {
+        finalCoverageStarted = true;
+        return fixtureData.sourceAdapter.loadCapture();
+      },
       readCurrent: async () => {
-        currentReads++;
-        if (currentReads === 7) {
-          finalReadStarted();
-          await pendingRead;
+        const current = await fixtureData.sourceAdapter.readCurrent();
+        if (finalCoverageStarted) {
+          finalCoverageStarted = false;
+          barrier.resolve();
+          await pendingRead.promise;
         }
-        return {
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        };
+        return current;
       },
       createGateway: (admit) => ({
         evaluatePair: async () => {
@@ -1925,11 +1950,11 @@ describe("JevRunService attempt barriers", () => {
       }),
     });
     try {
-      const handle = service.startRun({ noteTransmissionAuthorized: false });
-      await barrier;
+      const handle = await reserveUnifiedRunForTest(service, fixtureData.preparation, false);
+      await barrier.promise;
       expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })?.value).toBe(0.5);
       handle.cancel();
-      releaseFinalRead();
+      pendingRead.resolve();
       const result = await handle.completion;
       expect(result.state).toBe("interrupted");
       expect(cache.getRunProgress()?.state).toBe("interrupted");
@@ -1941,25 +1966,21 @@ describe("JevRunService attempt barriers", () => {
   });
 
   test("original policy change before activation persists failed without activation", async () => {
-    const capture = fixture();
     const { cache, progress } = cacheFake();
-    let currentPolicy = "policy";
-    let captureCalls = 0;
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => {
-        captureCalls++;
-        if (captureCalls === 2) currentPolicy = "changed-policy";
-        return Promise.resolve(capture);
+      loadCapture: async () => {
+        const capture = await fixtureData.sourceAdapter.loadCapture();
+        const settings = await fixtureData.storage.loadRedundancySettings();
+        await fixtureData.storage.saveRedundancySettings({
+          ...settings,
+          similarityThreshold: settings.similarityThreshold + 0.01,
+        });
+        return capture;
       },
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: currentPolicy,
-          canTransmitNotes: false,
-        }),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: (admit) => ({
         evaluatePair: async () => {
           await admit({
@@ -1971,14 +1992,13 @@ describe("JevRunService attempt barriers", () => {
         },
       }),
     });
-    const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    const result = await runUnifiedForTest(service, fixtureData.preparation, false);
     expect(result.state).toBe("failed");
     expect(progress.at(-1)?.state).toBe("failed");
     expect(cache.getActivation()).toBeNull();
   });
 
   test("startup reconciliation does not interfere with an active process-local run", async () => {
-    const capture = fixture();
     const { cache, progress } = cacheFake();
     cache.saveRunProgress({
       runId: "prior",
@@ -1990,37 +2010,40 @@ describe("JevRunService attempt barriers", () => {
       failedPairs: 0,
       updatedAt: "before",
     });
-    let release!: () => void;
-    const pending = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const pending = deferred<void>();
     let gateways = 0;
-    const service = new JevRunService({
-      storageService: {},
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const actualService = new JevRunService({
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: async () => {
-        await pending;
-        return capture;
-      },
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
-      createGateway: () => {
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
+      createGateway: (admit) => {
         gateways++;
-        return { evaluatePair: () => Promise.resolve(scoreResult()) };
+        return {
+          evaluatePair: async () => {
+            await admit({
+              mode: "description-only",
+              attemptId: "active-reconciliation",
+              start: () => ({ response: pending.promise.then(() => new Response()) }),
+            });
+            return scoreResult();
+          },
+        };
       },
     });
-    const handle = service.startRun({ noteTransmissionAuthorized: false });
-    const reconciled = await service.reconcileInterruptedProgress();
-    expect(reconciled?.state).toBe("running");
-    release();
-    await handle.completion;
-    expect(gateways).toBe(1);
-    expect(progress.at(-1)?.state).not.toBe("interrupted");
+    try {
+      const preparation = await fixtureData.prepare();
+      const handle = await reserveUnifiedRunForTest(actualService, preparation, false);
+      const reconciled = await actualService.reconcileInterruptedProgress();
+      expect(reconciled?.state).toBe("running");
+      pending.resolve();
+      await handle.completion;
+      expect(gateways).toBe(1);
+      expect(progress.at(-1)?.state).not.toBe("interrupted");
+    } finally {
+      cache.close();
+    }
   });
 
   test("startup reconciliation marks stale running progress without creating a gateway", async () => {
