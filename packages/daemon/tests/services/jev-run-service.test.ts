@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import {
 } from "@shelf-judge/shared";
 import { JevRunService, type JevRunCapture } from "../../src/services/jev-run-service.js";
 import { planJevRunScope } from "../../src/services/jev-run-scope.js";
+import * as jevRunScope from "../../src/services/jev-run-scope.js";
 import type {
   JevPairCache,
   JevPairCheckpoint,
@@ -24,8 +25,12 @@ import type {
 import { createJevPairCache } from "../../src/services/jev-pair-cache-service.js";
 import { computeJevPairCoverage } from "../../src/services/jev-pair-coverage.js";
 import { createCollectionMutationService } from "../../src/services/collection-mutation-service.js";
+import { createJevRunSourceAdapter } from "../../src/services/jev-run-source-adapter.js";
+import {
+  prepareUnifiedJevRun,
+  type PreparedUnifiedRun,
+} from "../../src/services/unified-jev-run-preparation.js";
 import { createSemanticRedundancyStateService } from "../../src/services/semantic-redundancy-state-service.js";
-import { buildJevPairDependencies } from "../../src/services/jev-pair-identity.js";
 import {
   computeRedundancyAdjustments,
   DEFAULT_REDUNDANCY_SETTINGS,
@@ -43,6 +48,7 @@ import {
   JEV_QUESTION_VERSION,
   JEV_RUBRIC_VERSION,
 } from "../../src/services/jev/jev-judgment-contract.js";
+import { createTestApp } from "../helpers/test-app.js";
 
 function game(id: string): DurableGame {
   return {
@@ -87,10 +93,10 @@ function game(id: string): DurableGame {
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
-    ratings: {},
+    ratings: { personal: 6 },
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
-    ownerNote: { state: "cleared", version: 0, updatedAt: "2026-01-01T00:00:00Z" },
+    ownerNote: { state: "cleared", version: 1, updatedAt: "2026-01-01T00:00:00Z" },
   };
 }
 
@@ -182,15 +188,103 @@ async function runPreparedForTest(
   return service.reserveValidatedPreparedRun(reservation).completion;
 }
 
+async function unifiedFixture(
+  ids: readonly string[],
+  cache: JevPairCache,
+  budget: Readonly<typeof DEFAULT_JEV_RUN_BUDGET> = DEFAULT_JEV_RUN_BUDGET,
+) {
+  const context = createTestApp({ jevPairCache: cache });
+  const storage = context.storageService;
+  const collection = await storage.loadCollection();
+  collection.axes = [
+    {
+      id: "personal",
+      name: "Personal",
+      description: null,
+      weight: 1,
+      enabled: true,
+      source: "personal",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    },
+  ];
+  collection.games = ids.map(game);
+  collection.semanticRedundancy.settings = {
+    ...collection.semanticRedundancy.settings,
+    enabled: true,
+    cachedOwnerNoteUse: false,
+    weights: { factual: 1, description: 1, ownerNote: 0 },
+  };
+  await storage.saveCollection(collection);
+  await storage.saveRedundancySettings({
+    ...(await storage.loadRedundancySettings()),
+    enabled: true,
+    stage: "integrated",
+    similarityThreshold: 0,
+    minNeighbors: 1,
+    expectedNeighbors: 5,
+    maxPenalty: 1,
+    componentWeights: { binary: 1, continuous: 3 },
+  });
+  await storage.hydrateSourceVector?.();
+  const snapshotPrediction = context.predictionService.listGamesWithPredictionsFromSnapshot?.bind(
+    context.predictionService,
+  );
+  if (!snapshotPrediction) throw new Error("Test prediction service lacks snapshot support");
+  const sourceAdapter = createJevRunSourceAdapter({
+    storageService: storage,
+    predictionService: { listGamesWithPredictionsFromSnapshot: snapshotPrediction },
+  });
+  const preparation = await prepareUnifiedJevRun({
+    scoring: context.unifiedScoringService,
+    sourceAdapter,
+    cache,
+    request: { scope: "collection-all" },
+    budget,
+  });
+  if (!preparation.collectionScope) throw new Error("Expected collection scope");
+  return { context, storage, sourceAdapter, preparation };
+}
+
+async function reserveUnifiedRunForTest(
+  service: JevRunService,
+  preparation: PreparedUnifiedRun,
+  noteTransmissionAuthorized: boolean,
+) {
+  if (!preparation.collectionScope) throw new Error("Expected collection scope");
+  const reservation = await service.prepareValidatedPreparedRun({
+    scopeKind: "collection",
+    capture: preparation.capture,
+    scope: preparation.collectionScope,
+    unifiedPreparation: preparation,
+    noteTransmissionAuthorized,
+    providerBudget: preparation.run.disclosure.budget,
+  });
+  if (!reservation) throw new Error("Expected validated unified preparation");
+  return service.reserveValidatedPreparedRun(reservation);
+}
+
+async function runUnifiedForTest(
+  service: JevRunService,
+  preparation: PreparedUnifiedRun,
+  noteTransmissionAuthorized: boolean,
+): Promise<JevRunProgress> {
+  return (await reserveUnifiedRunForTest(service, preparation, noteTransmissionAuthorized))
+    .completion;
+}
+
 function cacheFake() {
   const progress: JevRunProgress[] = [];
   const rows = new Map<string, JevPairJudgment>();
   let revision = 0;
+  let lookupCalls = 0;
   const cache = {
     available: true,
     mutationRevision: () => revision,
-    lookup: (key: { gameAId: string; gameBId: string; signal: string }) =>
-      rows.get(key.gameAId + key.gameBId + key.signal) ?? null,
+    lookup: (key: { gameAId: string; gameBId: string; signal: string }) => {
+      lookupCalls++;
+      return rows.get(key.gameAId + key.gameBId + key.signal) ?? null;
+    },
     upsert: () => {
       revision++;
     },
@@ -217,38 +311,51 @@ function cacheFake() {
     reset: () => {},
     close: () => {},
   } as unknown as JevPairCache;
-  return { cache, progress, rows };
+  return {
+    cache,
+    progress,
+    rows,
+    resetLookupCalls: () => {
+      lookupCalls = 0;
+    },
+    get lookupCalls() {
+      return lookupCalls;
+    },
+  };
 }
 
 describe("JevRunService attempt barriers", () => {
-  test("reuses one capture lookup across pair preparation, dispatch, and checkpoints", async () => {
-    const capture = fixture(["a", "b", "c"]);
-    const games = capture.collection.games;
-    const originalMap = games.map.bind(games);
-    let collectionMapCalls = 0;
-    games.map = ((...args: Parameters<typeof games.map>) => {
-      collectionMapCalls++;
-      return originalMap(...args);
-    }) as typeof games.map;
-    const { cache } = cacheFake();
+  test("builds one collection lookup across dispatches and checkpoints", async () => {
+    const cacheFixture = cacheFake();
+    const { cache } = cacheFixture;
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
+    cacheFixture.resetLookupCalls();
+    let checkpoints = 0;
+    const originalCheckpointPair = cache.checkpointPair.bind(cache);
+    cache.checkpointPair = (checkpoint) => {
+      checkpoints++;
+      originalCheckpointPair(checkpoint);
+    };
+    const collectionLookupSpy = spyOn(jevRunScope, "createJevRunCollectionLookup");
+    let lookupBuildsBeforeFinalCoverage: number | undefined;
     let dispatches = 0;
+    let lookupsAtLastDispatch = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
+      loadCapture: async () => {
+        lookupBuildsBeforeFinalCoverage = collectionLookupSpy.mock.calls.length;
+        collectionLookupSpy.mockRestore();
+        return fixtureData.sourceAdapter.loadCapture();
+      },
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: (admit) => ({
         evaluatePair: async () => {
           await admit({
             mode: "description-only",
             attemptId: `structural-${dispatches}`,
             start: () => {
+              lookupsAtLastDispatch = cacheFixture.lookupCalls;
               dispatches++;
               return { response: Promise.resolve(new Response()) };
             },
@@ -258,97 +365,104 @@ describe("JevRunService attempt barriers", () => {
       }),
     });
 
-    const result = await service.startRun({ noteTransmissionAuthorized: false }).completion;
-    expect(result).toMatchObject({ state: "completed", completedPairs: 3 });
-    expect(dispatches).toBe(3);
-    // One source-index build for scope planning and one lazy run lookup, independent of pair count.
-    expect(collectionMapCalls).toBe(2);
+    try {
+      const result = await runUnifiedForTest(service, fixtureData.preparation, false);
+      expect(result).toMatchObject({ state: "completed", completedPairs: 3 });
+      expect(dispatches).toBe(3);
+      expect(checkpoints).toBe(3);
+      expect(lookupBuildsBeforeFinalCoverage).toBe(1);
+      // The final dispatch observes only run-time cache reads; preparation and final coverage are excluded.
+      expect(lookupsAtLastDispatch).toBe(3);
+    } finally {
+      collectionLookupSpy.mockRestore();
+    }
   });
 
-  test("default computational scope admits a 200-game 19,900-pair universe", async () => {
+  test("one-attempt budget stops the 200-game universe after its first checkpoint", async () => {
     const ids = Array.from({ length: 200 }, (_, index) => `game-${String(index).padStart(3, "0")}`);
-    const capture = fixture(ids);
     const { cache, rows } = cacheFake();
-    const games = new Map(capture.collection.games.map((entry) => [entry.id, entry]));
-    for (let leftIndex = 0; leftIndex < ids.length; leftIndex++) {
-      for (let rightIndex = leftIndex + 1; rightIndex < ids.length; rightIndex++) {
-        const gameAId = ids[leftIndex];
-        const gameBId = ids[rightIndex];
-        const gameA = games.get(gameAId)!;
-        const gameB = games.get(gameBId)!;
-        rows.set(gameAId + gameBId + "C", {
-          collectionId: capture.collection.id,
-          gameAId,
-          gameBId,
-          signal: "C",
-          dependencyKind: "C_ONLY",
-          value: 0.5,
-          modelId: JEV_JUDGMENT_CONTRACT.modelId,
-          rubricVersion: JEV_JUDGMENT_CONTRACT.rubricVersion,
-          questionVersion: JEV_JUDGMENT_CONTRACT.questionVersion,
-          requestSchemaVersion: JEV_JUDGMENT_CONTRACT.requestSchemaVersion,
-          scoreMappingVersion: JEV_JUDGMENT_CONTRACT.scoreMappingVersion,
-          semanticPolicyId: JEV_JUDGMENT_CONTRACT.semanticPolicyId,
-          completedAt: "fixture-time",
-          dependencies: buildJevPairDependencies(
-            "C_ONLY",
-            {
-              gameId: gameAId,
-              name: gameA.name,
-              description: gameA.bggData!.description!,
-            },
-            {
-              gameId: gameBId,
-              name: gameB.name,
-              description: gameB.bggData!.description!,
-            },
-          ),
-        });
-      }
-    }
+    const budget = {
+      maxProviderAttempts: 1,
+      reportedTokenStopThreshold: 100_000,
+      maxRunDurationMs: 60_000,
+    };
+    const fixtureData = await unifiedFixture(ids, cache, budget);
+    let transportCalls = 0;
+    let gatewayConstructions = 0;
+    let checkpoints = 0;
+    const originalCheckpointPair = cache.checkpointPair.bind(cache);
+    cache.checkpointPair = (checkpoint) => {
+      checkpoints++;
+      originalCheckpointPair(checkpoint);
+    };
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
-      createGateway: () => {
-        throw new Error("No signals require provider work");
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
+      createGateway: (admitAndDispatch, providerBudget) => {
+        gatewayConstructions++;
+        return createJevGateway({
+          apiKey: "fake-test-key",
+          maxRequests: providerBudget.maxProviderAttempts,
+          maxReportedTokens: providerBudget.reportedTokenStopThreshold,
+          wait: async () => {},
+          admitAndDispatch,
+          fetch: () => {
+            transportCalls++;
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  model: JEV_MODEL_ID,
+                  answers: {
+                    description_similarity: {
+                      type: "score",
+                      score: 2,
+                      legend: { "0": "Low", "1": "Some", "2": "High", "3": "Very high" },
+                      probabilities: { "0": 0, "1": 0, "2": 1, "3": 0 },
+                      confidence: 0.5,
+                    },
+                  },
+                  usage: { input_tokens: 4, output_tokens: 2 },
+                }),
+                { status: 200 },
+              ),
+            );
+          },
+        });
       },
     });
 
     expect(service.effectiveLimits.maxEligiblePairs).toBeGreaterThanOrEqual(19_900);
-    const progress = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    const scope = fixtureData.preparation.collectionScope;
+    if (!scope) throw new Error("Expected unified collection scope");
+    expect(scope.totalEligiblePairs).toBe(19_900);
+    expect(rows.size).toBe(0);
+    const progress = await runUnifiedForTest(service, fixtureData.preparation, false);
     expect(progress).toMatchObject({
-      state: "completed",
+      state: "failed",
       pairCount: 19_900,
-      completedPairs: 19_900,
-      cacheHits: 19_900,
-      failedPairs: 0,
+      completedPairs: 2,
+      cacheMisses: 2,
+      failedPairs: 1,
+      stopReason: "application-attempt-limit",
     });
+    expect(gatewayConstructions).toBe(1);
+    expect(transportCalls).toBe(1);
+    expect(checkpoints).toBe(1);
+    expect(rows.size).toBe(1);
   });
 
   test("gateway request-budget exhaustion preserves checkpoints and stops later pairs", async () => {
-    const capture = fixture(["a", "b", "c"]);
     const { cache, rows } = cacheFake();
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
     let transportCalls = 0;
     const logs = recordingLogger();
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: (admitAndDispatch) =>
         createJevGateway({
           apiKey: "fake-test-key",
@@ -380,7 +494,7 @@ describe("JevRunService attempt barriers", () => {
       logger: logs.logger,
     });
 
-    const progress = await service.startRun({ noteTransmissionAuthorized: false }).completion;
+    const progress = await runUnifiedForTest(service, fixtureData.preparation, false);
     expect(transportCalls).toBe(2);
     expect(progress.cacheMisses).toBe(2);
     expect(rows.size).toBe(1);
@@ -400,7 +514,7 @@ describe("JevRunService attempt barriers", () => {
       maxProviderAttempts: DEFAULT_JEV_RUN_BUDGET.maxProviderAttempts,
       reportedTokenStopThreshold: DEFAULT_JEV_RUN_BUDGET.reportedTokenStopThreshold,
       maxRunDurationMs: 1_800_000,
-      eligiblePairs: null,
+      eligiblePairs: 3,
     });
     expect(terminalEvents).toHaveLength(1);
     expect(terminalEvents[0]?.fields).toMatchObject({
@@ -415,20 +529,19 @@ describe("JevRunService attempt barriers", () => {
 
   test("selected attempt budget above the former default reaches the transport", async () => {
     const ids = Array.from({ length: 15 }, (_, index) => `game-${index}`);
-    const capture = fixture(ids);
     const { cache, rows } = cacheFake();
+    const budget = {
+      maxProviderAttempts: 101,
+      reportedTokenStopThreshold: 100_000,
+      maxRunDurationMs: 60_000,
+    };
+    const fixtureData = await unifiedFixture(ids, cache, budget);
     let transportCalls = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: (admitAndDispatch, budget) =>
         createJevGateway({
           apiKey: "fake-test-key",
@@ -458,18 +571,7 @@ describe("JevRunService attempt barriers", () => {
           },
         }),
     });
-    const planned = planJevRunScope(capture.collection, capture.predictionCapture);
-    if (!planned.ok) throw new Error("Expected valid 15-game scope");
-    const progress = await runPreparedForTest(service, {
-      capture,
-      scope: planned.scope,
-      noteTransmissionAuthorized: false,
-      providerBudget: {
-        maxProviderAttempts: 101,
-        reportedTokenStopThreshold: 100_000,
-        maxRunDurationMs: 60_000,
-      },
-    });
+    const progress = await runUnifiedForTest(service, fixtureData.preparation, false);
 
     expect(transportCalls).toBe(101);
     expect(rows.size).toBe(101);
@@ -484,20 +586,19 @@ describe("JevRunService attempt barriers", () => {
   });
 
   test("a threshold-crossing provider response is checkpointed before the run stops", async () => {
-    const capture = fixture(["a", "b", "c"]);
     const { cache, rows } = cacheFake();
+    const budget = {
+      maxProviderAttempts: 10,
+      reportedTokenStopThreshold: 5,
+      maxRunDurationMs: 60_000,
+    };
+    const fixtureData = await unifiedFixture(["a", "b", "c"], cache, budget);
     let transportCalls = 0;
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
-      readCurrent: () =>
-        Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        }),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
       createGateway: (admitAndDispatch, budget) =>
         createJevGateway({
           apiKey: "fake-test-key",
@@ -526,18 +627,7 @@ describe("JevRunService attempt barriers", () => {
           },
         }),
     });
-    const planned = planJevRunScope(capture.collection, capture.predictionCapture);
-    if (!planned.ok) throw new Error("Expected valid three-game scope");
-    const progress = await runPreparedForTest(service, {
-      capture,
-      scope: planned.scope,
-      noteTransmissionAuthorized: false,
-      providerBudget: {
-        maxProviderAttempts: 10,
-        reportedTokenStopThreshold: 5,
-        maxRunDurationMs: 60_000,
-      },
-    });
+    const progress = await runUnifiedForTest(service, fixtureData.preparation, false);
 
     expect(transportCalls).toBe(1);
     expect(rows.size).toBe(1);
@@ -550,23 +640,23 @@ describe("JevRunService attempt barriers", () => {
   });
 
   test("the selected duration deadline is enforced at the exact boundary", async () => {
-    const capture = fixture();
     const { cache } = cacheFake();
+    const budget = {
+      maxProviderAttempts: 100,
+      reportedTokenStopThreshold: 200_000,
+      maxRunDurationMs: 60_000,
+    };
+    const fixtureData = await unifiedFixture(["a", "b"], cache, budget);
     let clock = 1_000;
     let gatewayConstructions = 0;
     const logs = recordingLogger();
     const service = new JevRunService({
-      storageService: {},
+      storageService: fixtureData.storage,
       cache,
-      loadCapture: () => Promise.resolve(capture),
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
       readCurrent: () => {
         clock += 60_000;
-        return Promise.resolve({
-          collection: capture.collection,
-          sourceVectorIdentity: "vector",
-          policyIdentity: "policy",
-          canTransmitNotes: false,
-        });
+        return fixtureData.sourceAdapter.readCurrent();
       },
       createGateway: () => {
         gatewayConstructions++;
@@ -575,18 +665,7 @@ describe("JevRunService attempt barriers", () => {
       now: () => new Date(clock),
       logger: logs.logger,
     });
-    const planned = planJevRunScope(capture.collection, capture.predictionCapture);
-    if (!planned.ok) throw new Error("Expected valid one-pair scope");
-    const progress = await runPreparedForTest(service, {
-      capture,
-      scope: planned.scope,
-      noteTransmissionAuthorized: false,
-      providerBudget: {
-        maxProviderAttempts: 100,
-        reportedTokenStopThreshold: 200_000,
-        maxRunDurationMs: 60_000,
-      },
-    });
+    const progress = await runUnifiedForTest(service, fixtureData.preparation, false);
 
     expect(gatewayConstructions).toBe(0);
     expect(progress).toMatchObject({ state: "failed", stopReason: "application-deadline" });
