@@ -36,15 +36,21 @@ export interface UnifiedWishlistProjectionObserver {
   onSourceCapture?(): void;
   onWishlistPairDemand?(candidateBggId: number, ownedGameId: string): void;
   onWishlistPairResolved?(candidateBggId: number, ownedGameId: string): void;
-  onCalculation?(calculation: {
-    readonly scope: StagedSimilarityCalculation | FrozenStagedSimilarityRun;
-    readonly proof: SemanticScoringInputProofV2;
-    readonly pairSimilarities: ReadonlyMap<string, number | null>;
-    readonly calculationDependencyPairs: readonly StagedScopePair[];
-    readonly collectionFitness: ReadonlyMap<string, FitnessResult | null>;
-    readonly actualFitness: ReadonlyMap<string, FitnessResult | null>;
-    readonly results: readonly WishlistEntryReadResultV2[];
-  }): void;
+}
+
+export interface UnifiedWishlistProjectionCalculation {
+  readonly scope: StagedSimilarityCalculation | FrozenStagedSimilarityRun;
+  readonly proof: SemanticScoringInputProofV2;
+  readonly pairSimilarities: ReadonlyMap<string, number | null>;
+  readonly calculationDependencyPairs: readonly StagedScopePair[];
+  readonly collectionFitness: ReadonlyMap<string, FitnessResult | null>;
+  readonly actualFitness: ReadonlyMap<string, FitnessResult | null>;
+  readonly results: readonly WishlistEntryReadResultV2[];
+}
+
+export interface UnifiedWishlistProjectionOutput {
+  readonly results: readonly WishlistEntryReadResultV2[];
+  readonly calculation: UnifiedWishlistProjectionCalculation | null;
 }
 
 export interface UnifiedWishlistProjectionOptions {
@@ -170,6 +176,12 @@ function keyForWishlistPair(candidateBggId: number, ownedGameId: string): string
 export function computeUnifiedWishlistProjection(
   options: UnifiedWishlistProjectionOptions,
 ): readonly WishlistEntryReadResultV2[] {
+  return computeUnifiedWishlistProjectionWithCalculation(options).results;
+}
+
+export function computeUnifiedWishlistProjectionWithCalculation(
+  options: UnifiedWishlistProjectionOptions,
+): UnifiedWishlistProjectionOutput {
   const { capture } = options;
   options.observer?.onSourceCapture?.();
   const capturedReadiness = capture
@@ -177,16 +189,19 @@ export function computeUnifiedWishlistProjection(
     : null;
   if (!capture || !capture.isSourceCurrent()) {
     const failureReason = capture ? "source-changed-before-capture" : "source-unavailable";
-    return Object.freeze(
-      options.entries.map((entry) => {
-        const prediction = stageUnavailable(failureReason, entry, capturedReadiness);
-        return validateWishlistEntryReadResultV2({
-          entry: projectLegacyEntry(entry, prediction, unavailableRedundancy()),
-          prediction,
-          redundancy: unavailableRedundancy(),
-        });
-      }),
-    );
+    return {
+      results: Object.freeze(
+        options.entries.map((entry) => {
+          const prediction = stageUnavailable(failureReason, entry, capturedReadiness);
+          return validateWishlistEntryReadResultV2({
+            entry: projectLegacyEntry(entry, prediction, unavailableRedundancy()),
+            prediction,
+            redundancy: unavailableRedundancy(),
+          });
+        }),
+      ),
+      calculation: null,
+    };
   }
 
   const entriesByBggId = new Map(options.entries.map((entry) => [entry.bggId, entry]));
@@ -207,20 +222,23 @@ export function computeUnifiedWishlistProjection(
       );
     })
   ) {
-    return Object.freeze(
-      options.entries.map((entry) => {
-        const prediction = stageUnavailable(
-          "source-changed-before-capture",
-          entry,
-          capturedReadiness,
-        );
-        return validateWishlistEntryReadResultV2({
-          entry: projectLegacyEntry(entry, prediction, unavailableRedundancy()),
-          prediction,
-          redundancy: unavailableRedundancy(),
-        });
-      }),
-    );
+    return {
+      results: Object.freeze(
+        options.entries.map((entry) => {
+          const prediction = stageUnavailable(
+            "source-changed-before-capture",
+            entry,
+            capturedReadiness,
+          );
+          return validateWishlistEntryReadResultV2({
+            entry: projectLegacyEntry(entry, prediction, unavailableRedundancy()),
+            prediction,
+            redundancy: unavailableRedundancy(),
+          });
+        }),
+      ),
+      calculation: null,
+    };
   }
   const prepared = createPreparedSimilarity({
     capture,
@@ -270,16 +288,19 @@ export function computeUnifiedWishlistProjection(
     },
   });
   if (!scope.ok) {
-    return Object.freeze(
-      options.entries.map((entry) => {
-        const prediction = stageUnavailable(scope.reason, entry, capturedReadiness);
-        return validateWishlistEntryReadResultV2({
-          entry: projectLegacyEntry(entry, prediction, unavailableRedundancy()),
-          prediction,
-          redundancy: unavailableRedundancy(),
-        });
-      }),
-    );
+    return {
+      results: Object.freeze(
+        options.entries.map((entry) => {
+          const prediction = stageUnavailable(scope.reason, entry, capturedReadiness);
+          return validateWishlistEntryReadResultV2({
+            entry: projectLegacyEntry(entry, prediction, unavailableRedundancy()),
+            prediction,
+            redundancy: unavailableRedundancy(),
+          });
+        }),
+      ),
+      calculation: null,
+    };
   }
 
   const staged = "run" in scope ? scope.run : scope.calculation;
@@ -384,30 +405,36 @@ export function computeUnifiedWishlistProjection(
     ("run" in scope && !scope.run.isCalculationCurrent()) ||
     ("calculation" in scope && !scope.calculation.prepared.isCurrent())
   ) {
-    return Object.freeze(
-      options.entries.map((entry) => {
-        const prediction = stageUnavailable(
-          "source-changed-before-publication",
-          entry,
-          staged.readiness,
-        );
-        return validateWishlistEntryReadResultV2({
-          entry: projectLegacyEntry(entry, prediction, unavailableRedundancy()),
-          prediction,
-          redundancy: unavailableRedundancy(),
-        });
-      }),
-    );
+    return {
+      results: Object.freeze(
+        options.entries.map((entry) => {
+          const prediction = stageUnavailable(
+            "source-changed-before-publication",
+            entry,
+            staged.readiness,
+          );
+          return validateWishlistEntryReadResultV2({
+            entry: projectLegacyEntry(entry, prediction, unavailableRedundancy()),
+            prediction,
+            redundancy: unavailableRedundancy(),
+          });
+        }),
+      ),
+      calculation: null,
+    };
   }
-  options.observer?.onCalculation?.({
-    scope: staged,
-    proof: staged.proof,
-    pairSimilarities: similarities,
-    calculationDependencyPairs:
-      "calculationDependencyPairs" in staged ? staged.calculationDependencyPairs : [],
-    collectionFitness,
-    actualFitness,
-    results,
-  });
-  return Object.freeze(results.map((result) => deepFreeze(result)));
+  const publishedResults = Object.freeze(results.map((result) => deepFreeze(result)));
+  return {
+    results: publishedResults,
+    calculation: {
+      scope: staged,
+      proof: staged.proof,
+      pairSimilarities: similarities,
+      calculationDependencyPairs:
+        "calculationDependencyPairs" in staged ? staged.calculationDependencyPairs : [],
+      collectionFitness,
+      actualFitness,
+      results: publishedResults,
+    },
+  };
 }

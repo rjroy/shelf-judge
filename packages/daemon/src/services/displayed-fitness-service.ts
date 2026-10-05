@@ -478,6 +478,7 @@ export function createDisplayedFitnessService(
     calculation: import("./unified-scoring-service.js").UnifiedCalculation,
     options: DisplayedFitnessOptions,
     outputCollection: Collection | CollectionProfileCollectionSource = collection,
+    excludePreviouslyOwned = false,
   ): DisplayedGameFitness[] {
     const targets = targetIds(options);
     const requested = targets === undefined ? null : new Set(targets);
@@ -486,7 +487,11 @@ export function createDisplayedFitnessService(
       : calculation.actualFitness;
     const outputGames = new Map(outputCollection.games.map((game) => [game.id, game]));
     const entries: DisplayedGameFitness[] = collection.games
-      .filter((game) => requested === null || requested.has(game.id))
+      .filter(
+        (game) =>
+          (!excludePreviouslyOwned || game.ownership !== "previously-owned") &&
+          (requested === null || requested.has(game.id)),
+      )
       .map((game) => {
         const outputGame = outputGames.get(game.id);
         if (!outputGame)
@@ -809,58 +814,16 @@ export function createDisplayedFitnessService(
             : { scope: "collection-targets", targetIds: targets },
           { includeRedundancy: true },
         );
-        const current = await unifiedScoringService.publishCurrent(calculation, () => {
-          const sourceScores = options.includePredicted
-            ? calculation.collectionFitness
-            : calculation.actualFitness;
-          const requested = targets === undefined ? null : new Set(targets);
-          const projected: DisplayedGameFitness[] = frame.sources.collection.games
-            .filter(
-              (game) =>
-                game.ownership !== "previously-owned" && (!requested || requested.has(game.id)),
-            )
-            .map((game) => {
-              const score = sourceScores.get(game.id) ?? null;
-              if (score === null)
-                return {
-                  game,
-                  score: null,
-                  bggDataStale: isBggDataStale(game),
-                  hasPredictedContribution: false,
-                  hasScoringContribution: false,
-                };
-              const adjustment = calculation.redundancyAdjustments.get(game.id) ?? null;
-              const output = structuredClone(score);
-              output.redundancyAdjustment = adjustment;
-              output.redundancySimilarityInfo = {
-                status: calculation.redundancySimilarityStatus(game.id),
-                generationId: null,
-              };
-              if (adjustment && frame.redundancySettings.stage === "integrated")
-                output.score = adjustment.adjustedScore;
-              return {
-                game,
-                score: output,
-                bggDataStale: isBggDataStale(game),
-                hasPredictedContribution: hasPredictedContribution({ game, score: output }),
-                hasScoringContribution: hasScoringContribution({ game, score: output }),
-              };
-            });
-          if (options.includeNiches) {
-            const nicheMap = computeNichePositions(
-              projected.filter((entry) => entry.game.ownership !== "previously-owned"),
-            );
-            for (const entry of projected)
-              entry.nichePosition = nicheMap.get(entry.game.id) ?? null;
-          }
-          return projected.sort((left, right) => {
-            if (left.score !== null && right.score !== null)
-              return right.score.score - left.score.score;
-            if (left.score !== null) return -1;
-            if (right.score !== null) return 1;
-            return 0;
-          });
-        });
+        const current = await unifiedScoringService.publishCurrent(calculation, () =>
+          unifiedDisplayedGames(
+            frame.sources.collection,
+            frame.redundancySettings,
+            calculation,
+            options,
+            frame.sources.collection,
+            true,
+          ),
+        );
         if (current === null)
           throw new Error("Displayed fitness sources changed before publication");
         return current;

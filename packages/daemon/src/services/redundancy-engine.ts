@@ -12,6 +12,7 @@ import type {
 import type { FeatureVector } from "./feature-vector.js";
 import { cosineSimilarity } from "./feature-vector.js";
 import type { RedundancyComponentWeights } from "@shelf-judge/shared";
+import { calculateRedundancyPenalty } from "./redundancy-adjustment-math.js";
 
 export const DEFAULT_REDUNDANCY_SETTINGS: RedundancySettings = {
   enabled: false,
@@ -192,14 +193,6 @@ export function factualSimilarity(
   weights: RedundancyComponentWeights,
 ): number {
   return cosineSimilarity(flattenWeighted(a, weights), flattenWeighted(b, weights));
-}
-
-/**
- * Tie detection at two decimal places (REQ-REDUN-10).
- * Two scores are "tied" when they round to the same value at two decimals.
- */
-function scoresAreTied(a: number, b: number): boolean {
-  return Math.round(a * 100) === Math.round(b * 100);
 }
 
 /**
@@ -408,16 +401,13 @@ function buildAdjustment(
   settings: RedundancySettings,
 ): RedundancyAdjustment {
   const sortedNeighbors = [...neighbors].sort((a, b) => b.similarity - a.similarity);
-  let betterCount = 0;
-  for (const neighbor of sortedNeighbors) {
-    if (scoresAreTied(target.score, neighbor.score)) continue;
-    if (!target.isPredicted && neighbor.isPredicted) continue;
-    if (neighbor.score > target.score) betterCount++;
-  }
+  const penaltyResult = calculateRedundancyPenalty(
+    target.score,
+    target.isPredicted,
+    sortedNeighbors,
+    settings,
+  );
   const nicheSize = sortedNeighbors.length;
-  const coverageRatio = betterCount / Math.max(nicheSize, settings.expectedNeighbors);
-  const penalty = coverageRatio * settings.maxPenalty;
-  const adjustedScore = Math.max(1.0, target.score - penalty);
   const nicheNeighbors: RedundancyNeighbor[] = sortedNeighbors.map((neighbor) => ({
     gameId: neighbor.game.id,
     gameName: neighbor.game.name,
@@ -426,11 +416,11 @@ function buildAdjustment(
     isPredicted: neighbor.isPredicted,
   }));
   return {
-    penalty: Math.round(penalty * 100) / 100,
+    penalty: penaltyResult.penalty,
     originalScore: target.score,
-    adjustedScore: Math.round(adjustedScore * 100) / 100,
+    adjustedScore: penaltyResult.adjustedScore,
     nicheNeighbors,
-    nicheRank: betterCount + 1,
+    nicheRank: penaltyResult.betterCount + 1,
     nicheSize,
   };
 }
