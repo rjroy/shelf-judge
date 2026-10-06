@@ -63,6 +63,8 @@ export interface CollectionSnapshotBuildResult {
         status: "unified-v2";
         proof: SemanticScoringInputProof;
         isCurrent(): boolean;
+        isReusable(): boolean;
+        validateCurrent(): Promise<boolean>;
       };
 }
 
@@ -171,10 +173,7 @@ export function createCollectionSnapshotService(
         waitMs: Math.max(0, performance.now() - queueStartedAt),
       });
       let before = storageService.sourceVector?.();
-      const hasStartupMarker = before?.unavailableSources.some(
-        (source) => source === "startup" || source === "startup-hydration",
-      );
-      if (hasStartupMarker && storageService.hydrateSourceVector) {
+      if (before && !before.available && storageService.hydrateSourceVector) {
         const hydrationStartedAt = performance.now();
         logger.debug?.("collection snapshot startup hydration attempt", {
           ...context,
@@ -536,6 +535,9 @@ export function createCollectionSnapshotService(
               status: "unified-v2",
               proof: prepared.semanticScoringInputProof,
               isCurrent: () => prepared?.isCurrent?.() ?? false,
+              isReusable: () => prepared?.semanticScoringInputReusable?.() ?? false,
+              validateCurrent: async () =>
+                (await prepared?.validateSemanticScoringInputCurrent?.()) ?? false,
             }
           : { status: "not-used" };
       let snapshotSimilarityStatus = input.redundancySimilarityStatus;
@@ -837,11 +839,18 @@ export function createCollectionSnapshotService(
         gameCount: games.length,
         outcome: "projected",
       });
+      if (
+        prepared?.validateSemanticScoringInputCurrent &&
+        !(await prepared.validateSemanticScoringInputCurrent())
+      )
+        throw new CollectionSnapshotUnavailableError(
+          "Unified scoring publication authority changed before snapshot publication",
+        );
+      await stillCurrent(input.token, input.sourceVector, { requestId, operationId });
       if (prepared?.isCurrent && !prepared.isCurrent())
         throw new CollectionSnapshotUnavailableError(
           "Unified scoring inputs changed before snapshot publication",
         );
-      await stillCurrent(input.token, input.sourceVector, { requestId, operationId });
       logger.debug?.("collection snapshot build completed", {
         requestId,
         operationId,

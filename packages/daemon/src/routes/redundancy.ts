@@ -2,7 +2,7 @@ import { Hono, type Context } from "hono";
 import type { JevWishlistCandidateSelection, RedundancySettings } from "@shelf-judge/shared";
 import { DurableSourcePostCommitError, type StorageService } from "../services/storage-service.js";
 import type { AttentionMutationImpact } from "../services/attention-candidate-service.js";
-import type { RouteModule, OperationDefinition } from "../operations.js";
+import type { OperationJsonValue, RouteModule, OperationDefinition } from "../operations.js";
 import type { SemanticRedundancySettings } from "@shelf-judge/shared";
 import type { SemanticRedundancyStateService } from "../services/semantic-redundancy-state-service.js";
 import {
@@ -18,7 +18,7 @@ import { parseJevRunBudgetQuery } from "../services/jev-run-budget.js";
 
 type JevRunRouteController = Pick<
   JevRunController,
-  "preview" | "previewWishlist" | "start" | "cancel" | "activeRun"
+  "preview" | "previewWishlist" | "start" | "cancel" | "retryPublication" | "activeRun"
 >;
 
 export interface RedundancyRoutesDeps {
@@ -31,6 +31,74 @@ export interface RedundancyRoutesDeps {
 }
 
 const SEMANTIC_PATCH_FIELDS = new Set(["enabled", "weights", "cachedOwnerNoteUse"]);
+
+const JEV_RUN_PROGRESS_PROJECTION_SCHEMA: { [key: string]: OperationJsonValue } = {
+  type: "object",
+  properties: {
+    state: { enum: ["last-known-running", "completed", "interrupted", "failed"] },
+    scope: { enum: ["collection", "wishlist"] },
+    pairCount: { type: "integer" },
+    completedPairs: { type: "integer" },
+    cacheHits: { type: "integer" },
+    cacheMisses: { type: "integer" },
+    failedPairs: { type: "integer" },
+    stopReason: {
+      enum: [
+        "provider-limit",
+        "provider-unconfigured",
+        "application-attempt-limit",
+        "application-token-threshold",
+        "application-deadline",
+        "owner-cancelled",
+      ],
+    },
+    publication: {
+      type: "object",
+      properties: {
+        state: { enum: ["published", "unchanged", "pending"] },
+        phase: { enum: ["seal", "validate", "promote"] },
+        outcomePersistence: { enum: ["sealed", "finalized", "unpersisted"] },
+        reason: { type: "string" },
+      },
+      required: ["state", "outcomePersistence"],
+      additionalProperties: false,
+    },
+  },
+  required: ["state", "pairCount", "completedPairs", "cacheHits", "cacheMisses", "failedPairs"],
+  additionalProperties: false,
+};
+
+const JEV_REFRESH_PROGRESS_ENTRY_SCHEMA: { [key: string]: OperationJsonValue } = {
+  oneOf: [
+    {
+      type: "object",
+      properties: { state: { enum: ["none", "unavailable"] } },
+      required: ["state"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        state: { const: "process-local" },
+        value: JEV_RUN_PROGRESS_PROJECTION_SCHEMA,
+        retryRunId: { type: "string", minLength: 1 },
+      },
+      required: ["state", "value", "retryRunId"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        state: { const: "saved" },
+        relation: { enum: ["active-run", "historical", "unknown"] },
+        value: JEV_RUN_PROGRESS_PROJECTION_SCHEMA,
+        retryRunId: { type: "string", minLength: 1 },
+      },
+      required: ["state", "relation", "value"],
+      additionalProperties: false,
+    },
+  ],
+};
 
 function validateSemanticPatch(value: unknown): value is Partial<SemanticRedundancySettings> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -311,6 +379,7 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
   const setRunNoStore = (c: Context) => c.header("Cache-Control", "no-store");
   const controllerError = (c: Context, status: number) => {
     if (status === 400) return c.json({ error: "Invalid Run preview request" }, 400);
+    if (status === 404) return c.json({ error: "Run not found" }, 404);
     if (status === 409) return c.json({ error: "Run conflict" }, 409);
     if (status === 412) return c.json({ error: "Run precondition failed" }, 412);
     return c.json({ error: "Run is unavailable" }, 503);
@@ -404,6 +473,23 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
     } catch {
       return c.json({ error: "Run is unavailable" }, 503);
     }
+  });
+
+  routes.post("/redundancy/semantic/publication/retry", async (c) => {
+    setRunNoStore(c);
+    const body = await readStrictObject(c, ["runId"]);
+    if (
+      !body ||
+      typeof body.runId !== "string" ||
+      body.runId.length === 0 ||
+      body.runId.length > 100
+    )
+      return c.json({ error: "Invalid publication retry request" }, 400);
+    const controller = deps.jevRunController;
+    if (!controller) return c.json({ error: "Run is unavailable" }, 503);
+    const result = await controller.retryPublication({ runId: body.runId });
+    if (result.status === 200) return c.json(result.body, 200);
+    return controllerError(c, result.status);
   });
 
   routes.get("/redundancy/semantic/active-run", (c) => {
@@ -656,57 +742,7 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
                 },
               ],
             },
-            progress: {
-              oneOf: [
-                {
-                  type: "object",
-                  properties: { state: { enum: ["none", "unavailable"] } },
-                  required: ["state"],
-                  additionalProperties: false,
-                },
-                {
-                  type: "object",
-                  properties: {
-                    state: { const: "saved" },
-                    relation: { enum: ["active-run", "historical", "unknown"] },
-                    value: {
-                      type: "object",
-                      properties: {
-                        state: {
-                          enum: ["last-known-running", "completed", "interrupted", "failed"],
-                        },
-                        scope: { enum: ["collection", "wishlist"] },
-                        pairCount: { type: "integer" },
-                        completedPairs: { type: "integer" },
-                        cacheHits: { type: "integer" },
-                        cacheMisses: { type: "integer" },
-                        failedPairs: { type: "integer" },
-                        stopReason: {
-                          enum: [
-                            "provider-limit",
-                            "provider-unconfigured",
-                            "application-attempt-limit",
-                            "application-token-threshold",
-                            "application-deadline",
-                          ],
-                        },
-                      },
-                      required: [
-                        "state",
-                        "pairCount",
-                        "completedPairs",
-                        "cacheHits",
-                        "cacheMisses",
-                        "failedPairs",
-                      ],
-                      additionalProperties: false,
-                    },
-                  },
-                  required: ["state", "relation", "value"],
-                  additionalProperties: false,
-                },
-              ],
-            },
+            progress: JEV_REFRESH_PROGRESS_ENTRY_SCHEMA,
           },
           required: ["coverageMeasurement", "activity", "progress"],
           additionalProperties: false,
@@ -915,6 +951,41 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
           properties: { state: { const: "cancellation-requested" } },
           required: ["state"],
           additionalProperties: false,
+        },
+      },
+      hierarchy: { root: "shelf", feature: "redundancy" },
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.redundancy.retry-semantic-publication",
+      name: "retry-semantic-publication",
+      description: "Retry provider-free publication of a sealed Jev Run outcome",
+      invocation: { method: "POST", path: "/api/redundancy/semantic/publication/retry" },
+      request: {
+        body: {
+          type: "object",
+          properties: { runId: { type: "string", minLength: 1, maxLength: 100 } },
+          required: ["runId"],
+          additionalProperties: false,
+        },
+      },
+      response: {
+        body: {
+          type: "object",
+          properties: {
+            runId: { type: "string" },
+            state: { enum: ["completed", "interrupted", "failed"] },
+            publication: {
+              type: "object",
+              properties: {
+                state: { enum: ["published", "unchanged", "pending"] },
+                phase: { enum: ["seal", "validate", "promote"] },
+                outcomePersistence: { enum: ["sealed", "finalized", "unpersisted"] },
+              },
+              required: ["state", "outcomePersistence"],
+            },
+          },
+          required: ["runId", "state", "publication"],
         },
       },
       hierarchy: { root: "shelf", feature: "redundancy" },

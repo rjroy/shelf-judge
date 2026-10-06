@@ -87,7 +87,7 @@ export interface AppDeps {
   jevRefreshProgressService?: Pick<ReturnType<typeof createJevRefreshProgressService>, "read">;
   jevRunController?: Pick<
     JevRunController,
-    "preview" | "previewWishlist" | "start" | "cancel" | "activeRun"
+    "preview" | "previewWishlist" | "start" | "cancel" | "retryPublication" | "activeRun"
   >;
   jevPairCache?: JevPairCache;
   ownerGameNoteService: OwnerGameNoteService;

@@ -6,6 +6,7 @@ tags: [spec, prediction, fitness, similarity, k-nn, confidence]
 modules: [daemon, shared, web, cli]
 related:
   - .lore/work/design/unified-similarity-prediction-redundancy.md
+  - .lore/work/design/semantic-snapshot-cache.md
   - .lore/work/brainstorm/prediction-engine.md
   - .lore/work/brainstorm/collection-profiling.md
   - .lore/work/specs/mvp.md
@@ -22,6 +23,8 @@ req-prefix: PRED
 # Spec: Prediction Engine for Unrated Games
 
 > **Current similarity authority — 2026-10-04:** The approved unified-similarity design and Phase 6 activation supersede the legacy similarity/default and top-K-prefilter clauses below. This reference remains authoritative for prediction estimation, axis-specific eligibility, confidence/readiness and result meaning except where this notice and the **Unified similarity** section explicitly update them. Prediction and redundancy now consume the same factual/semantic pair similarity; collection and wishlist use the same predictor. See [unified similarity design](../../../work/design/unified-similarity-prediction-redundancy.md), [redundancy scoring](redundancy-scoring.md), and [wishlist](../features/wishlist.md). Historical requirements and validation criteria are retained for discoverability, not as current similarity behavior.
+
+> **Current semantic evidence publication authority — 2026-10-05:** The [approved semantic snapshot cache design](../../../work/design/semantic-snapshot-cache.md) governs when cached semantic judgments become visible. Prediction continues to use the same F/D/O scoring, dependency proof, eligibility, and privacy rules above, but ordinary prediction reads see only published judgments—not checkpoints written during a provider run. The worker alone may use its private run overlay. Terminal success/failure/deadline/cancellation/interruption publishes the current valid subset once; full coverage and advisory activation are not requirements. Pending/unpersisted publication is distinct from prediction output and cannot be treated as changed scores. Recovery/retry is provider-free, and source/permission changes continue to fence dependent results immediately. Proof-aware snapshot retention additionally requires healthy published-read capability and authoritative freshness for the full snapshot source set; incapable fallback remains renderable but no-store. Phase lanes are locally accepted; holistic project gates remain pending.
 
 ## Overview
 

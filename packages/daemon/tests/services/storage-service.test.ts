@@ -1923,3 +1923,149 @@ describe("StorageService — concurrent first-time load lock", () => {
     expect(collectionRenames).toHaveLength(1);
   });
 });
+
+describe("StorageService collection snapshot source authority", () => {
+  test("same-revision content edits change authority and fence each of the six source files", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "snapshot-authority-edit-"));
+    try {
+      const storage = createStorageService({
+        dataDir: directory,
+        configPath: path.join(directory, "config.json"),
+        fileOps: createFileOps(),
+      });
+      if (!storage.hydrateSourceVector || !storage.readCollectionSnapshotAuthority)
+        throw new Error("Collection snapshot source authority is unavailable");
+      await storage.hydrateSourceVector();
+      let before = await storage.readCollectionSnapshotAuthority();
+      expect(before.available).toBe(true);
+
+      for (const fileName of [
+        "collection.json",
+        "tournament.json",
+        "prediction-settings.json",
+        "redundancy-settings.json",
+        "niche-settings.json",
+        "shelf-config.json",
+      ]) {
+        const filePath = path.join(directory, fileName);
+        await writeFile(filePath, `${await readFile(filePath, "utf8")}\n`, "utf8");
+        const changed = await storage.readCollectionSnapshotAuthority();
+        expect(changed.identity).not.toBe(before.identity);
+        expect(storage.sourceVector?.().available, fileName).toBe(false);
+        await storage.hydrateSourceVector();
+        before = await storage.readCollectionSnapshotAuthority();
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("disappearance of an established source is unavailable and cannot be recreated by a loader", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "snapshot-authority-delete-"));
+    try {
+      const storage = createStorageService({
+        dataDir: directory,
+        configPath: path.join(directory, "config.json"),
+        fileOps: createFileOps(),
+      });
+      if (!storage.hydrateSourceVector || !storage.readCollectionSnapshotAuthority)
+        throw new Error("Collection snapshot source authority is unavailable");
+      await storage.hydrateSourceVector();
+      const shelfConfigPath = path.join(directory, "shelf-config.json");
+      await rm(shelfConfigPath);
+
+      const authority = await storage.readCollectionSnapshotAuthority();
+      expect(authority.available).toBe(false);
+      await expectPromiseToReject(storage.loadShelfConfig(), "disappeared");
+      await expectPromiseToReject(readFile(shelfConfigPath, "utf8"), "ENOENT");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("rechecks earlier sources when a later source read overlaps an external edit", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "snapshot-authority-overlap-"));
+    try {
+      const baseFileOps = createFileOps();
+      const collectionPath = path.join(directory, "collection.json");
+      const shelfPath = path.join(directory, "shelf-config.json");
+      let injected = false;
+      const fileOps = {
+        ...baseFileOps,
+        async readFile(filePath: string): Promise<string> {
+          const content = await baseFileOps.readFile(filePath);
+          if (!injected && filePath === shelfPath) {
+            injected = true;
+            await writeFile(collectionPath, `${await readFile(collectionPath, "utf8")}\n`, "utf8");
+          }
+          return content;
+        },
+      };
+      const storage = createStorageService({
+        dataDir: directory,
+        configPath: path.join(directory, "config.json"),
+        fileOps,
+      });
+      if (!storage.hydrateSourceVector || !storage.readCollectionSnapshotAuthority)
+        throw new Error("Collection snapshot source authority is unavailable");
+      await storage.hydrateSourceVector();
+      const authority = await storage.readCollectionSnapshotAuthority();
+
+      expect(injected).toBe(true);
+      expect(authority.available).toBe(true);
+      expect(storage.sourceVector?.().available).toBe(false);
+      expect(await readFile(collectionPath, "utf8")).toEndWith("\n");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("final metadata fence rejects an earlier edit during the final source read", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "snapshot-authority-final-fence-"));
+    try {
+      const baseFileOps = createFileOps();
+      const collectionPath = path.join(directory, "collection.json");
+      const shelfPath = path.join(directory, "shelf-config.json");
+      let shelfReads = 0;
+      let injected = false;
+      const fileOps = {
+        ...baseFileOps,
+        async readFile(filePath: string): Promise<string> {
+          const content = await baseFileOps.readFile(filePath);
+          if (filePath === shelfPath) {
+            shelfReads++;
+            if (!injected && shelfReads === 4) {
+              injected = true;
+              await writeFile(
+                collectionPath,
+                `${await readFile(collectionPath, "utf8")}\n`,
+                "utf8",
+              );
+            }
+          }
+          return content;
+        },
+      };
+      const storage = createStorageService({
+        dataDir: directory,
+        configPath: path.join(directory, "config.json"),
+        fileOps,
+      });
+      if (!storage.hydrateSourceVector || !storage.readCollectionSnapshotAuthority)
+        throw new Error("Collection snapshot source authority is unavailable");
+      await storage.hydrateSourceVector();
+      const before = await storage.readCollectionSnapshotAuthority();
+      expect(before.available).toBe(true);
+
+      const after = await storage.readCollectionSnapshotAuthority();
+
+      expect(injected).toBe(true);
+      expect(after.available).toBe(true);
+      expect(after.identity).not.toBe(before.identity);
+      expect(storage.sourceVector?.().available).toBe(false);
+      expect(await readFile(collectionPath, "utf8")).toEndWith("\n");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});

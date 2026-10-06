@@ -23,6 +23,7 @@ export interface CollectionSnapshotBuilder {
 export interface CollectionSnapshotCacheStorage {
   sourceVector?(): SourceVector | undefined;
   loadCollection?(): Promise<{ semanticRedundancy?: { settings?: { enabled?: boolean } } }>;
+  readCollectionSnapshotAuthority?(): Promise<{ available: boolean; identity: string }>;
 }
 
 export interface CollectionSnapshotCacheCoordinator {
@@ -56,16 +57,20 @@ export interface CollectionSnapshotCacheService {
 
 interface CacheEntry {
   sourceVector: SourceVector;
+  sourceIdentity: string;
   evaluatedAtMs: number;
   expiresAtMs: number | null;
   serializedBody: string;
   etag: string;
   gameCount: number;
+  semanticRead: BuiltCollectionSnapshot["semanticRead"];
 }
 
 interface BuildFlight {
   id: string;
   semanticEnabled: boolean;
+  sourceVector: SourceVector | undefined;
+  sourceIdentity: string | null;
   promise: Promise<CompletedBuild>;
   resolve(value: CompletedBuild): void;
   reject(error: unknown): void;
@@ -78,6 +83,13 @@ interface CompletedBuild {
   expiresAtMs: number | null;
   semanticEnabled: boolean;
   semanticRead: BuiltCollectionSnapshot["semanticRead"];
+  sourceIdentity: string | null;
+  authorityAvailable: boolean;
+}
+
+interface SemanticAuthorityValidation {
+  capable: boolean;
+  current: boolean;
 }
 
 type Reservation =
@@ -99,14 +111,19 @@ export function createCollectionSnapshotCacheService(
   let flightSequence = 0;
   let reservationSequence = 0;
 
-  function createFlight(semanticEnabled: boolean, id: string): BuildFlight {
+  function createFlight(
+    semanticEnabled: boolean,
+    sourceVector: SourceVector | undefined,
+    sourceIdentity: string | null,
+    id: string,
+  ): BuildFlight {
     let resolve!: (value: CompletedBuild) => void;
     let reject!: (error: unknown) => void;
     const promise = new Promise<CompletedBuild>((res, rej) => {
       resolve = res;
       reject = rej;
     });
-    return { id, semanticEnabled, promise, resolve, reject };
+    return { id, semanticEnabled, sourceVector, sourceIdentity, promise, resolve, reject };
   }
 
   async function semanticEnabled(): Promise<boolean> {
@@ -126,6 +143,49 @@ export function createCollectionSnapshotCacheService(
       return false;
     }
     return sameSourceVector(candidate.sourceVector, current);
+  }
+
+  function semanticProofIsCurrent(read: BuiltCollectionSnapshot["semanticRead"]): boolean {
+    return (
+      read?.status === "unified-v2" &&
+      read.proof.version === 2 &&
+      read.proof.mode === "unified-similarity" &&
+      read.proof.identity.length > 0 &&
+      read.proof.demandedPairsIdentity.length > 0 &&
+      read.proof.examinedComponentsIdentity.length > 0 &&
+      read.isCurrent()
+    );
+  }
+
+  function semanticProofIsReusable(read: BuiltCollectionSnapshot["semanticRead"]): boolean {
+    return (
+      semanticProofIsCurrent(read) &&
+      read?.status === "unified-v2" &&
+      typeof read.isReusable === "function" &&
+      read.isReusable()
+    );
+  }
+
+  async function validateSemanticAuthority(
+    read: BuiltCollectionSnapshot["semanticRead"],
+  ): Promise<SemanticAuthorityValidation> {
+    if (read?.status !== "unified-v2" || typeof read.validateCurrent !== "function")
+      return { capable: false, current: false };
+    return { capable: true, current: await read.validateCurrent() };
+  }
+
+  async function readAuthority(): Promise<{ available: boolean; identity: string } | null> {
+    const read = deps.storageService.readCollectionSnapshotAuthority?.bind(deps.storageService);
+    if (!read) return null;
+    try {
+      return await read();
+    } catch (error) {
+      logger.warn("collection snapshot source authority unavailable", {
+        outcome: "no-store",
+        errorClass: error instanceof Error ? error.name : "UnknownError",
+      });
+      return null;
+    }
   }
 
   function decisionForEntry(candidate: CacheEntry, ifNoneMatch?: string | null) {
@@ -174,25 +234,49 @@ export function createCollectionSnapshotCacheService(
       });
       await Promise.resolve();
       const semanticIsEnabled = await semanticEnabled();
+      const semanticAuthority = entry
+        ? await validateSemanticAuthority(entry.semanticRead)
+        : { capable: false, current: false };
+      const authority = await readAuthority();
       const current = deps.storageService.sourceVector?.();
       const now = clock.now();
-      if (!semanticIsEnabled && isUsable(entry, current, now)) {
-        return { kind: "hit", decision: decisionForEntry(entry!, ifNoneMatch) };
+      if (
+        semanticAuthority.capable &&
+        semanticAuthority.current &&
+        authority?.available &&
+        entry?.sourceIdentity === authority.identity &&
+        semanticProofIsReusable(entry.semanticRead) &&
+        isUsable(entry, current, now)
+      ) {
+        return { kind: "hit", decision: decisionForEntry(entry, ifNoneMatch) };
       }
-      if (entry && (semanticIsEnabled || !isUsable(entry, current, now))) {
+      if (
+        entry &&
+        (!authority?.available ||
+          entry.sourceIdentity !== authority.identity ||
+          !isUsable(entry, current, now))
+      ) {
         logger.debug?.("collection snapshot cache invalidation", {
           outcome: "invalidated",
           cachedChangeToken: entry.sourceVector.changeToken,
           currentChangeToken: current?.changeToken ?? null,
-          reason: semanticIsEnabled
-            ? "semantic-redundancy-enabled"
-            : !current?.available
-              ? "sources-unavailable"
-              : "source-or-time-mismatch",
+          reason: !authority?.available
+            ? "authoritative-sources-unavailable"
+            : entry.sourceIdentity !== authority.identity
+              ? "authoritative-source-content-changed"
+              : !current?.available
+                ? "sources-unavailable"
+                : "source-or-time-mismatch",
         });
         entry = null;
       }
-      if (flight && flight.semanticEnabled === semanticIsEnabled) {
+      if (
+        flight &&
+        flight.semanticEnabled === semanticIsEnabled &&
+        !!flight.sourceVector &&
+        sameSourceVector(flight.sourceVector, current) &&
+        flight.sourceIdentity === (authority?.available ? authority.identity : null)
+      ) {
         logger.debug?.("collection snapshot cache miss", {
           requestId,
           reservationId,
@@ -203,7 +287,12 @@ export function createCollectionSnapshotCacheService(
         });
         return { kind: "join", flight };
       }
-      const created = createFlight(semanticIsEnabled, `snapshot-flight-${++flightSequence}`);
+      const created = createFlight(
+        semanticIsEnabled,
+        current,
+        authority?.available ? authority.identity : null,
+        `snapshot-flight-${++flightSequence}`,
+      );
       flight = created;
       logger.debug?.("collection snapshot cache miss", {
         requestId,
@@ -231,6 +320,7 @@ export function createCollectionSnapshotCacheService(
       outcome: "started",
     });
     try {
+      const buildAuthority = await readAuthority();
       const built = await deps.builder.buildSnapshot({ requestId, operationId });
       const serializedBody = serialize(built.snapshot);
       const publicationEnqueuedAt = performance.now();
@@ -251,6 +341,8 @@ export function createCollectionSnapshotCacheService(
           });
           await Promise.resolve();
           const semanticIsEnabled = await semanticEnabled();
+          const semanticAuthority = await validateSemanticAuthority(built.semanticRead);
+          const publicationAuthority = await readAuthority();
           const current = deps.storageService.sourceVector?.();
           if (semanticIsEnabled !== buildFlight.semanticEnabled) {
             throw new CollectionSnapshotUnavailableError(
@@ -267,12 +359,44 @@ export function createCollectionSnapshotCacheService(
               "Collection snapshot sources changed before cache publication",
             );
           }
+          const authorityStable =
+            buildAuthority?.available === true &&
+            publicationAuthority?.available === true &&
+            buildAuthority.identity === publicationAuthority.identity;
+          if (semanticAuthority.capable && !semanticAuthority.current) {
+            throw new CollectionSnapshotUnavailableError(
+              "Collection snapshot unified scoring authority changed before publication",
+            );
+          }
+          if (
+            built.snapshot.status === "complete" &&
+            deps.storageService.readCollectionSnapshotAuthority &&
+            !authorityStable
+          ) {
+            throw new CollectionSnapshotUnavailableError(
+              "Collection snapshot authoritative sources are unavailable",
+            );
+          }
+          if (
+            built.snapshot.status === "complete" &&
+            buildAuthority?.available === true &&
+            (!publicationAuthority?.available ||
+              buildAuthority.identity !== publicationAuthority.identity)
+          ) {
+            throw new CollectionSnapshotUnavailableError(
+              "Collection snapshot authoritative sources changed or are unavailable",
+            );
+          }
           if (built.snapshot.status === "complete" && !built.sourceVector.available) {
             throw new CollectionSnapshotUnavailableError(
               "Complete collection snapshot has unavailable sources",
             );
           }
           const now = clock.now();
+          if (flight !== buildFlight)
+            throw new CollectionSnapshotUnavailableError(
+              "Collection snapshot build was superseded before publication",
+            );
           if (!freshAt(built.evaluatedAtMs, built.expiresAtMs, now)) {
             logger.warn("collection snapshot cache build discarded", {
               outcome: "time-changed",
@@ -307,12 +431,14 @@ export function createCollectionSnapshotCacheService(
               expiresAtMs: built.expiresAtMs,
               semanticEnabled: semanticIsEnabled,
               semanticRead: built.semanticRead,
+              sourceIdentity: publicationAuthority?.identity ?? null,
+              authorityAvailable: publicationAuthority?.available === true,
             };
           }
-          if (semanticIsEnabled) {
+          if (!authorityStable || !semanticProofIsReusable(built.semanticRead)) {
             if (flight === buildFlight) flight = null;
             logger.debug?.("collection snapshot cache build completed", {
-              outcome: "semantic-redundancy-no-store",
+              outcome: "semantic-proof-unavailable-no-store",
               gameCount: built.snapshot.games.length,
               bytes: Buffer.byteLength(serializedBody),
             });
@@ -328,18 +454,22 @@ export function createCollectionSnapshotCacheService(
               sourceVector: built.sourceVector,
               evaluatedAtMs: built.evaluatedAtMs,
               expiresAtMs: built.expiresAtMs,
-              semanticEnabled: true,
+              semanticEnabled: semanticIsEnabled,
               semanticRead: built.semanticRead,
+              sourceIdentity: publicationAuthority?.identity ?? null,
+              authorityAvailable: publicationAuthority?.available === true,
             };
           }
-          const etag = createSnapshotEtag(built);
+          const etag = createSnapshotEtag(built, publicationAuthority.identity, serializedBody);
           entry = {
             sourceVector: built.sourceVector,
+            sourceIdentity: publicationAuthority.identity,
             evaluatedAtMs: built.evaluatedAtMs,
             expiresAtMs: built.expiresAtMs,
             serializedBody,
             etag,
             gameCount: built.snapshot.games.length,
+            semanticRead: built.semanticRead,
           };
           logger.debug?.("collection snapshot cache build completed", {
             outcome: "published",
@@ -363,6 +493,8 @@ export function createCollectionSnapshotCacheService(
             expiresAtMs: built.expiresAtMs,
             semanticEnabled: semanticIsEnabled,
             semanticRead: built.semanticRead,
+            sourceIdentity: publicationAuthority.identity,
+            authorityAvailable: true,
           };
         })
         .then(
@@ -464,12 +596,18 @@ export function createCollectionSnapshotCacheService(
             });
             await Promise.resolve();
             const semanticIsEnabled = await semanticEnabled();
-            // Read the vector only after the authoritative semantic setting has
-            // settled; loading it can cross an activation/commit boundary.
+            const semanticAuthority = await validateSemanticAuthority(completed.semanticRead);
+            const authority = await readAuthority();
+            // Re-read freshness only after all asynchronous authority checks.
             const current = deps.storageService.sourceVector?.();
             const now = clock.now();
+            const authorityChanged =
+              completed.authorityAvailable &&
+              (!authority?.available || completed.sourceIdentity !== authority.identity);
             if (
               semanticIsEnabled !== completed.semanticEnabled ||
+              (semanticAuthority.capable && !semanticAuthority.current) ||
+              authorityChanged ||
               !sameSourceVector(completed.sourceVector, current) ||
               !freshAt(completed.evaluatedAtMs, completed.expiresAtMs, now)
             ) {
@@ -481,16 +619,6 @@ export function createCollectionSnapshotCacheService(
                 now,
               });
               return null;
-            }
-            if (
-              completed.semanticEnabled &&
-              completed.semanticRead?.status !== "verified" &&
-              completed.semanticRead?.status !== "unified-v2" &&
-              hasReadySemanticData(completed.decision.body)
-            ) {
-              throw new CollectionSnapshotUnavailableError(
-                "Semantic snapshot result has no current read proof",
-              );
             }
             if (
               completed.semanticEnabled &&
@@ -508,11 +636,24 @@ export function createCollectionSnapshotCacheService(
               });
               return null;
             }
+            if (
+              completed.semanticRead?.status === "unified-v2" &&
+              !semanticProofIsCurrent(completed.semanticRead)
+            )
+              return null;
             if (completed.decision.snapshotStatus === "degraded") {
               return completed.decision;
             }
-            if (completed.semanticEnabled) return completed.decision;
-            if (!current?.available || !entry || !sameSourceVector(entry.sourceVector, current)) {
+            if (!completed.decision.cacheable) return completed.decision;
+            if (
+              !semanticAuthority.capable ||
+              !semanticAuthority.current ||
+              !authority?.available ||
+              !current?.available ||
+              !entry ||
+              entry.sourceIdentity !== authority.identity ||
+              !sameSourceVector(entry.sourceVector, current)
+            ) {
               return null;
             }
             return decisionForEntry(entry, ifNoneMatch);
@@ -566,20 +707,6 @@ export function createCollectionSnapshotCacheService(
   };
 }
 
-function hasReadySemanticData(body: string | null): boolean {
-  if (body === null) return false;
-  try {
-    const snapshot = JSON.parse(body) as {
-      games?: Array<{ redundancySimilarityInfo?: { status?: unknown } }>;
-    };
-    return (
-      snapshot.games?.some((game) => game.redundancySimilarityInfo?.status === "ready") ?? false
-    );
-  } catch {
-    return false;
-  }
-}
-
 function freshAt(evaluatedAtMs: number, expiresAtMs: number | null, now: number): boolean {
   return (
     Number.isFinite(now) &&
@@ -613,10 +740,14 @@ function sameSourceVector(left: SourceVector, right: SourceVector | undefined): 
   );
 }
 
-function createSnapshotEtag(built: BuiltCollectionSnapshot): string {
+function createSnapshotEtag(
+  built: BuiltCollectionSnapshot,
+  sourceIdentity: string,
+  serializedBody: string,
+): string {
   const vector = built.sourceVector;
   const hash = canonicalSha256({
-    processEpoch: vector.processEpoch,
+    sourceIdentity,
     collectionId: vector.collectionId,
     collectionSchemaVersion: vector.collectionSchemaVersion,
     collectionRevision: vector.collectionRevision,
@@ -630,12 +761,13 @@ function createSnapshotEtag(built: BuiltCollectionSnapshot): string {
     nicheSettingsRevision: vector.nicheSettingsRevision,
     redundancySettingsRevision: vector.redundancySettingsRevision,
     shelfConfigRevision: vector.shelfConfigRevision,
-    changeToken: vector.changeToken,
     representationVersion: vector.representationVersion,
     algorithmVersion: vector.algorithmVersion,
     nextTimeTransition: built.expiresAtMs,
+    proof: built.semanticRead?.status === "unified-v2" ? built.semanticRead.proof : null,
+    serializedBody,
   });
-  return `W/"cs1-${hash}"`;
+  return `W/"cs2-${hash}"`;
 }
 
 function matchesIfNoneMatch(header: string, etag: string): boolean {

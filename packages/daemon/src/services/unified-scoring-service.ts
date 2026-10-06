@@ -117,6 +117,7 @@ export interface UnifiedCalculation {
   evidence(pair: StagedSimilarityPair): StagedSimilarityEvidence | null;
   redundancySimilarityStatus(gameId: string): RedundancySimilarityInfo["status"];
   isCurrent(): boolean;
+  isReusable(): boolean;
 }
 
 export type UnifiedScoringRequestOptions = {
@@ -447,11 +448,7 @@ export function createUnifiedScoringService(
         captureMode: shareFlight ? "shareable" : "owner-local-bypass",
       });
       const before = options.storageService.sourceVector?.();
-      if (
-        before?.unavailableSources.some(
-          (source) => source === "startup" || source === "startup-hydration",
-        )
-      ) {
+      if (before && !before.available) {
         await options.storageService.hydrateSourceVector?.();
       }
       const snapshot = await options.storageService.loadJevSourceSnapshot?.();
@@ -757,6 +754,7 @@ export function createUnifiedScoringService(
         evidence,
         redundancySimilarityStatus,
         isCurrent: () => frame.capture.isSourceCurrent() && prepared.isCurrent(),
+        isReusable: () => frame.capture.isSourceCurrent() && prepared.isReusable(),
       });
       rememberCalculation(memoKey, calculation, frame);
       return calculation;
@@ -830,6 +828,7 @@ export function createUnifiedScoringService(
         (pair) => wishlistScope.prepared.evidence(pair),
       ),
       isCurrent: () => frame.capture.isSourceCurrent() && wishlistScope.prepared.isCurrent(),
+      isReusable: () => frame.capture.isSourceCurrent() && wishlistScope.prepared.isReusable(),
     });
     rememberCalculation(memoKey, result, frame);
     return result;

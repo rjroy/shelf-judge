@@ -115,7 +115,12 @@ async function waitUntilFinished(
 ) {
   for (let i = 0; i < 300; i++) {
     const progress = cache.getRunProgress();
-    if (progress && progress.runId === expectedRunId && progress.state !== "running")
+    if (
+      progress &&
+      progress.runId === expectedRunId &&
+      progress.state !== "running" &&
+      progress.publication?.state !== "pending"
+    )
       return progress;
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }

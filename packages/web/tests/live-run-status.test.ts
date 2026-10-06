@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   activityLabel,
   progressBelongsToActivity,
+  publicationState,
+  publicationAllowsScoreRefresh,
+  readRunPublication,
   readRunStatusSnapshot,
   runProgressSummary,
 } from "@/lib/live-run-status";
@@ -98,5 +101,106 @@ describe("live run scope", () => {
     expect(readRunStatusSnapshot({ activity: { state: "idle" } }).activity).toEqual({
       state: "idle",
     });
+  });
+
+  test("preserves pending publication retry authority without confusing idle for completion", () => {
+    const saved = readRunStatusSnapshot({
+      activity: { state: "idle" },
+      coverageMeasurement: "not-measured",
+      progress: {
+        state: "saved",
+        relation: "historical",
+        retryRunId: "r-1",
+        value: {
+          state: "failed",
+          stopReason: "owner-cancelled",
+          publication: { state: "pending", phase: "validate", outcomePersistence: "sealed" },
+        },
+      },
+    });
+    expect(saved.progress.state).toBe("saved");
+    if (saved.progress.state === "saved") {
+      expect(saved.progress.retryRunId).toBe("r-1");
+      expect(publicationState(saved.progress.value)).toBe("pending");
+    }
+    const local = readRunStatusSnapshot({
+      activity: { state: "idle" },
+      progress: {
+        state: "process-local",
+        retryRunId: "r-2",
+        value: {
+          state: "failed",
+          publication: { state: "pending", phase: "seal", outcomePersistence: "unpersisted" },
+        },
+      },
+    });
+    expect(local.progress.state).toBe("process-local");
+    expect(
+      publicationState(local.progress.state === "process-local" ? local.progress.value : null),
+    ).toBe("pending");
+    expect(publicationState({ state: "completed" })).toBeNull();
+    expect(
+      publicationAllowsScoreRefresh({
+        publication: { state: "pending", phase: "promote", outcomePersistence: "sealed" },
+      }),
+    ).toBe(false);
+    expect(
+      publicationAllowsScoreRefresh({
+        publication: { state: "published", outcomePersistence: "finalized" },
+      }),
+    ).toBe(true);
+    expect(
+      publicationAllowsScoreRefresh({
+        publication: { state: "unchanged", outcomePersistence: "finalized" },
+      }),
+    ).toBe(true);
+    expect(
+      readRunPublication({
+        publication: { state: "pending", phase: "promote", outcomePersistence: "sealed" },
+      }),
+    ).toEqual({ state: "pending", phase: "promote", outcomePersistence: "sealed" });
+    expect(
+      readRunPublication({ publication: { state: "pending", outcomePersistence: "sealed" } }),
+    ).toBeNull();
+    expect(
+      readRunPublication({ publication: { state: "published", outcomePersistence: "finalized" } }),
+    ).toEqual({ state: "published", outcomePersistence: "finalized" });
+    expect(readRunPublication({ publication: { state: "published" } })).toBeNull();
+    expect(
+      readRunStatusSnapshot({
+        activity: { state: "idle" },
+        progress: { state: "process-local", value: {} },
+      }).progress.state,
+    ).toBe("unavailable");
+  });
+
+  test("parses publication from the complete retry completion response", () => {
+    const completion = (publication: unknown) => ({
+      runId: "retry-run-1",
+      state: "failed",
+      scope: "collection",
+      pairCount: 2,
+      completedPairs: 1,
+      cacheHits: 0,
+      cacheMisses: 2,
+      failedPairs: 0,
+      stopReason: "application-attempt-limit",
+      updatedAt: "2026-10-05T00:00:00.000Z",
+      publication,
+    });
+
+    expect(
+      readRunPublication(
+        completion({ state: "pending", phase: "promote", outcomePersistence: "sealed" }),
+      ),
+    ).toEqual({ state: "pending", phase: "promote", outcomePersistence: "sealed" });
+    expect(
+      readRunPublication(completion({ state: "published", outcomePersistence: "finalized" })),
+    ).toEqual({ state: "published", outcomePersistence: "finalized" });
+    expect(
+      readRunPublication(completion({ state: "unchanged", outcomePersistence: "finalized" })),
+    ).toEqual({ state: "unchanged", outcomePersistence: "finalized" });
+    expect(readRunPublication(completion({ state: "published" }))).toBeNull();
+    expect(readRunPublication({ publication: completion({ state: "published" }) })).toBeNull();
   });
 });

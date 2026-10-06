@@ -11,7 +11,9 @@ export type RunProgressSnapshot =
       relation: "active-run" | "historical" | "unknown";
       scope: RunScope | null;
       value: unknown;
+      retryRunId?: string;
     }
+  | { state: "process-local"; value: unknown; retryRunId: string }
   | { state: "none" | "unavailable" };
 
 export type RunStatusSnapshot = { activity: LiveActivity; progress: RunProgressSnapshot };
@@ -59,10 +61,80 @@ export function readRunStatusSnapshot(payload: unknown): RunStatusSnapshot {
         relation: value.relation,
         scope: savedScope === "collection" || savedScope === "wishlist" ? savedScope : null,
         value: value.value,
+        ...(typeof value.retryRunId === "string" && value.retryRunId.length > 0
+          ? { retryRunId: value.retryRunId }
+          : {}),
       };
+    } else if (
+      value.state === "process-local" &&
+      value.value &&
+      typeof value.value === "object" &&
+      typeof value.retryRunId === "string" &&
+      value.retryRunId.length > 0
+    ) {
+      progress = { state: "process-local", value: value.value, retryRunId: value.retryRunId };
     }
   }
   return { activity: readLiveActivity(payload), progress };
+}
+
+export type PublicRunPublication = {
+  state: "published" | "unchanged" | "pending";
+  phase?: "seal" | "validate" | "promote";
+  outcomePersistence: "sealed" | "finalized" | "unpersisted";
+  reason?: string;
+};
+
+export function readRunPublication(value: unknown): PublicRunPublication | null {
+  if (!value || typeof value !== "object") return null;
+  const publication = (value as Record<string, unknown>).publication;
+  if (!publication || typeof publication !== "object") return null;
+  const raw = publication as Record<string, unknown>;
+  const validPersistence =
+    raw.outcomePersistence === "sealed" ||
+    raw.outcomePersistence === "finalized" ||
+    raw.outcomePersistence === "unpersisted";
+  if (!validPersistence || (raw.reason !== undefined && typeof raw.reason !== "string"))
+    return null;
+  if (raw.state === "pending") {
+    if (raw.phase !== "seal" && raw.phase !== "validate" && raw.phase !== "promote") return null;
+    return {
+      state: "pending",
+      phase: raw.phase,
+      outcomePersistence: raw.outcomePersistence as PublicRunPublication["outcomePersistence"],
+      ...(typeof raw.reason === "string" ? { reason: raw.reason } : {}),
+    };
+  }
+  if (
+    (raw.state !== "published" && raw.state !== "unchanged") ||
+    raw.phase !== undefined ||
+    raw.outcomePersistence !== "finalized"
+  )
+    return null;
+  return {
+    state: raw.state,
+    outcomePersistence: "finalized",
+    ...(typeof raw.reason === "string" ? { reason: raw.reason } : {}),
+  };
+}
+
+export function publicationState(value: unknown): PublicRunPublication["state"] | null {
+  return readRunPublication(value)?.state ?? null;
+}
+
+export function publicationRetryRunId(progress: RunProgressSnapshot): string | null {
+  if (
+    (progress.state === "saved" || progress.state === "process-local") &&
+    typeof progress.retryRunId === "string" &&
+    progress.retryRunId.length > 0
+  )
+    return progress.retryRunId;
+  return null;
+}
+
+export function publicationAllowsScoreRefresh(value: unknown): boolean {
+  const state = publicationState(value);
+  return state === "published" || state === "unchanged";
 }
 
 export function activityLabel(activity: LiveActivity, pageScope: RunScope): string | null {

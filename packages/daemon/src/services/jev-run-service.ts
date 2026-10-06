@@ -1,6 +1,18 @@
-import type { Collection, GameWithScore, RedundancyComponentWeights } from "@shelf-judge/shared";
-import type { JevPairCache, JevRunProgress, JevRunStopReason } from "./jev-pair-cache-service.js";
-import { computeJevPairCoverage, type JevPredictionCaptureIdentity } from "./jev-pair-coverage.js";
+import type {
+  Collection,
+  GameWithScore,
+  JevRunPublication,
+  RedundancyComponentWeights,
+  WishlistEntry,
+} from "@shelf-judge/shared";
+import type {
+  JevPairCache,
+  JevPairJudgment,
+  JevPairKey,
+  JevRunProgress,
+  JevRunStopReason,
+} from "./jev-pair-cache-service.js";
+import type { JevPredictionCaptureIdentity } from "./jev-pair-coverage.js";
 import {
   profileSourceCoordinatorFor,
   runOutsideProfileSourceCoordinator,
@@ -13,6 +25,11 @@ import {
   type JevRunCollectionLookup,
   type JevRunScope,
 } from "./jev-run-scope.js";
+import { validateJevCachedRow } from "./jev-pair-read-proof.js";
+import {
+  validateWishlistCandidateCOnlyRow,
+  type WishlistCandidateMembershipIndex,
+} from "./wishlist-candidate-read-proof.js";
 import {
   JevGatewayError,
   type JevAttemptAdmission,
@@ -33,6 +50,7 @@ import {
   encodeOwnedLocalMember,
   encodeWishlistBggMember,
   buildJevPairDependencies,
+  parseWishlistCandidateMember,
 } from "./jev-pair-identity.js";
 import { JEV_JUDGMENT_CONTRACT } from "./jev/jev-judgment-contract.js";
 
@@ -63,6 +81,7 @@ export interface JevRunServiceOptions {
   loadCapture(): Promise<JevRunCapture>;
   /** Cheap authoritative state read, safe under the profile-source coordinator. */
   readCurrent(): Promise<JevRunCurrentState>;
+  loadWishlist?(): Promise<readonly WishlistEntry[]>;
   createGateway(
     admitAndDispatch: (attempt: JevAttemptAdmission) => Promise<JevDispatchReceipt>,
     providerBudget: Readonly<
@@ -78,9 +97,11 @@ export interface JevRunServiceOptions {
 
 export interface JevRunHandle {
   runId: string;
-  completion: Promise<JevRunProgress>;
+  completion: Promise<JevRunCompletion>;
   cancel(): void;
 }
+
+export type JevRunCompletion = JevRunProgress & { publication: JevRunPublication };
 
 export interface JevPreparedRunInput {
   scopeKind?: "collection";
@@ -133,12 +154,26 @@ interface RunControl {
   controller: AbortController;
   startedAt: number;
   progress: JevRunProgress;
-  resolveCompletion(progress: JevRunProgress): void;
+  resolveCompletion(progress: JevRunCompletion): void;
   terminalCause?: "cancelled" | "deadline";
   completionSettled: boolean;
   successCommitted: boolean;
   deadlineTimer: ReturnType<typeof setTimeout>;
   terminalPersistenceFailed?: boolean;
+  prepared: PreparedRunData;
+  finalizationPromise?: Promise<JevRunCompletion>;
+  sealCommitted: boolean;
+}
+
+interface PendingFinalization {
+  progress: JevRunProgress;
+  prepared?: PreparedRunData;
+  processLocalCompletion?: JevRunCompletion;
+}
+
+function completionFromProgress(progress: JevRunProgress): JevRunCompletion | null {
+  const publication = progress.publication;
+  return publication ? { ...progress, publication } : null;
 }
 
 /** Unified prepared execution only; persisted progress never authorizes inference. */
@@ -153,6 +188,8 @@ export class JevRunService {
   private readonly runDurations = new WeakMap<AbortController, number>();
   private readonly deadlineControllers = new WeakSet<AbortController>();
   private readonly runControls = new WeakMap<AbortController, RunControl>();
+  private readonly pendingFinalizations = new Map<string, PendingFinalization>();
+  private readonly retryingFinalizations = new Map<string, Promise<JevRunCompletion | null>>();
 
   constructor(private readonly options: JevRunServiceOptions) {
     this.coordinator = profileSourceCoordinatorFor(options.storageService);
@@ -165,6 +202,18 @@ export class JevRunService {
 
   get effectiveLimits(): JevRunEffectiveLimits {
     return { maxEligiblePairs: this.maxPairs, maxRunDurationMs: this.maxRunMs };
+  }
+
+  /** Volatile terminal observation when durable sealing failed; never a persisted claim. */
+  getProcessPendingProgress(): JevRunCompletion | null {
+    for (const [runId, pending] of this.pendingFinalizations) {
+      if (pending.processLocalCompletion?.publication.outcomePersistence === "unpersisted") {
+        const batch = this.getRunBatch();
+        if (batch?.runId === runId) return pending.processLocalCompletion;
+        this.pendingFinalizations.delete(runId);
+      }
+    }
+    return null;
   }
 
   /**
@@ -237,7 +286,6 @@ export class JevRunService {
     const prepared = this.preparedRuns.get(key);
     if (!prepared) throw new Error("Prepared Jev reservation is invalid or already consumed");
     if (activeRuns.has(this.options.storageService)) throw new Error("A Jev run is already active");
-    prepared.unifiedPreparation.beginExecution();
     this.preparedRuns.delete(key);
     return this.reserveRun(prepared);
   }
@@ -249,28 +297,44 @@ export class JevRunService {
     const startedAt = this.now().getTime();
     const budget = prepared.unifiedPreparation.run.disclosure.budget;
     const duration = budget.maxRunDurationMs;
-    let resolveCompletion!: (progress: JevRunProgress) => void;
-    const completion = new Promise<JevRunProgress>((resolve) => {
+    const initialProgress: JevRunProgress = {
+      runId,
+      state: "running",
+      scope: prepared.scopeKind,
+      pairCount: 0,
+      completedPairs: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
+      failedPairs: 0,
+      updatedAt: this.now().toISOString(),
+    };
+    const reserveBatch = this.options.cache.reserveRunBatch?.bind(this.options.cache);
+    if (
+      !reserveBatch ||
+      !this.options.cache.checkpointStagedPair ||
+      !this.options.cache.lookupForRun ||
+      !this.options.cache.stagedSnapshot ||
+      !this.options.cache.getRunBatch ||
+      !this.options.cache.sealRunBatch ||
+      !this.options.cache.promoteRunBatch
+    )
+      throw new Error("Jev run cache lacks staged publication support");
+    reserveBatch(initialProgress);
+    prepared.unifiedPreparation.beginExecution();
+    let resolveCompletion!: (progress: JevRunCompletion) => void;
+    const completion = new Promise<JevRunCompletion>((resolve) => {
       resolveCompletion = resolve;
     });
     const control = {
       runId,
       controller,
       startedAt,
-      progress: {
-        runId,
-        state: "running" as const,
-        scope: prepared.scopeKind,
-        pairCount: 0,
-        completedPairs: 0,
-        cacheHits: 0,
-        cacheMisses: 0,
-        failedPairs: 0,
-        updatedAt: this.now().toISOString(),
-      },
+      progress: initialProgress,
       resolveCompletion,
       completionSettled: false,
       successCommitted: false,
+      sealCommitted: false,
+      prepared,
       deadlineTimer: setTimeout(() => this.terminateRun(control, "deadline"), duration),
     } satisfies RunControl;
     control.deadlineTimer.unref?.();
@@ -299,14 +363,39 @@ export class JevRunService {
       // Lifecycle diagnostics are best-effort and must not strand a reserved Run.
     }
     void runOutsideProfileSourceCoordinator(() => this.execute(control, prepared)).then(
-      (progress) => this.settleRun(control, progress),
-      () => this.settleRun(control, control.progress),
+      (progress) => {
+        if (!control.completionSettled) void this.finalizeRun(control, progress, prepared);
+      },
+      () => {
+        if (!control.completionSettled)
+          void this.finalizeRun(
+            control,
+            this.nextProgress(control.progress, {}, "failed"),
+            prepared,
+          );
+      },
     );
     return handle;
   }
 
   private terminateRun(control: RunControl, cause: "cancelled" | "deadline"): void {
-    if (control.terminalCause || control.completionSettled || control.successCommitted) return;
+    if (control.sealCommitted && !control.completionSettled) {
+      const completion = this.pendingCompletion(
+        control.progress,
+        "validate",
+        "sealed",
+        "publication-pending",
+      );
+      this.settleRun(control, completion);
+      return;
+    }
+    if (
+      control.terminalCause ||
+      control.completionSettled ||
+      control.successCommitted ||
+      control.sealCommitted
+    )
+      return;
     control.terminalCause = cause;
     if (cause === "deadline") this.deadlineControllers.add(control.controller);
     control.controller.abort();
@@ -314,23 +403,16 @@ export class JevRunService {
       ...control.progress,
       state: cause === "deadline" ? "failed" : "interrupted",
       updatedAt: this.now().toISOString(),
-      ...(cause === "deadline" ? { stopReason: "application-deadline" as const } : {}),
+      ...(cause === "deadline"
+        ? { stopReason: "application-deadline" as const }
+        : { stopReason: "owner-cancelled" as const }),
     };
-    if (cause !== "deadline") delete terminal.stopReason;
     control.progress = terminal;
     clearTimeout(control.deadlineTimer);
-    let terminalPersistenceFailed = false;
-    try {
-      this.options.cache.finishRun({ activation: null, progress: terminal });
-    } catch {
-      terminalPersistenceFailed = true;
-      // Completion is fail-closed even when terminal status persistence is unavailable.
-    }
-    control.terminalPersistenceFailed = terminalPersistenceFailed;
-    this.settleRun(control, terminal);
+    void this.finalizeRun(control, terminal, control.prepared);
   }
 
-  private settleRun(control: RunControl, progress: JevRunProgress): void {
+  private settleRun(control: RunControl, progress: JevRunCompletion): void {
     if (control.completionSettled) return;
     control.completionSettled = true;
     clearTimeout(control.deadlineTimer);
@@ -341,6 +423,7 @@ export class JevRunService {
     const terminalFields = {
       runId: control.runId,
       state: progress.state,
+      publication: progress.publication.state,
       stopReason:
         progress.stopReason ?? (control.terminalCause === "cancelled" ? "owner-cancelled" : null),
       completedPairs: progress.completedPairs,
@@ -362,19 +445,110 @@ export class JevRunService {
     }
   }
 
-  /** Marks a durable interrupted marker only. This method never creates a gateway or sends. */
-  reconcileInterruptedProgress(): Promise<JevRunProgress | null> {
-    if (activeRuns.has(this.options.storageService))
-      return Promise.resolve(this.options.cache.getRunProgress());
-    const prior = this.options.cache.getRunProgress();
-    if (!prior || prior.state !== "running") return Promise.resolve(prior);
-    const interrupted: JevRunProgress = {
-      ...prior,
-      state: "interrupted",
-      updatedAt: this.now().toISOString(),
-    };
-    this.options.cache.saveRunProgress(interrupted);
-    return Promise.resolve(interrupted);
+  /** Provider-free startup reconciliation and publication retry. */
+  async reconcileInterruptedProgress(): Promise<JevRunProgress | null> {
+    if (activeRuns.has(this.options.storageService)) return this.options.cache.getRunProgress();
+    const batch = this.getRunBatch();
+    if (!batch) {
+      const progress = this.options.cache.getRunProgress();
+      if (progress?.state !== "running") return progress;
+      const interrupted: JevRunProgress = {
+        ...progress,
+        state: "interrupted",
+        updatedAt: this.now().toISOString(),
+      };
+      try {
+        this.options.cache.saveRunProgress(interrupted);
+      } catch {
+        // Legacy progress has no staged evidence to recover; report the safe interrupted state.
+      }
+      return interrupted;
+    }
+    let progress = batch.progress;
+    if (batch.state === "active") {
+      progress = {
+        ...progress,
+        state: "interrupted",
+        updatedAt: this.now().toISOString(),
+      };
+      try {
+        await this.coordinator.runExclusive(() => Promise.resolve(this.sealRunBatch(progress)));
+      } catch {
+        const observed: JevRunCompletion = {
+          ...progress,
+          publication: {
+            state: "pending",
+            phase: "seal",
+            outcomePersistence: "unpersisted",
+            reason: "seal-failed",
+          },
+        };
+        this.trackPendingFinalization(batch.runId, progress, undefined, observed);
+        return observed;
+      }
+    }
+    return this.publishSealedBatch(batch.runId, progress, undefined);
+  }
+
+  /** Explicit provider-free retry for the single unresolved durable batch. */
+  retryPublication(runId: string): Promise<JevRunCompletion | null> {
+    const active = activeRuns.get(this.options.storageService);
+    if (active?.runId === runId) return Promise.resolve(null);
+    const concurrent = this.retryingFinalizations.get(runId);
+    if (concurrent) return concurrent;
+    const pending = this.pendingFinalizations.get(runId);
+    const operation = (async () => {
+      if (pending) {
+        const batch = this.getRunBatch();
+        if (!batch || batch.runId !== runId) {
+          this.pendingFinalizations.delete(runId);
+          const progress = this.options.cache.getRunProgress();
+          return progress?.runId === runId ? completionFromProgress(progress) : null;
+        }
+        if (batch.state === "active") {
+          try {
+            await this.coordinator.runExclusive(() =>
+              Promise.resolve(this.sealRunBatch(pending.progress)),
+            );
+          } catch {
+            const observed = this.pendingCompletion(
+              pending.progress,
+              "seal",
+              "unpersisted",
+              "seal-failed",
+            );
+            this.trackPendingFinalization(runId, pending.progress, pending.prepared, observed);
+            return observed;
+          }
+        }
+        const result = await this.publishSealedBatch(runId, pending.progress, pending.prepared);
+        if (result.publication.state !== "pending") this.pendingFinalizations.delete(runId);
+        return result;
+      }
+      const batch = this.getRunBatch();
+      if (!batch || batch.runId !== runId) {
+        const progress = this.options.cache.getRunProgress();
+        return progress?.runId === runId ? completionFromProgress(progress) : null;
+      }
+      let progress = batch.progress;
+      if (batch.state === "active") {
+        progress = { ...progress, state: "interrupted", updatedAt: this.now().toISOString() };
+        try {
+          await this.coordinator.runExclusive(() => Promise.resolve(this.sealRunBatch(progress)));
+        } catch {
+          const observed = this.pendingCompletion(progress, "seal", "unpersisted", "seal-failed");
+          this.trackPendingFinalization(runId, progress, undefined, observed);
+          return observed;
+        }
+      }
+      return await this.publishSealedBatch(runId, progress, undefined);
+    })();
+    this.retryingFinalizations.set(runId, operation);
+    void operation.finally(() => {
+      if (this.retryingFinalizations.get(runId) === operation)
+        this.retryingFinalizations.delete(runId);
+    });
+    return operation;
   }
 
   private async execute(control: RunControl, prepared: PreparedRunData): Promise<JevRunProgress> {
@@ -444,7 +618,7 @@ export class JevRunService {
           scope: originalScope,
           collection: capture.collection,
           getCollectionLookup: collectionLookupForRun,
-          cache: this.options.cache,
+          cache: { lookup: (key) => this.lookupForRun(control.runId, key) },
           noteTransmissionAuthorized: noteAuthorized,
         });
         if (pairReady.status === "skip") {
@@ -543,15 +717,9 @@ export class JevRunService {
       if (this.deadlineReached(controller, startedAt)) terminal.stopReason = "application-deadline";
       if (state !== "completed") {
         control.progress = terminal;
-        return this.finishTerminal(terminal, controller, startedAt, state, control);
+        return await this.finalizeRun(control, terminal, prepared);
       }
-      return await this.finishWithCurrentCoverage(
-        terminal,
-        capture,
-        controller,
-        startedAt,
-        control,
-      );
+      return await this.finalizeRun(control, terminal, prepared);
     } catch {
       if (control.terminalCause) return control.progress;
       const deadlineReached = this.deadlineReached(controller, startedAt);
@@ -562,16 +730,7 @@ export class JevRunService {
       );
       if (deadlineReached) terminal.stopReason = "application-deadline";
       control.progress = terminal;
-      let terminalPersistenceFailed = false;
-      try {
-        if (!control.terminalCause)
-          this.options.cache.finishRun({ activation: null, progress: terminal });
-      } catch {
-        terminalPersistenceFailed = true;
-        /* preserve fail-closed state */
-      }
-      control.terminalPersistenceFailed = terminalPersistenceFailed;
-      return terminal;
+      return this.finalizeRun(control, terminal, prepared);
     }
   }
 
@@ -593,7 +752,9 @@ export class JevRunService {
     } | null = null;
     let stop = false;
 
-    const inspectPair = createWishlistPairReadinessInspector(frozen, this.options.cache);
+    const inspectPair = createWishlistPairReadinessInspector(frozen, {
+      lookup: (key) => this.lookupForRun(control.runId, key),
+    });
 
     const getGateway = (): JevGateway => {
       if (gateway) return gateway;
@@ -785,7 +946,7 @@ export class JevRunService {
               return;
             }
             const next = this.nextProgress(progress, { completedPairs: 1 });
-            this.options.cache.checkpointPair({ judgments: [judgment], progress: next });
+            this.checkpointStaged(control.runId, [judgment], next);
             progress = next;
             control.progress = next;
             outcome.value = "saved";
@@ -817,31 +978,13 @@ export class JevRunService {
             ? "failed"
             : "completed";
       const terminal = this.nextProgress(progress, {}, state);
-      if (state === "completed") {
-        await this.coordinator.runExclusive(async () => {
-          if (!this.runCanContinue(control) || !(await frozen.isSourceCurrent()))
-            throw new Error("Wishlist Jev sources changed at completion");
-          if (!this.runCanContinue(control) || this.stopped(controller, startedAt))
-            throw new Error("Wishlist Jev run stopped");
-          this.options.cache.finishRun({ activation: null, progress: terminal });
-          control.successCommitted = true;
-        });
-      } else {
-        this.options.cache.finishRun({ activation: null, progress: terminal });
-      }
-      return terminal;
+      return this.finalizeRun(control, terminal, prepared);
     } catch {
       if (control.terminalCause) return control.progress;
       const state = this.deadlineReached(controller, startedAt) ? "failed" : "failed";
       const terminal = this.nextProgress(progress, {}, state);
       control.progress = terminal;
-      try {
-        if (!control.terminalCause)
-          this.options.cache.finishRun({ activation: null, progress: terminal });
-      } catch {
-        control.terminalPersistenceFailed = true;
-      }
-      return terminal;
+      return this.finalizeRun(control, terminal, prepared);
     }
   }
 
@@ -902,126 +1045,313 @@ export class JevRunService {
     });
   }
 
-  private async finishWithCurrentCoverage(
-    terminal: JevRunProgress,
-    original: JevRunCapture,
-    controller: AbortController,
-    startedAt: number,
+  private finalizeRun(
     control: RunControl,
-  ): Promise<JevRunProgress> {
-    for (let attempt = 0; attempt <= this.finalCaptureRetries; attempt++) {
-      if (!this.runCanContinue(control)) return control.progress;
-      if (this.stopped(controller, startedAt))
-        return this.finishTerminal(terminal, controller, startedAt, undefined, control);
-      const capture = await this.options.loadCapture();
-      if (!this.runCanContinue(control)) return control.progress;
-      if (this.stopped(controller, startedAt))
-        return this.finishTerminal(terminal, controller, startedAt, undefined, control);
-      if (capture.policyIdentity !== original.policyIdentity)
-        return this.finishTerminal(terminal, controller, startedAt, "failed", control);
-      const cacheRevisionBefore = this.options.cache.mutationRevision();
-      if (cacheRevisionBefore === null)
-        return this.finishTerminal(terminal, controller, startedAt, "failed", control);
-      const digest = computeJevPairCoverage({
-        collection: capture.collection,
-        predictionCapture: capture.predictionCapture,
-        captureIdentity: capture.captureIdentity,
-        factualWeights: capture.factualWeights,
-        cache: this.options.cache,
-      });
-      const cacheRevisionAfter = this.options.cache.mutationRevision();
-      if (cacheRevisionAfter === null || cacheRevisionAfter !== cacheRevisionBefore) continue;
-      const result = await this.coordinator.runExclusive(async () => {
-        if (!this.runCanContinue(control) || this.stopped(controller, startedAt))
-          return {
-            retry: false,
-            complete: false,
-            persisted: false,
-            terminalState: "interrupted" as const,
-          };
-        const current = await this.options.readCurrent();
-        if (!this.runCanContinue(control) || this.stopped(controller, startedAt))
-          return {
-            retry: false,
-            complete: false,
-            persisted: false,
-            terminalState: "interrupted" as const,
-          };
-        if (current.policyIdentity !== original.policyIdentity)
-          return {
-            retry: false,
-            complete: false,
-            persisted: false,
-            terminalState: "failed" as const,
-          };
-        if (current.sourceVectorIdentity !== capture.sourceVectorIdentity)
-          return {
-            retry: true,
-            complete: false,
-            persisted: false,
-            terminalState: "failed" as const,
-          };
-        const committedRevision = this.options.cache.mutationRevision();
-        if (committedRevision === null || committedRevision !== cacheRevisionAfter)
-          return {
-            retry: true,
-            complete: false,
-            persisted: false,
-            terminalState: "failed" as const,
-          };
-        const activation = digest.complete
-          ? { identity: digest.identity, activatedAt: this.now().toISOString() }
-          : null;
-        // Activation is only an advisory complete-universe marker. A Run succeeds
-        // when its authorized scope completed; unrelated/uncovered pairs do not
-        // rewrite that execution outcome as failed.
+    proposed: JevRunProgress,
+    prepared: PreparedRunData,
+  ): Promise<JevRunCompletion> {
+    if (control.finalizationPromise) return control.finalizationPromise;
+    let terminal = proposed;
+    clearTimeout(control.deadlineTimer);
+    control.finalizationPromise = (async () => {
+      try {
+        const executionOutcome = control.terminalCause
+          ? control.terminalCause === "cancelled"
+            ? {
+                ...control.progress,
+                state: "interrupted" as const,
+                stopReason: "owner-cancelled" as const,
+              }
+            : {
+                ...control.progress,
+                state: "failed" as const,
+                stopReason: "application-deadline" as const,
+              }
+          : proposed;
+        terminal = { ...executionOutcome, updatedAt: this.now().toISOString() };
         control.progress = terminal;
-        this.options.cache.finishRun({ activation, progress: terminal });
-        control.successCommitted = true;
-        return {
-          retry: false,
-          complete: digest.complete,
-          persisted: true,
-          terminalState: "completed" as const,
-        };
-      });
-      if (control.terminalCause) return control.progress;
-      if (result.retry) continue;
-      if (result.terminalState === "interrupted")
-        return this.finishTerminal(terminal, controller, startedAt, "interrupted", control);
-      if (!result.persisted)
-        return this.finishTerminal(terminal, controller, startedAt, "failed", control);
-      return terminal;
-    }
-    return this.finishTerminal(terminal, controller, startedAt, "failed", control);
+        this.sealRunBatch(terminal);
+        control.sealCommitted = true;
+        if (control.terminalCause) {
+          const pending = this.pendingCompletion(
+            terminal,
+            "validate",
+            "sealed",
+            "publication-pending",
+          );
+          this.trackPendingFinalization(control.runId, terminal, prepared, pending);
+          this.settleRun(control, pending);
+          void this.publishSealedBatch(control.runId, terminal, prepared).then((result) => {
+            if (result.publication.state === "pending")
+              this.trackPendingFinalization(control.runId, terminal, prepared, result);
+            else this.pendingFinalizations.delete(control.runId);
+          });
+          return pending;
+        }
+        const result = await this.publishSealedBatch(control.runId, terminal, prepared);
+        if (result.publication.state === "pending")
+          this.trackPendingFinalization(control.runId, terminal, prepared, result);
+        else this.pendingFinalizations.delete(control.runId);
+        this.settleRun(control, result);
+        return result;
+      } catch {
+        const sealed = control.sealCommitted;
+        const result = this.pendingCompletion(
+          terminal,
+          sealed ? "validate" : "seal",
+          sealed ? "sealed" : "unpersisted",
+          sealed ? "publication-pending" : "seal-failed",
+        );
+        this.trackPendingFinalization(control.runId, terminal, prepared, result);
+        control.terminalPersistenceFailed = !sealed;
+        this.settleRun(control, result);
+        return result;
+      }
+    })();
+    return control.finalizationPromise;
   }
 
-  private finishTerminal(
+  private getRunBatch() {
+    return this.options.cache.getRunBatch?.() ?? null;
+  }
+
+  private sealRunBatch(progress: JevRunProgress): void {
+    const seal = this.options.cache.sealRunBatch?.bind(this.options.cache);
+    if (!seal) throw new Error("Jev cache cannot seal run batches");
+    seal(progress);
+  }
+
+  private lookupForRun(runId: string, key: JevPairKey): JevPairJudgment | null {
+    const lookup = this.options.cache.lookupForRun?.bind(this.options.cache);
+    if (!lookup) throw new Error("Jev cache cannot read run-owned staging");
+    return lookup(runId, key);
+  }
+
+  private checkpointStaged(
+    runId: string,
+    judgments: [JevPairJudgment] | [JevPairJudgment, JevPairJudgment],
     progress: JevRunProgress,
-    controller: AbortController,
-    startedAt: number,
-    requestedState: "failed" | "interrupted" | undefined,
-    control: RunControl,
-  ): Promise<JevRunProgress> {
-    if (control.completionSettled || control.terminalCause)
-      return Promise.resolve(control.progress);
-    if (this.deadlineReached(controller, startedAt)) return Promise.resolve(control.progress);
-    const state = this.stopped(controller, startedAt)
-      ? "interrupted"
-      : (requestedState ?? "failed");
-    const terminal: JevRunProgress = { ...progress, state, updatedAt: this.now().toISOString() };
-    if (state !== "failed") delete terminal.stopReason;
-    control.progress = terminal;
-    let terminalPersistenceFailed = false;
-    try {
-      this.options.cache.finishRun({ activation: null, progress: terminal });
-    } catch {
-      terminalPersistenceFailed = true;
-      // Completion is fail-closed even when terminal status persistence is unavailable.
+  ): void {
+    const checkpoint = this.options.cache.checkpointStagedPair?.bind(this.options.cache);
+    if (!checkpoint) throw new Error("Jev cache cannot stage run judgments");
+    checkpoint({ judgments, progress: { ...progress, runId } });
+  }
+
+  private pendingCompletion(
+    progress: JevRunProgress,
+    phase: "seal" | "validate" | "promote",
+    outcomePersistence: "sealed" | "unpersisted",
+    reason: string,
+  ): JevRunCompletion {
+    const completion: JevRunCompletion = {
+      ...progress,
+      publication: { state: "pending", phase, outcomePersistence, reason },
+    };
+    if (outcomePersistence === "sealed") {
+      try {
+        this.options.cache.saveSealedRunProgressIfOwned?.(completion);
+      } catch {
+        // The immutable execution outcome is already durable in the seal; publication remains pending.
+      }
     }
-    control.terminalPersistenceFailed = terminalPersistenceFailed;
-    this.settleRun(control, terminal);
-    return Promise.resolve(terminal);
+    return completion;
+  }
+
+  private trackPendingFinalization(
+    runId: string,
+    progress: JevRunProgress,
+    prepared: PreparedRunData | undefined,
+    processLocalCompletion?: JevRunCompletion,
+  ): void {
+    if (this.getRunBatch()?.runId !== runId) {
+      this.pendingFinalizations.delete(runId);
+      return;
+    }
+    this.pendingFinalizations.set(runId, { progress, prepared, processLocalCompletion });
+  }
+
+  private async publishSealedBatch(
+    runId: string,
+    progress: JevRunProgress,
+    prepared?: PreparedRunData,
+  ): Promise<JevRunCompletion> {
+    for (let attempt = 0; attempt <= this.finalCaptureRetries; attempt++) {
+      try {
+        const existingBatch = this.getRunBatch();
+        if (!existingBatch) {
+          const existingProgress = this.options.cache.getRunProgress();
+          if (existingProgress?.runId === runId) {
+            const completed = completionFromProgress(existingProgress);
+            if (completed && completed.publication.state !== "pending") return completed;
+          }
+        }
+        const batch = this.getRunBatch();
+        const snapshot = this.options.cache.stagedSnapshot?.(runId);
+        if (!batch || batch.runId !== runId || batch.state !== "sealed" || !snapshot)
+          return this.pendingCompletion(progress, "validate", "sealed", "staging-unavailable");
+        if (snapshot.judgments.length === 0) {
+          const emptyPromotion = await this.coordinator.runExclusive(() =>
+            Promise.resolve(
+              (() => {
+                const latestBatch = this.getRunBatch();
+                const latestSnapshot = this.options.cache.stagedSnapshot?.(runId);
+                if (
+                  !latestBatch ||
+                  latestBatch.runId !== runId ||
+                  latestBatch.state !== "sealed" ||
+                  !latestSnapshot ||
+                  latestSnapshot.revision !== snapshot.revision
+                )
+                  return null;
+                return (
+                  this.options.cache.promoteRunBatch?.({
+                    runId,
+                    expectedStagingRevision: snapshot.revision,
+                    eligibleJudgments: [],
+                    progress,
+                  }) ?? null
+                );
+              })(),
+            ),
+          );
+          if (emptyPromotion) return emptyPromotion.progress as JevRunCompletion;
+          continue;
+        }
+        const capture = await this.options.loadCapture();
+        const promoted = await this.coordinator.runExclusive(async () => {
+          const current = await this.options.readCurrent();
+          const wishlist = snapshot.judgments.some((row) => row.pairDomain === "wishlist-candidate")
+            ? await this.options.loadWishlist?.()
+            : undefined;
+          const currentBatch = this.getRunBatch();
+          const currentSnapshot = this.options.cache.stagedSnapshot?.(runId);
+          if (
+            !sameAuthority(capture, current) ||
+            !currentBatch ||
+            currentBatch.runId !== runId ||
+            currentBatch.state !== "sealed" ||
+            !currentSnapshot ||
+            currentSnapshot.revision !== snapshot.revision
+          )
+            return null;
+          const eligible =
+            prepared && capture.policyIdentity !== prepared.capture.policyIdentity
+              ? []
+              : this.validateStagedRows(
+                  snapshot.judgments,
+                  { ...capture, collection: current.collection },
+                  prepared,
+                  wishlist,
+                );
+          const permitted = current.canTransmitNotes
+            ? eligible
+            : eligible.filter((row) => row.dependencyKind === "C_ONLY");
+          const promote = this.options.cache.promoteRunBatch?.bind(this.options.cache);
+          if (!promote) throw new Error("Jev cache cannot promote run batches");
+          return promote({
+            runId,
+            expectedStagingRevision: snapshot.revision,
+            eligibleJudgments: permitted,
+            progress,
+          });
+        });
+        if (promoted) {
+          return {
+            ...promoted.progress,
+            publication: promoted.progress.publication ?? {
+              state: promoted.status === "unchanged" ? "unchanged" : "published",
+              outcomePersistence: "finalized",
+            },
+          };
+        }
+      } catch {
+        // Keep sealed evidence and retry provider-free at the next explicit opportunity.
+      }
+    }
+    return this.pendingCompletion(progress, "validate", "sealed", "source-or-stage-changed");
+  }
+
+  private validateStagedRows(
+    rows: readonly JevPairJudgment[],
+    capture: JevRunCapture,
+    prepared?: PreparedRunData,
+    wishlist?: readonly WishlistEntry[],
+  ): JevPairJudgment[] {
+    const eligible: JevPairJudgment[] = [];
+    const lookup = createJevRunCollectionLookup(capture.collection);
+    const candidates = new Map((wishlist ?? []).map((entry) => [entry.bggId, entry]));
+    const ownedIds = new Set(capture.collection.games.map((game) => game.id));
+    const membership: WishlistCandidateMembershipIndex = {
+      candidateBggIds: new Set(candidates.keys()),
+      eligibleOwnedIds: ownedIds,
+    };
+    for (const row of rows) {
+      if (row.pairDomain === "wishlist-candidate") {
+        const memberA = parseWishlistCandidateMember(row.gameAId);
+        const memberB = parseWishlistCandidateMember(row.gameBId);
+        const candidate = memberA?.kind === "wishlist-bgg" ? memberA : memberB;
+        const owned = memberA?.kind === "owned-local" ? memberA : memberB;
+        if (
+          !candidate ||
+          candidate.kind !== "wishlist-bgg" ||
+          candidate.collectionId !== capture.collection.id ||
+          !owned ||
+          owned.kind !== "owned-local" ||
+          owned.collectionId !== capture.collection.id
+        )
+          continue;
+        const entry = candidates.get(Number(candidate.bggId));
+        const game = lookup.gameForId(owned.localGameId);
+        if (!entry?.bggSource || !game || !wishlist) continue;
+        if (
+          prepared?.scopeKind === "wishlist" &&
+          !prepared.wishlistPreparation.pairs.some(
+            (pair) =>
+              (pair.gameAId === row.gameAId && pair.gameBId === row.gameBId) ||
+              (pair.gameAId === row.gameBId && pair.gameBId === row.gameAId),
+          )
+        )
+          continue;
+        const pair = {
+          candidate: { bggId: entry.bggId, name: entry.name, bggSource: entry.bggSource },
+          ownedGame: {
+            id: game.id,
+            bggId: game.bggId,
+            name: game.name,
+            description: game.bggData?.description ?? null,
+          },
+        };
+        if (validateWishlistCandidateCOnlyRow(row, capture.collection.id, pair, membership).valid)
+          eligible.push(row);
+        continue;
+      }
+      const gameA = lookup.gameForId(row.gameAId);
+      const gameB = lookup.gameForId(row.gameBId);
+      if (!gameA || !gameB) continue;
+      if (prepared?.scopeKind === "collection") {
+        const pair = prepared.scope.pairForIds(row.gameAId, row.gameBId);
+        if (!pair) continue;
+        const kind = row.dependencyKind;
+        if (
+          jevRunPairSourcesChanged(
+            prepared.scope,
+            capture.collection,
+            row.gameAId,
+            row.gameBId,
+            kind,
+          )
+        )
+          continue;
+      }
+      if (
+        (row.dependencyKind === "D_ONLY" || row.dependencyKind === "SHARED_CD") &&
+        capture.collection.semanticRedundancy.settings.cachedOwnerNoteUse !== true
+      )
+        continue;
+      const proof = validateJevCachedRow(row, capture.collection, gameA, gameB, row.signal);
+      if (proof.valid) eligible.push(row);
+    }
+    return eligible;
   }
 
   private async checkpointMappedPair(input: {
@@ -1061,10 +1391,7 @@ export class JevRunService {
         return false;
       const next = this.nextProgress(input.getProgress(), { completedPairs: 1 });
       try {
-        this.options.cache.checkpointPair({
-          judgments: tupleJudgments(input.mapped),
-          progress: next,
-        });
+        this.checkpointStaged(input.control.runId, tupleJudgments(input.mapped), next);
       } catch (error) {
         input.onStorageFailure();
         throw error;

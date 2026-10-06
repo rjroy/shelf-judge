@@ -9,6 +9,9 @@ import { WishlistCurrentProjectionCard } from "@/components/wishlist-current-pro
 import {
   activityLabel,
   progressBelongsToActivity,
+  publicationAllowsScoreRefresh,
+  publicationState,
+  publicationRetryRunId,
   readDisplayRunProgress,
   readRunStatusSnapshot,
   runProgressSummary,
@@ -176,15 +179,32 @@ export default function WishlistPage() {
     liveActivityRef.current = status.activity;
     setLiveActivity(status.activity);
     setSavedProgress(status.progress);
+    const runValue =
+      status.progress.state === "saved" || status.progress.state === "process-local"
+        ? status.progress.value
+        : null;
+    const valueScope =
+      runValue &&
+      typeof runValue === "object" &&
+      ((runValue as Record<string, unknown>).scope === "wishlist" ||
+        (runValue as Record<string, unknown>).scope === "collection")
+        ? (runValue as Record<string, unknown>).scope
+        : null;
+    if (publicationState(runValue) === "pending" && valueScope === "wishlist") {
+      observedWishlistRunId.current ??=
+        publicationRetryRunId(status.progress) ?? "publication-pending:wishlist";
+    }
     if (status.activity.state === "active") {
-      observedWishlistRunId.current =
-        status.activity.scope === "wishlist" ? status.activity.runId : null;
+      if (status.activity.scope === "wishlist")
+        observedWishlistRunId.current = status.activity.runId;
     } else if (status.activity.state === "idle") {
       const completedRunId = observedWishlistRunId.current;
-      observedWishlistRunId.current = null;
-      if (completedRunId) refreshWishlistProjectionAfterRun(completedRunId);
+      if (completedRunId && publicationAllowsScoreRefresh(runValue)) {
+        observedWishlistRunId.current = null;
+        refreshWishlistProjectionAfterRun(completedRunId);
+      }
     } else {
-      observedWishlistRunId.current = null;
+      // Keep a run we already observed until publication is resolved after status recovers.
     }
     return true;
   }
@@ -239,7 +259,6 @@ export default function WishlistPage() {
           setLiveActivity({ state: "unavailable" });
           liveActivityRef.current = { state: "unavailable" };
           setSavedProgress({ state: "unavailable" });
-          observedWishlistRunId.current = null;
           setRunError("Run status could not be loaded. Try refreshing status.");
         }
       } finally {

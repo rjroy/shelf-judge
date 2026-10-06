@@ -30,8 +30,9 @@ const entries = [
 ];
 
 type WishlistCalls = Array<{ url: string; method: string; body?: unknown }> & {
-  waitForHeldStatus(read: number): Promise<void>;
-  releaseHeldStatus(read: number): void;
+  holdNextStatus(): void;
+  waitForHeldStatus(): Promise<number>;
+  releaseHeldStatus(): void;
   waitForHeldStart(): Promise<void>;
   releaseHeldStart(): void;
 };
@@ -105,26 +106,37 @@ async function wishlistFixture(
   progressRelation: "active-run" | "historical" | "unknown" = "active-run",
   progressScope: "collection" | "wishlist" | null = activeScope,
   statusSequence?: readonly ({ runId: string; scope: "collection" | "wishlist" | null } | null)[],
-  holdSecondStatus = false,
   statusFailureAt?: number,
   holdStartResponse = false,
   communityRatingScenario = false,
 ) {
   const calls = [] as unknown as WishlistCalls;
-  const heldStatus = new Map<number, { entered: Promise<void>; release: () => void }>();
-  let heldStart: { entered: Promise<void>; release: () => void } | null = null;
-  calls.waitForHeldStatus = async (read) => {
-    const hold = heldStatus.get(read);
-    if (!hold) throw new Error(`Status read ${read} was not held`);
-    await hold.entered;
+  let requestToHoldNextStatus = false;
+  let heldStatus:
+    | { read: number; entered: Promise<number>; announce: (read: number) => void }
+    | undefined;
+  let pendingStatusRelease: (() => void) | undefined;
+  calls.holdNextStatus = () => {
+    requestToHoldNextStatus = true;
+    let announce!: (read: number) => void;
+    const entered = new Promise<number>((resolve) => {
+      announce = resolve;
+    });
+    heldStatus = { read: -1, entered, announce };
   };
-  calls.releaseHeldStatus = (read) => heldStatus.get(read)?.release();
+  calls.waitForHeldStatus = async () => {
+    if (!heldStatus) throw new Error("No status request was scheduled to be held");
+    return heldStatus.entered;
+  };
+  calls.releaseHeldStatus = () => pendingStatusRelease?.();
+  let heldStart: { entered: Promise<void>; release: () => void } | null = null;
   calls.waitForHeldStart = async () => {
     if (!heldStart) throw new Error("Start response was not held");
     await heldStart.entered;
   };
   calls.releaseHeldStart = () => heldStart?.release();
   let active = activeInitially;
+  let hadRun = activeInitially;
   let currentEntries: Array<
     Omit<(typeof entries)[number], "predictedBreakdown"> & { predictedBreakdown: unknown }
   > = entries.map((entry) => ({ ...entry }));
@@ -293,6 +305,7 @@ async function wishlistFixture(
         : active
           ? { runId: replacementRunId ?? "wishlist-run", scope: activeScope }
           : null;
+      if (selectedStatus) hadRun = true;
       data = {
         coverageMeasurement: "not-measured",
         activity: selectedStatus
@@ -316,24 +329,104 @@ async function wishlistFixture(
                 failedPairs: 0,
               },
             }
-          : { state: "none" },
+          : hadRun
+            ? {
+                state: "saved",
+                relation: "historical",
+                value: {
+                  scope: activeScope ?? "wishlist",
+                  state: "completed",
+                  pairCount: 3,
+                  completedPairs: 3,
+                  cacheHits: 1,
+                  cacheMisses: 2,
+                  failedPairs: 0,
+                  publication: { state: "published", outcomePersistence: "finalized" },
+                },
+              }
+            : { state: "none" },
       };
+      const publicationFlow = new URL(page.url()).searchParams.get("publication-flow");
+      const flowState =
+        publicationFlow === "initial-pending-published"
+          ? runStatusReadCount === 1
+            ? "pending"
+            : "published"
+          : publicationFlow === "active-unavailable-pending-published"
+            ? runStatusReadCount === 1
+              ? "active"
+              : runStatusReadCount === 2
+                ? "unavailable"
+                : runStatusReadCount === 3
+                  ? "pending"
+                  : "published"
+            : null;
+      if (flowState) {
+        data = {
+          coverageMeasurement: "not-measured",
+          activity:
+            flowState === "active"
+              ? { state: "active", runId: "wishlist-flow-run", scope: "wishlist" }
+              : flowState === "unavailable"
+                ? { state: "unavailable" }
+                : { state: "idle" },
+          progress:
+            flowState === "active"
+              ? {
+                  state: "saved",
+                  relation: "active-run",
+                  value: {
+                    scope: "wishlist",
+                    state: "last-known-running",
+                    pairCount: 3,
+                    completedPairs: 1,
+                    cacheHits: 1,
+                    cacheMisses: 2,
+                    failedPairs: 0,
+                  },
+                }
+              : flowState === "unavailable"
+                ? { state: "unavailable" }
+                : {
+                    state: "saved",
+                    relation: "historical",
+                    ...(flowState === "pending" ? { retryRunId: "wishlist-flow-run" } : {}),
+                    value: {
+                      scope: "wishlist",
+                      state: "interrupted",
+                      pairCount: 3,
+                      completedPairs: 1,
+                      cacheHits: 1,
+                      cacheMisses: 2,
+                      failedPairs: 0,
+                      stopReason: "owner-cancelled",
+                      publication:
+                        flowState === "pending"
+                          ? {
+                              state: "pending",
+                              phase: "promote",
+                              outcomePersistence: "sealed",
+                            }
+                          : { state: "published", outcomePersistence: "finalized" },
+                    },
+                  },
+        };
+      }
       if (statusFailureAt === runStatusReadCount) {
         status = 503;
         data = { error: "Status temporarily unavailable" };
       }
-      if (holdSecondStatus && runStatusReadCount === 2) {
-        let announceEntered!: () => void;
+      if (requestToHoldNextStatus && heldStatus) {
+        requestToHoldNextStatus = false;
         let release!: () => void;
-        const entered = new Promise<void>((resolve) => {
-          announceEntered = resolve;
-        });
         const pending = new Promise<void>((resolve) => {
           release = resolve;
         });
-        heldStatus.set(runStatusReadCount, { entered, release });
-        announceEntered();
+        pendingStatusRelease = release;
+        heldStatus.read = runStatusReadCount;
+        heldStatus.announce(runStatusReadCount);
         await pending;
+        pendingStatusRelease = undefined;
       }
     } else if (url.pathname.endsWith("/run-preview")) {
       previewRequestCount += 1;
@@ -407,6 +500,7 @@ async function wishlistFixture(
         data = { error: "Run precondition failed" };
       } else {
         active = true;
+        hadRun = true;
         if (cacheResultChangesAfterRun) cachedRunCompleted = true;
         data = { state: "running", runId: "wishlist-run" };
       }
@@ -537,6 +631,37 @@ test("a reloaded wishlist run completion refreshes projections exactly once", as
   await expect.poll(projections).toBe(2);
 });
 
+test("an initially loaded pending wishlist publication refreshes once when later published", async ({
+  page,
+}) => {
+  const calls = await wishlistFixture(page);
+  await page.goto("/wishlist?publication-flow=initial-pending-published");
+  const projections = () =>
+    calls.filter((call) => call.url === "/api/daemon/wishlist/redundancy").length;
+  await expect.poll(projections).toBe(1);
+  await page.getByRole("button", { name: "Refresh status" }).click();
+  await expect.poll(projections).toBe(2);
+  await page.getByRole("button", { name: "Refresh status" }).click();
+  await expect.poll(projections).toBe(2);
+});
+
+test("wishlist activity loss retains pending publication tracking through later publication", async ({
+  page,
+}) => {
+  const calls = await wishlistFixture(page);
+  await page.goto("/wishlist?publication-flow=active-unavailable-pending-published");
+  const projections = () =>
+    calls.filter((call) => call.url === "/api/daemon/wishlist/redundancy").length;
+  await expect(page.getByRole("status")).toContainText("Wishlist comparison is running");
+  await expect.poll(projections).toBe(1);
+  await page.getByRole("button", { name: "Refresh status" }).click();
+  await expect(page.getByRole("status")).toContainText("Live run status is unavailable");
+  await page.getByRole("button", { name: "Refresh status" }).click();
+  await expect.poll(projections).toBe(1);
+  await page.getByRole("button", { name: "Refresh status" }).click();
+  await expect.poll(projections).toBe(2);
+});
+
 test("a delayed start receipt cannot replace newer wishlist status authority", async ({ page }) => {
   const calls = await wishlistFixture(
     page,
@@ -553,7 +678,6 @@ test("a delayed start receipt cannot replace newer wishlist status authority", a
     "active-run",
     "wishlist",
     [null, { runId: "new-authoritative-run", scope: "wishlist" }],
-    false,
     undefined,
     true,
   );
@@ -680,18 +804,19 @@ for (const olderRequestFails of [false, true])
         { runId: "old-wishlist-run", scope: "wishlist" },
         { runId: "new-collection-run", scope: "collection" },
       ],
-      true,
       olderRequestFails ? 2 : undefined,
     );
     await page.goto("/wishlist");
     await expect
       .poll(() => calls.filter((call) => call.url.endsWith("/refresh-progress")).length)
       .toBe(1);
+    calls.holdNextStatus();
     await page.getByRole("button", { name: "Refresh status" }).click();
-    await calls.waitForHeldStatus(2);
+    const heldRead = await calls.waitForHeldStatus();
+    expect(heldRead).toBeGreaterThan(1);
     await page.getByRole("button", { name: "Refresh status" }).click();
     await expect(page.getByRole("status")).toContainText("A collection comparison is active");
-    calls.releaseHeldStatus(2);
+    calls.releaseHeldStatus();
     await expect
       .poll(() => calls.filter((call) => call.url.endsWith("/refresh-progress")).length)
       .toBe(3);
@@ -997,7 +1122,6 @@ test("expanded current Community Rating breakdown shows effective values only", 
     "active-run",
     "wishlist",
     undefined,
-    false,
     undefined,
     false,
     true,

@@ -106,6 +106,13 @@ export interface StorageService extends CollectionReader, CollectionPersistence 
   hydrateSourceVector?(): Promise<SourceVector>;
   /** Fresh, metadata-coherent view for JEV source capture; returned data is caller-owned. */
   loadJevSourceSnapshot?(): Promise<JevSourceSnapshot>;
+  /** Direct, stable filesystem identity for every source represented in collection snapshots. */
+  readCollectionSnapshotAuthority?(): Promise<CollectionSnapshotAuthority>;
+}
+
+export interface CollectionSnapshotAuthority {
+  available: boolean;
+  identity: string;
 }
 
 export interface JevSourceSnapshot {
@@ -384,6 +391,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   let externalJevEpoch = 0n;
   let jevSnapshotCache: { signatures: readonly string[]; snapshot: JevSourceSnapshot } | undefined;
   let collectionMustExistForJevSnapshot = false;
+  let lastSnapshotAuthority: { signatures: readonly (string | null)[] } | undefined;
 
   // Per-file in-flight load promise. Serializes concurrent first-time loads so
   // two callers don't both race to write `<file>.tmp` and one ends up renaming
@@ -603,6 +611,120 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     });
   }
 
+  async function readCollectionSnapshotAuthority(): Promise<CollectionSnapshotAuthority> {
+    if (!fileOps.stat)
+      throw new Error("Collection snapshot source freshness metadata is unavailable");
+    const paths = [
+      ["collection", collectionPath],
+      ["tournament", tournamentPath],
+      ["prediction-settings", sourcePaths["prediction-settings"]],
+      ["redundancy-settings", sourcePaths["redundancy-settings"]],
+      ["niche-settings", sourcePaths["niche-settings"]],
+      ["shelf-config", sourcePaths["shelf-config"]],
+    ] as const;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const first = await observeSnapshotSources(paths);
+      if (!first) continue;
+      const second = await observeSnapshotSources(paths);
+      if (!second || !sameFileSignatures(first.signatures, second.signatures)) continue;
+      const finalMetadata = await readSnapshotMetadata(paths);
+      if (!finalMetadata || !sameFileSignatures(second.metadataIdentities, finalMetadata)) continue;
+
+      const prior = lastSnapshotAuthority;
+      for (const [index, [name, filePath]] of paths.entries()) {
+        const signature = second.signatures[index] ?? null;
+        establishedJevPaths.add(filePath);
+        // On first observation no loaded source cache has byte-level provenance.
+        // Fence it before allowing this identity to authorize a snapshot.
+        if (!prior || signature !== prior.signatures[index]) {
+          fenceSnapshotSource(name, filePath);
+        }
+      }
+      lastSnapshotAuthority = { signatures: second.signatures };
+      return { available: second.available, identity: canonicalSha256(second.identities) };
+    }
+    throw new Error("Collection snapshot sources changed repeatedly during authority capture");
+  }
+
+  async function observeSnapshotSources(paths: readonly (readonly [string, string])[]): Promise<{
+    identities: Array<readonly [string, string | null]>;
+    signatures: Array<string | null>;
+    metadataIdentities: Array<string | null>;
+    available: boolean;
+  } | null> {
+    const identities: Array<readonly [string, string | null]> = [];
+    const signatures: Array<string | null> = [];
+    const metadataIdentities: Array<string | null> = [];
+    let available = true;
+    for (const [name, filePath] of paths) {
+      let before: FileMetadata;
+      try {
+        before = await fileOps.stat!(filePath);
+      } catch (error) {
+        if (!hasErrorCode(error, "ENOENT")) throw error;
+        identities.push([name, null]);
+        signatures.push(null);
+        metadataIdentities.push(null);
+        available = false;
+        continue;
+      }
+      const beforeIdentity = fileMetadataIdentity(before);
+      let content: string;
+      try {
+        content = await fileOps.readFile(filePath);
+      } catch (error) {
+        if (!hasErrorCode(error, "ENOENT")) throw error;
+        identities.push([name, null]);
+        signatures.push(null);
+        metadataIdentities.push(null);
+        available = false;
+        continue;
+      }
+      let afterIdentity: string;
+      try {
+        afterIdentity = fileMetadataIdentity(await fileOps.stat!(filePath));
+      } catch (error) {
+        if (!hasErrorCode(error, "ENOENT")) throw error;
+        return null;
+      }
+      if (beforeIdentity !== afterIdentity) return null;
+      const contentIdentity = canonicalSha256(content);
+      identities.push([name, contentIdentity]);
+      signatures.push(canonicalSha256({ fileIdentity: afterIdentity, contentIdentity }));
+      metadataIdentities.push(afterIdentity);
+    }
+    return { identities, signatures, metadataIdentities, available };
+  }
+
+  async function readSnapshotMetadata(
+    paths: readonly (readonly [string, string])[],
+  ): Promise<Array<string | null> | null> {
+    const metadata = await Promise.all(
+      paths.map(async ([, filePath]) => {
+        try {
+          return fileMetadataIdentity(await fileOps.stat!(filePath));
+        } catch (error) {
+          if (hasErrorCode(error, "ENOENT")) return null;
+          throw error;
+        }
+      }),
+    );
+    return metadata;
+  }
+
+  function fenceSnapshotSource(name: string, filePath: string): void {
+    establishedJevPaths.add(filePath);
+    if (name === "collection") {
+      invalidateJevPath(filePath);
+      return;
+    }
+    const kind = name as RevisionedSourceKind;
+    sourceCache.delete(kind);
+    unavailableJevPaths.add(filePath);
+    jevSnapshotCache = undefined;
+    sourceVector.markUnavailable(kind);
+  }
+
   async function readStoredSource(
     kind: RevisionedSourceKind,
     allowCreate = true,
@@ -610,6 +732,8 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     const filePath = sourcePaths[kind];
     try {
       if (!(await fileOps.exists(filePath))) {
+        if (establishedJevPaths.has(filePath))
+          throw new Error("An established snapshot source file disappeared");
         if (!allowCreate) throw new Error("A required JEV source file disappeared");
         const prepared = prepareMissingStoredSource(kind, new Date().toISOString());
         await fileOps.mkdir(dataDir);
@@ -790,8 +914,8 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       return withLoadLock(collectionPath, async () => {
         const exists = await fileOps.exists(collectionPath);
         if (!exists) {
-          if (collectionMustExistForJevSnapshot)
-            throw new Error("An established JEV collection file disappeared");
+          if (collectionMustExistForJevSnapshot || establishedJevPaths.has(collectionPath))
+            throw new Error("An established collection file disappeared");
           const collection = createDefaultCollection(deps.collectionMigrationDependencies);
           await persistCollection(collection);
           advanceAttentionCandidateSourceGeneration();
@@ -893,6 +1017,9 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
 
     loadJevSourceSnapshot(): Promise<JevSourceSnapshot> {
       return captureJevSourceSnapshot();
+    },
+    readCollectionSnapshotAuthority(): Promise<CollectionSnapshotAuthority> {
+      return readCollectionSnapshotAuthority();
     },
 
     async saveCollection(collection: Collection): Promise<void> {
@@ -1169,6 +1296,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   const loadCollection = storage.loadCollection.bind(storage);
   const loadWishlist = storage.loadWishlist.bind(storage);
   const loadJevSourceSnapshot = storage.loadJevSourceSnapshot?.bind(storage);
+  const readSnapshotAuthority = storage.readCollectionSnapshotAuthority?.bind(storage);
   const loadTournament = storage.loadTournament.bind(storage);
   const loadPredictionSettings = storage.loadPredictionSettings.bind(storage);
   const loadNicheSettings = storage.loadNicheSettings.bind(storage);
@@ -1179,6 +1307,8 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   storage.loadWishlist = () => coordinate(loadWishlist);
   if (loadJevSourceSnapshot)
     storage.loadJevSourceSnapshot = () => coordinate(loadJevSourceSnapshot);
+  if (readSnapshotAuthority)
+    storage.readCollectionSnapshotAuthority = () => coordinate(readSnapshotAuthority);
   storage.loadTournament = () => coordinate(loadTournament);
   storage.loadPredictionSettings = () => coordinate(loadPredictionSettings);
   storage.loadNicheSettings = () => coordinate(loadNicheSettings);

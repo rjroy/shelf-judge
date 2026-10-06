@@ -14,8 +14,9 @@ describe("redundancy run controls", () => {
     expect(page).toContain("Refresh coverage");
     expect(page).toContain("Refresh progress");
     expect(page).toContain(
-      "const shouldMeasure = wasActive.current || activityUnavailable.current",
+      "wasActive.current || activityUnavailable.current || runPublicationExpected.current",
     );
+    expect(page).toContain("const statusRecoveredWithoutPending =");
     expect(page).toContain("measurePending.current = true");
     expect(page).toContain("setRefresh(null)");
     expect(page).toContain("Coverage is not being presented as current");
