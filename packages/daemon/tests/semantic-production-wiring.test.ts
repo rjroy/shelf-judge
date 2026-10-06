@@ -4,7 +4,7 @@ import {
   createInitialEntityMetadata,
   createInitialSemanticRedundancyStateV10,
 } from "@shelf-judge/shared";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTestApp, jsonRequest } from "./helpers/test-app.js";
@@ -327,6 +327,25 @@ describe("semantic production app wiring", () => {
       await context.gameService.rateGame(stored.games[1].id, { [personalAxes[1].id]: 7 });
       const hydratedSourceVector = await context.storageService.hydrateSourceVector?.();
 
+      // Prime decoded niche/shelf source caches, then make same-revision external
+      // edits before the snapshot authority has ever been captured.
+      await context.storageService.loadNicheSettings();
+      await context.storageService.loadShelfConfig();
+      const nichePath = join(filesDir, "niche-settings.json");
+      const shelfPath = join(filesDir, "shelf-config.json");
+      const nicheStored = JSON.parse(await readFile(nichePath, "utf8")) as {
+        revision: number;
+        ignoredTags: Array<{ type: string; name: string }>;
+      };
+      nicheStored.ignoredTags = [{ type: "mechanic", name: "External first-capture marker" }];
+      await writeFile(nichePath, JSON.stringify(nicheStored, null, 2), "utf8");
+      const shelfStored = JSON.parse(await readFile(shelfPath, "utf8")) as {
+        revision: number;
+        updatedAt: string;
+      };
+      shelfStored.updatedAt = "2026-01-02T00:00:00.000Z";
+      await writeFile(shelfPath, JSON.stringify(shelfStored, null, 2), "utf8");
+
       const collection = await context.storageService.loadCollection();
       const predictionCapture = await context.predictionService.listGamesWithPredictions();
       const tournament = await context.storageService.loadTournament();
@@ -453,6 +472,7 @@ describe("semantic production app wiring", () => {
         expect(listResponse.status).toBe(200);
         expect(detailResponse.status).toBe(200);
         const snapshot = (await snapshotResponse.json()) as {
+          ignoredTags: string[];
           games: {
             game: { id: string };
             predicted: { score: { score: number } | null };
@@ -463,7 +483,14 @@ describe("semantic production app wiring", () => {
         const detail = (await detailResponse.json()) as GameWithScore;
         const snapshotGame = snapshot.games.find((game) => game.game.id === games[0].id)!;
         const listGame = list.find((game) => game.game.id === games[0].id)!;
-        return { snapshot, snapshotGame, list, listGame, detail };
+        return {
+          snapshot,
+          snapshotGame,
+          list,
+          listGame,
+          detail,
+          snapshotEtag: snapshotResponse.headers.get("etag"),
+        };
       };
       const assertReady = async () => {
         const result = await readRoutes();
@@ -482,6 +509,22 @@ describe("semantic production app wiring", () => {
       };
 
       const ready = await assertReady();
+      expect(ready.snapshot.ignoredTags).toContain("mechanic:External first-capture marker");
+      expect(ready.snapshotEtag).not.toBeNull();
+      const firstSnapshotEtag = ready.snapshotEtag!;
+      const shelfAfterCapture = JSON.parse(await readFile(shelfPath, "utf8")) as {
+        revision: number;
+        updatedAt: string;
+      };
+      shelfAfterCapture.updatedAt = "2026-01-03T00:00:00.000Z";
+      await writeFile(shelfPath, JSON.stringify(shelfAfterCapture, null, 2), "utf8");
+      const refreshedSnapshotResponse = await context.app.request(
+        new Request("http://localhost/api/collection/snapshot", {
+          headers: { "If-None-Match": firstSnapshotEtag },
+        }),
+      );
+      expect(refreshedSnapshotResponse.status).toBe(200);
+      expect(refreshedSnapshotResponse.headers.get("etag")).not.toBe(firstSnapshotEtag);
       expect(JSON.stringify({ snapshot: ready.snapshot, list: ready.list })).not.toContain(
         "PRIVATE NOTE",
       );
@@ -503,6 +546,7 @@ describe("semantic production app wiring", () => {
       cache.purgePair(games[0].id, games[1].id, "C");
       const missing = await readRoutes();
       expect(missing.snapshotGame.redundancySimilarityInfo.status).toBe("partial");
+      expect(missing.snapshotEtag).not.toBeNull();
       expect(missing.listGame.score?.redundancySimilarityInfo?.status).toBe("partial");
       expect(missing.detail.score?.redundancySimilarityInfo?.status).toBe("partial");
       const partialIdentity = missing.snapshotGame.redundancySimilarityInfo.generationId;

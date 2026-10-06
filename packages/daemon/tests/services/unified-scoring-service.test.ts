@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -7,7 +7,11 @@ import type { Axis, Collection, Game, WishlistEntry } from "@shelf-judge/shared"
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createFileOps } from "../../src/services/file-ops.js";
 import { createJevPairCache } from "../../src/services/jev-pair-cache-service.js";
-import type { JevPairCache, JevPairJudgment } from "../../src/services/jev-pair-cache-service.js";
+import type {
+  JevPairCache,
+  JevPairJudgment,
+  JevRunProgress,
+} from "../../src/services/jev-pair-cache-service.js";
 import { JEV_JUDGMENT_CONTRACT } from "../../src/services/jev/jev-judgment-contract.js";
 import {
   buildJevPairDependencies,
@@ -20,9 +24,26 @@ import { createStorageService } from "../../src/services/storage-service.js";
 import { createFitnessService } from "../../src/services/fitness-service.js";
 import { createUnifiedScoringService } from "../../src/services/unified-scoring-service.js";
 import { advanceWishlistMutationGeneration } from "../../src/services/profile-source-coordinator.js";
+import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
 import { createVerifiedWishlistRefreshOverlay } from "../../src/services/staged-similarity-capture.js";
+import { createCollectionSnapshotCacheService } from "../../src/services/collection-snapshot-cache-service.js";
 
 const observedAt = "2026-10-04T00:00:00.000Z";
+
+function readSnapshotScore(body: string | null): number | null {
+  const parsed: unknown = JSON.parse(body ?? "{}");
+  if (typeof parsed !== "object" || parsed === null || !("games" in parsed))
+    throw new Error("Snapshot has no games array");
+  const games: unknown = parsed.games;
+  if (!Array.isArray(games) || typeof games[0] !== "object" || games[0] === null)
+    throw new Error("Snapshot has no first game");
+  const firstGame: unknown = games[0];
+  if (typeof firstGame !== "object" || firstGame === null || !("score" in firstGame))
+    throw new Error("Snapshot first game has no score");
+  const score: unknown = firstGame.score;
+  if (score !== null && typeof score !== "number") throw new Error("Snapshot score is invalid");
+  return score;
+}
 
 function wishlistEntry(bggId: number, overrides: Partial<WishlistEntry> = {}): WishlistEntry {
   return {
@@ -301,6 +322,357 @@ describe("unified scoring storage composition", () => {
     }
   });
 
+  test("ordinary unified scoring remains published-only through staging, cold reads, source change, and promotion", async () => {
+    directory = await mkdtemp(join(tmpdir(), "unified-staged-published-boundary-"));
+    const storage = createStorageService({
+      dataDir: directory,
+      configPath: join(directory, "config.json"),
+      fileOps: createFileOps(),
+    });
+    const cache = await createJevPairCache(directory);
+    try {
+      const collection = await storage.loadCollection();
+      collection.axes = [axis()];
+      collection.games = [
+        game("target"),
+        game("rated-reference-1", 2),
+        game("rated-reference-2", 4),
+        game("rated-reference-3", 6),
+        game("rated-reference-4", 8),
+        game("rated-reference-5", 10),
+      ];
+      collection.semanticRedundancy.settings = {
+        ...collection.semanticRedundancy.settings,
+        enabled: true,
+        cachedOwnerNoteUse: false,
+        weights: { factual: 1, description: 1, ownerNote: 0 },
+      };
+      await storage.saveCollection(collection);
+      if (!storage.hydrateSourceVector) throw new Error("Source vector hydration unavailable");
+      await storage.hydrateSourceVector();
+
+      const makeService = () =>
+        createUnifiedScoringService({
+          storageService: storage,
+          cache,
+          fitnessService: createFitnessService(),
+        });
+      const service = makeService();
+      const frame = await service.capture();
+      const request = { scope: "predict-game" as const, gameId: "target" };
+      const requestOptions = { includeRedundancy: true };
+      const initial = service.calculate(frame, request, requestOptions);
+      const firstPair =
+        initial.calculationDependencyPairs.find(({ pair }) => pair.domain === "collection")?.pair ??
+        initial.predictionPairs.find(({ pair }) => pair.domain === "collection")?.pair ??
+        initial.redundancyPairs.find(({ pair }) => pair.domain === "collection")?.pair;
+      if (!firstPair || firstPair.domain !== "collection")
+        throw new Error("Expected a collection semantic dependency pair");
+      const gameA = frame.sources.collection.games.find((item) => item.id === firstPair.gameAId);
+      const gameB = frame.sources.collection.games.find((item) => item.id === firstPair.gameBId);
+      if (!gameA?.bggData?.description || !gameB?.bggData?.description)
+        throw new Error("Expected described semantic pair sources");
+      const row: JevPairJudgment = {
+        collectionId: frame.sources.collection.id,
+        gameAId: firstPair.gameAId,
+        gameBId: firstPair.gameBId,
+        signal: "C",
+        dependencyKind: "C_ONLY",
+        value: 0.2,
+        confidence: 1,
+        ...JEV_JUDGMENT_CONTRACT,
+        completedAt: observedAt,
+        dependencies: buildJevPairDependencies(
+          "C_ONLY",
+          { gameId: gameA.id, name: gameA.name, description: gameA.bggData.description },
+          { gameId: gameB.id, name: gameB.name, description: gameB.bggData.description },
+        ),
+      };
+      cache.upsert(row);
+      const publishedRead = service.calculate(frame, request, requestOptions);
+      expect(publishedRead.evidence(firstPair)?.description).toMatchObject({
+        state: "available",
+        value: 0.2,
+      });
+
+      const reserve = cache.reserveRunBatch?.bind(cache);
+      const checkpoint = cache.checkpointStagedPair?.bind(cache);
+      const stage = cache.stagedSnapshot?.bind(cache);
+      const seal = cache.sealRunBatch?.bind(cache);
+      const promote = cache.promoteRunBatch?.bind(cache);
+      if (!reserve || !checkpoint || !stage || !seal || !promote)
+        throw new Error("Expected durable staging cache API");
+      const running = {
+        runId: "run-unified-stage-proof",
+        state: "running" as const,
+        scope: "collection" as const,
+        pairCount: 1,
+        completedPairs: 0,
+        cacheHits: 0,
+        cacheMisses: 1,
+        failedPairs: 0,
+        updatedAt: observedAt,
+      };
+      reserve.call(cache, running);
+      const staged = { ...row, value: 0.9 };
+      checkpoint.call(cache, { judgments: [staged], progress: { ...running, completedPairs: 1 } });
+      expect(
+        cache.lookupForRun?.(running.runId, {
+          gameAId: row.gameAId,
+          gameBId: row.gameBId,
+          signal: "C",
+        })?.value,
+      ).toBe(0.9);
+      expect(cache.lookup({ gameAId: row.gameAId, gameBId: row.gameBId, signal: "C" })?.value).toBe(
+        0.2,
+      );
+
+      const coldService = makeService();
+      const coldFrame = await coldService.capture();
+      const coldRead = coldService.calculate(coldFrame, request, requestOptions);
+      expect(coldRead.evidence(firstPair)?.description).toMatchObject({
+        state: "available",
+        value: 0.2,
+      });
+
+      const currentPredictionSettings = await storage.loadPredictionSettings();
+      await storage.savePredictionSettings({
+        ...currentPredictionSettings,
+        defaultK: currentPredictionSettings.defaultK + 1,
+      });
+      if (!storage.hydrateSourceVector) throw new Error("Source vector hydration unavailable");
+      await storage.hydrateSourceVector();
+      const changedService = makeService();
+      const changedFrame = await changedService.capture();
+      const changedRead = changedService.calculate(changedFrame, request, requestOptions);
+      expect(changedRead.evidence(firstPair)?.description).toMatchObject({
+        state: "available",
+        value: 0.2,
+      });
+      expect(
+        cache.lookupForRun?.(running.runId, {
+          gameAId: row.gameAId,
+          gameBId: row.gameBId,
+          signal: "C",
+        })?.value,
+      ).toBe(0.9);
+
+      const terminal = { ...running, state: "completed" as const, completedPairs: 1 };
+      seal.call(cache, terminal);
+      const snapshot = stage.call(cache, running.runId);
+      if (!snapshot) throw new Error("Expected sealed staged snapshot");
+      const publication = promote.call(cache, {
+        runId: running.runId,
+        expectedStagingRevision: snapshot.revision,
+        eligibleJudgments: [staged],
+        progress: terminal,
+      });
+      expect(publication.status).toBe("published");
+      const finalService = makeService();
+      const finalFrame = await finalService.capture();
+      const finalRead = finalService.calculate(finalFrame, request, requestOptions);
+      expect(finalRead.evidence(firstPair)?.description).toMatchObject({
+        state: "available",
+        value: 0.9,
+      });
+      expect(cache.stagedSnapshot?.(running.runId)).toBeNull();
+    } finally {
+      cache.close();
+    }
+  });
+
+  test("real SQLite scoring proof keeps snapshot validators through staging and refreshes after promotion", async () => {
+    directory = await mkdtemp(join(tmpdir(), "unified-snapshot-cache-proof-"));
+    const storage = createStorageService({
+      dataDir: directory,
+      configPath: join(directory, "config.json"),
+      fileOps: createFileOps(),
+    });
+    const cache = await createJevPairCache(directory);
+    try {
+      const collection = await storage.loadCollection();
+      collection.axes = [axis()];
+      collection.games = [
+        game("target"),
+        game("snapshot-reference-1", 2),
+        game("snapshot-reference-2", 4),
+        game("snapshot-reference-3", 6),
+        game("snapshot-reference-4", 8),
+        game("snapshot-reference-5", 10),
+      ];
+      collection.semanticRedundancy.settings = {
+        ...collection.semanticRedundancy.settings,
+        enabled: true,
+        cachedOwnerNoteUse: false,
+        weights: { factual: 1, description: 1, ownerNote: 0 },
+      };
+      await storage.saveCollection(collection);
+      if (!storage.hydrateSourceVector) throw new Error("Source vector hydration unavailable");
+      await storage.hydrateSourceVector();
+      const scoring = createUnifiedScoringService({
+        storageService: storage,
+        cache,
+        fitnessService: createFitnessService(),
+      });
+      const initialFrame = await scoring.capture();
+      const initialCalculation = scoring.calculate(
+        initialFrame,
+        { scope: "predict-game", gameId: "target" },
+        { includeRedundancy: true },
+      );
+      const dependency = initialCalculation.predictionPairs.find(
+        ({ pair }) => pair.domain === "collection",
+      )?.pair;
+      if (!dependency || dependency.domain !== "collection")
+        throw new Error("Expected a semantic prediction dependency");
+      const sourceGames = new Map(
+        initialFrame.sources.collection.games.map((item) => [item.id, item]),
+      );
+      const gameA = sourceGames.get(dependency.gameAId);
+      const gameB = sourceGames.get(dependency.gameBId);
+      if (!gameA || !gameB) throw new Error("Expected captured semantic dependency sources");
+      const publishedRow: JevPairJudgment = {
+        collectionId: collection.id,
+        gameAId: dependency.gameAId,
+        gameBId: dependency.gameBId,
+        signal: "C",
+        dependencyKind: "C_ONLY",
+        value: 0.2,
+        confidence: 1,
+        ...JEV_JUDGMENT_CONTRACT,
+        completedAt: observedAt,
+        dependencies: buildJevPairDependencies(
+          "C_ONLY",
+          {
+            gameId: gameA.id,
+            name: gameA.name,
+            description: gameA.bggData?.description ?? undefined,
+          },
+          {
+            gameId: gameB.id,
+            name: gameB.name,
+            description: gameB.bggData?.description ?? undefined,
+          },
+        ),
+      };
+      cache.upsert(publishedRow);
+      let builds = 0;
+      let serializations = 0;
+      const snapshotCache = createCollectionSnapshotCacheService({
+        storageService: storage,
+        coordinator: profileSourceCoordinatorFor(storage),
+        clock: { now: () => Date.parse(observedAt) },
+        serialize: (snapshot) => {
+          serializations++;
+          return JSON.stringify(snapshot);
+        },
+        builder: {
+          async buildSnapshot() {
+            builds++;
+            const frame = await scoring.capture();
+            const calculation = scoring.calculate(
+              frame,
+              { scope: "predict-game", gameId: "target" },
+              { includeRedundancy: true },
+            );
+            const score = calculation.targetFitness.get("target")?.score ?? null;
+            return {
+              snapshot: {
+                representationVersion: 1,
+                collectionId: collection.id,
+                serverId: "real-scoring-test",
+                status: "complete",
+                unavailableFeatures: [],
+                axes: [],
+                ignoredTags: [],
+                redundancyMode: "integrated",
+                games: [{ gameId: "target", score }],
+                nichePositions: { availability: "available", positions: [] },
+                capacity: { availability: "available", result: null },
+                counts: { total: 1, rated: 1, predicted: 1, unavailablePredictions: 0 },
+                averageScore: score,
+              } as unknown as import("@shelf-judge/shared").CollectionSnapshot,
+              sourceVector: frame.sources.sourceVector,
+              evaluatedAtMs: Date.parse(observedAt),
+              expiresAtMs: null,
+              semanticRead: {
+                status: "unified-v2",
+                proof: calculation.proof,
+                isCurrent: () => calculation.isCurrent(),
+                isReusable: () => calculation.isReusable(),
+                validateCurrent: async () =>
+                  (await scoring.publishCurrent(calculation, () => true)) === true,
+              },
+            };
+          },
+        },
+      });
+      const first = await snapshotCache.resolve();
+      expect(first.status).toBe(200);
+      expect(first.cacheable).toBe(true);
+      const firstEtag = first.etag;
+      const firstBody = first.body;
+      expect((await snapshotCache.resolve(firstEtag)).status).toBe(304);
+      expect({ builds, serializations }).toEqual({ builds: 1, serializations: 1 });
+
+      const shelfRevision = storage.sourceVector?.().shelfConfigRevision;
+      const shelfConfigPath = join(directory, "shelf-config.json");
+      await writeFile(shelfConfigPath, `${await readFile(shelfConfigPath, "utf8")}\n`, "utf8");
+      const afterExternalEdit = await snapshotCache.resolve(firstEtag);
+      expect(afterExternalEdit.status).toBe(200);
+      expect(afterExternalEdit.etag).not.toBe(firstEtag);
+      expect(storage.sourceVector?.().shelfConfigRevision).toBe(shelfRevision);
+      expect({ builds, serializations }).toEqual({ builds: 2, serializations: 2 });
+      const stableEtag = afterExternalEdit.etag;
+
+      const running: JevRunProgress = {
+        runId: "snapshot-staged-run",
+        state: "running",
+        scope: "collection",
+        pairCount: 1,
+        completedPairs: 0,
+        cacheHits: 0,
+        cacheMisses: 1,
+        failedPairs: 0,
+        updatedAt: observedAt,
+      };
+      const stagedRow = { ...publishedRow, value: 0.9 };
+      cache.reserveRunBatch?.(running);
+      cache.checkpointStagedPair?.({
+        judgments: [stagedRow],
+        progress: { ...running, completedPairs: 1 },
+      });
+      expect((await snapshotCache.resolve(stableEtag)).status).toBe(304);
+      expect({ builds, serializations }).toEqual({ builds: 2, serializations: 2 });
+
+      const terminal: JevRunProgress = {
+        ...running,
+        state: "completed",
+        completedPairs: 1,
+      };
+      cache.sealRunBatch?.(terminal);
+      const staged = cache.stagedSnapshot?.(running.runId);
+      if (!staged) throw new Error("Expected staged snapshot evidence");
+      cache.promoteRunBatch?.({
+        runId: running.runId,
+        expectedStagingRevision: staged.revision,
+        eligibleJudgments: [stagedRow],
+        progress: terminal,
+      });
+      const afterPublication = await snapshotCache.resolve(stableEtag);
+      expect(afterPublication.status).toBe(200);
+      expect(afterPublication.cacheable).toBe(true);
+      expect(afterPublication.etag).not.toBe(stableEtag);
+      expect(afterPublication.body).not.toBe(afterExternalEdit.body);
+      const afterPublicationScore = readSnapshotScore(afterPublication.body);
+      const initialScore = readSnapshotScore(firstBody);
+      expect(afterPublicationScore).not.toBe(initialScore);
+      expect({ builds, serializations }).toEqual({ builds: 3, serializations: 3 });
+    } finally {
+      cache.close();
+    }
+  });
+
   test("re-reads retained wishlist C_ONLY evidence after durable note revocation and cleanup failure", async () => {
     directory = await mkdtemp(join(tmpdir(), "unified-scoring-note-revocation-"));
     const storage = createStorageService({
@@ -423,6 +795,26 @@ describe("unified scoring storage composition", () => {
         },
       });
 
+      const sharedC = cache.lookup({ gameAId: ownedA.id, gameBId: ownedB.id, signal: "C" });
+      const sharedD = cache.lookup({ gameAId: ownedA.id, gameBId: ownedB.id, signal: "D" });
+      if (!sharedC || !sharedD) throw new Error("Expected published shared C and D evidence");
+      const reserve = cache.reserveRunBatch?.bind(cache);
+      const checkpoint = cache.checkpointStagedPair?.bind(cache);
+      if (!reserve || !checkpoint) throw new Error("Expected staged cache methods");
+      const runProgress: JevRunProgress = {
+        runId: "run-note-revocation",
+        state: "running",
+        scope: "collection",
+        pairCount: 1,
+        completedPairs: 0,
+        cacheHits: 0,
+        cacheMisses: 1,
+        failedPairs: 0,
+        updatedAt: observedAt,
+      };
+      reserve.call(cache, runProgress);
+      checkpoint.call(cache, { judgments: [sharedC, sharedD], progress: runProgress });
+
       const service = createUnifiedScoringService({
         storageService: storage,
         cache,
@@ -442,10 +834,15 @@ describe("unified scoring storage composition", () => {
         })?.description,
       ).toMatchObject({ state: "available", noteDependent: true });
 
+      let failCleanup = true;
       const failingCache: JevPairCache = {
         ...cache,
         purgeDDependent: () => {
-          throw new Error("injected SQLite cleanup failure");
+          if (failCleanup) {
+            failCleanup = false;
+            throw new Error("injected SQLite cleanup failure");
+          }
+          return cache.purgeDDependent();
         },
       };
       const mutationService = createCollectionMutationService({
@@ -472,6 +869,7 @@ describe("unified scoring storage composition", () => {
           pairDomain: "wishlist-candidate",
         })?.dependencyKind,
       ).toBe("C_ONLY");
+      expect(cache.stagedSnapshot?.(runProgress.runId)?.judgments).toHaveLength(2);
 
       const collectionFrame = await service.capture();
       const collectionRead = service.calculate(
@@ -500,6 +898,37 @@ describe("unified scoring storage composition", () => {
         description: { state: "available", value: 0.6, noteDependent: false },
         ownerNote: { state: "not-requested" },
       });
+
+      const disabledState = await storage.loadCollection();
+      const reenabled = await createSemanticRedundancyStateService({
+        collectionMutationService: mutationService,
+      }).updateSettings(
+        {
+          evidenceEpoch: disabledState.semanticRedundancy.evidenceEpoch,
+          consentEpoch: disabledState.semanticRedundancy.consentEpoch,
+        },
+        { ...disabledState.semanticRedundancy.settings, cachedOwnerNoteUse: true },
+      );
+      expect(reenabled).toMatchObject({ outcome: "accepted", cleanupPending: false });
+      expect(cache.lookup({ gameAId: ownedA.id, gameBId: ownedB.id, signal: "C" })).toBeNull();
+      expect(cache.lookup({ gameAId: ownedA.id, gameBId: ownedB.id, signal: "D" })).toBeNull();
+      expect(cache.stagedSnapshot?.(runProgress.runId)?.judgments).toHaveLength(0);
+      const seal = cache.sealRunBatch?.bind(cache);
+      const promote = cache.promoteRunBatch?.bind(cache);
+      if (!seal || !promote) throw new Error("Expected terminal staged cache methods");
+      const terminal: JevRunProgress = { ...runProgress, state: "failed" };
+      seal.call(cache, terminal);
+      const snapshot = cache.stagedSnapshot?.(runProgress.runId);
+      if (!snapshot) throw new Error("Expected remaining sealed batch");
+      expect(
+        promote.call(cache, {
+          runId: runProgress.runId,
+          expectedStagingRevision: snapshot.revision,
+          eligibleJudgments: [],
+          progress: terminal,
+        }).status,
+      ).toBe("unchanged");
+      expect(cache.lookup({ gameAId: ownedA.id, gameBId: ownedB.id, signal: "C" })).toBeNull();
     } finally {
       cache.close();
     }

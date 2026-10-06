@@ -7,7 +7,12 @@ import type {
   RedundancySettings,
 } from "@shelf-judge/shared";
 import type { JevPairCache } from "./jev-pair-cache-service.js";
-import type { JevRunHandle, JevRunService, ValidatedPreparedJevRun } from "./jev-run-service.js";
+import type {
+  JevRunCompletion,
+  JevRunHandle,
+  JevRunService,
+  ValidatedPreparedJevRun,
+} from "./jev-run-service.js";
 import type { JevRunSourceAdapter } from "./jev-run-source-adapter.js";
 import type { UnifiedScoringService } from "./unified-scoring-service.js";
 import { prepareUnifiedJevRun, type PreparedUnifiedRun } from "./unified-jev-run-preparation.js";
@@ -57,6 +62,10 @@ export type JevRunControllerStartResponse =
 export type JevRunControllerCancelResponse =
   | { status: 200; body: { state: "cancellation-requested" } }
   | { status: 404 | 409; body: ControllerErrorBody };
+
+export type JevRunControllerPublicationResponse =
+  | { status: 200; body: JevRunCompletion }
+  | { status: 404 | 409 | 503; body: ControllerErrorBody };
 
 interface AuthorizationRecord {
   requestId: string;
@@ -198,6 +207,23 @@ export class JevRunController {
       return { status: 409, body: { error: "run-conflict" } };
     active.cancel();
     return { status: 200, body: { state: "cancellation-requested" } };
+  }
+
+  async retryPublication(input: { runId: string }): Promise<JevRunControllerPublicationResponse> {
+    if (
+      !input ||
+      typeof input.runId !== "string" ||
+      input.runId.length === 0 ||
+      input.runId.length > 100
+    )
+      return { status: 404, body: { error: "run-not-found" } };
+    try {
+      const completion = await this.options.runService.retryPublication(input.runId);
+      if (!completion) return { status: 404, body: { error: "run-not-found" } };
+      return { status: 200, body: completion };
+    } catch {
+      return { status: 503, body: { error: "run-unavailable" } };
+    }
   }
 
   /** Returns process-local live run identity; durable progress is not run authority. */

@@ -46,7 +46,44 @@ async function installDaemon(page: Page) {
               migrationNotice: { kind: "jev-cache-v9-to-v10", discardedPairCount: 1 },
             },
           };
-        else if (url.pathname.endsWith("/refresh-progress")) {
+        else if (url.pathname.endsWith("/semantic/publication/retry") && init?.method === "POST") {
+          if (new URL(location.href).searchParams.get("retry-fail") === "1")
+            return new Response(JSON.stringify({ error: "Publication retry unavailable" }), {
+              status: 503,
+              headers: { "content-type": "application/json" },
+            });
+          const retryResult = new URL(location.href).searchParams.get("retry-result");
+          const publication =
+            retryResult === "pending"
+              ? {
+                  state: "pending",
+                  phase: "promote",
+                  outcomePersistence: "sealed",
+                }
+              : retryResult === "unchanged"
+                ? { state: "unchanged", outcomePersistence: "finalized" }
+                : retryResult === "malformed"
+                  ? { state: "published" }
+                  : { state: "published", outcomePersistence: "finalized" };
+          if (publication.state === "pending") {
+            window.localStorage.setItem("publication-state", "pending");
+          } else if (publication.state === "published" || publication.state === "unchanged") {
+            window.localStorage.setItem("publication-state", "published");
+          }
+          response = {
+            runId: "retry-run-1",
+            state: "failed",
+            scope: "collection",
+            pairCount: 2,
+            completedPairs: 1,
+            cacheHits: 0,
+            cacheMisses: 2,
+            failedPairs: 0,
+            stopReason: "application-attempt-limit",
+            updatedAt: "2026-10-05T00:00:00.000Z",
+            publication,
+          };
+        } else if (url.pathname.endsWith("/refresh-progress")) {
           const runState = window.localStorage.getItem("run-state");
           const locationUrl = new URL(location.href);
           const statusRead = Number(window.localStorage.getItem("progress-read-count") ?? "0") + 1;
@@ -141,6 +178,10 @@ async function installDaemon(page: Page) {
                     ? {
                         state: "saved",
                         relation: "historical",
+                        ...(new URL(location.href).searchParams.get("publication") === "pending" ||
+                        new URL(location.href).searchParams.get("publication") === "unpersisted"
+                          ? { retryRunId: "retry-run-1" }
+                          : {}),
                         value: {
                           scope: window.localStorage.getItem("history-scope") ?? "collection",
                           state: runState === "complete" ? "completed" : "interrupted",
@@ -149,12 +190,18 @@ async function installDaemon(page: Page) {
                           cacheHits: 0,
                           cacheMisses: 2,
                           failedPairs: 0,
+                          publication: { state: "published", outcomePersistence: "finalized" },
                         },
                       }
                     : stopReason
                       ? {
                           state: "saved",
                           relation: "historical",
+                          ...(new URL(location.href).searchParams.get("publication") ===
+                            "pending" ||
+                          new URL(location.href).searchParams.get("publication") === "unpersisted"
+                            ? { retryRunId: "retry-run-1" }
+                            : {}),
                           value: {
                             scope: window.localStorage.getItem("history-scope") ?? "collection",
                             state: "failed",
@@ -164,6 +211,33 @@ async function installDaemon(page: Page) {
                             cacheMisses: 0,
                             failedPairs: progressCount("failed", 0),
                             stopReason,
+                            ...(window.localStorage.getItem("publication-state") === "published"
+                              ? {
+                                  publication: {
+                                    state: "published",
+                                    outcomePersistence: "finalized",
+                                  },
+                                }
+                              : new URL(location.href).searchParams.get("publication") ===
+                                    "pending" ||
+                                  window.localStorage.getItem("publication-state") === "pending"
+                                ? {
+                                    publication: {
+                                      state: "pending",
+                                      phase: "promote",
+                                      outcomePersistence: "sealed",
+                                    },
+                                  }
+                                : new URL(location.href).searchParams.get("publication") ===
+                                    "unpersisted"
+                                  ? {
+                                      publication: {
+                                        state: "pending",
+                                        phase: "seal",
+                                        outcomePersistence: "unpersisted",
+                                      },
+                                    }
+                                  : {}),
                           },
                         }
                       : { state: "none" },
@@ -253,6 +327,15 @@ async function installDaemon(page: Page) {
                 cacheMisses: 0,
                 failedPairs: Number(new URL(location.href).searchParams.get("failed") ?? 0),
                 stopReason,
+                ...(new URL(location.href).searchParams.get("publication") === "pending"
+                  ? {
+                      publication: {
+                        state: "pending",
+                        phase: "promote",
+                        outcomePersistence: "sealed",
+                      },
+                    }
+                  : {}),
               };
             }
           }
@@ -1032,6 +1115,219 @@ test("progress polling waits one minute and keeps polling only cheap status afte
         ).__redundancyCalls.filter((entry) => entry.url.endsWith("/refresh-status")).length,
     ),
   ).toBe(coverageCalls);
+});
+
+test("pending publication stays explicit and can be retried without provider requests", async ({
+  page,
+}) => {
+  await installDaemon(page);
+  await page.goto("/redundancy?stop=application-attempt-limit&publication=pending");
+  const status = page.locator(".redundancy-refresh-status");
+  await expect(status).toContainText("not published yet");
+  await expect(status).toContainText("retry publishes them without sending provider requests");
+  await expect(page.getByRole("button", { name: "Retry score update" })).toBeVisible();
+  const initialCoverage = await page.evaluate(
+    () =>
+      (
+        window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+      ).__redundancyCalls.filter((call) => call.url.endsWith("/refresh-status")).length,
+  );
+  await page.getByRole("button", { name: "Retry score update" }).click();
+  await expect(
+    page.getByText("Saved comparisons were published. Refreshing coverage…"),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as typeof window & {
+              __redundancyCalls: Array<{ url: string; method: string; body?: unknown }>;
+            }
+          ).__redundancyCalls.filter(
+            (call) =>
+              call.url.endsWith("/publication/retry") &&
+              call.method === "POST" &&
+              (call.body as { runId?: string })?.runId === "retry-run-1",
+          ).length,
+      ),
+    )
+    .toBe(1);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+          ).__redundancyCalls.filter((call) => call.url.endsWith("/semantic/run")).length,
+      ),
+    )
+    .toBe(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+          ).__redundancyCalls.filter((call) => call.url.endsWith("/refresh-status")).length,
+      ),
+    )
+    .toBe(initialCoverage + 1);
+});
+
+test("publication retry errors remain visible and unpersisted seal status is explained", async ({
+  page,
+}) => {
+  await installDaemon(page);
+  await page.goto(
+    "/redundancy?stop=application-attempt-limit&publication=unpersisted&retry-fail=1",
+  );
+  const status = page.locator(".redundancy-refresh-status");
+  await expect(status).toContainText("outcome could not yet be saved");
+  await page.getByRole("button", { name: "Retry score update" }).click();
+  await expect(page.locator(".error-banner")).toContainText("Publication retry unavailable");
+});
+
+test("a successful retry response that is still pending does not announce or measure an update", async ({
+  page,
+}) => {
+  await installDaemon(page);
+  await page.goto(
+    "/redundancy?stop=application-attempt-limit&publication=pending&retry-result=pending",
+  );
+  const coverageReads = () =>
+    page.evaluate(
+      () =>
+        (
+          window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+        ).__redundancyCalls.filter((call) => call.url.endsWith("/refresh-status")).length,
+    );
+  const initialCoverageReads = await coverageReads();
+  await page.getByRole("button", { name: "Retry score update" }).click();
+  await expect(page.locator(".success-banner")).toContainText("Publication is still pending");
+  await expect(page.locator(".success-banner")).toContainText("Scores have not been updated");
+  await expect(page.getByRole("button", { name: "Retry score update" })).toBeVisible();
+  expect(await coverageReads()).toBe(initialCoverageReads);
+  expect(
+    await page.evaluate(
+      () =>
+        (
+          window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+        ).__redundancyCalls.filter((call) => call.url.endsWith("/semantic/run")).length,
+    ),
+  ).toBe(0);
+});
+
+test("a complete unchanged retry response measures coverage exactly once", async ({ page }) => {
+  await installDaemon(page);
+  await page.goto(
+    "/redundancy?stop=application-attempt-limit&publication=pending&retry-result=unchanged",
+  );
+  const coverageReads = () =>
+    page.evaluate(
+      () =>
+        (
+          window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+        ).__redundancyCalls.filter((call) => call.url.endsWith("/refresh-status")).length,
+    );
+  const initialCoverageReads = await coverageReads();
+  await page.getByRole("button", { name: "Retry score update" }).click();
+  await expect(page.locator(".success-banner")).toContainText("already up to date");
+  await expect.poll(coverageReads).toBe(initialCoverageReads + 1);
+  await page.getByRole("button", { name: "Refresh progress" }).click();
+  expect(await coverageReads()).toBe(initialCoverageReads + 1);
+});
+
+test("a malformed complete retry response fails safe without refreshing coverage", async ({
+  page,
+}) => {
+  await installDaemon(page);
+  await page.goto(
+    "/redundancy?stop=application-attempt-limit&publication=pending&retry-result=malformed",
+  );
+  const coverageReads = () =>
+    page.evaluate(
+      () =>
+        (
+          window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+        ).__redundancyCalls.filter((call) => call.url.endsWith("/refresh-status")).length,
+    );
+  const initialCoverageReads = await coverageReads();
+  await page.getByRole("button", { name: "Retry score update" }).click();
+  await expect(page.locator(".error-banner")).toContainText(
+    "Publication retry returned an invalid result",
+  );
+  expect(await coverageReads()).toBe(initialCoverageReads);
+});
+
+test("initial pending publication is tracked until a later published status", async ({ page }) => {
+  await installDaemon(page);
+  await page.goto("/redundancy?stop=application-attempt-limit&publication=pending");
+  const coverageReads = () =>
+    page.evaluate(
+      () =>
+        (
+          window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+        ).__redundancyCalls.filter((call) => call.url.endsWith("/refresh-status")).length,
+    );
+  expect(await coverageReads()).toBe(0);
+  await page.evaluate(() => localStorage.setItem("publication-state", "published"));
+  await page.getByRole("button", { name: "Refresh progress" }).click();
+  await expect.poll(coverageReads).toBe(1);
+  await page.getByRole("button", { name: "Refresh progress" }).click();
+  expect(await coverageReads()).toBe(1);
+});
+
+test("activity loss does not consume an active run's pending publication tracking", async ({
+  page,
+}) => {
+  await installDaemon(page);
+  await page.addInitScript(() => localStorage.setItem("run-state", "running"));
+  await page.goto("/redundancy?stop=application-attempt-limit");
+  const coverageReads = () =>
+    page.evaluate(
+      () =>
+        (
+          window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+        ).__redundancyCalls.filter((call) => call.url.endsWith("/refresh-status")).length,
+    );
+  expect(await coverageReads()).toBe(0);
+  await page.evaluate(() => localStorage.setItem("activity-state", "unavailable"));
+  await page.getByRole("button", { name: "Refresh progress" }).click();
+  await page.evaluate(() => {
+    localStorage.removeItem("activity-state");
+    localStorage.setItem("run-state", "failed");
+    localStorage.setItem("publication-state", "pending");
+  });
+  await page.getByRole("button", { name: "Refresh progress" }).click();
+  expect(await coverageReads()).toBe(0);
+  await page.evaluate(() => localStorage.setItem("publication-state", "published"));
+  await page.getByRole("button", { name: "Refresh progress" }).click();
+  await expect.poll(coverageReads).toBe(1);
+  await page.getByRole("button", { name: "Refresh progress" }).click();
+  expect(await coverageReads()).toBe(1);
+});
+
+test("legacy historical status recovers coverage once after activity becomes available", async ({
+  page,
+}) => {
+  await installDaemon(page);
+  await page.goto("/redundancy?stop=application-attempt-limit");
+  const coverageReads = () =>
+    page.evaluate(
+      () =>
+        (
+          window as typeof window & { __redundancyCalls: Array<{ url: string }> }
+        ).__redundancyCalls.filter((call) => call.url.endsWith("/refresh-status")).length,
+    );
+  await expect.poll(coverageReads).toBe(1);
+  await page.evaluate(() => localStorage.setItem("activity-state", "unavailable"));
+  await page.getByRole("button", { name: "Refresh progress" }).click();
+  await page.evaluate(() => localStorage.removeItem("activity-state"));
+  await page.getByRole("button", { name: "Refresh progress" }).click();
+  await expect.poll(coverageReads).toBe(2);
+  await page.getByRole("button", { name: "Refresh progress" }).click();
+  expect(await coverageReads()).toBe(2);
 });
 
 test("progress polling stops when the page unmounts", async ({ page }) => {

@@ -64,6 +64,11 @@ const progress: JevRunProgress = {
   cacheHits: 1,
   cacheMisses: 2,
   failedPairs: 1,
+  publication: {
+    state: "pending",
+    phase: "validate",
+    outcomePersistence: "sealed",
+  },
   updatedAt: "private-time",
 };
 
@@ -92,6 +97,11 @@ describe("projectJevPairStatus", () => {
         cacheHits: 1,
         cacheMisses: 2,
         failedPairs: 1,
+        publication: {
+          state: "pending",
+          phase: "validate",
+          outcomePersistence: "sealed",
+        },
       },
     });
     const serialized = JSON.stringify(result);
@@ -238,6 +248,11 @@ describe("projectJevPairStatus", () => {
       cacheHits: 0,
       cacheMisses: 2,
       failedPairs: 1,
+      publication: {
+        state: "pending",
+        phase: "validate",
+        outcomePersistence: "sealed",
+      },
     });
   });
 

@@ -2,7 +2,8 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DurableGame, SemanticRedundancySettings } from "@shelf-judge/shared";
+import { Database } from "bun:sqlite";
+import type { DurableGame, SemanticRedundancySettings, WishlistEntry } from "@shelf-judge/shared";
 import { createInitialEntityMetadata, DEFAULT_JEV_RUN_BUDGET } from "@shelf-judge/shared";
 import {
   JevRunService,
@@ -17,9 +18,15 @@ import type {
   JevRunProgress,
 } from "../../src/services/jev-pair-cache-service.js";
 import { createJevPairCache } from "../../src/services/jev-pair-cache-service.js";
+import { createJevRefreshProgressService } from "../../src/services/jev-refresh-progress-service.js";
 import { computeJevPairCoverage } from "../../src/services/jev-pair-coverage.js";
 import { createCollectionMutationService } from "../../src/services/collection-mutation-service.js";
 import { createJevRunSourceAdapter } from "../../src/services/jev-run-source-adapter.js";
+import {
+  buildJevPairDependencies,
+  encodeOwnedLocalMember,
+  encodeWishlistBggMember,
+} from "../../src/services/jev-pair-identity.js";
 import {
   prepareUnifiedJevRun,
   type PreparedUnifiedRun,
@@ -230,7 +237,7 @@ async function runUnifiedForTest(
   service: JevRunService,
   preparation: PreparedUnifiedRun,
   noteTransmissionAuthorized: boolean,
-): Promise<JevRunProgress> {
+): Promise<import("../../src/services/jev-run-service.js").JevRunCompletion> {
   return (await reserveUnifiedRunForTest(service, preparation, noteTransmissionAuthorized))
     .completion;
 }
@@ -238,6 +245,13 @@ async function runUnifiedForTest(
 function cacheFake() {
   const progress: JevRunProgress[] = [];
   const rows = new Map<string, JevPairJudgment>();
+  const staged = new Map<string, JevPairJudgment>();
+  let batch: {
+    runId: string;
+    state: "active" | "sealed";
+    progress: JevRunProgress;
+    stagingRevision: number;
+  } | null = null;
   let revision = 0;
   let lookupCalls = 0;
   const cache = {
@@ -260,12 +274,81 @@ function cacheFake() {
     invalidateGame: () => 0,
     purgeDDependent: () => 0,
     saveRunProgress: (p: JevRunProgress) => progress.push({ ...p }),
-    checkpointPair: ({ judgments, progress: p }: JevPairCheckpoint) => {
-      for (const row of judgments) rows.set(row.gameAId + row.gameBId + row.signal, row);
-      revision++;
+    saveSealedRunProgressIfOwned: (p: JevRunProgress) => {
+      if (!batch || batch.state !== "sealed" || batch.runId !== p.runId) return false;
+      progress.push({ ...p });
+      return true;
+    },
+    reserveRunBatch: (p: JevRunProgress) => {
+      if (batch) throw new Error("unresolved batch");
+      batch = { runId: p.runId, state: "active", progress: p, stagingRevision: 0 };
       progress.push({ ...p });
     },
-    finishRun: ({ progress: p }: { progress: JevRunProgress }) => progress.push({ ...p }),
+    checkpointStagedPair: ({ judgments, progress: p }: JevPairCheckpoint) => {
+      if (!batch || batch.state !== "active" || p.runId !== batch.runId)
+        throw new Error("invalid batch");
+      for (const row of judgments) staged.set(row.gameAId + row.gameBId + row.signal, row);
+      batch.stagingRevision++;
+      batch.progress = p;
+      progress.push({ ...p });
+    },
+    lookupForRun: (_runId: string, key: { gameAId: string; gameBId: string; signal: string }) => {
+      lookupCalls++;
+      return (
+        rows.get(key.gameAId + key.gameBId + key.signal) ??
+        staged.get(key.gameAId + key.gameBId + key.signal) ??
+        null
+      );
+    },
+    stagedSnapshot: (runId: string) =>
+      batch?.runId === runId
+        ? { runId, revision: batch.stagingRevision, judgments: [...staged.values()] }
+        : null,
+    getRunBatch: () => batch,
+    sealRunBatch: (p: JevRunProgress) => {
+      if (!batch || batch.runId !== p.runId) throw new Error("invalid batch");
+      batch = { ...batch, state: "sealed", progress: p };
+      progress.push({
+        ...p,
+        publication: { state: "pending", phase: "validate", outcomePersistence: "sealed" },
+      });
+    },
+    promoteRunBatch: (input: {
+      runId: string;
+      expectedStagingRevision: number;
+      eligibleJudgments: readonly JevPairJudgment[];
+      progress: JevRunProgress;
+    }) => {
+      if (
+        !batch ||
+        batch.runId !== input.runId ||
+        batch.state !== "sealed" ||
+        batch.stagingRevision !== input.expectedStagingRevision
+      )
+        throw new Error("invalid batch");
+      let changed = false;
+      for (const row of input.eligibleJudgments) {
+        const key = row.gameAId + row.gameBId + row.signal;
+        if (!rows.has(key) || JSON.stringify(rows.get(key)) !== JSON.stringify(row)) changed = true;
+        rows.set(key, row);
+        staged.delete(key);
+      }
+      batch = null;
+      revision += Number(changed);
+      const terminal = {
+        ...input.progress,
+        publication: {
+          state: changed ? ("published" as const) : ("unchanged" as const),
+          outcomePersistence: "finalized" as const,
+        },
+      };
+      progress.push(terminal);
+      return {
+        status: changed ? ("published" as const) : ("unchanged" as const),
+        publicationToken: String(revision),
+        progress: terminal,
+      };
+    },
     getRunProgress: () => progress.at(-1) ?? null,
     setActivation: () => {},
     getActivation: () => null,
@@ -293,10 +376,10 @@ describe("JevRunService attempt barriers", () => {
     const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
     cacheFixture.resetLookupCalls();
     let checkpoints = 0;
-    const originalCheckpointPair = cache.checkpointPair.bind(cache);
-    cache.checkpointPair = (checkpoint) => {
+    const originalCheckpointPair = cache.checkpointStagedPair?.bind(cache);
+    cache.checkpointStagedPair = (checkpoint) => {
       checkpoints++;
-      originalCheckpointPair(checkpoint);
+      originalCheckpointPair?.(checkpoint);
     };
     const collectionLookupSpy = spyOn(jevRunScope, "createJevRunCollectionLookup");
     let lookupBuildsBeforeFinalCoverage: number | undefined;
@@ -333,7 +416,7 @@ describe("JevRunService attempt barriers", () => {
       expect(dispatches).toBe(3);
       expect(checkpoints).toBe(3);
       expect(lookupBuildsBeforeFinalCoverage).toBe(1);
-      // The final dispatch observes only run-time cache reads; preparation and final coverage are excluded.
+      // One bounded point lookup per planned pair goes through the private worker overlay.
       expect(lookupsAtLastDispatch).toBe(3);
     } finally {
       collectionLookupSpy.mockRestore();
@@ -352,8 +435,8 @@ describe("JevRunService attempt barriers", () => {
     let transportCalls = 0;
     let gatewayConstructions = 0;
     let checkpoints = 0;
-    const originalCheckpointPair = cache.checkpointPair.bind(cache);
-    cache.checkpointPair = (checkpoint) => {
+    const originalCheckpointPair = cache.checkpointStagedPair!.bind(cache);
+    cache.checkpointStagedPair = (checkpoint) => {
       checkpoints++;
       originalCheckpointPair(checkpoint);
     };
@@ -709,7 +792,7 @@ describe("JevRunService attempt barriers", () => {
     const pendingProvider = deferred<JevPairResult>();
     const providerStarted = deferred<void>();
     const logs = recordingLogger();
-    cache.finishRun = () => {
+    cache.sealRunBatch = () => {
       throw new Error("simulated terminal persistence failure");
     };
     const service = new JevRunService({
@@ -996,7 +1079,7 @@ describe("JevRunService attempt barriers", () => {
     const progress = await runUnifiedForTest(service, fixtureData.preparation, false);
     expect(progress).toMatchObject({ state: "failed", stopReason: "application-attempt-limit" });
     expect(attemptStarts).toBe(1);
-    expect(readCountAfterFailure).toBe(0);
+    expect(readCountAfterFailure).toBe(1); // final source validation is required for partial publication.
   });
 
   test("deadline settles independently of a blocked coordinated read and blocks its late callback", async () => {
@@ -1052,7 +1135,7 @@ describe("JevRunService attempt barriers", () => {
     expect(progress.at(-1)).toMatchObject({ runId: timed.runId, state: "failed" });
   }, 70_000);
 
-  test("cancellation releases logical activity while a coordinated read drains without stale writes", async () => {
+  test("cancellation settles pending publication while a coordinated read drains and blocks admission", async () => {
     const { cache, progress, rows } = cacheFake();
     const fixtureData = await unifiedFixture(["a", "b"], cache);
     const readEntered = deferred<void>();
@@ -1103,17 +1186,21 @@ describe("JevRunService attempt barriers", () => {
     const canceled = service.reserveValidatedPreparedRun(canceledReservation);
     await readEntered.promise;
     canceled.cancel();
-    expect(await canceled.completion).toMatchObject({ state: "interrupted" });
-
-    const replacement = service.reserveValidatedPreparedRun(replacementReservation);
+    expect(await canceled.completion).toMatchObject({
+      state: "interrupted",
+      stopReason: "owner-cancelled",
+      publication: { state: "pending" },
+    });
+    expect(() => service.reserveValidatedPreparedRun(replacementReservation)).toThrow(
+      "unresolved batch",
+    );
     pendingRead.resolve(releaseReadValue);
-    const replacementProgress = await replacement.completion;
     await new Promise<void>((resolve) => setImmediate(resolve));
-
-    expect(replacementProgress).toMatchObject({ runId: replacement.runId, state: "completed" });
-    expect(dispatches).toBe(1);
-    expect(rows.size).toBe(1);
-    expect(progress.at(-1)).toMatchObject({ runId: replacement.runId, state: "completed" });
+    const retried = await service.retryPublication(canceled.runId);
+    expect(retried).toMatchObject({ state: "interrupted", publication: { state: "unchanged" } });
+    expect(dispatches).toBe(0);
+    expect(rows.size).toBe(0);
+    expect(progress.at(-1)).toMatchObject({ runId: canceled.runId, state: "interrupted" });
   });
 
   test("not-configured is terminal instead of failing every remaining pair", async () => {
@@ -1339,7 +1426,7 @@ describe("JevRunService attempt barriers", () => {
     expect(admissionCount).toBe(2);
     expect(rows.size).toBe(0);
     expect(done.state).toBe("interrupted");
-    expect(done.stopReason).toBeUndefined();
+    expect(done.stopReason).toBe("owner-cancelled");
   });
 
   test("real SQLite cache checkpoints a complete run and activates only complete coverage", async () => {
@@ -1371,7 +1458,7 @@ describe("JevRunService attempt barriers", () => {
       expect(dispatches).toBe(1);
       expect(result.state).toBe("completed");
       expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })?.value).toBe(0.5);
-      expect(cache.getActivation()).not.toBeNull();
+      expect(result.publication.state).toBe("published");
     } finally {
       cache.close();
       await rm(dir, { recursive: true, force: true });
@@ -1584,57 +1671,15 @@ describe("JevRunService attempt barriers", () => {
     },
   );
 
-  test("purge after a successful scoped Run leaves it completed without stale activation", async () => {
+  test("purge fencing prevents staged evidence from being resurrected at promotion", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-purge-race-"));
     const cache = await createJevPairCache(dir);
     const fixtureData = await unifiedFixture(["a", "b"], cache);
-    const coordinator = profileSourceCoordinatorFor(fixtureData.storage);
-    const revision = cache.mutationRevision.bind(cache);
-    let coverageCaptureReturned = false;
-    let waitForPostDigestRevision = false;
-    let purgePromise: Promise<void> | undefined;
-    let coverageCapture: JevRunCapture | undefined;
-    const completionActivationPublications: Array<string | null> = [];
-    const publicationOrder: string[] = [];
-    const finishRun = cache.finishRun.bind(cache);
-    cache.finishRun = (finish) => {
-      if (finish.progress.state === "completed") {
-        completionActivationPublications.push(finish.activation?.identity ?? null);
-        publicationOrder.push(
-          finish.activation ? "completed-with-activation" : "completed-without-activation",
-        );
-      }
-      finishRun(finish);
-    };
-    cache.mutationRevision = () => {
-      const current = revision();
-      if (coverageCaptureReturned) {
-        coverageCaptureReturned = false;
-        waitForPostDigestRevision = true;
-      } else if (waitForPostDigestRevision && !purgePromise) {
-        waitForPostDigestRevision = false;
-        purgePromise = runOutsideProfileSourceCoordinator(() =>
-          coordinator.runExclusive(() => {
-            cache.purgePair("a", "b", "C");
-            publicationOrder.push("purged");
-            return Promise.resolve();
-          }),
-        );
-      }
-      return current;
-    };
     try {
       const service = new JevRunService({
         storageService: fixtureData.storage,
         cache,
-        loadCapture: async () => {
-          const capture = await fixtureData.sourceAdapter.loadCapture();
-          if (!coverageCapture) {
-            coverageCapture = capture;
-            coverageCaptureReturned = true;
-          }
-          return capture;
-        },
+        loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
         readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
         createGateway: (admit) => ({
           evaluatePair: async () => {
@@ -1647,24 +1692,21 @@ describe("JevRunService attempt barriers", () => {
           },
         }),
       });
+      const promote = cache.promoteRunBatch!.bind(cache);
+      let purged = false;
+      cache.promoteRunBatch = (input) => {
+        if (!purged) {
+          purged = true;
+          cache.purgePair("a", "b", "C");
+        }
+        return promote(input);
+      };
       const result = await runUnifiedForTest(service, fixtureData.preparation, false);
-      const completedPurge = purgePromise;
-      if (!completedPurge) throw new Error("Expected coverage-phase cache purge");
-      await completedPurge;
-      const finalCapture = coverageCapture;
-      if (!finalCapture) throw new Error("Expected actual final coverage capture");
-      const current = await fixtureData.sourceAdapter.readCurrent();
-      expect(finalCapture.sourceVectorIdentity).toBe(
-        fixtureData.preparation.capture.sourceVectorIdentity,
-      );
-      expect(finalCapture.policyIdentity).toBe(fixtureData.preparation.capture.policyIdentity);
-      expect(current.sourceVectorIdentity).toBe(finalCapture.sourceVectorIdentity);
-      expect(current.policyIdentity).toBe(finalCapture.policyIdentity);
       expect(result.state).toBe("completed");
+      expect(result.publication.state).toBe("unchanged");
+      expect(purged).toBe(true);
       expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })).toBeNull();
       expect(cache.getActivation()).toBeNull();
-      expect(completionActivationPublications).toEqual([null]);
-      expect(publicationOrder).toEqual(["purged", "completed-without-activation"]);
     } finally {
       cache.close();
       await rm(dir, { recursive: true, force: true });
@@ -1724,7 +1766,7 @@ describe("JevRunService attempt barriers", () => {
       expect(coverage.complete).toBe(true);
       expect(coverage.pairs.filter((pair) => pair.C.state === "covered")).toHaveLength(1);
       expect(coverage.pairs.filter((pair) => pair.C.state === "unavailable")).toHaveLength(2);
-      expect(cache.getActivation()?.identity).toBe(coverage.identity);
+      expect(result.publication.state).toBe("published");
     } finally {
       cache.close();
       await rm(dir, { recursive: true, force: true });
@@ -1787,7 +1829,7 @@ describe("JevRunService attempt barriers", () => {
     }
   });
 
-  test("cancellation while final coherent capture is pending fences activation", async () => {
+  test("late cancellation during sealed validation settles pending without rewriting outcome", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-final-capture-cancel-"));
     const cache = await createJevPairCache(dir);
     const fixtureData = await unifiedFixture(["a", "b"], cache);
@@ -1833,13 +1875,21 @@ describe("JevRunService attempt barriers", () => {
       captureGateReached = true;
       handle.cancel();
       const result = await handle.completion;
-      const progressAtCancellation = cache.getRunProgress();
       releaseFinalCapture.resolve();
       await finalCaptureSettled.promise;
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      expect(result.state).toBe("interrupted");
-      expect(cache.getRunProgress()?.state).toBe("interrupted");
-      expect(cache.getRunProgress()).toEqual(progressAtCancellation);
+      for (let attempt = 0; attempt < 300; attempt++) {
+        if (cache.getRunProgress()?.publication?.state !== "pending") break;
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      expect(result).toMatchObject({
+        state: "completed",
+        publication: { state: "pending", outcomePersistence: "sealed" },
+      });
+      expect(cache.getRunProgress()?.state).toBe("completed");
+      expect(cache.getRunProgress()).toMatchObject({
+        state: "completed",
+        publication: { state: "published" },
+      });
       expect(cache.getActivation()).toBeNull();
       expect(gatewayCalls).toBe(1);
       expect(paidDispatches).toBe(1);
@@ -1854,7 +1904,7 @@ describe("JevRunService attempt barriers", () => {
     }
   });
 
-  test("cancellation while final readCurrent is pending persists interrupted status", async () => {
+  test("late cancellation settles pending while final readCurrent drains without rewriting seal", async () => {
     const dir = await mkdtemp(join(tmpdir(), "jev-run-final-read-cancel-"));
     const cache = await createJevPairCache(dir);
     const fixtureData = await unifiedFixture(["a", "b"], cache);
@@ -1891,12 +1941,24 @@ describe("JevRunService attempt barriers", () => {
     try {
       const handle = await reserveUnifiedRunForTest(service, fixtureData.preparation, false);
       await barrier.promise;
-      expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })?.value).toBe(0.5);
+      expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })).toBeNull();
+      expect(
+        cache.lookupForRun?.(handle.runId, { gameAId: "a", gameBId: "b", signal: "C" })?.value,
+      ).toBe(0.5);
       handle.cancel();
       pendingRead.resolve();
       const result = await handle.completion;
-      expect(result.state).toBe("interrupted");
-      expect(cache.getRunProgress()?.state).toBe("interrupted");
+      expect(result.state).toBe("completed");
+      expect(result.publication).toMatchObject({
+        state: "pending",
+        outcomePersistence: "sealed",
+      });
+      for (let attempt = 0; attempt < 300; attempt++) {
+        if (cache.getRunProgress()?.publication?.state !== "pending") break;
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      expect(cache.getRunProgress()?.state).toBe("completed");
+      expect(cache.getRunProgress()?.publication?.state).toBe("published");
       expect(cache.getActivation()).toBeNull();
     } finally {
       cache.close();
@@ -1904,7 +1966,7 @@ describe("JevRunService attempt barriers", () => {
     }
   });
 
-  test("original policy change before activation persists failed without activation", async () => {
+  test("repeated policy changes preserve completion and leave publication pending", async () => {
     const { cache, progress } = cacheFake();
     const fixtureData = await unifiedFixture(["a", "b"], cache);
     const service = new JevRunService({
@@ -1932,8 +1994,9 @@ describe("JevRunService attempt barriers", () => {
       }),
     });
     const result = await runUnifiedForTest(service, fixtureData.preparation, false);
-    expect(result.state).toBe("failed");
-    expect(progress.at(-1)?.state).toBe("failed");
+    expect(result.state).toBe("completed");
+    expect(result.publication.state).toBe("pending");
+    expect(progress.at(-1)?.state).toBe("completed");
     expect(cache.getActivation()).toBeNull();
   });
 
@@ -1987,6 +2050,16 @@ describe("JevRunService attempt barriers", () => {
 
   test("startup reconciliation marks stale running progress without creating a gateway", async () => {
     const { cache, progress } = cacheFake();
+    cache.reserveRunBatch!({
+      runId: "crashed",
+      state: "running",
+      pairCount: 2,
+      completedPairs: 1,
+      cacheHits: 0,
+      cacheMisses: 1,
+      failedPairs: 0,
+      updatedAt: "before",
+    });
     cache.saveRunProgress({
       runId: "crashed",
       state: "running",
@@ -2234,7 +2307,7 @@ describe("JevRunService attempt barriers", () => {
     const { cache } = cacheFake();
     const fixtureData = await unifiedFixture(["a", "b", "c"], cache);
     const preparation = await fixtureData.prepare();
-    cache.checkpointPair = () => {
+    cache.checkpointStagedPair = () => {
       throw new Error("sqlite write failed");
     };
     let dispatches = 0;
@@ -2464,6 +2537,123 @@ describe("JevRunService attempt barriers", () => {
     expect(result.state).toBe("completed");
     expect(gatewayConstructions).toBe(0);
     expect(rows.size).toBe(0);
+  });
+
+  test("revalidates candidate membership and source inside final coordinator before promotion", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "jev-candidate-final-proof-"));
+    const cache = await createJevPairCache(dir);
+    const fixtureData = await unifiedFixture(["a"], cache);
+    const collection = await fixtureData.storage.loadCollection();
+    const owned = collection.games[0];
+    if (!owned?.bggData?.description) throw new Error("Expected described owned fixture");
+    const candidateMember = encodeWishlistBggMember(collection.id, "501");
+    const ownedMember = encodeOwnedLocalMember(collection.id, owned.id);
+    let currentEntry: WishlistEntry = {
+      id: "candidate-501",
+      bggId: 501,
+      name: "Current candidate name",
+      yearPublished: 2024,
+      thumbnailUrl: null,
+      predictedScore: 8,
+      predictionConfidence: "strong",
+      predictedBreakdown: [],
+      nicheImpact: null,
+      redundancyPreview: null,
+      addedAt: "2026-10-04T00:00:00.000Z",
+      bggSource: {
+        observedAt: "2026-10-04T00:00:00.000Z",
+        description: "Current candidate description",
+        mechanics: [],
+        categories: [],
+        weight: null,
+        communityRating: null,
+        minPlayers: null,
+        maxPlayers: null,
+        bestPlayers: null,
+        playingTime: null,
+      },
+    };
+    const candidateSource = currentEntry.bggSource;
+    if (!candidateSource) throw new Error("Expected current candidate source");
+    const pair = (name: string, description: string, value: number): JevPairJudgment => ({
+      pairDomain: "wishlist-candidate",
+      collectionId: collection.id,
+      gameAId: candidateMember,
+      gameBId: ownedMember,
+      signal: "C",
+      dependencyKind: "C_ONLY",
+      value,
+      confidence: 1,
+      ...JEV_JUDGMENT_CONTRACT,
+      completedAt: "2026-10-04T00:00:00.000Z",
+      dependencies: buildJevPairDependencies(
+        "C_ONLY",
+        { gameId: candidateMember, name, description },
+        { gameId: ownedMember, name: owned.name, description: owned.bggData!.description! },
+      ),
+    });
+    const previous = pair(currentEntry.name, candidateSource.description!, 0.2);
+    const staged = pair(currentEntry.name, candidateSource.description!, 0.8);
+    cache.upsert(previous);
+    const terminal: JevRunProgress = {
+      runId: "run-candidate-proof",
+      state: "completed",
+      scope: "wishlist",
+      pairCount: 1,
+      completedPairs: 1,
+      cacheHits: 0,
+      cacheMisses: 1,
+      failedPairs: 0,
+      updatedAt: "2026-10-04T00:00:00.000Z",
+    };
+    const reserve = cache.reserveRunBatch?.bind(cache);
+    const checkpoint = cache.checkpointStagedPair?.bind(cache);
+    const seal = cache.sealRunBatch?.bind(cache);
+    if (!reserve || !checkpoint || !seal) throw new Error("Expected staged cache methods");
+    reserve.call(cache, { ...terminal, state: "running" });
+    checkpoint.call(cache, { judgments: [staged], progress: { ...terminal, state: "running" } });
+    seal.call(cache, terminal);
+    let wishlistReads = 0;
+    const service = new JevRunService({
+      storageService: fixtureData.storage,
+      cache,
+      loadCapture: async () => {
+        const capture = await fixtureData.sourceAdapter.loadCapture();
+        currentEntry = {
+          ...currentEntry,
+          name: "Changed after capture",
+          bggSource: { ...candidateSource, description: "Changed after capture" },
+        };
+        return capture;
+      },
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
+      loadWishlist: () => {
+        wishlistReads++;
+        expect(profileSourceCoordinatorFor(fixtureData.storage).isHeldByCurrentContext()).toBe(
+          true,
+        );
+        return Promise.resolve([currentEntry]);
+      },
+      createGateway: () => {
+        throw new Error("Publication recovery must not create a provider gateway");
+      },
+    });
+    try {
+      const result = await service.reconcileInterruptedProgress();
+      expect(result).toMatchObject({ state: "completed", publication: { state: "unchanged" } });
+      expect(wishlistReads).toBe(1);
+      expect(
+        cache.lookup({
+          gameAId: candidateMember,
+          gameBId: ownedMember,
+          signal: "C",
+          pairDomain: "wishlist-candidate",
+        })?.value,
+      ).toBe(0.2);
+    } finally {
+      cache.close();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("validated reservation returns synchronously without cache or source reads", async () => {
@@ -2871,10 +3061,15 @@ describe("JevRunService attempt barriers", () => {
       interruptedHandle.cancel();
       secondProviderResponse.resolve(new Response());
       const interrupted = await interruptedHandle.completion;
-      expect(interrupted.state).toBe("interrupted");
+      expect(interrupted).toMatchObject({
+        state: "interrupted",
+        stopReason: "owner-cancelled",
+        publication: { state: "pending", outcomePersistence: "sealed" },
+      });
       expect(providerCalls).toBe(2);
       expect(requestedPairs).toEqual(["Game a/Game b", "Game a/Game c"]);
-      expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })?.value).toBe(0.5);
+      expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })).toBeNull();
+      expect(cache.stagedSnapshot?.(interrupted.runId)?.judgments).toHaveLength(1);
       expect(cache.lookup({ gameAId: "a", gameBId: "c", signal: "C" })).toBeNull();
       expect(cache.lookup({ gameAId: "b", gameBId: "c", signal: "C" })).toBeNull();
       expect(cache.getRunProgress()?.state).toBe("interrupted");
@@ -2890,7 +3085,11 @@ describe("JevRunService attempt barriers", () => {
       expect((await reopenedFixture.storage.loadCollection()).id).toBe(originalCollectionId);
       const reopenedService = makeService(reopenedFixture, cache, false);
       const startupProgress = await reopenedService.reconcileInterruptedProgress();
-      expect(startupProgress?.state).toBe("interrupted");
+      expect(startupProgress).toMatchObject({
+        state: "interrupted",
+        stopReason: "owner-cancelled",
+        publication: { state: "published", outcomePersistence: "finalized" },
+      });
       expect(cache.getRunProgress()?.state).toBe("interrupted");
       expect(providerCalls).toBe(2);
       expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })?.value).toBe(0.5);
@@ -2901,8 +3100,149 @@ describe("JevRunService attempt barriers", () => {
       expect(resumed.state).toBe("completed");
       expect(cache.lookup({ gameAId: "a", gameBId: "c", signal: "C" })?.value).toBe(0.5);
       expect(cache.lookup({ gameAId: "b", gameBId: "c", signal: "C" })?.value).toBe(0.5);
-      expect(cache.getActivation()).not.toBeNull();
+      expect(resumed.publication.state).toBe("published");
     } finally {
+      cache.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("seal failure settles unpersisted, blocks admission, and retries promotion without providers", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "jev-run-seal-retry-"));
+    const cache = await createJevPairCache(dir);
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const db = new Database(join(dir, "jev-pair-cache.sqlite"));
+    db.exec(
+      "CREATE TRIGGER fail_terminal_progress BEFORE INSERT ON run_progress WHEN NEW.state!='running' BEGIN SELECT RAISE(ABORT, 'seal fault'); END;",
+    );
+    db.close();
+    let providerCalls = 0;
+    const service = new JevRunService({
+      storageService: fixtureData.storage,
+      cache,
+      loadCapture: () => fixtureData.sourceAdapter.loadCapture(),
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
+      createGateway: (admit) => ({
+        evaluatePair: async (request) => {
+          providerCalls++;
+          await admit({
+            mode: request.mode,
+            attemptId: `seal-retry-${providerCalls}`,
+            start: () => ({ response: Promise.resolve(new Response()) }),
+          });
+          return scoreResult();
+        },
+      }),
+    });
+    try {
+      const handle = await reserveUnifiedRunForTest(service, fixtureData.preparation, false);
+      const firstCompletion = await handle.completion;
+      expect(firstCompletion).toMatchObject({
+        state: "completed",
+        publication: { state: "pending", phase: "seal", outcomePersistence: "unpersisted" },
+      });
+      expect(service.getProcessPendingProgress()).toEqual(firstCompletion);
+      expect(
+        createJevRefreshProgressService({
+          cache,
+          processPendingProgress: () => service.getProcessPendingProgress(),
+          activeRun: () => null,
+        }).read().progress,
+      ).toMatchObject({ state: "process-local", value: { state: "completed" } });
+      expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })).toBeNull();
+      expect(cache.stagedSnapshot?.(handle.runId)?.judgments).toHaveLength(1);
+      expect(providerCalls).toBe(1);
+
+      const replacement = await fixtureData.prepare();
+      const replacementReservation = await validateUnifiedRunForTest(service, replacement, false);
+      expect(() => service.reserveValidatedPreparedRun(replacementReservation)).toThrow(
+        "already unresolved",
+      );
+
+      const writer = new Database(join(dir, "jev-pair-cache.sqlite"));
+      writer.exec("DROP TRIGGER fail_terminal_progress");
+      writer.close();
+      const retried = await service.retryPublication(handle.runId);
+      expect(retried).toMatchObject({
+        state: "completed",
+        publication: { state: "published", outcomePersistence: "finalized" },
+      });
+      expect(await service.retryPublication(handle.runId)).toEqual(retried);
+      expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })?.value).toBe(0.5);
+      expect(providerCalls).toBe(1);
+    } finally {
+      cache.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("reset racing provider-free publication retry fences promotion and cannot resurrect staging", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "jev-run-reset-retry-race-"));
+    const cache = await createJevPairCache(dir);
+    const fixtureData = await unifiedFixture(["a", "b"], cache);
+    const captureEntered = [deferred<void>(), deferred<void>()];
+    const releaseCapture = deferred<void>();
+    let captureCalls = 0;
+    let providerCalls = 0;
+    const service = new JevRunService({
+      storageService: fixtureData.storage,
+      cache,
+      loadCapture: async () => {
+        const call = captureCalls++;
+        if (call < captureEntered.length) {
+          captureEntered[call].resolve();
+          await releaseCapture.promise;
+        }
+        return fixtureData.sourceAdapter.loadCapture();
+      },
+      readCurrent: () => fixtureData.sourceAdapter.readCurrent(),
+      createGateway: (admit) => ({
+        evaluatePair: async (request) => {
+          providerCalls++;
+          await admit({
+            mode: request.mode,
+            attemptId: `reset-race-${providerCalls}`,
+            start: () => ({ response: Promise.resolve(new Response()) }),
+          });
+          return scoreResult();
+        },
+      }),
+    });
+    try {
+      const handle = await reserveUnifiedRunForTest(service, fixtureData.preparation, false);
+      await captureEntered[0].promise;
+      handle.cancel();
+      expect(await handle.completion).toMatchObject({
+        state: "completed",
+        publication: { state: "pending", outcomePersistence: "sealed" },
+      });
+      const retry = service.retryPublication(handle.runId);
+      await captureEntered[1].promise;
+      cache.reset();
+      expect(cache.getRunProgress()).toBeNull();
+      const replacementPreparation = await fixtureData.prepare();
+      const replacementReservation = await validateUnifiedRunForTest(
+        service,
+        replacementPreparation,
+        false,
+      );
+      const replacementHandle = service.reserveValidatedPreparedRun(replacementReservation);
+      expect(await replacementHandle.completion).toMatchObject({
+        state: "completed",
+        publication: { state: "published" },
+      });
+      const replacementProgress = cache.getRunProgress();
+      expect(replacementProgress?.runId).toBe(replacementHandle.runId);
+      releaseCapture.resolve();
+      await retry;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(providerCalls).toBe(2);
+      expect(cache.lookup({ gameAId: "a", gameBId: "b", signal: "C" })?.value).toBe(0.5);
+      expect(cache.getRunBatch?.()).toBeNull();
+      expect(cache.stagedSnapshot?.(handle.runId)).toBeNull();
+      expect(cache.getRunProgress()).toEqual(replacementProgress);
+    } finally {
+      releaseCapture.resolve();
       cache.close();
       await rm(dir, { recursive: true, force: true });
     }

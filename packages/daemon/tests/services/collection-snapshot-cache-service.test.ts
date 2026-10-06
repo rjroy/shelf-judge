@@ -51,6 +51,10 @@ function fixture(
     serialize?: (snapshot: CollectionSnapshot) => string;
     semanticRead?:
       | CollectionSnapshotBuildResult["semanticRead"]
+      | Pick<
+          Extract<CollectionSnapshotBuildResult["semanticRead"], { status: "unified-v2" }>,
+          "status" | "proof" | "isCurrent"
+        >
       | (() => CollectionSnapshotBuildResult["semanticRead"]);
     logger?: {
       debug?(...args: unknown[]): void;
@@ -72,10 +76,14 @@ function fixture(
     },
   );
   let semanticEnabled = false;
+  let authorityIdentity = "snapshot-source-content-1";
+  let authorityAvailable = true;
   const storage = {
     sourceVector: () => vectorService.read(),
     loadCollection: () =>
       Promise.resolve({ semanticRedundancy: { settings: { enabled: semanticEnabled } } }),
+    readCollectionSnapshotAuthority: () =>
+      Promise.resolve({ available: authorityAvailable, identity: authorityIdentity }),
   };
   let now = BASE_TIME;
   let builds = 0;
@@ -96,14 +104,24 @@ function fixture(
         snapshot,
         sourceVector,
         evaluatedAtMs,
-        ...(options.semanticRead === undefined
-          ? {}
-          : {
-              semanticRead:
-                typeof options.semanticRead === "function"
-                  ? options.semanticRead()
-                  : options.semanticRead,
-            }),
+        semanticRead: (options.semanticRead === undefined
+          ? {
+              status: "unified-v2" as const,
+              proof: {
+                version: 2 as const,
+                mode: "unified-similarity" as const,
+                algorithmVersion: "unified-jaccard-manhattan-jev-v1" as const,
+                identity: "a".repeat(64),
+                demandedPairsIdentity: "b".repeat(64),
+                examinedComponentsIdentity: "c".repeat(64),
+              },
+              isCurrent: () => true,
+              isReusable: () => true,
+              validateCurrent: () => Promise.resolve(true),
+            }
+          : typeof options.semanticRead === "function"
+            ? options.semanticRead()
+            : options.semanticRead) as CollectionSnapshotBuildResult["semanticRead"],
         expiresAtMs:
           options.expiresAtMs != null && evaluatedAtMs < options.expiresAtMs
             ? options.expiresAtMs
@@ -141,12 +159,78 @@ function fixture(
       nextStatus = value;
     },
     setSemanticEnabled(value: boolean) {
+      if (semanticEnabled !== value) {
+        const current = vectorService.read();
+        authorityIdentity = `${authorityIdentity}-${value ? "enabled" : "disabled"}`;
+        vectorService.publishCollection({
+          id: current.collectionId ?? "collection-id",
+          schemaVersion: current.collectionSchemaVersion ?? 9,
+          revision: (current.collectionRevision ?? 0) + 1,
+        });
+      }
       semanticEnabled = value;
+    },
+    setAuthority(identity: string, available = true) {
+      authorityIdentity = identity;
+      authorityAvailable = available;
     },
   };
 }
 
 describe("CollectionSnapshotCacheService", () => {
+  test("renders a complete fallback without retaining or validating it", async () => {
+    const f = fixture({
+      semanticRead: {
+        status: "unified-v2",
+        proof: {
+          version: 2,
+          mode: "unified-similarity",
+          algorithmVersion: "unified-jaccard-manhattan-jev-v1",
+          identity: "a".repeat(64),
+          demandedPairsIdentity: "b".repeat(64),
+          examinedComponentsIdentity: "c".repeat(64),
+        },
+        isCurrent: () => true,
+        isReusable: () => false,
+        validateCurrent: () => Promise.resolve(true),
+      },
+    });
+
+    const first = await f.cache.resolve();
+    const second = await f.cache.resolve(first.etag);
+
+    expect(first.status).toBe(200);
+    expect(first.body).not.toBeNull();
+    expect(first.cacheable).toBe(false);
+    expect(first.etag).toBeNull();
+    expect(second.status).toBe(200);
+    expect(second.cacheable).toBe(false);
+    expect(f.counts().builds).toBe(2);
+  });
+
+  test("does not retain a proof from a reader without freshness capabilities", async () => {
+    const semanticRead = {
+      status: "unified-v2" as const,
+      proof: {
+        version: 2 as const,
+        mode: "unified-similarity" as const,
+        algorithmVersion: "unified-jaccard-manhattan-jev-v1" as const,
+        identity: "a".repeat(64),
+        demandedPairsIdentity: "b".repeat(64),
+        examinedComponentsIdentity: "c".repeat(64),
+      },
+      isCurrent: () => true,
+    };
+    const f = fixture({ semanticRead });
+
+    const response = await f.cache.resolve();
+
+    expect(response.status).toBe(200);
+    expect(response.body).not.toBeNull();
+    expect(response.cacheable).toBe(false);
+    expect(response.etag).toBeNull();
+  });
+
   test("emits correlated, privacy-safe request and build timings", async () => {
     const records: Array<{ level: string; message: string; fields: Record<string, unknown> }> = [];
     const record = (level: string) => (message: unknown, fields: unknown) => {
@@ -226,7 +310,7 @@ describe("CollectionSnapshotCacheService", () => {
     const first = await f.route.request("/collection/snapshot");
     expect(first.status).toBe(200);
     const etag = first.headers.get("etag")!;
-    expect(etag).toMatch(/^W\/"cs1-/);
+    expect(etag).toMatch(/^W\/"cs2-/);
     expect(first.headers.get("cache-control")).toBe("private, no-cache");
     expect(first.headers.get("content-type")).toContain("application/json");
     const body = await first.text();
@@ -298,7 +382,7 @@ describe("CollectionSnapshotCacheService", () => {
     expect(afterEdit.headers.get("etag")).not.toBe(oldEtag);
   });
 
-  test("semantic redundancy activation bypasses cache and validators without changing the source vector", async () => {
+  test("semantic redundancy activation preserves the V2 proof and uses the published cache", async () => {
     const f = fixture({
       build: () => {
         const snapshot = makeSnapshot();
@@ -319,24 +403,25 @@ describe("CollectionSnapshotCacheService", () => {
       headers: { "If-None-Match": factualEtag },
     });
     expect(enabled.status).toBe(200);
-    expect(enabled.headers.get("cache-control")).toBe("no-store");
-    expect(enabled.headers.get("etag")).toBeNull();
+    expect(enabled.headers.get("cache-control")).toBe("private, no-cache");
+    expect(enabled.headers.get("etag")).not.toBeNull();
     expect((JSON.parse(await enabled.text()) as { redundancyMode: string }).redundancyMode).toBe(
       "integrated",
     );
-    expect(f.vector.read().changeToken).toBe(token);
+    expect(f.vector.read().changeToken).toBeGreaterThan(token);
 
-    const enabledAgain = await f.cache.resolve(factualEtag);
-    expect(enabledAgain.status).toBe(200);
-    expect(enabledAgain.cacheable).toBe(false);
-    expect(enabledAgain.etag).toBeNull();
-    expect(f.counts().builds).toBe(3);
+    const enabledEtag = enabled.headers.get("etag")!;
+    const enabledAgain = await f.cache.resolve(enabledEtag);
+    expect(enabledAgain.status).toBe(304);
+    expect(enabledAgain.cacheable).toBe(true);
+    expect(enabledAgain.etag).toBe(enabledEtag);
+    expect(f.counts().builds).toBe(2);
 
     f.setSemanticEnabled(false);
     const factualAgain = await f.cache.resolve();
     expect(factualAgain.cacheable).toBe(true);
     expect((await f.cache.resolve(factualAgain.etag)).status).toBe(304);
-    expect(f.counts().builds).toBe(4);
+    expect(f.counts().builds).toBe(3);
   });
 
   test("an activation during an in-flight build discards the old-mode result", async () => {
@@ -361,8 +446,8 @@ describe("CollectionSnapshotCacheService", () => {
     unblock();
     const result = await pending;
     expect(result.status).toBe(200);
-    expect(result.cacheable).toBe(false);
-    expect(result.etag).toBeNull();
+    expect(result.cacheable).toBe(true);
+    expect(result.etag).not.toBeNull();
     expect(f.counts().builds).toBe(2);
   });
 
@@ -452,6 +537,39 @@ describe("CollectionSnapshotCacheService", () => {
     const restarted = fixture();
     const afterRestart = await restarted.cache.resolve();
     expect(afterRestart.etag).not.toBe(previous.etag);
+  });
+
+  test("same-revision content edits to any of the six authoritative sources invalidate the entry", async () => {
+    const f = fixture();
+    let prior = await f.cache.resolve();
+    const sourceNames = [
+      "collection",
+      "tournament",
+      "prediction-settings",
+      "redundancy-settings",
+      "niche-settings",
+      "shelf-config",
+    ];
+    for (const [index, source] of sourceNames.entries()) {
+      f.setAuthority(`same-revision-edit-${source}`);
+      const refreshed = await f.cache.resolve(prior.etag);
+      expect(refreshed.status).toBe(200);
+      expect(refreshed.cacheable).toBe(true);
+      expect(refreshed.etag).not.toBe(prior.etag);
+      expect(f.vector.read().collectionRevision).toBe(1);
+      expect(f.vector.read().tournamentRevision).toBe(1);
+      expect(f.counts().builds).toBe(index + 2);
+      prior = refreshed;
+    }
+  });
+
+  test("missing established authority prevents cache reuse and validator publication", async () => {
+    const f = fixture();
+    const first = await f.cache.resolve();
+    f.setAuthority("missing-niche-settings", false);
+    await expectRejected(f.cache.resolve(first.etag), "authoritative sources");
+    expect(f.counts().builds).toBeGreaterThanOrEqual(2);
+    expect(f.counts().builds).toBeLessThanOrEqual(3);
   });
 
   test("mutation after assembly but before publication discards the serialized candidate", async () => {
@@ -577,8 +695,8 @@ describe("CollectionSnapshotCacheService", () => {
     const recovered = await f.route.request("/collection/snapshot", {
       headers: { "If-None-Match": etag },
     });
-    expect(recovered.status).toBe(200);
-    expect(recovered.headers.get("etag")).not.toBe(etag);
+    expect(recovered.status).toBe(304);
+    expect(recovered.headers.get("etag")).toBe(etag);
   });
 
   test("a reader queued after degraded completion and a source mutation cannot join the old flight", async () => {
@@ -654,8 +772,9 @@ describe("CollectionSnapshotCacheService", () => {
     );
     expect(firstResponse.status).toBe(200);
     expect(secondResponse.snapshotStatus).toBe("complete");
-    expect(secondResponse.cacheable).toBe(true);
-    expect(builds).toBe(2);
+    expect(secondResponse.cacheable).toBe(false);
+    expect(builds).toBeGreaterThanOrEqual(2);
+    expect(builds).toBeLessThanOrEqual(3);
   });
 
   test("settled degraded snapshots are rebuilt on every later request", async () => {

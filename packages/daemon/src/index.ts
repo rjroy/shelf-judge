@@ -85,6 +85,7 @@ export function createJevRunWorker(options: {
     storageService,
     cache,
     ...sourceAdapter,
+    loadWishlist: () => storageService.loadWishlist(),
     // This factory runs once per unified prepared execution, so each authorized
     // execution receives fresh request and reported-token budgets.
     createGateway: (admitAndDispatch, providerBudget) =>
@@ -589,6 +590,9 @@ export async function main() {
         jevRefreshProgressService: createJevRefreshProgressService({
           cache: jevPairCache,
           ...(jevRunController ? { activeRun: () => jevRunController?.activeRun() ?? null } : {}),
+          ...(jevRunWorker
+            ? { processPendingProgress: () => jevRunWorker?.getProcessPendingProgress() ?? null }
+            : {}),
         }),
         jevRunController: jevRunController ?? undefined,
         jevPairCache: jevPairCache ?? undefined,

@@ -170,7 +170,8 @@ async function waitForRun(cache: Awaited<ReturnType<typeof createJevPairCache>>,
     const progress = cache.getRunProgress();
     if (
       progress?.runId === runId &&
-      (progress.state === "completed" || progress.state === "failed")
+      (progress.state === "completed" || progress.state === "failed") &&
+      progress.publication?.state !== "pending"
     )
       return progress;
     await new Promise<void>((resolve) => setTimeout(resolve, 0));

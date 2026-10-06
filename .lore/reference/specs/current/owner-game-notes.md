@@ -12,6 +12,7 @@ related:
   - .lore/work/design/jev-redundancy-similarity.md
   - .lore/work/design/jev-contract-amendments.md
   - .lore/work/design/wishlist-jev-description-similarity.md
+  - .lore/work/design/semantic-snapshot-cache.md
   - .lore/reference/specs/features/wishlist.md
   - .lore/reference/designs/current/manual-game-value-edit-lifecycle.md
   - .lore/reference/specs/current/game-view-next-previous-navigation.md
@@ -21,6 +22,8 @@ req-prefix: GAME-NOTE
 # Owner Game Notes
 
 > **Current derived-scoring authority — 2026-10-04:** The [approved unified-similarity design](../../../work/design/unified-similarity-prediction-redundancy.md) and accepted Phase 6 activation extend the existing explicit JEV exception: current authorized note evidence can affect pair similarity, prediction neighbor selection, score, confidence, redundancy and wishlist ordering. A shared C+D judgment is note-dependent even at zero O weight; wishlist ordering can inherit dependence through owned-game prediction although its direct candidate evidence is C_ONLY. Revocation fences the complete transitive result before cleanup and requires whole recomputation or unavailable output. This does not authorize note use in ordinary reads, profile interpretation, or any provider operation other than explicitly disclosed Run. Existing JEV history/design/amendment links below remain discoverable, subject to the unified design.
+
+> **Current checkpoint/publication authority — 2026-10-05:** The approved [semantic snapshot cache design](../../../work/design/semantic-snapshot-cache.md) supersedes the earlier immediate-per-checkpoint visibility clause in the 2026-10-01 amendment below. Run checkpoints are private durable staging, not ordinary scoring evidence. Ordinary reads use only published judgments; worker reads may use their run-owned overlay. On completion, failure, deadline, cancellation, or interruption, the terminal finalizer publishes the currently valid staged subset once, independently of execution outcome. Full coverage and advisory activation are not gates. A pending publication is distinct from execution completion; sealed ownership blocks new runs until provider-free retry/recovery or authorized reset/purge. Exact source/provenance checks, frozen authorization, note consent, and immediate revocation fencing remain unchanged. These accepted phase contracts are not a claim that all holistic project gates have passed.
 
 ## Goal
 

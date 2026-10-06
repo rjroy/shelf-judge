@@ -1,6 +1,9 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { Database } from "bun:sqlite";
+import type { JevRunPublication, JevRunStopReason } from "@shelf-judge/shared";
+export type { JevRunStopReason } from "@shelf-judge/shared";
 import { parseWishlistCandidateMember } from "./jev-pair-identity.js";
 
 export type JevSignal = "C" | "D";
@@ -55,19 +58,13 @@ export interface JevRunProgress {
   cacheMisses: number;
   failedPairs: number;
   stopReason?: JevRunStopReason;
+  publication?: JevRunPublication;
   updatedAt: string;
 }
 
 export type JevRunProgressRead =
   | { status: "available"; progress: JevRunProgress }
   | { status: "none" | "invalid" | "unavailable" };
-
-export type JevRunStopReason =
-  | "provider-limit"
-  | "provider-unconfigured"
-  | "application-attempt-limit"
-  | "application-token-threshold"
-  | "application-deadline";
 
 export interface JevAdvisoryActivation {
   identity: string;
@@ -79,15 +76,30 @@ export interface JevPairCheckpoint {
   progress: JevRunProgress;
 }
 
-export interface JevRunFinish {
-  /** Null preserves any independently valid activation already in the cache. */
-  activation: JevAdvisoryActivation | null;
+export interface JevRunBatch {
+  runId: string;
+  state: "active" | "sealed";
+  progress: JevRunProgress;
+  stagingRevision: number;
+}
+
+export interface JevStagedSnapshot {
+  runId: string;
+  revision: number;
+  judgments: JevPairJudgment[];
+}
+
+export interface JevRunPromotionResult {
+  status: "published" | "unchanged" | "already-published";
+  publicationToken: string;
   progress: JevRunProgress;
 }
 
 export interface JevPairCache {
   readonly available: boolean;
   mutationRevision(): number | null;
+  /** Durable fence for changes to the ordinary published evidence view. */
+  publicationToken?(): string | null;
   lookup(key: JevPairKey): JevPairJudgment | null;
   upsert(judgment: JevPairJudgment): void;
   purgePair(
@@ -124,8 +136,26 @@ export interface JevPairCache {
   ): number;
   purgeDDependent(): number;
   saveRunProgress(progress: JevRunProgress): void;
-  checkpointPair(checkpoint: JevPairCheckpoint): void;
-  finishRun(finish: JevRunFinish): void;
+  /** Persist pending publication details only while the matching sealed batch still owns progress. */
+  saveSealedRunProgressIfOwned?(progress: JevRunProgress): boolean;
+  /** Reserve the single durable batch slot before execution. */
+  reserveRunBatch?(progress: JevRunProgress): void;
+  /** Atomically checkpoint numeric evidence and progress to the owned staging delta. */
+  checkpointStagedPair?(checkpoint: JevPairCheckpoint): void;
+  /** Published-first, run-owned overlay lookup for workers only. */
+  lookupForRun?(runId: string, key: JevPairKey): JevPairJudgment | null;
+  /** Indexed, run-bounded snapshot for source/permission validation outside SQLite transactions. */
+  stagedSnapshot?(runId: string): JevStagedSnapshot | null;
+  getRunBatch?(): JevRunBatch | null;
+  /** Durably seals execution outcome. Subsequent checkpoints are rejected. */
+  sealRunBatch?(progress: JevRunProgress): void;
+  /** Promote only exact rows selected by the caller's source/permission validator. */
+  promoteRunBatch?(input: {
+    runId: string;
+    expectedStagingRevision: number;
+    eligibleJudgments: readonly JevPairJudgment[];
+    progress: JevRunProgress;
+  }): JevRunPromotionResult;
   getRunProgress(): JevRunProgress | null;
   getRunProgressRead(): JevRunProgressRead;
   setActivation(activation: JevAdvisoryActivation | null): void;
@@ -136,7 +166,7 @@ export interface JevPairCache {
 }
 
 const DATABASE_FILENAME = "jev-pair-cache.sqlite";
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 7;
 
 function canonicalPair(left: string, right: string): [string, string] {
   if (!left || !right || left === right) throw new Error("Pair requires two distinct stable IDs");
@@ -160,7 +190,7 @@ function requireExactKeys(value: object, allowed: readonly string[], field: stri
   if (unknown.length > 0) throw new Error(`Unexpected ${field} properties`);
 }
 
-function validateProgress(progress: JevRunProgress): void {
+function validateProgress(progress: unknown): asserts progress is JevRunProgress {
   if (!isRecord(progress)) throw new Error("Invalid run progress");
   requireExactKeys(
     progress,
@@ -174,11 +204,17 @@ function validateProgress(progress: JevRunProgress): void {
       "cacheMisses",
       "failedPairs",
       "stopReason",
+      "publication",
       "updatedAt",
     ],
     "run progress",
   );
-  if (!["running", "completed", "interrupted", "failed"].includes(progress.state))
+  if (
+    progress.state !== "running" &&
+    progress.state !== "completed" &&
+    progress.state !== "interrupted" &&
+    progress.state !== "failed"
+  )
     throw new Error("Invalid run state");
   if (
     progress.scope !== undefined &&
@@ -194,29 +230,71 @@ function validateProgress(progress: JevRunProgress): void {
         "application-attempt-limit",
         "application-token-threshold",
         "application-deadline",
+        "owner-cancelled",
       ].some((reason) => reason === progress.stopReason) ||
-      progress.state !== "failed"
+      (progress.stopReason === "owner-cancelled"
+        ? progress.state !== "interrupted"
+        : progress.state !== "failed")
     )
       throw new Error("Invalid run stop reason");
   }
-  for (const n of [
+  const counters = [
     progress.pairCount,
     progress.completedPairs,
     progress.cacheHits,
     progress.cacheMisses,
     progress.failedPairs,
-  ])
-    if (!Number.isSafeInteger(n) || n < 0) throw new Error("Invalid progress counter");
+  ];
+  if (
+    counters.some(
+      (value) => typeof value !== "number" || !Number.isSafeInteger(value) || value < 0,
+    ) ||
+    typeof progress.pairCount !== "number" ||
+    typeof progress.completedPairs !== "number" ||
+    typeof progress.cacheHits !== "number" ||
+    typeof progress.cacheMisses !== "number" ||
+    typeof progress.failedPairs !== "number"
+  )
+    throw new Error("Invalid progress counter");
   if (progress.completedPairs > progress.pairCount) throw new Error("Invalid completed pair count");
+  if (typeof progress.runId !== "string" || typeof progress.updatedAt !== "string")
+    throw new Error("Invalid run progress identity");
   requireText(progress.runId, "run ID");
   requireText(progress.updatedAt, "updatedAt");
-}
-
-function validateActivation(activation: JevAdvisoryActivation): void {
-  if (!isRecord(activation)) throw new Error("Invalid activation");
-  requireExactKeys(activation, ["identity", "activatedAt"], "activation");
-  requireText(activation.identity, "activation identity");
-  requireText(activation.activatedAt, "activation timestamp");
+  if (progress.publication !== undefined) {
+    const publication = progress.publication;
+    if (!isRecord(publication)) throw new Error("Invalid publication outcome");
+    requireExactKeys(
+      publication,
+      ["state", "phase", "outcomePersistence", "reason"],
+      "publication outcome",
+    );
+    if (
+      publication.state !== "published" &&
+      publication.state !== "unchanged" &&
+      publication.state !== "pending"
+    )
+      throw new Error("Invalid publication state");
+    if (
+      publication.phase !== undefined &&
+      publication.phase !== "seal" &&
+      publication.phase !== "validate" &&
+      publication.phase !== "promote"
+    )
+      throw new Error("Invalid publication phase");
+    if (
+      publication.outcomePersistence !== "sealed" &&
+      publication.outcomePersistence !== "finalized" &&
+      publication.outcomePersistence !== "unpersisted"
+    )
+      throw new Error("Invalid publication persistence state");
+    if (publication.reason !== undefined) {
+      if (typeof publication.reason !== "string") throw new Error("Invalid publication reason");
+      requireText(publication.reason, "publication reason");
+    }
+    if (publication.state === "pending" && !publication.phase)
+      throw new Error("Pending publication requires a phase");
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -373,6 +451,14 @@ type JudgmentRow = {
   dependencies_json: string;
 };
 
+type StagedJudgmentRow = JudgmentRow & { run_id: string };
+type RunBatchRow = {
+  runId: string;
+  state: "active" | "sealed";
+  progressJson: string;
+  stagingRevision: number;
+};
+
 function projectJudgmentRow(row: JudgmentRow): JevPairJudgment | null {
   try {
     const dependencies: unknown = JSON.parse(row.dependencies_json);
@@ -435,9 +521,10 @@ function canonicalJudgmentContent(judgment: JevPairJudgment): string {
   });
 }
 
-type RunProgressRow = Omit<JevRunProgress, "stopReason" | "scope"> & {
+type RunProgressRow = Omit<JevRunProgress, "stopReason" | "scope" | "publication"> & {
   stopReason: string | null;
   scope: string | null;
+  publicationJson: string | null;
 };
 
 function prepareStatements(db: Database) {
@@ -455,11 +542,43 @@ function prepareStatements(db: Database) {
       "DELETE FROM judgments WHERE pair_domain=? AND game_a=? AND game_b=? AND signal=?",
     ),
     deletePair: db.query("DELETE FROM judgments WHERE pair_domain=? AND game_a=? AND game_b=?"),
+    stagedGet: db.query<StagedJudgmentRow, [string, JevPairDomain, string, string, JevSignal]>(
+      "SELECT * FROM staged_judgments WHERE run_id=? AND pair_domain=? AND game_a=? AND game_b=? AND signal=?",
+    ),
+    stagedByRun: db.query<StagedJudgmentRow, [string]>(
+      "SELECT * FROM staged_judgments WHERE run_id=? ORDER BY pair_domain,game_a,game_b,signal",
+    ),
+    stagedUpsert: db.query(
+      "INSERT OR REPLACE INTO staged_judgments (run_id,pair_domain,game_a,game_b,signal,collection_id,consent_epoch,dependency_kind,value,confidence,model_id,rubric_version,question_version,request_schema_version,score_mapping_version,semantic_policy_id,completed_at,dependencies_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    ),
+    stagedDeleteRun: db.query("DELETE FROM staged_judgments WHERE run_id=?"),
+    stagedDeletePair: db.query(
+      "DELETE FROM staged_judgments WHERE pair_domain=? AND game_a=? AND game_b=?",
+    ),
+    getRunBatch: db.query<RunBatchRow, []>(
+      "SELECT run_id as runId,state,progress_json as progressJson,staging_revision as stagingRevision FROM run_batch WHERE singleton=1",
+    ),
+    reserveRunBatch: db.query(
+      "INSERT INTO run_batch (singleton,run_id,state,progress_json,staging_revision) VALUES (1,?,'active',?,0)",
+    ),
+    updateRunBatch: db.query(
+      "UPDATE run_batch SET state=?,progress_json=?,staging_revision=? WHERE singleton=1 AND run_id=? AND state=?",
+    ),
+    bumpRunBatchRevision: db.query(
+      "UPDATE run_batch SET staging_revision=staging_revision+1 WHERE singleton=1",
+    ),
+    deleteRunBatch: db.query("DELETE FROM run_batch WHERE singleton=1 AND run_id=?"),
+    getPublicationState: db.query<{ token: string; lastRunId: string | null }, []>(
+      "SELECT token,last_run_id as lastRunId FROM publication_state WHERE singleton=1",
+    ),
+    setPublicationState: db.query(
+      "UPDATE publication_state SET token=?,last_run_id=? WHERE singleton=1",
+    ),
     saveRunProgress: db.query(
-      "INSERT OR REPLACE INTO run_progress (singleton,run_id,state,scope_kind,pair_count,completed_pairs,cache_hits,cache_misses,failed_pairs,stop_reason,updated_at) VALUES (1,?,?,?,?,?,?,?,?,?,?)",
+      "INSERT OR REPLACE INTO run_progress (singleton,run_id,state,scope_kind,pair_count,completed_pairs,cache_hits,cache_misses,failed_pairs,stop_reason,publication_json,updated_at) VALUES (1,?,?,?,?,?,?,?,?,?,?,?)",
     ),
     getRunProgress: db.query<RunProgressRow, []>(
-      "SELECT run_id as runId,state,scope_kind as scope,pair_count as pairCount,completed_pairs as completedPairs,cache_hits as cacheHits,cache_misses as cacheMisses,failed_pairs as failedPairs,stop_reason as stopReason,updated_at as updatedAt FROM run_progress WHERE singleton=1",
+      "SELECT run_id as runId,state,scope_kind as scope,pair_count as pairCount,completed_pairs as completedPairs,cache_hits as cacheHits,cache_misses as cacheMisses,failed_pairs as failedPairs,stop_reason as stopReason,publication_json as publicationJson,updated_at as updatedAt FROM run_progress WHERE singleton=1",
     ),
     setActivation: db.query("INSERT OR REPLACE INTO activation VALUES (1,?,?)"),
     getActivation: db.query<JevAdvisoryActivation, []>(
@@ -473,6 +592,7 @@ function noOpCache(): JevPairCache {
   return {
     available: false,
     mutationRevision: () => null,
+    publicationToken: () => null,
     lookup: () => null,
     upsert: () => {
       throw new Error("Jev pair cache unavailable");
@@ -501,10 +621,20 @@ function noOpCache(): JevPairCache {
     saveRunProgress: () => {
       throw new Error("Jev pair cache unavailable");
     },
-    checkpointPair: () => {
+    saveSealedRunProgressIfOwned: () => false,
+    reserveRunBatch: () => {
       throw new Error("Jev pair cache unavailable");
     },
-    finishRun: () => {
+    checkpointStagedPair: () => {
+      throw new Error("Jev pair cache unavailable");
+    },
+    lookupForRun: () => null,
+    stagedSnapshot: () => null,
+    getRunBatch: () => null,
+    sealRunBatch: () => {
+      throw new Error("Jev pair cache unavailable");
+    },
+    promoteRunBatch: () => {
       throw new Error("Jev pair cache unavailable");
     },
     getRunProgress: () => null,
@@ -552,12 +682,39 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
           state TEXT NOT NULL CHECK(state IN ('running','completed','interrupted','failed')),
           scope_kind TEXT CHECK(scope_kind IS NULL OR scope_kind IN ('collection','wishlist')),
           pair_count INTEGER NOT NULL, completed_pairs INTEGER NOT NULL, cache_hits INTEGER NOT NULL,
-          cache_misses INTEGER NOT NULL, failed_pairs INTEGER NOT NULL, stop_reason TEXT,
+          cache_misses INTEGER NOT NULL, failed_pairs INTEGER NOT NULL, stop_reason TEXT, publication_json TEXT,
           updated_at TEXT NOT NULL
         );
         CREATE TABLE activation (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), identity TEXT NOT NULL, activated_at TEXT NOT NULL);
-        PRAGMA user_version = 5;
-        COMMIT;`);
+        CREATE TABLE staged_judgments (
+          run_id TEXT NOT NULL,
+          pair_domain TEXT NOT NULL CHECK(pair_domain IN ('collection','wishlist-candidate')),
+          game_a TEXT NOT NULL, game_b TEXT NOT NULL, signal TEXT NOT NULL CHECK(signal IN ('C','D')),
+          collection_id TEXT NOT NULL, consent_epoch TEXT,
+          dependency_kind TEXT NOT NULL CHECK(dependency_kind IN ('C_ONLY','D_ONLY','SHARED_CD')),
+          value REAL NOT NULL CHECK(value >= 0 AND value <= 1), confidence REAL CHECK(confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+          model_id TEXT NOT NULL, rubric_version TEXT NOT NULL, question_version TEXT NOT NULL,
+          request_schema_version TEXT NOT NULL, score_mapping_version TEXT NOT NULL, semantic_policy_id TEXT NOT NULL,
+          completed_at TEXT NOT NULL, dependencies_json TEXT NOT NULL,
+          PRIMARY KEY(run_id,pair_domain,game_a,game_b,signal), CHECK(game_a < game_b)
+        );
+        CREATE INDEX staged_judgments_run_order ON staged_judgments(run_id,pair_domain,game_a,game_b,signal);
+        CREATE INDEX staged_judgments_member_a ON staged_judgments(pair_domain,game_a);
+        CREATE INDEX staged_judgments_member_b ON staged_judgments(pair_domain,game_b);
+        CREATE TABLE run_batch (
+          singleton INTEGER PRIMARY KEY CHECK(singleton=1), run_id TEXT NOT NULL UNIQUE,
+          state TEXT NOT NULL CHECK(state IN ('active','sealed')), progress_json TEXT NOT NULL,
+          staging_revision INTEGER NOT NULL CHECK(staging_revision>=0)
+        );
+        CREATE TABLE publication_state (
+          singleton INTEGER PRIMARY KEY CHECK(singleton=1), token TEXT NOT NULL, last_run_id TEXT
+        );
+        PRAGMA user_version = 7;
+        `);
+      db.query("INSERT INTO publication_state(singleton,token,last_run_id) VALUES (1,?,NULL)").run(
+        randomUUID(),
+      );
+      db.exec("COMMIT;");
     } else {
       if (version < 2) {
         // Earlier cache rows lack collection/consent fences and cannot be proven reusable.
@@ -611,8 +768,53 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
           PRAGMA user_version = 5;
           COMMIT;`);
       }
+      if (version < 6) {
+        db.exec(`BEGIN IMMEDIATE;
+          CREATE TABLE staged_judgments (
+            run_id TEXT NOT NULL,
+            pair_domain TEXT NOT NULL CHECK(pair_domain IN ('collection','wishlist-candidate')),
+            game_a TEXT NOT NULL, game_b TEXT NOT NULL, signal TEXT NOT NULL CHECK(signal IN ('C','D')),
+            collection_id TEXT NOT NULL, consent_epoch TEXT,
+            dependency_kind TEXT NOT NULL CHECK(dependency_kind IN ('C_ONLY','D_ONLY','SHARED_CD')),
+            value REAL NOT NULL CHECK(value >= 0 AND value <= 1), confidence REAL CHECK(confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+            model_id TEXT NOT NULL, rubric_version TEXT NOT NULL, question_version TEXT NOT NULL,
+            request_schema_version TEXT NOT NULL, score_mapping_version TEXT NOT NULL, semantic_policy_id TEXT NOT NULL,
+            completed_at TEXT NOT NULL, dependencies_json TEXT NOT NULL,
+            PRIMARY KEY(run_id,pair_domain,game_a,game_b,signal), CHECK(game_a < game_b)
+          );
+          CREATE INDEX staged_judgments_run_order ON staged_judgments(run_id,pair_domain,game_a,game_b,signal);
+          CREATE INDEX staged_judgments_member_a ON staged_judgments(pair_domain,game_a);
+          CREATE INDEX staged_judgments_member_b ON staged_judgments(pair_domain,game_b);
+          CREATE TABLE run_batch (
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1), run_id TEXT NOT NULL UNIQUE,
+            state TEXT NOT NULL CHECK(state IN ('active','sealed')), progress_json TEXT NOT NULL,
+            staging_revision INTEGER NOT NULL CHECK(staging_revision>=0)
+          );
+          CREATE TABLE publication_state (
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1), token TEXT NOT NULL, last_run_id TEXT
+          );
+          PRAGMA user_version = 6;
+          `);
+        db.query(
+          "INSERT INTO publication_state(singleton,token,last_run_id) VALUES (1,?,NULL)",
+        ).run(randomUUID());
+        db.exec("COMMIT;");
+      }
+      if (version < 7) {
+        db.exec(`BEGIN IMMEDIATE;
+          ALTER TABLE run_progress ADD COLUMN publication_json TEXT;
+          PRAGMA user_version=7;
+          COMMIT;`);
+      }
     }
     statements = prepareStatements(db);
+    const publicationState = statements.getPublicationState.get();
+    if (
+      !publicationState ||
+      typeof publicationState.token !== "string" ||
+      !publicationState.token.trim()
+    )
+      throw new Error("Jev cache publication state is missing or invalid");
   } catch {
     try {
       db?.close();
@@ -642,6 +844,16 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
   const recordMutation = (): void => {
     revision = revision === null || revision >= Number.MAX_SAFE_INTEGER ? null : revision + 1;
   };
+  const advancePublicationToken = (lastRunId?: string | null): string => {
+    const token = randomUUID();
+    const committedRunId =
+      lastRunId === undefined
+        ? (statements?.getPublicationState.get()?.lastRunId ?? null)
+        : lastRunId;
+    const update = statements?.setPublicationState.run(token, committedRunId);
+    if (update?.changes !== 1) throw new Error("Jev cache publication state is unavailable");
+    return token;
+  };
   const invalidateRevision = (): void => {
     revision = null;
   };
@@ -651,6 +863,29 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
   const writeJudgment = (judgment: JevPairJudgment): void => {
     const [a, b] = canonicalPair(judgment.gameAId, judgment.gameBId);
     statements?.upsert.run(
+      judgment.pairDomain ?? "collection",
+      a,
+      b,
+      judgment.signal,
+      judgment.collectionId,
+      judgment.consentEpoch ?? null,
+      judgment.dependencyKind,
+      judgment.value,
+      judgment.confidence ?? null,
+      judgment.modelId,
+      judgment.rubricVersion,
+      judgment.questionVersion,
+      judgment.requestSchemaVersion,
+      judgment.scoreMappingVersion,
+      judgment.semanticPolicyId,
+      judgment.completedAt,
+      JSON.stringify(judgment.dependencies.map(projectDependency)),
+    );
+  };
+  const writeStagedJudgment = (runId: string, judgment: JevPairJudgment): void => {
+    const [a, b] = canonicalPair(judgment.gameAId, judgment.gameBId);
+    statements?.stagedUpsert.run(
+      runId,
       judgment.pairDomain ?? "collection",
       a,
       b,
@@ -681,6 +916,7 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       progress.cacheMisses,
       progress.failedPairs,
       progress.stopReason ?? null,
+      progress.publication === undefined ? null : JSON.stringify(progress.publication),
       progress.updatedAt,
     );
   };
@@ -699,6 +935,9 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
         cacheMisses: row.cacheMisses,
         failedPairs: row.failedPairs,
         ...(row.stopReason === null ? {} : { stopReason: row.stopReason as JevRunStopReason }),
+        ...(row.publicationJson === null
+          ? {}
+          : { publication: JSON.parse(row.publicationJson) as JevRunPublication }),
         updatedAt: row.updatedAt,
       };
       validateProgress(progress);
@@ -720,6 +959,14 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
         return revision;
       } catch {
         invalidateRevision();
+        return null;
+      }
+    },
+    publicationToken() {
+      if (!usable()) return null;
+      try {
+        return statements.getPublicationState.get()?.token ?? null;
+      } catch {
         return null;
       }
     },
@@ -751,7 +998,10 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
     upsert(judgment) {
       assertUsable();
       validate(judgment);
-      writeJudgment(judgment);
+      db.transaction(() => {
+        writeJudgment(judgment);
+        advancePublicationToken();
+      })();
       recordMutation();
     },
     transferCandidateCOnlyPair(candidateKey, ownedLocalGameIds) {
@@ -834,6 +1084,13 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       db.transaction(() => {
         if (!existingJudgment) writeJudgment(target);
         statements.deletePairSignal.run("wishlist-candidate", sourcePair[0], sourcePair[1], "C");
+        const stagedDeleted = statements.stagedDeletePair.run(
+          "wishlist-candidate",
+          sourcePair[0],
+          sourcePair[1],
+        ).changes;
+        if (stagedDeleted > 0) statements.bumpRunBatchRevision.run();
+        advancePublicationToken();
       })();
       recordMutation();
       return true;
@@ -938,7 +1195,7 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
           throw new Error("Conflicting owned cache row prevents candidate transfer");
         planned.push({ sourcePair, sourceIdentity: canonicalJudgmentContent(source), target });
       }
-      const changed = db.transaction(() => {
+      const result = db.transaction(() => {
         let count = 0;
         for (const { sourcePair, sourceIdentity, target } of planned) {
           const currentSourceRow = statements.get.get(
@@ -968,25 +1225,40 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
             )
             .run(candidateMemberId, candidateMemberId).changes,
         );
-        return count;
+        const stagedChanged = Number(
+          db
+            .query(
+              "DELETE FROM staged_judgments WHERE pair_domain='wishlist-candidate' AND (game_a=? OR game_b=?)",
+            )
+            .run(candidateMemberId, candidateMemberId).changes,
+        );
+        if (stagedChanged > 0) statements.bumpRunBatchRevision.run();
+        if (count > 0 || stagedChanged > 0) advancePublicationToken();
+        return { changed: count, stagedChanged };
       })();
-      if (changed > 0) recordMutation();
-      return changed;
+      if (result.changed > 0 || result.stagedChanged > 0) {
+        recordMutation();
+      }
+      return result.changed;
     },
     purgePair(left, right, signal, pairDomain = "collection") {
       assertUsable();
       const [a, b] = canonicalPair(left, right);
       const deleted = db.transaction(() => {
         statements.deleteActivation.run();
-        return Number(
+        const staged = statements.stagedDeletePair.run(pairDomain, a, b).changes;
+        if (staged > 0) statements.bumpRunBatchRevision.run();
+        const published = Number(
           (signal
             ? statements.deletePairSignal.run(pairDomain, a, b, signal)
             : statements.deletePair.run(pairDomain, a, b)
           ).changes,
         );
+        if (published > 0 || staged > 0) advancePublicationToken();
+        return { published, staged };
       })();
       recordMutation();
-      return deleted;
+      return deleted.published;
     },
     purgeGame(gameId, signal, dependencyKind, pairDomain = "collection") {
       const allKinds: JevDependencyKind[] = ["C_ONLY", "D_ONLY", "SHARED_CD"];
@@ -1000,16 +1272,24 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       const placeholders = selected.map(() => "?").join(",");
       const deleted = db.transaction(() => {
         statements.deleteActivation.run();
-        return Number(
+        const predicate = `pair_domain=? AND (game_a=? OR game_b=?) AND dependency_kind IN (${placeholders})${signal ? " AND signal=?" : ""}`;
+        const params = [pairDomain, gameId, gameId, ...selected, ...(signal ? [signal] : [])];
+        const staged = Number(
+          db.query(`DELETE FROM staged_judgments WHERE ${predicate}`).run(...params).changes,
+        );
+        if (staged > 0) statements.bumpRunBatchRevision.run();
+        const published = Number(
           db
             .query(
               `DELETE FROM judgments WHERE pair_domain=? AND (game_a=? OR game_b=?) AND dependency_kind IN (${placeholders})${signal ? " AND signal=?" : ""}`,
             )
-            .run(pairDomain, gameId, gameId, ...selected, ...(signal ? [signal] : [])).changes,
+            .run(...params).changes,
         );
+        if (published > 0 || staged > 0) advancePublicationToken();
+        return { published, staged };
       })();
       recordMutation();
-      return deleted;
+      return deleted.published;
     },
     invalidateGame(gameId, dependencyKinds, pairDomain = "collection") {
       assertUsable();
@@ -1019,55 +1299,102 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
       const placeholders = kinds.map(() => "?").join(",");
       const deleted = db.transaction(() => {
         statements.deleteActivation.run();
-        return Number(
+        const predicate = `pair_domain=? AND (game_a=? OR game_b=?) AND dependency_kind IN (${placeholders})`;
+        const params = [pairDomain, gameId, gameId, ...kinds];
+        const staged = Number(
+          db.query(`DELETE FROM staged_judgments WHERE ${predicate}`).run(...params).changes,
+        );
+        if (staged > 0) statements.bumpRunBatchRevision.run();
+        const published = Number(
           db
             .query(
               `DELETE FROM judgments WHERE pair_domain=? AND (game_a=? OR game_b=?) AND dependency_kind IN (${placeholders})`,
             )
-            .run(pairDomain, gameId, gameId, ...kinds).changes,
+            .run(...params).changes,
         );
+        if (published > 0 || staged > 0) advancePublicationToken();
+        return { published, staged };
       })();
       recordMutation();
-      return deleted;
+      return deleted.published;
     },
     purgeDDependent() {
       assertUsable();
       const deleted = db.transaction(() => {
         statements.deleteActivation.run();
-        return Number(
+        const staged = Number(
+          db
+            .query("DELETE FROM staged_judgments WHERE dependency_kind IN ('D_ONLY','SHARED_CD')")
+            .run().changes,
+        );
+        if (staged > 0) statements.bumpRunBatchRevision.run();
+        const published = Number(
           db.query("DELETE FROM judgments WHERE dependency_kind IN ('D_ONLY','SHARED_CD')").run()
             .changes,
         );
+        if (published > 0 || staged > 0) advancePublicationToken();
+        return { published, staged };
       })();
       recordMutation();
-      return deleted;
+      return deleted.published;
     },
     saveRunProgress(progress) {
       assertUsable();
       validateProgress(progress);
       writeProgress(progress);
     },
-    checkpointPair(checkpoint) {
+    saveSealedRunProgressIfOwned(progress) {
       assertUsable();
-      if (!isRecord(checkpoint)) throw new Error("Invalid pair checkpoint");
-      requireExactKeys(checkpoint, ["judgments", "progress"], "pair checkpoint");
+      validateProgress(progress);
+      if (progress.state === "running" || progress.publication?.state !== "pending")
+        throw new Error("Owned sealed progress must describe pending terminal publication");
+      return db.transaction(() => {
+        const batch = statements.getRunBatch.get();
+        if (!batch || batch.runId !== progress.runId || batch.state !== "sealed") return false;
+        const sealedProgress: unknown = JSON.parse(batch.progressJson);
+        validateProgress(sealedProgress);
+        const sealedExecution = { ...sealedProgress };
+        const pendingExecution = { ...progress };
+        delete sealedExecution.publication;
+        delete pendingExecution.publication;
+        if (JSON.stringify(sealedExecution) !== JSON.stringify(pendingExecution)) return false;
+        writeProgress(progress);
+        return true;
+      })();
+    },
+    reserveRunBatch(progress) {
+      assertUsable();
+      validateProgress(progress);
+      if (progress.state !== "running")
+        throw new Error("Run batch reservation requires running progress");
+      db.transaction(() => {
+        if (statements.getRunBatch.get()) throw new Error("A Jev run batch is already unresolved");
+        statements.reserveRunBatch.run(progress.runId, JSON.stringify(progress));
+        writeProgress(progress);
+      })();
+    },
+    checkpointStagedPair(checkpoint) {
+      assertUsable();
+      if (!isRecord(checkpoint)) throw new Error("Invalid staged pair checkpoint");
+      requireExactKeys(checkpoint, ["judgments", "progress"], "staged pair checkpoint");
       const { judgments, progress } = checkpoint;
+      validateProgress(progress);
+      if (progress.state !== "running")
+        throw new Error("Staged checkpoint requires running progress");
       if (!Array.isArray(judgments) || (judgments.length !== 1 && judgments.length !== 2))
         throw new Error("A checkpoint requires one or two judgments");
-      // Validate the entire bounded operation before opening its transaction.
       judgments.forEach(validate);
       const first = judgments[0];
       if (!first) throw new Error("A checkpoint requires at least one judgment");
       const pair = canonicalPair(first.gameAId, first.gameBId);
-      const pairDomain = first.pairDomain === undefined ? "collection" : first.pairDomain;
+      const domain = first.pairDomain ?? "collection";
       if (
         judgments.some((judgment) => {
           const otherPair = canonicalPair(judgment.gameAId, judgment.gameBId);
           return (
             otherPair[0] !== pair[0] ||
             otherPair[1] !== pair[1] ||
-            (judgment.pairDomain === undefined ? "collection" : judgment.pairDomain) !==
-              pairDomain ||
+            (judgment.pairDomain ?? "collection") !== domain ||
             judgment.collectionId !== first.collectionId
           );
         })
@@ -1075,27 +1402,197 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
         throw new Error("Checkpoint judgments must identify the same domain, collection, and pair");
       if (judgments.length === 2 && judgments[0]?.signal === judgments[1]?.signal)
         throw new Error("Checkpoint judgments must have distinct signals");
-      validateProgress(progress);
       db.transaction(() => {
-        judgments.forEach(writeJudgment);
+        const batch = statements.getRunBatch.get();
+        if (!batch || batch.runId !== progress.runId || batch.state !== "active")
+          throw new Error("Run batch is not owned and active");
+        judgments.forEach((judgment) => writeStagedJudgment(progress.runId, judgment));
+        const nextRevision = batch.stagingRevision + 1;
+        statements.updateRunBatch.run(
+          "active",
+          JSON.stringify(progress),
+          nextRevision,
+          progress.runId,
+          "active",
+        );
         writeProgress(progress);
       })();
-      recordMutation();
     },
-    finishRun(finish) {
+    lookupForRun(runId, key) {
+      if (!usable()) return null;
+      const pairDomain = key.pairDomain ?? "collection";
+      let pair: [string, string];
+      try {
+        pair = canonicalPair(key.gameAId, key.gameBId);
+      } catch {
+        return null;
+      }
+      const batch = statements.getRunBatch.get();
+      if (batch?.runId === runId) {
+        const staged = statements.stagedGet.get(runId, pairDomain, pair[0], pair[1], key.signal);
+        if (staged) return projectJudgmentRow(staged);
+      }
+      try {
+        const row = statements.get.get(pairDomain, pair[0], pair[1], key.signal);
+        return row ? projectJudgmentRow(row) : null;
+      } catch {
+        invalidateRevision();
+        return null;
+      }
+    },
+    stagedSnapshot(runId) {
+      if (!usable()) return null;
+      const batch = statements.getRunBatch.get();
+      if (!batch || batch.runId !== runId) return null;
+      return {
+        runId,
+        revision: batch.stagingRevision,
+        judgments: statements.stagedByRun.all(runId).flatMap((row) => {
+          const judgment = projectJudgmentRow(row);
+          return judgment ? [judgment] : [];
+        }),
+      };
+    },
+    getRunBatch() {
+      if (!usable()) return null;
+      const batch = statements.getRunBatch.get();
+      if (!batch) return null;
+      try {
+        const progress: unknown = JSON.parse(batch.progressJson);
+        validateProgress(progress);
+        return {
+          runId: batch.runId,
+          state: batch.state,
+          progress,
+          stagingRevision: batch.stagingRevision,
+        };
+      } catch {
+        return null;
+      }
+    },
+    sealRunBatch(progress) {
       assertUsable();
-      if (!isRecord(finish)) throw new Error("Invalid run finish");
-      requireExactKeys(finish, ["activation", "progress"], "run finish");
-      const { activation, progress } = finish;
       validateProgress(progress);
-      if (progress.state === "running") throw new Error("Run finish requires terminal progress");
-      if (activation !== null) validateActivation(activation);
+      if (progress.state === "running")
+        throw new Error("Run batch seal requires terminal progress");
+      const durableOutcome = { ...progress };
+      delete durableOutcome.publication;
       db.transaction(() => {
-        if (activation !== null)
-          statements.setActivation.run(activation.identity, activation.activatedAt);
-        writeProgress(progress);
+        const batch = statements.getRunBatch.get();
+        if (!batch || batch.runId !== progress.runId)
+          throw new Error("Run batch ownership mismatch");
+        if (batch.state === "sealed") {
+          if (batch.progressJson !== JSON.stringify(durableOutcome))
+            throw new Error("Run batch already sealed differently");
+          return;
+        }
+        statements.updateRunBatch.run(
+          "sealed",
+          JSON.stringify(durableOutcome),
+          batch.stagingRevision,
+          progress.runId,
+          "active",
+        );
+        writeProgress({
+          ...durableOutcome,
+          publication: {
+            state: "pending",
+            phase: "validate",
+            outcomePersistence: "sealed",
+          },
+        });
       })();
-      if (activation !== null) recordMutation();
+    },
+    promoteRunBatch(input) {
+      assertUsable();
+      validateProgress(input.progress);
+      if (input.progress.state === "running" || input.progress.runId !== input.runId)
+        throw new Error("Promotion requires matching terminal progress");
+      const result = db.transaction(() => {
+        const publication = statements.getPublicationState.get();
+        if (!publication || typeof publication.token !== "string" || !publication.token.trim())
+          throw new Error("Jev cache publication state is unavailable");
+        const batch = statements.getRunBatch.get();
+        if (publication?.lastRunId === input.runId) {
+          const storedProgress = readProgress();
+          return {
+            status: "already-published" as const,
+            publicationToken: publication.token,
+            progress:
+              storedProgress.status === "available" ? storedProgress.progress : input.progress,
+          };
+        }
+        if (!batch) {
+          throw new Error("No unresolved run batch to promote");
+        }
+        if (batch.runId !== input.runId || batch.state !== "sealed")
+          throw new Error("Run batch is not sealed and owned");
+        if (batch.stagingRevision !== input.expectedStagingRevision)
+          throw new Error("Staged judgments changed before promotion");
+        if (batch.progressJson !== JSON.stringify(input.progress))
+          throw new Error("Promotion outcome differs from durable seal");
+        const eligible = new Map<string, JevPairJudgment>();
+        for (const judgment of input.eligibleJudgments) {
+          validate(judgment);
+          const key = `${judgment.pairDomain ?? "collection"}\u0000${canonicalPair(judgment.gameAId, judgment.gameBId).join("\u0000")}\u0000${judgment.signal}`;
+          if (eligible.has(key)) throw new Error("Duplicate eligible staged judgment");
+          eligible.set(key, judgment);
+        }
+        for (const judgment of eligible.values()) {
+          const [a, b] = canonicalPair(judgment.gameAId, judgment.gameBId);
+          const row = statements.stagedGet.get(
+            input.runId,
+            judgment.pairDomain ?? "collection",
+            a,
+            b,
+            judgment.signal,
+          );
+          const staged = row ? projectJudgmentRow(row) : null;
+          if (!staged || canonicalJudgmentContent(staged) !== canonicalJudgmentContent(judgment))
+            throw new Error("Eligible judgment is not the exact staged row");
+        }
+        let changed = false;
+        for (const judgment of eligible.values()) {
+          const [a, b] = canonicalPair(judgment.gameAId, judgment.gameBId);
+          const existingRow = statements.get.get(
+            judgment.pairDomain ?? "collection",
+            a,
+            b,
+            judgment.signal,
+          );
+          const existing = existingRow ? projectJudgmentRow(existingRow) : null;
+          if (existingRow && !existing) throw new Error("Existing published judgment is invalid");
+          if (
+            !existing ||
+            canonicalJudgmentContent(existing) !== canonicalJudgmentContent(judgment)
+          ) {
+            writeJudgment(judgment);
+            changed = true;
+          }
+        }
+        statements.stagedDeleteRun.run(input.runId);
+        statements.deleteRunBatch.run(input.runId);
+        statements.deleteActivation.run();
+        const terminalProgress: JevRunProgress = {
+          ...input.progress,
+          publication: {
+            state: changed ? "published" : "unchanged",
+            outcomePersistence: "finalized",
+          },
+        };
+        writeProgress(terminalProgress);
+        const token = changed ? randomUUID() : publication.token;
+        const publicationUpdate = statements.setPublicationState.run(token, input.runId);
+        if (publicationUpdate.changes !== 1)
+          throw new Error("Jev cache publication state is unavailable");
+        return {
+          status: changed ? ("published" as const) : ("unchanged" as const),
+          publicationToken: token,
+          progress: terminalProgress,
+        };
+      })();
+      if (result.status === "published") recordMutation();
+      return result;
     },
     getRunProgress() {
       const result = readProgress();
@@ -1107,13 +1604,19 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
     setActivation(activation) {
       assertUsable();
       if (activation === null) {
-        statements.deleteActivation.run();
+        db.transaction(() => {
+          statements.deleteActivation.run();
+          advancePublicationToken();
+        })();
         recordMutation();
       } else {
         requireExactKeys(activation, ["identity", "activatedAt"], "activation");
         requireText(activation.identity, "activation identity");
         requireText(activation.activatedAt, "activation timestamp");
-        statements.setActivation.run(activation.identity, activation.activatedAt);
+        db.transaction(() => {
+          statements.setActivation.run(activation.identity, activation.activatedAt);
+          advancePublicationToken();
+        })();
         recordMutation();
       }
     },
@@ -1133,7 +1636,10 @@ export async function createJevPairCache(dataDir: string): Promise<JevPairCache>
     reset() {
       if (usable()) {
         db.transaction(() => {
-          db.exec("DELETE FROM judgments; DELETE FROM run_progress; DELETE FROM activation;");
+          db.exec(
+            "DELETE FROM judgments; DELETE FROM staged_judgments; DELETE FROM run_batch; DELETE FROM run_progress; DELETE FROM activation;",
+          );
+          advancePublicationToken(null);
         })();
         recordMutation();
       }

@@ -805,6 +805,99 @@ describe("semantic redundancy CLI consent boundary", () => {
     expect(human).toContain("Run scope: unknown (legacy progress; not inferred)");
   });
 
+  test("process-local seal failure is reported as stopped and unpersisted, not saved", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/redundancy/semantic/refresh-progress": {
+          response: {
+            ok: true,
+            status: 200,
+            data: {
+              coverageMeasurement: "not-measured",
+              activity: { state: "idle" },
+              progress: {
+                state: "process-local",
+                retryRunId: "run-seal-failed",
+                value: {
+                  state: "interrupted",
+                  scope: "wishlist",
+                  pairCount: 2,
+                  completedPairs: 1,
+                  cacheHits: 0,
+                  cacheMisses: 1,
+                  failedPairs: 0,
+                  stopReason: "owner-cancelled",
+                  publication: {
+                    state: "pending",
+                    phase: "seal",
+                    outcomePersistence: "unpersisted",
+                    reason: "seal-failed",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const output = await redundancySemanticProgress(client, [], { json: false });
+    expect(output).toContain("Process-local execution outcome (not persisted): interrupted");
+    expect(output).toContain(
+      "Evidence publication: pending (phase seal; outcome persistence unpersisted; seal-failed)",
+    );
+    expect(output).toContain("Run was stopped by owner cancellation");
+    expect(output).not.toContain("Saved progress (run association unknown)");
+    expect(output).not.toContain("Historical saved progress");
+  });
+
+  test.each([
+    {
+      publication: { state: "pending", phase: "validate", outcomePersistence: "sealed" },
+      expected: "Evidence publication: pending (phase validate; outcome persistence sealed)",
+    },
+    {
+      publication: { state: "published", outcomePersistence: "finalized" },
+      expected: "Evidence publication: published (outcome persistence finalized)",
+    },
+  ])(
+    "saved progress reports publication independently: $expected",
+    async ({ publication, expected }) => {
+      const client = createMockClient({
+        routes: {
+          "GET /api/redundancy/semantic/refresh-progress": {
+            response: {
+              ok: true,
+              status: 200,
+              data: {
+                coverageMeasurement: "not-measured",
+                activity: { state: "idle" },
+                progress: {
+                  state: "saved",
+                  relation: "historical",
+                  value: {
+                    state: "completed",
+                    pairCount: 1,
+                    completedPairs: 1,
+                    cacheHits: 0,
+                    cacheMisses: 1,
+                    failedPairs: 0,
+                    publication,
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      const output = await redundancySemanticProgress(client, [], { json: false });
+      expect(output).toContain("Historical saved progress");
+      expect(output).toContain(expected);
+      expect(output).not.toContain("Process-local");
+    },
+  );
+
   test.each([
     {
       stopReason: "application-attempt-limit",

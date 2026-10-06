@@ -550,6 +550,10 @@ export function createPreparedSimilarity(options: PreparedSimilarityOptions) {
     }
   }
 
+  function isReusable(): boolean {
+    return cacheFenceKind === "revisioned" && cacheWasReadable && isCurrent();
+  }
+
   return Object.freeze({
     resolvePairs,
     similarity(pair: StagedSimilarityPair): number | null {
@@ -560,6 +564,7 @@ export function createPreparedSimilarity(options: PreparedSimilarityOptions) {
     },
     sealProof,
     isCurrent,
+    isReusable,
     get isSealed() {
       return sealedProof !== null;
     },

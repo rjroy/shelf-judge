@@ -1,5 +1,6 @@
 // Redundancy commands: settings, enable, disable, stage, set
 import type {
+  JevRefreshProgressResponse,
   JevRunPreview,
   JevWishlistCandidateSelection,
   RedundancySettings,
@@ -178,33 +179,6 @@ export async function redundancySet(
 
 const SEMANTIC = "/api/redundancy/semantic";
 
-interface SemanticRefreshProgress {
-  coverageMeasurement: "not-measured";
-  activity: { state: "active"; runId: string } | { state: "idle" } | { state: "unavailable" };
-  progress:
-    | {
-        state: "saved";
-        relation: "active-run" | "historical" | "unknown";
-        value: {
-          state: string;
-          scope?: "collection" | "wishlist";
-          pairCount: number;
-          completedPairs: number;
-          cacheHits: number;
-          cacheMisses: number;
-          failedPairs: number;
-          stopReason?:
-            | "provider-limit"
-            | "provider-unconfigured"
-            | "application-attempt-limit"
-            | "application-token-threshold"
-            | "application-deadline";
-        };
-      }
-    | { state: "none" }
-    | { state: "unavailable" };
-}
-
 function fail(data: unknown, fallback: string): never {
   throw responseError(data, fallback);
 }
@@ -258,7 +232,7 @@ export async function redundancySemanticProgress(
   _args: string[],
   opts: OutputOptions,
 ): Promise<string> {
-  const { ok, data } = await client.get<SemanticRefreshProgress>(`${SEMANTIC}/refresh-progress`);
+  const { ok, data } = await client.get<JevRefreshProgressResponse>(`${SEMANTIC}/refresh-progress`);
   if (!ok) fail(data, "Failed to load semantic refresh progress");
   return opts.json ? printOutput(data, opts) : formatRunProgress(data);
 }
@@ -305,7 +279,7 @@ function formatWishlistSelection(selection: JevWishlistCandidateSelection): stri
   return selection.kind === "all" ? "all" : selection.bggIds.join(", ");
 }
 
-function formatRunProgress(status: SemanticRefreshProgress): string {
+function formatRunProgress(status: JevRefreshProgressResponse): string {
   const lines = ["Semantic refresh progress"];
   if (status.coverageMeasurement === "not-measured") {
     lines.push("Coverage counts: not measured");
@@ -318,22 +292,32 @@ function formatRunProgress(status: SemanticRefreshProgress): string {
     lines.push("Live activity: unavailable");
   }
 
-  if (status.progress.state === "unavailable") {
-    lines.push("Saved progress: unavailable");
-  } else if (status.progress.state === "none") {
+  if (status.progress.state === "none") {
     lines.push("Saved progress: none");
-  } else {
+  } else if (status.progress.state === "unavailable") {
+    lines.push("Saved progress: unavailable");
+  } else if (status.progress.state === "process-local" || status.progress.state === "saved") {
     const progress = status.progress.value;
     lines.push(`Run scope: ${progress.scope ?? "unknown (legacy progress; not inferred)"}`);
     const label =
-      status.progress.relation === "active-run"
-        ? "Live associated progress"
-        : status.progress.relation === "historical"
-          ? "Historical saved progress"
-          : "Saved progress (run association unknown)";
+      status.progress.state === "process-local"
+        ? "Process-local execution outcome (not persisted)"
+        : status.progress.relation === "active-run"
+          ? "Live associated progress"
+          : status.progress.relation === "historical"
+            ? "Historical saved progress"
+            : "Saved progress (run association unknown)";
     lines.push(
       `${label}: ${progress.state}; ${progress.completedPairs}/${progress.pairCount} completed; ${progress.cacheHits} cache hits; ${progress.cacheMisses} misses; ${progress.failedPairs} failed`,
     );
+    if (progress.publication) {
+      const details = [
+        progress.publication.phase && `phase ${progress.publication.phase}`,
+        `outcome persistence ${progress.publication.outcomePersistence}`,
+        progress.publication.reason,
+      ].filter(Boolean);
+      lines.push(`Evidence publication: ${progress.publication.state} (${details.join("; ")})`);
+    }
     if (progress.stopReason === "provider-limit") {
       lines.push(
         "Run stopped at a legacy local budget limit (provider-limit); this code does not establish that TypeSafe rate-limited the request. Prior checkpoints are retained.",
@@ -354,6 +338,8 @@ function formatRunProgress(status: SemanticRefreshProgress): string {
       lines.push(
         "Run stopped at the application Run-duration deadline. Prior checkpoints are retained.",
       );
+    } else if (progress.stopReason === "owner-cancelled") {
+      lines.push("Run was stopped by owner cancellation; accepted checkpoints may still publish.");
     }
   }
   return lines.join("\n");

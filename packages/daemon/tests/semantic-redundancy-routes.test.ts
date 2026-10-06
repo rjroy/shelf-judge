@@ -214,6 +214,48 @@ describe("semantic redundancy routes", () => {
     expect(unavailable.headers.get("Cache-Control")).toBe("no-store");
   });
 
+  test("refresh-progress publishes process-local retry capability in its declared schema", async () => {
+    const processLocal = {
+      coverageMeasurement: "not-measured" as const,
+      activity: { state: "idle" as const },
+      progress: {
+        state: "process-local" as const,
+        retryRunId: "run-pending",
+        value: {
+          state: "interrupted" as const,
+          pairCount: 3,
+          completedPairs: 1,
+          cacheHits: 0,
+          cacheMisses: 1,
+          failedPairs: 0,
+          stopReason: "owner-cancelled" as const,
+          publication: {
+            state: "pending" as const,
+            phase: "seal" as const,
+            outcomePersistence: "unpersisted" as const,
+            reason: "seal-failed",
+          },
+        },
+      },
+    };
+    const { app, operations } = harness(undefined, undefined, { read: () => processLocal });
+    const response = await app.request("/api/redundancy/semantic/refresh-progress");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toEqual(processLocal);
+    const operation = operations.find((item) => item.invocation.path.endsWith("refresh-progress"));
+    const schemaText = JSON.stringify(operation?.response?.body);
+    for (const field of [
+      "process-local",
+      "retryRunId",
+      "publication",
+      "reason",
+      "owner-cancelled",
+      "unpersisted",
+    ])
+      expect(schemaText).toContain(field);
+  });
+
   test("Run endpoints are strict, sanitized, aggregate-only, and no-store", async () => {
     const calls: unknown[] = [];
     const controller = {
@@ -249,6 +291,19 @@ describe("semantic redundancy routes", () => {
       cancel: (input: unknown) => {
         calls.push(input);
         return { status: 200, body: { state: "cancellation-requested" } };
+      },
+      retryPublication: (input: { runId: string }) => {
+        calls.push(input);
+        return input.runId === "run-safe"
+          ? {
+              status: 200,
+              body: {
+                runId: input.runId,
+                state: "completed",
+                publication: { state: "published", outcomePersistence: "finalized" },
+              },
+            }
+          : { status: 404, body: { error: "run-not-found" } };
       },
       activeRun: () => ({ runId: "run-safe" }),
     } as unknown as NonNullable<RedundancyRoutesDeps["jevRunController"]>;
@@ -326,13 +381,41 @@ describe("semantic redundancy routes", () => {
     expect(active.status).toBe(200);
     expect(active.headers.get("Cache-Control")).toBe("no-store");
     expect(await active.json()).toEqual({ runId: "run-safe" });
+    const malformedRetry = await app.request(
+      "/api/redundancy/semantic/publication/retry",
+      json({ runId: "" }),
+    );
+    expect(malformedRetry.status).toBe(400);
+    const unknownRetry = await app.request(
+      "/api/redundancy/semantic/publication/retry",
+      json({ runId: "missing" }),
+    );
+    expect(unknownRetry.status).toBe(404);
+    const retryOnce = await app.request(
+      "/api/redundancy/semantic/publication/retry",
+      json({ runId: "run-safe" }),
+    );
+    const retryAgain = await app.request(
+      "/api/redundancy/semantic/publication/retry",
+      json({ runId: "run-safe" }),
+    );
+    expect(retryOnce.status).toBe(200);
+    expect(retryOnce.headers.get("Cache-Control")).toBe("no-store");
+    const retryOnceBody: unknown = await retryOnce.json();
+    const retryAgainBody: unknown = await retryAgain.json();
+    expect(retryOnceBody).toEqual(retryAgainBody);
+    expect(retryAgainBody).toMatchObject({
+      runId: "run-safe",
+      state: "completed",
+      publication: { state: "published", outcomePersistence: "finalized" },
+    });
     expect(calls).toContainEqual({
       requestId: "request-safe",
       precondition: "opaque-token",
       noteTransmissionAuthorized: false,
     });
     expect(calls).toContainEqual({ runId: "run-safe" });
-    for (const suffix of ["run-preview", "run", "cancel", "active-run"]) {
+    for (const suffix of ["run-preview", "run", "cancel", "active-run", "publication/retry"]) {
       expect(
         operations.find((operation) => operation.invocation.path.endsWith(`/semantic/${suffix}`)),
       ).toBeDefined();
@@ -463,6 +546,7 @@ describe("semantic redundancy routes", () => {
       ],
       ["/api/redundancy/semantic/cancel", json({ runId: "r" })],
       ["/api/redundancy/semantic/active-run"],
+      ["/api/redundancy/semantic/publication/retry", json({ runId: "r" })],
     ];
     for (const [path, init] of requests) {
       const response = await app.request(path, init);

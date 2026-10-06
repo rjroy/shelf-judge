@@ -343,6 +343,13 @@ function collectionCOnlyJudgment(collection: Collection): JevPairJudgment {
 }
 
 describe("JevRunController unified lifecycle", () => {
+  test("publication retry is provider-free and rejects unknown run identities", async () => {
+    const h = await harness();
+    const result = await h.controller.retryPublication({ runId: "unknown-run" });
+    expect(result).toEqual({ status: 404, body: { error: "run-not-found" } });
+    expect(h.gatewayCalls).toBe(0);
+  });
+
   test("previews actual durable collection facts without exposing private values and binds budget", async () => {
     const h = await harness({ ids: ["a", "b", "c"], notes: true });
     const budget = {

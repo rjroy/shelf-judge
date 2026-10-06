@@ -4,7 +4,7 @@ date: 2026-10-04
 status: approved
 tags: [design, prediction, redundancy, jev, similarity, privacy, wishlist]
 modules: [daemon-services, prediction, redundancy, jev-cache, wishlist, shared-contracts]
-related: [.lore/work/plans/unified-similarity-prediction-redundancy.md, .lore/reference/specs/fitness/prediction-engine.md, .lore/reference/specs/fitness/redundancy-scoring.md, .lore/reference/specs/features/wishlist.md, .lore/reference/specs/current/owner-game-notes.md]
+related: [.lore/work/plans/unified-similarity-prediction-redundancy.md, .lore/work/design/semantic-snapshot-cache.md, .lore/reference/specs/fitness/prediction-engine.md, .lore/reference/specs/fitness/redundancy-scoring.md, .lore/reference/specs/features/wishlist.md, .lore/reference/specs/current/owner-game-notes.md]
 ---
 
 # Design: unified similarity for prediction and redundancy
@@ -12,6 +12,8 @@ related: [.lore/work/plans/unified-similarity-prediction-redundancy.md, .lore/re
 ## Authority and lifecycle
 
 This design is **approved by the user** as the implementation contract for Beads epic `shelf-judge-bs1y`. Its companion `.lore/work/plans/unified-similarity-prediction-redundancy.md` sequences implementation and validation. Approval authorizes the planned seven-phase work and creation of its bounded phase beads; it does not mean implementation has started or waive phase gates. The epic remains open while work proceeds and is routed `agentic` once its approved executable child workgraph is recorded.
+
+> **Current evidence publication authority — 2026-10-05:** The approved [semantic snapshot cache design](semantic-snapshot-cache.md) adds the durable run-owned staging and terminal publication boundary used by this design. It changes evidence visibility timing, not F/D/O arithmetic, pair demand, proof identity, source eligibility, frozen authorization, consent, or privacy. Run checkpoint progress remains atomic with private staging but ordinary readers continue to see only published evidence; the worker alone receives its run overlay. One terminal finalizer can publish the still-valid subset after every terminal outcome, without a full-coverage or activation gate. Execution outcome remains distinct from published/unchanged/pending state; sealed outcomes survive restart, and provider-free retry/recovery preserves them. Immediate source/permission fencing and the existing indexed point-read/performance contracts remain in force. Phases 1–5b are locally accepted; holistic validation and terminal project acceptance remain pending.
 
 ## Product impact requiring explicit approval
 
@@ -116,7 +118,7 @@ An entry lacking sufficient saved factual source is `missing-source` on ordinary
 
 Keep existing `stored-source-revision.ts` compatibility and preserve arbitrary stored binary:continuous ratios and existing write fences. No per-consumer defaults, new persisted duplicate weights, or weights migration.
 
-JEV run budget remains: default 1,000 attempts, 2,000,000 reported-token stop threshold, 30 minutes; maximum 75,000 attempts; reported-token threshold may be any positive safe integer; duration 1–720 minutes. Provider usage is learned after a response: usage can cross/overshoot threshold for that response, then subsequent dispatch is stopped. This is not a hard billing/token ceiling. All-hit run performs zero gateway calls and needs no authorization restart. Provider calls are serial, bounded, cancellable, outside short coordinator locks; each accepted judgment and progress update is one atomic checkpoint.
+JEV run budget remains: default 1,000 attempts, 2,000,000 reported-token stop threshold, 30 minutes; maximum 75,000 attempts; reported-token threshold may be any positive safe integer; duration 1–720 minutes. Provider usage is learned after a response: usage can cross/overshoot threshold for that response, then subsequent dispatch is stopped. This is not a hard billing/token ceiling. All-hit run performs zero gateway calls and needs no authorization restart. Provider calls are serial, bounded, cancellable, outside short coordinator locks; each accepted judgment and progress update is one atomic checkpoint in private staging, not ordinary published evidence.
 
 Use deterministic work counts, not invented latency targets. Preserve relevant existing evidence: 7 encodes for 12 pairs; 4×3 indexed comparisons; the wishlist read-proof fixture has 124 eligible owned IDs but validates 3 rows with 3 candidate plus 3 owned membership probes; unchanged proof causes 0 rereads; pair/signal memoization; no full-cache scan; all-hit zero gateway; serial maximum concurrency 1; one atomic judgment+progress checkpoint. Retain fixture definitions and meanings when extending tests.
 

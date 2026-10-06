@@ -1054,7 +1054,7 @@ describe("CollectionSnapshotService", () => {
       const result = await pending;
       expect(result.status).toBe(200);
       expect(result.snapshotStatus).toBe("complete");
-      expect(result.cacheable).toBe(true);
+      expect(result.cacheable).toBe(false);
       expect(predictionBuilds).toBe(2);
     }
   });
@@ -1169,8 +1169,8 @@ describe("CollectionSnapshotService", () => {
     recoverNicheSettings();
     const recoveredResponse = await route.request("/collection/snapshot");
     expect(recoveredResponse.status).toBe(200);
-    expect(recoveredResponse.headers.get("cache-control")).toBe("private, no-cache");
-    expect(recoveredResponse.headers.get("etag")).toMatch(/^W\/"cs1-/);
+    expect(recoveredResponse.headers.get("cache-control")).toBe("no-store");
+    expect(recoveredResponse.headers.get("etag")).toBeNull();
     const recoveredSnapshot = (await recoveredResponse.json()) as CollectionSnapshot;
     expect(recoveredSnapshot.status).toBe("complete");
   });

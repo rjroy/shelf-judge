@@ -256,6 +256,16 @@ export type {
 
 export { DEFAULT_JEV_RUN_BUDGET } from "./jev-run-budget";
 export type { JevRunBudget } from "./jev-run-budget";
+export type {
+  JevRefreshProgressEntry,
+  JevRefreshProgressResponse,
+  JevRunOutcomePersistence,
+  JevRunPublication,
+  JevRunPublicationPhase,
+  JevRunPublicationState,
+  JevRunProgressProjection,
+  JevRunStopReason,
+} from "./jev-run-publication";
 
 export {
   SemanticScoringInputProofSchema,

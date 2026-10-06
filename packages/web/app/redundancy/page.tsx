@@ -3,10 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_JEV_RUN_BUDGET } from "@shelf-judge/shared";
 import type { RedundancySettings } from "@shelf-judge/shared";
+import type { JevRunProgressProjection } from "@shelf-judge/shared";
 import {
   activityLabel,
   progressBelongsToActivity,
   readRunStatusSnapshot,
+  publicationState,
+  publicationAllowsScoreRefresh,
+  readRunPublication,
+  publicationRetryRunId,
   type LiveActivity,
   type RunProgressSnapshot,
 } from "@/lib/live-run-status";
@@ -49,27 +54,11 @@ type Refresh = {
     string,
     { covered: number; missing: number; invalid: number; unavailable: number; blocked: number }
   > | null;
-  progress: null | {
-    state: "last-known-running" | "completed" | "interrupted" | "failed";
-    pairCount: number;
-    completedPairs: number;
-    cacheHits: number;
-    cacheMisses: number;
-    failedPairs: number;
-    stopReason?:
-      | "application-attempt-limit"
-      | "application-token-threshold"
-      | "application-deadline"
-      | "provider-limit"
-      | "provider-rate-limited"
-      | "provider-unconfigured";
-  };
+  progress: JevRunProgressProjection | null;
 };
 type CheapStatus = {
   activity: LiveActivity;
-  progress:
-    | (Extract<RunProgressSnapshot, { state: "saved" }> & { value: Refresh["progress"] })
-    | Extract<RunProgressSnapshot, { state: "none" | "unavailable" }>;
+  progress: RunProgressSnapshot;
 };
 
 const readCheapStatus = async (): Promise<CheapStatus> => {
@@ -77,10 +66,7 @@ const readCheapStatus = async (): Promise<CheapStatus> => {
   const snapshot = readRunStatusSnapshot(payload);
   return {
     activity: snapshot.activity,
-    progress:
-      snapshot.progress.state === "saved"
-        ? { ...snapshot.progress, value: snapshot.progress.value as Refresh["progress"] }
-        : snapshot.progress,
+    progress: snapshot.progress,
   };
 };
 const readFullStatus = () => request<Refresh>("/api/daemon/redundancy/semantic/refresh-status");
@@ -223,7 +209,9 @@ export default function RedundancyPage() {
   };
   const statusGeneration = useRef(0);
   const wasActive = useRef(false);
+  const runPublicationExpected = useRef(false);
   const activityUnavailable = useRef(false);
+  const publicationRetryInProgress = useRef(false);
   const coverageError = useRef(false);
   const measuring = useRef(false);
   const measurePending = useRef(false);
@@ -260,9 +248,15 @@ export default function RedundancyPage() {
   const applyCheapStatus = async (latest: CheapStatus, requestVersion?: number) => {
     if (requestVersion !== undefined && requestVersion !== activityRequestVersion.current) return;
     setCheap(latest);
+    const latestValue =
+      latest.progress.state === "saved" || latest.progress.state === "process-local"
+        ? latest.progress.value
+        : null;
+    if (publicationState(latestValue) === "pending") runPublicationExpected.current = true;
     if (latest.activity.state === "active") {
       activityUnavailable.current = false;
       wasActive.current = true;
+      runPublicationExpected.current = true;
       activeRunRef.current = latest.activity;
       setActiveRun(latest.activity);
       invalidateCoverage();
@@ -276,12 +270,27 @@ export default function RedundancyPage() {
       invalidateCoverage();
       return;
     }
-    const shouldMeasure = wasActive.current || activityUnavailable.current;
+    const shouldMeasure =
+      wasActive.current || activityUnavailable.current || runPublicationExpected.current;
+    const statusWasUnavailable = activityUnavailable.current;
+    const publicationWasExpected = runPublicationExpected.current;
     activityUnavailable.current = false;
     activeRunRef.current = null;
     setActiveRun(null);
-    if (shouldMeasure) {
+    const terminalPublicationConfirmed =
+      (latest.progress.state === "saved" || latest.progress.state === "process-local") &&
+      publicationAllowsScoreRefresh(latest.progress.value);
+    const statusRecoveredWithoutPending =
+      statusWasUnavailable &&
+      !publicationWasExpected &&
+      publicationState(latestValue) !== "pending";
+    if (
+      !publicationRetryInProgress.current &&
+      shouldMeasure &&
+      (terminalPublicationConfirmed || statusRecoveredWithoutPending)
+    ) {
       wasActive.current = false;
+      runPublicationExpected.current = false;
       await measureCoverage();
     }
   };
@@ -289,10 +298,10 @@ export default function RedundancyPage() {
     const requestVersion = ++activityRequestVersion.current;
     try {
       const latest = await readCheapStatus();
-      if (requestVersion !== activityRequestVersion.current) return false;
+      if (requestVersion !== activityRequestVersion.current) return null;
       await applyCheapStatus(latest, requestVersion);
       if (!coverageError.current) setStatusError(undefined);
-      return requestVersion === activityRequestVersion.current;
+      return requestVersion === activityRequestVersion.current ? latest : null;
     } catch (cause) {
       if (requestVersion === activityRequestVersion.current) {
         loseActivityAuthority();
@@ -300,7 +309,7 @@ export default function RedundancyPage() {
           cause instanceof Error ? cause.message : "Refresh status could not be loaded.",
         );
       }
-      return false;
+      return null;
     }
   };
   const [noteTransmissionAuthorized, setNoteTransmissionAuthorized] = useState(false);
@@ -354,11 +363,17 @@ export default function RedundancyPage() {
         await applyCheapStatus(status, requestVersion);
       else {
         setCheap(status);
+        const latestValue =
+          status.progress.state === "saved" || status.progress.state === "process-local"
+            ? status.progress.value
+            : null;
+        const pendingPublication = publicationState(latestValue) === "pending";
+        runPublicationExpected.current = pendingPublication;
         activeRunRef.current = null;
         setActiveRun(null);
         wasActive.current = false;
         activityUnavailable.current = false;
-        void measureCoverage();
+        if (!pendingPublication) void measureCoverage();
       }
     }
   }, []);
@@ -559,6 +574,55 @@ export default function RedundancyPage() {
       await refreshCurrentActivityStatus();
     } catch (e) {
       setRunError(e instanceof Error ? e.message : "Could not cancel refresh");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const retryPublication = async (runId: string) => {
+    setBusy(true);
+    setRunError(undefined);
+    setMessage(undefined);
+    try {
+      const result = await request<unknown>(
+        "/api/daemon/redundancy/semantic/publication/retry",
+        json({ runId }),
+      );
+      const publication = readRunPublication(result);
+      if (!publication) throw new Error("Publication retry returned an invalid result.");
+      if (publication.state === "pending") {
+        runPublicationExpected.current = true;
+        publicationRetryInProgress.current = true;
+        const latest = await refreshCurrentActivityStatus();
+        publicationRetryInProgress.current = false;
+        const latestValue =
+          latest?.progress.state === "saved" || latest?.progress.state === "process-local"
+            ? latest.progress.value
+            : null;
+        if (publicationAllowsScoreRefresh(latestValue)) {
+          runPublicationExpected.current = false;
+          setMessage("Saved comparisons were published. Refreshing coverage…");
+          if (activeRunRef.current === null) await measureCoverage();
+          return;
+        }
+        setMessage(
+          "Publication is still pending. Scores have not been updated; retry again when ready.",
+        );
+        return;
+      }
+      runPublicationExpected.current = false;
+      setMessage(
+        publication.state === "published"
+          ? "Saved comparisons were published. Refreshing coverage…"
+          : "Saved comparisons were already up to date. Refreshing coverage…",
+      );
+      publicationRetryInProgress.current = true;
+      await refreshCurrentActivityStatus();
+      publicationRetryInProgress.current = false;
+      if (activeRunRef.current === null) await measureCoverage();
+      runPublicationExpected.current = false;
+    } catch (e) {
+      publicationRetryInProgress.current = false;
+      setRunError(e instanceof Error ? e.message : "Could not publish saved comparisons.");
     } finally {
       setBusy(false);
     }
@@ -1157,21 +1221,24 @@ export default function RedundancyPage() {
                     ) &&
                     cheap?.progress.state === "saved" &&
                     cheap.progress.value
-                      ? progressCopy(cheap.progress.value)
+                      ? progressCopy(cheap.progress.value as JevRunProgressProjection)
                       : activeRun.scope === "collection" && cheap?.activity.state === "active"
                         ? "Run progress is not available yet."
                         : null}
                   </p>
                 )}
                 {!activeRun &&
-                  cheap?.progress.state === "saved" &&
-                  cheap.progress.relation === "historical" &&
-                  cheap.progress.value && (
+                  !!(
+                    cheap?.progress.state === "saved" &&
+                    cheap.progress.relation === "historical" &&
+                    cheap.progress.value
+                  ) && (
                     <p role="status">
                       {cheap.activity.state === "unavailable"
                         ? "Activity status unavailable; saved progress from the "
                         : "Last saved "}
-                      {cheap.progress.scope ?? "unscoped"} run: {progressCopy(cheap.progress.value)}
+                      {cheap.progress.scope ?? "unscoped"} run:{" "}
+                      {progressCopy(cheap.progress.value as JevRunProgressProjection)}
                     </p>
                   )}
                 {cheap?.activity.state === "unavailable" && (
@@ -1185,6 +1252,35 @@ export default function RedundancyPage() {
                 {cheap?.progress.state === "saved" && cheap.progress.relation === "unknown" && (
                   <p role="status">Saved progress is available, but its run scope is unknown.</p>
                 )}
+                {(cheap?.progress.state === "saved" || cheap?.progress.state === "process-local") &&
+                  publicationState(cheap.progress.value) === "pending" && (
+                    <div role="status">
+                      <p>
+                        {(() => {
+                          const publication = (cheap.progress.value as JevRunProgressProjection)
+                            .publication;
+                          if (
+                            publication?.phase === "seal" &&
+                            publication.outcomePersistence === "unpersisted"
+                          )
+                            return "The run stopped, but its outcome could not yet be saved. Scores have not been updated; retry will save and publish accepted results without sending provider requests.";
+                          return "The run ended, but its accepted results are not published yet. Scores have not been updated; retry publishes them without sending provider requests.";
+                        })()}
+                      </p>
+                      {publicationRetryRunId(cheap.progress) && (
+                        <button
+                          className="btn btn-secondary"
+                          disabled={busy}
+                          onClick={() => {
+                            const runId = publicationRetryRunId(cheap.progress);
+                            if (runId) void retryPublication(runId);
+                          }}
+                        >
+                          {busy ? "Publishing saved results…" : "Retry score update"}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 {cheap?.progress.state === "none" && cheap.activity.state === "idle" && (
                   <p role="status">No saved run progress.</p>
                 )}

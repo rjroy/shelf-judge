@@ -16,7 +16,7 @@ export type WishlistPairReadiness =
 /** Inspect only the frozen wishlist pair and its exact candidate-domain C_ONLY evidence. */
 export function createWishlistPairReadinessInspector(
   frozen: PreparedWishlistRun,
-  cache: JevPairCache,
+  cache: Pick<JevPairCache, "lookup">,
 ): (pair: FrozenWishlistRunPair) => WishlistPairReadiness {
   const entriesById = new Map(frozen.entries.map((entry) => [entry.id, entry]));
   const ownedById = new Map(frozen.capture.collection.games.map((game) => [game.id, game]));

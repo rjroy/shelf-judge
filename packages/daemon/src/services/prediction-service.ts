@@ -134,6 +134,10 @@ export interface PreparedPredictionList {
   listActualGames?(): GameWithScore[];
   /** V2 proof and live guard for durable snapshot publication. */
   semanticScoringInputProof?: import("@shelf-judge/shared").SemanticScoringInputProof;
+  /** True only when every demanded cache read was backed by a healthy revision fence. */
+  semanticScoringInputReusable?(): boolean;
+  /** Refreshes the unified scoring publication authority, not merely its captured proof. */
+  validateSemanticScoringInputCurrent?(): Promise<boolean>;
   isCurrent?(): boolean;
 }
 
@@ -1064,6 +1068,9 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
           listGames: () => entriesFor(calculation.collectionFitness),
           listActualGames: () => entriesFor(calculation.actualFitness),
           semanticScoringInputProof: calculation.proof,
+          semanticScoringInputReusable: () => calculation.isReusable(),
+          validateSemanticScoringInputCurrent: async () =>
+            (await unifiedScoringService.publishCurrent(calculation, () => true)) === true,
           isCurrent: () => calculation.isCurrent(),
         };
       }

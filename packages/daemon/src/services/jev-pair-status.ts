@@ -1,6 +1,7 @@
+import type { JevRunProgressProjection } from "@shelf-judge/shared";
 import type { JevPairCoverageDigest, JevPairSignalCoverage } from "./jev-pair-coverage.js";
 import type { JevPairReadResult } from "./jev-pair-read-service.js";
-import type { JevRunProgress, JevRunStopReason } from "./jev-pair-cache-service.js";
+import type { JevRunProgress } from "./jev-pair-cache-service.js";
 
 export interface JevSignalCoverageCounts {
   covered: number;
@@ -18,17 +19,7 @@ export type JevStatusState =
   | "partial"
   | "ready"
   | "unavailable";
-export type JevStatusProgress = null | {
-  state: "last-known-running" | "completed" | "interrupted" | "failed";
-  /** Omitted on persisted legacy rows whose run scope cannot be established. */
-  scope?: "collection" | "wishlist";
-  pairCount: number;
-  completedPairs: number;
-  cacheHits: number;
-  cacheMisses: number;
-  failedPairs: number;
-  stopReason?: JevRunStopReason;
-};
+export type JevStatusProgress = null | JevRunProgressProjection;
 
 interface JevStatusBase {
   status: JevStatusState;
@@ -88,10 +79,29 @@ export function projectJevRunProgress(progress: JevRunProgress | null): JevStatu
       "application-attempt-limit",
       "application-token-threshold",
       "application-deadline",
+      "owner-cancelled",
     ].some((reason) => reason === progress.stopReason) ||
+      !["failed", "interrupted"].includes(progress.state))
+  )
+    return null;
+  if (
+    (progress.stopReason === "owner-cancelled" && progress.state !== "interrupted") ||
+    (progress.stopReason !== undefined &&
+      progress.stopReason !== "owner-cancelled" &&
       progress.state !== "failed")
   )
     return null;
+  if (progress.publication !== undefined) {
+    const publication = progress.publication;
+    if (
+      !["published", "unchanged", "pending"].includes(publication.state) ||
+      !["sealed", "finalized", "unpersisted"].includes(publication.outcomePersistence) ||
+      (publication.state === "pending" &&
+        !["seal", "validate", "promote"].includes(publication.phase ?? "")) ||
+      (publication.state !== "pending" && publication.phase !== undefined)
+    )
+      return null;
+  }
   if (
     progress.scope !== undefined &&
     progress.scope !== "collection" &&
@@ -107,6 +117,7 @@ export function projectJevRunProgress(progress: JevRunProgress | null): JevStatu
     cacheMisses: progress.cacheMisses,
     failedPairs: progress.failedPairs,
     ...(progress.stopReason ? { stopReason: progress.stopReason } : {}),
+    ...(progress.publication ? { publication: progress.publication } : {}),
   };
 }
 

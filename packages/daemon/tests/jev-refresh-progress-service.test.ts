@@ -29,6 +29,7 @@ function fakeCache(overrides: Record<string, unknown> = {}) {
       calls.progress++;
       return { status: "available", progress: saved };
     },
+    getRunBatch: () => null,
     ...overrides,
   } as unknown as JevPairCache;
   return { cache, calls };
@@ -147,5 +148,155 @@ describe("Jev refresh progress", () => {
     expect(
       createJevRefreshProgressService({ cache, activeRun: () => null }).read().progress,
     ).toEqual({ state: "unavailable" });
+  });
+
+  test("reports an unpersisted stopped outcome as process-local, not saved", () => {
+    const { cache } = fakeCache({
+      getRunProgressRead: () => ({ status: "none" }),
+      getRunBatch: () => ({
+        runId: saved.runId,
+        state: "active",
+        progress: saved,
+        stagingRevision: 1,
+      }),
+    });
+    const result = createJevRefreshProgressService({
+      cache,
+      activeRun: () => null,
+      processPendingProgress: () => ({
+        ...saved,
+        state: "completed",
+        publication: {
+          state: "pending",
+          phase: "seal",
+          outcomePersistence: "unpersisted",
+          reason: "seal-failed",
+        },
+      }),
+    }).read();
+    expect(result).toEqual({
+      coverageMeasurement: "not-measured",
+      activity: { state: "idle" },
+      progress: {
+        state: "process-local",
+        retryRunId: saved.runId,
+        value: {
+          state: "completed",
+          pairCount: 7,
+          completedPairs: 3,
+          cacheHits: 1,
+          cacheMisses: 2,
+          failedPairs: 0,
+          publication: {
+            state: "pending",
+            phase: "seal",
+            outcomePersistence: "unpersisted",
+            reason: "seal-failed",
+          },
+        },
+      },
+    });
+  });
+
+  test("exposes retry ID only for the matching unresolved sealed owner", () => {
+    const pending: JevRunProgress = {
+      ...saved,
+      state: "interrupted",
+      stopReason: "owner-cancelled",
+      publication: {
+        state: "pending",
+        phase: "validate",
+        outcomePersistence: "sealed",
+        reason: "source-or-stage-changed",
+      },
+    };
+    const owned = fakeCache({
+      getRunProgressRead: () => ({ status: "available", progress: pending }),
+      getRunBatch: () => ({
+        runId: pending.runId,
+        state: "sealed",
+        progress: pending,
+        stagingRevision: 2,
+      }),
+    });
+    const retryable = createJevRefreshProgressService({
+      cache: owned.cache,
+      activeRun: () => null,
+    }).read();
+    expect(retryable.progress).toMatchObject({
+      state: "saved",
+      retryRunId: pending.runId,
+      value: { publication: pending.publication, stopReason: "owner-cancelled" },
+    });
+
+    const reset = fakeCache({
+      getRunProgressRead: () => ({ status: "available", progress: pending }),
+      getRunBatch: () => null,
+    });
+    const resetResult = createJevRefreshProgressService({
+      cache: reset.cache,
+      activeRun: () => null,
+    }).read();
+    expect(resetResult.progress).toMatchObject({ state: "saved" });
+    expect(resetResult.progress).not.toHaveProperty("retryRunId");
+
+    const finalized = fakeCache({
+      getRunProgressRead: () => ({
+        status: "available",
+        progress: {
+          ...pending,
+          publication: { state: "published", outcomePersistence: "finalized" },
+        },
+      }),
+      getRunBatch: () => null,
+    });
+    const finalizedResult = createJevRefreshProgressService({
+      cache: finalized.cache,
+      activeRun: () => null,
+    }).read();
+    expect(finalizedResult.progress).not.toHaveProperty("retryRunId");
+  });
+
+  test("recognizes a sealed terminal outcome after crash before pending progress was saved", () => {
+    const terminal: JevRunProgress = { ...saved, state: "completed" };
+    const { cache } = fakeCache({
+      getRunProgressRead: () => ({ status: "available", progress: terminal }),
+      getRunBatch: () => ({
+        runId: terminal.runId,
+        state: "sealed",
+        progress: terminal,
+        stagingRevision: 1,
+      }),
+    });
+    const result = createJevRefreshProgressService({ cache, activeRun: () => null }).read();
+    expect(result.progress).toMatchObject({
+      state: "saved",
+      retryRunId: terminal.runId,
+      value: { state: "completed" },
+    });
+  });
+
+  test("does not project stale process-local completion after ownership is reset", () => {
+    const staleCompletion = {
+      ...saved,
+      state: "interrupted" as const,
+      publication: {
+        state: "pending" as const,
+        phase: "seal" as const,
+        outcomePersistence: "unpersisted" as const,
+        reason: "seal-failed",
+      },
+    };
+    const { cache } = fakeCache({
+      getRunProgressRead: () => ({ status: "none" }),
+      getRunBatch: () => null,
+    });
+    const result = createJevRefreshProgressService({
+      cache,
+      activeRun: () => null,
+      processPendingProgress: () => staleCompletion,
+    }).read();
+    expect(result.progress).toEqual({ state: "none" });
+    expect(JSON.stringify(result)).not.toContain("retryRunId");
   });
 });
