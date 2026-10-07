@@ -10,7 +10,6 @@ related:
   - .lore/reference/designs/current/profile-evidence-explorer.md
   - .lore/reference/architecture-pattern.md
 req-prefix: ANALYST
-legacy_source_type: spec
 ---
 
 # Collection Analyst Chat

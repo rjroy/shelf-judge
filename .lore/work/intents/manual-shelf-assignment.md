@@ -1,15 +1,14 @@
 ---
 title: Manual shelf assignment
 date: 2026-06-27
-status: draft
-tags: [shelf-layout, manual-assignment, capacity, bin-packing]
-modules: [shared, daemon, web, cli]
+status: completed
+tags: [ shelf-layout, manual-assignment, capacity, bin-packing ]
+modules: [ shared, daemon, web, cli ]
 related:
   - .lore/reference/specs/features/shelf-capacity.md
   - .lore/reference/designs/similarity-weighted-bin-packing.md
   - .lore/work/brainstorm/shelf-layout-designer.md
 req-prefix: SHELF-ASSIGN
-legacy_source_type: spec
 ---
 
 # Manual shelf assignment

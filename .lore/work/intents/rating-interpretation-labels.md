@@ -1,13 +1,12 @@
 ---
 viewport: "width=device-width, initial-scale=1.0"
-status: "approved"
+status: completed
 req-prefix: "RATING-LABELS"
 created: "2026-05-21"
 updated: "2026-05-21"
-modules: ["shared", "web"]
-related: [".lore/reference/designs/mvp-data-model.md", ".lore/reference/designs/mvp-fitness-model.md", ".lore/reference/designs/mvp-web-ui.md"]
+modules: [ "shared", "web" ]
+related: [ ".lore/reference/designs/mvp-data-model.md", ".lore/reference/designs/mvp-fitness-model.md", ".lore/reference/designs/mvp-web-ui.md" ]
 title: "Rating Interpretation Labels Spec"
-legacy_source_type: spec
 ---
 
 ```html

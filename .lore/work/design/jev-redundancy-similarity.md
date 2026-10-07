@@ -1,10 +1,10 @@
 ---
 title: Jev-backed redundancy similarity components
 date: 2026-09-28
-status: approved
-tags: [redundancy, similarity, jev, owner-notes, cache]
-modules: [daemon, shared, web, cli]
-related: [.lore/reference/specs/fitness/redundancy-scoring.md, .lore/reference/specs/current/owner-game-notes.md, .lore/reference/architecture-pattern.md]
+status: completed
+tags: [ redundancy, similarity, jev, owner-notes, cache ]
+modules: [ daemon, shared, web, cli ]
+related: [ .lore/reference/specs/fitness/redundancy-scoring.md, .lore/reference/specs/current/owner-game-notes.md, .lore/reference/architecture-pattern.md ]
 ---
 
 # Jev-backed redundancy similarity components

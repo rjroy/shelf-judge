@@ -10,7 +10,6 @@ related:
   - .lore/reference/designs/mvp-web-ui.md
   - .lore/archive/specs/collection/collection-profiling.md
 req-prefix: GLINK
-legacy_source_type: spec
 ---
 
 # Spec: Game Links

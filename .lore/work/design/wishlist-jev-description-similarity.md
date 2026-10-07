@@ -1,10 +1,10 @@
 ---
 title: Wishlist-to-owned description similarity
 date: 2026-10-02
-status: approved
-tags: [wishlist, jev, similarity, cache, candidate-scoring]
-modules: [daemon, shared, web, cli]
-related: [.lore/work/design/jev-redundancy-similarity.md, .lore/reference/specs/current/owner-game-notes.md, .lore/reference/specs/features/wishlist.md]
+status: completed
+tags: [ wishlist, jev, similarity, cache, candidate-scoring ]
+modules: [ daemon, shared, web, cli ]
+related: [ .lore/work/design/jev-redundancy-similarity.md, .lore/reference/specs/current/owner-game-notes.md, .lore/reference/specs/features/wishlist.md ]
 ---
 
 # Wishlist-to-owned description similarity

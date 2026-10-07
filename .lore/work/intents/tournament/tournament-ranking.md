@@ -14,7 +14,6 @@ related:
   - .lore/work/issues/deferred-tournament-ranking.md
   - .lore/work/mockups/ (tournament-*.html)
 req-prefix: TOURN
-legacy_source_type: spec
 ---
 
 # Spec: Tournament-Based ELO Ranking

@@ -1,9 +1,9 @@
 ---
 title: Bounded BGG discovery and fitness preview in Collection Analyst
 date: 2026-09-25
-status: approved
-tags: [collection, analyst, bgg, discovery, prediction, provenance]
-modules: [shared, daemon, web, cli]
+status: completed
+tags: [ collection, analyst, bgg, discovery, prediction, provenance ]
+modules: [ shared, daemon, web, cli ]
 related:
   - .lore/work/intents/collection-analyst-bgg-discovery.md
   - .lore/work/intents/collection-analyst-chat.md
