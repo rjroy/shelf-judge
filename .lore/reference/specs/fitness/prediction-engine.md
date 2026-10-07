@@ -9,9 +9,9 @@ related:
   - .lore/work/design/semantic-snapshot-cache.md
   - .lore/work/brainstorm/prediction-engine.md
   - .lore/work/brainstorm/collection-profiling.md
-  - .lore/work/specs/mvp.md
-  - .lore/work/specs/fitness/utility-curves.md
-  - .lore/work/specs/tournament/tournament-ranking.md
+  - .lore/work/intents/mvp.md
+  - .lore/work/intents/fitness/utility-curves.md
+  - .lore/work/intents/tournament/tournament-ranking.md
   - .lore/reference/designs/mvp-fitness-model.md
   - .lore/work/issues/deferred-prediction-engine.md
   - .lore/work/issues/deferred-collection-profiling.md

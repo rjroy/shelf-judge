@@ -7,8 +7,8 @@ modules: [shared, daemon, cli, web]
 related:
   - .lore/work/design/unified-similarity-prediction-redundancy.md
   - .lore/reference/specs/current/useful-collection-profile.md
-  - .lore/work/specs/grounded-profile-reflections.md
-  - .lore/work/specs/collection-analyst-chat.md
+  - .lore/work/intents/grounded-profile-reflections.md
+  - .lore/work/intents/collection-analyst-chat.md
   - .lore/work/design/jev-redundancy-similarity.md
   - .lore/work/design/jev-contract-amendments.md
   - .lore/work/design/wishlist-jev-description-similarity.md

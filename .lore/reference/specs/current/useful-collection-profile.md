@@ -7,9 +7,9 @@ modules: [shared, daemon, cli, web]
 related:
   - .lore/work/brainstorm/collection-profile-decision-taxonomy.md
   - .lore/archive/specs/collection/collection-profiling.md
-  - .lore/work/notes/trusted-collection-insights-consumers.md
+  - .lore/local/notes/trusted-collection-insights-consumers.md
   - .lore/reference/specs/current/collection-purchase-utilization.md
-  - .lore/work/specs/expanded-profile-attention-opportunities.md
+  - .lore/work/intents/expanded-profile-attention-opportunities.md
 req-prefix: USEFUL-PROF
 ---
 
@@ -19,7 +19,7 @@ req-prefix: USEFUL-PROF
 
 The owner reviewed and approved this product and behavior specification. The amended adjusted-fit requirements are implemented and passed terminal acceptance.
 
-**Authority notice:** This file is the authority for Profile identity behavior and the durable intention lifecycle. Ranked attention behavior is defined by the approved [Fitness-ranked Profile attention](../../../work/specs/fitness-ranked-profile-attention.md) specification, which supersedes the earlier intention-only attention presentation and ordering requirements below. Active intentions and their completion, retirement, ownership-transition, evidence, and history semantics remain authoritative here; attention candidates, selection, ranking, and the configured visible cap follow the ranked-attention specification. Profile reads remain read-only with respect to collection source state.
+**Authority notice:** This file is the authority for Profile identity behavior and the durable intention lifecycle. Ranked attention behavior is defined by the approved [Fitness-ranked Profile attention](../../../work/intents/fitness-ranked-profile-attention.md) specification, which supersedes the earlier intention-only attention presentation and ordering requirements below. Active intentions and their completion, retirement, ownership-transition, evidence, and history semantics remain authoritative here; attention candidates, selection, ranking, and the configured visible cap follow the ranked-attention specification. Profile reads remain read-only with respect to collection source state.
 
 Once approved, this specification supersedes the Profile Overview behavior in [Collection Identity and Trusted Insight Profiling](../../../archive/specs/collection/collection-profiling.md). The older document remains the record of the implemented contract before this redesign. It does not justify retaining a surface that this specification removes.
 

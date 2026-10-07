@@ -10,7 +10,7 @@ related:
   - .lore/reference/specs/fitness/prediction-engine.md
   - .lore/reference/specs/current/owner-game-notes.md
   - .lore/work/design/sqlite-jev-pair-cache.md
-  - .lore/work/notes/sqlite-jev-pair-cache.md
+  - .lore/local/notes/sqlite-jev-pair-cache.md
 ---
 
 # Stable semantic evidence publication and collection snapshot caching

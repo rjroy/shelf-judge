@@ -6,7 +6,7 @@ tags: [collection, profile, identity, attention, decision-support]
 modules: [profile]
 related:
   - .lore/archive/specs/collection/collection-profiling.md
-  - .lore/work/notes/trusted-collection-insights-validation.md
+  - .lore/local/notes/trusted-collection-insights-validation.md
   - .lore/reference/specs/current/collection-purchase-utilization.md
 ---
 

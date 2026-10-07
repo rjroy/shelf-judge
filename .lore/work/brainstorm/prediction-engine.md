@@ -7,7 +7,7 @@ tags: [brainstorm, prediction, fitness, similarity, bgg]
 related:
   - .lore/work/issues/deferred-prediction-engine.md
   - .lore/reference/designs/mvp-fitness-model.md
-  - .lore/work/specs/fitness/utility-curves.md
+  - .lore/work/intents/fitness/utility-curves.md
   - .lore/work/brainstorm/fitness-model-options.md
   - .lore/work/issues/deferred-collection-profiling.md
   - .lore/work/issues/deferred-redundancy-scoring.md

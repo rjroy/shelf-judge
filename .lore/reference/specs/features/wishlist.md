@@ -9,7 +9,7 @@ related:
   - .lore/work/design/unified-similarity-prediction-redundancy.md
   - .lore/work/issues/wishlist.md
   - .lore/reference/vision.md
-  - .lore/work/specs/mvp.md
+  - .lore/work/intents/mvp.md
   - .lore/reference/specs/fitness/prediction-engine.md
   - .lore/reference/specs/fitness/niche-champion-display.md
   - .lore/reference/specs/fitness/redundancy-scoring.md

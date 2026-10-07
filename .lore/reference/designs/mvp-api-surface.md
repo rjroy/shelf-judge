@@ -5,7 +5,7 @@ status: implemented
 tags: [design, api, daemon, mvp]
 modules: [daemon]
 related:
-  - .lore/work/specs/mvp.md
+  - .lore/work/intents/mvp.md
   - .lore/reference/architecture-pattern.md
 ---
 

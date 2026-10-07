@@ -5,7 +5,7 @@ status: implemented
 tags: [tournament, filtering, bgg]
 modules: [shared, daemon, web]
 related:
-  - .lore/work/specs/tournament/tournament-ranking.md
+  - .lore/work/intents/tournament/tournament-ranking.md
 req-prefix: BGG-TAG
 ---
 

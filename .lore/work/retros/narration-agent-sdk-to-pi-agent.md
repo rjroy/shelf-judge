@@ -5,7 +5,7 @@ status: complete
 tags: [migration, sdk, llm]
 modules: [daemon-narration]
 related:
-  - .lore/work/plans/llm-narrative.md
+  - .lore/local/plans/llm-narrative.md
   - .lore/archive/research/claude-agent-sdk.md
   - .lore/work/retros/narration-isavailable-gate-removal.md
 ---

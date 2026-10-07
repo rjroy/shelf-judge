@@ -9,8 +9,8 @@ related:
   - .lore/work/mockups/mockup-collection-filter-sort.html
   - .lore/reference/designs/mvp-web-ui.md
   - .lore/reference/designs/mvp-data-model.md
-  - .lore/work/specs/mvp.md
-  - .lore/work/specs/tournament/tournament-ranking.md
+  - .lore/work/intents/mvp.md
+  - .lore/work/intents/tournament/tournament-ranking.md
   - .lore/work/issues/collection-page-filter.md
   - .lore/work/issues/collection-page-sorting.md
 req-prefix: CFS

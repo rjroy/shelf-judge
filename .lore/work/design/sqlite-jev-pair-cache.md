@@ -8,7 +8,7 @@ related:
   - .lore/reference/specs/fitness/redundancy-scoring.md
   - .lore/reference/specs/current/owner-game-notes.md
   - .lore/work/design/jev-redundancy-similarity.md
-  - .lore/work/plans/jev-redundancy-similarity.md
+  - .lore/local/plans/jev-redundancy-similarity.md
   - .lore/work/design/wishlist-jev-description-similarity.md
   - .lore/work/design/semantic-snapshot-cache.md
   - .lore/reference/specs/features/wishlist.md
@@ -18,7 +18,7 @@ related:
 
 ## Purpose and authority
 
-This approved design amends the storage, refresh, and disclosure mechanics in the maintained [Redundancy Scoring](../../reference/specs/fitness/redundancy-scoring.md) and [Owner Game Notes](../../reference/specs/current/owner-game-notes.md), and supersedes conflicting steps in the historical [Jev similarity design](jev-redundancy-similarity.md) and [implementation plan](../plans/jev-redundancy-similarity.md). Preserve the prior documents for discovery and history. Design approval does not authorize provider calls or imply that implementation is complete.
+This approved design amends the storage, refresh, and disclosure mechanics in the maintained [Redundancy Scoring](../../reference/specs/fitness/redundancy-scoring.md) and [Owner Game Notes](../../reference/specs/current/owner-game-notes.md), and supersedes conflicting steps in the historical [Jev similarity design](jev-redundancy-similarity.md) and [implementation plan](../../local/plans/jev-redundancy-similarity.md). Preserve the prior documents for discovery and history. Design approval does not authorize provider calls or imply that implementation is complete.
 
 > **Current storage/publication authority — 2026-10-05:** The approved [semantic snapshot cache design](semantic-snapshot-cache.md) amends this cache's run lifecycle and scoring visibility. Each run checkpoint atomically writes its judgment delta to private run-owned staging plus progress; it does not write to the ordinary `judgments` view or advance the ordinary published-evidence revision. The ordinary `lookup()` remains published-only; only the matching worker overlay can read its staged rows. At success, failure/deadline, cancellation, or interruption, seal the first execution outcome, validate the still-current staged subset, and atomically promote valid rows once with terminal progress and publication token. Failed/canceled/interrupted runs may publish valid partial work. Full coverage and activation are not gates. Pending publication retains durable ownership and blocks new admission; recovery/retry is provider-free and preserves an already sealed outcome. Purge/reset/transfer fence staged evidence against resurrection. Existing consent, source-provenance, frozen-scope, C_ONLY, and privacy rules remain unchanged. This supersedes this document's earlier statements that partial rows become active only at complete coverage and that restart requires a later explicit run to make valid partial results visible. The design's complete-coverage text remains historical rationale, not the current visibility contract.
 
