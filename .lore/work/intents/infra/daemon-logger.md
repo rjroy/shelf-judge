@@ -8,7 +8,6 @@ modules: [daemon-services, bgg-client]
 related:
   [.lore/work/issues/daemon-logger-factory.md, .lore/work/retros/bgg-import-double-request.md]
 req-prefix: LOG
-legacy_source_type: spec
 ---
 
 # Spec: Structured Logger Factory

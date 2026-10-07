@@ -7,7 +7,6 @@ modules: [shared, daemon, web]
 related:
   - .lore/reference/specs/current/useful-collection-profile.md
 req-prefix: PROFILE-ATTN
-legacy_source_type: spec
 ---
 
 # Expanded Profile Attention Opportunities

@@ -17,7 +17,6 @@ related:
   - .lore/reference/designs/mvp-web-ui.md
   - .lore/reference/designs/mvp-cli.md
 req-prefix: MVP
-legacy_source_type: spec
 ---
 
 # Spec: Shelf Judge MVP

@@ -13,7 +13,6 @@ related:
   - .lore/work/brainstorm/fitness-model-options.md
   - .lore/work/intents/mvp.md
   - .lore/reference/vision.md
-legacy_source_type: spec
 ---
 
 # Spec: Utility Curves for Axis Scoring

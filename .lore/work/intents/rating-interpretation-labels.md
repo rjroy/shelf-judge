@@ -7,7 +7,6 @@ updated: "2026-05-21"
 modules: [ "shared", "web" ]
 related: [ ".lore/reference/designs/mvp-data-model.md", ".lore/reference/designs/mvp-fitness-model.md", ".lore/reference/designs/mvp-web-ui.md" ]
 title: "Rating Interpretation Labels Spec"
-legacy_source_type: spec
 ---
 
 ```html

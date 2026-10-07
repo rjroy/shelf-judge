@@ -9,7 +9,6 @@ related:
   - .lore/reference/designs/similarity-weighted-bin-packing.md
   - .lore/work/brainstorm/shelf-layout-designer.md
 req-prefix: SHELF-ASSIGN
-legacy_source_type: spec
 ---
 
 # Manual shelf assignment

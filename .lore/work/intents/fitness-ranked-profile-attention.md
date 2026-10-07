@@ -9,7 +9,6 @@ related:
   - .lore/reference/specs/current/collection-purchase-utilization.md
   - .lore/work/intents/expanded-profile-attention-opportunities.md
 req-prefix: RANKED-ATTN
-legacy_source_type: spec
 ---
 
 # Fitness-ranked Profile Attention Discovery

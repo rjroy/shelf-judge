@@ -15,7 +15,6 @@ related:
   - .lore/reference/specs/fitness/redundancy-scoring.md
   - .lore/reference/specs/fitness/niche-champion-display.md
   - .lore/reference/designs/mvp-data-model.md
-legacy_source_type: spec
 ---
 
 # Spec: Previously Owned

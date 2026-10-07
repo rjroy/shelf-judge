@@ -10,7 +10,6 @@ related:
   - .lore/work/intents/collection-analyst-chat.md
   - .lore/reference/designs/current/profile-evidence-explorer.md
 req-prefix: REFLECT
-legacy_source_type: spec
 ---
 
 # Grounded Profile Reflections

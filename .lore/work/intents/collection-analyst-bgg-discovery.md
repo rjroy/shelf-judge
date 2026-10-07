@@ -11,7 +11,6 @@ related:
   - .lore/reference/designs/mvp-bgg-integration.md
   - .lore/reference/specs/fitness/prediction-engine.md
 req-prefix: ANALYSTBGG
-legacy_source_type: spec
 ---
 
 # Collection Analyst BGG Discovery and Preview
