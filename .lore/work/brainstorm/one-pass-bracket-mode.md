@@ -6,7 +6,7 @@ tags: [brainstorm, tournament, pairwise, data-model, ux]
 modules: [daemon, web, cli, shared]
 related:
   - .lore/work/issues/one-pass-bracket-mode.md
-  - .lore/work/specs/tournament/tournament-ranking.md
+  - .lore/work/intents/tournament/tournament-ranking.md
   - .lore/reference/specs/tournament/reduce-tournament-overhead.md
   - .lore/work/brainstorm/fitness-model-options.md
   - .lore/reference/vision.md

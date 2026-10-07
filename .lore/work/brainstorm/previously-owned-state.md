@@ -6,7 +6,7 @@ tags: [brainstorm, data-model, ownership, lifecycle, redundancy, prediction, pro
 related:
   - .lore/work/issues/previously-owned-state.md
   - .lore/reference/vision.md
-  - .lore/work/specs/mvp.md
+  - .lore/work/intents/mvp.md
   - .lore/reference/designs/mvp-data-model.md
   - .lore/reference/specs/features/wishlist.md
   - .lore/work/brainstorm/redundancy-scoring.md

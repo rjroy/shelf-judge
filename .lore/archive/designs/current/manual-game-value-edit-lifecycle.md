@@ -4,7 +4,7 @@ date: 2026-08-29
 status: implemented
 tags: [design, forms, manual-values, concurrency]
 modules: [web, daemon, shared]
-related: [.lore/work/notes/shelf-judge-e05.md]
+related: [.lore/local/notes/shelf-judge-e05.md]
 ---
 
 # Manual game value edit lifecycle

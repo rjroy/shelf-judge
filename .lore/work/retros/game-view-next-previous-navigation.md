@@ -18,8 +18,8 @@ modules: [web-ui]
 related:
   - .lore/reference/specs/current/game-view-next-previous-navigation.md
   - .lore/reference/designs/current/game-view-next-previous-navigation.md
-  - .lore/work/plans/game-view-next-previous-navigation.md
-  - .lore/work/notes/game-view-next-previous-navigation.md
+  - .lore/local/plans/game-view-next-previous-navigation.md
+  - .lore/local/notes/game-view-next-previous-navigation.md
 ---
 
 # Game-view next and previous navigation rollout

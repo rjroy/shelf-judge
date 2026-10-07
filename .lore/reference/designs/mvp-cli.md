@@ -5,7 +5,7 @@ status: implemented
 tags: [design, cli, mvp]
 modules: [cli]
 related:
-  - .lore/work/specs/mvp.md
+  - .lore/work/intents/mvp.md
   - .lore/reference/designs/mvp-api-surface.md
   - .lore/reference/architecture-pattern.md
 ---

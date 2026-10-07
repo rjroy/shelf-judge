@@ -5,8 +5,8 @@ status: approved
 tags: [collection, analyst, bgg, discovery, prediction, provenance]
 modules: [shared, daemon, web, cli]
 related:
-  - .lore/work/specs/collection-analyst-bgg-discovery.md
-  - .lore/work/specs/collection-analyst-chat.md
+  - .lore/work/intents/collection-analyst-bgg-discovery.md
+  - .lore/work/intents/collection-analyst-chat.md
   - .lore/reference/architecture-pattern.md
 ---
 

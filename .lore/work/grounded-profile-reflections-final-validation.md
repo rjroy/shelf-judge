@@ -3,8 +3,8 @@ title: "Grounded Profile Reflections: final technical validation"
 date: 2026-09-07
 status: accepted
 related:
-  - .lore/work/specs/grounded-profile-reflections.md
-  - .lore/work/plans/grounded-profile-reflections.md
+  - .lore/work/intents/grounded-profile-reflections.md
+  - .lore/local/plans/grounded-profile-reflections.md
   - shelf-judge-6wv.13
   - shelf-judge-6wv.14
 ---

@@ -8,7 +8,7 @@ related:
   - .lore/work/issues/deferred-collection-profiling.md
   - .lore/work/issues/deferred-llm-integration.md
   - .lore/work/issues/deferred-prediction-engine.md
-  - .lore/work/specs/fitness/utility-curves.md
+  - .lore/work/intents/fitness/utility-curves.md
   - .lore/reference/designs/mvp-data-model.md
   - .lore/reference/designs/mvp-fitness-model.md
   - .lore/archive/research/claude-agent-sdk.md

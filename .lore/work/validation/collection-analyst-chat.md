@@ -136,8 +136,8 @@ non-secret structured-output validation blocker; no usefulness or semantic-truth
 claim is made by this evidence.
 
 The CLI implementation had drifted from the approved command contract: the
-[specification CLI syntax](../specs/collection-analyst-chat.md#cli) and
-[plan Step 7.1](../plans/collection-analyst-chat.md#step-7-add-one-shot-and-interactive-cli-parity)
+[specification CLI syntax](../intents/collection-analyst-chat.md#cli) and
+[plan Step 7.1](../../local/plans/collection-analyst-chat.md#step-7-add-one-shot-and-interactive-cli-parity)
 require `analyst ask --question <text> [--json]`, while code, help, and tests
 accepted positional question text. The documented `--question` syntax is restored
 with command and parser tests; the positional form remains a compatible alias.
@@ -148,12 +148,12 @@ stderr, so they cannot contaminate the machine-readable stream.
 
 ## Source obligation links
 
-- [Collection Analyst requirements](../specs/collection-analyst-chat.md#requirements)
-  map to the [Step 10 release gates](../plans/collection-analyst-chat.md#step-10-complete-persisted-flow-privacy-documentation-and-release-validation).
+- [Collection Analyst requirements](../intents/collection-analyst-chat.md#requirements)
+  map to the [Step 10 release gates](../../local/plans/collection-analyst-chat.md#step-10-complete-persisted-flow-privacy-documentation-and-release-validation).
 - The shared model-boundary, capability, redaction, and deterministic evidence
-  obligations map to [model-directed evidence tool flow](../notes/model-directed-evidence-tool-flow.md).
+  obligations map to [model-directed evidence tool flow](../../local/notes/model-directed-evidence-tool-flow.md).
 - Owner-note deletion, retention, and race obligations map to
-  [owner-note final validation](../notes/owner-game-notes-final-validation.md).
+  [owner-note final validation](../../local/notes/owner-game-notes-final-validation.md).
 - Browser blocker resolution and the previously accepted port-isolation evidence
   map to Beads issue `shelf-judge-bka`; this final-validation issue stays open
   until independent acceptance confirms the current evidence.

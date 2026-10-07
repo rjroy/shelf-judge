@@ -7,8 +7,8 @@ modules: [web-ui]
 related:
   - .lore/work/brainstorm/collection-filter-sort.md
   - .lore/reference/specs/collection/collection-filter-sort.md
-  - .lore/work/specs/collection/game-links.md
-  - .lore/work/specs/features/previously-owned.md
+  - .lore/work/intents/collection/game-links.md
+  - .lore/work/intents/features/previously-owned.md
   - .lore/reference/specs/current/collection-purchase-utilization.md
   - .lore/reference/specs/current/useful-collection-profile.md
 ---

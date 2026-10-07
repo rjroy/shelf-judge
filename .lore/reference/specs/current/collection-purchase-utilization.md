@@ -24,7 +24,7 @@ The result is conditional on simplifying assumptions and does not establish obje
 
 This is not about resale value and it does not decide whether a game should be kept or sold.
 
-**Authority notice:** This specification remains authoritative for the exact per-game utilization formula, evidence, game-detail result, and owner-selected collection-list sorts. The approved [Fitness-ranked Profile attention](../../../work/specs/fitness-ranked-profile-attention.md) specification permits a narrow Profile-only `underused-purchase` candidate derived from a valid existing `not-met` utilization result. That candidate uses the existing exact value multiplier and shortfall formula; it does not alter this calculation or collection sorting. It does not authorize collection auto-sort, collection aggregation or brief placement, resale or purchase recommendations, or claim that real collection results have been reviewed.
+**Authority notice:** This specification remains authoritative for the exact per-game utilization formula, evidence, game-detail result, and owner-selected collection-list sorts. The approved [Fitness-ranked Profile attention](../../../work/intents/fitness-ranked-profile-attention.md) specification permits a narrow Profile-only `underused-purchase` candidate derived from a valid existing `not-met` utilization result. That candidate uses the existing exact value multiplier and shortfall formula; it does not alter this calculation or collection sorting. It does not authorize collection auto-sort, collection aggregation or brief placement, resale or purchase recommendations, or claim that real collection results have been reviewed.
 
 ## What The Owner Sees
 

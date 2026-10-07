@@ -5,7 +5,7 @@ status: implemented
 tags: [design, fitness, scoring, algorithm, mvp]
 modules: [daemon]
 related:
-  - .lore/work/specs/mvp.md
+  - .lore/work/intents/mvp.md
   - .lore/work/brainstorm/fitness-model-options.md
 ---
 

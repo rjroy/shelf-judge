@@ -5,7 +5,7 @@ status: active
 tags: [bgg, discovery, analyst, api, research]
 modules: [daemon, web, shared]
 related:
-  - .lore/work/specs/collection-analyst-bgg-discovery.md
+  - .lore/work/intents/collection-analyst-bgg-discovery.md
   - .lore/archive/research/bgg-api.md
   - .lore/reference/designs/mvp-bgg-integration.md
 ---

@@ -8,7 +8,7 @@ related:
   - .lore/reference/color-system-principles.md
   - .lore/archive/designs/visual-direction.md
   - .lore/reference/designs/mvp-web-ui.md
-  - .lore/work/notes/color-system-consolidation.md
+  - .lore/local/notes/color-system-consolidation.md
 ---
 
 # Shelf Judge Color System

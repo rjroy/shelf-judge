@@ -7,8 +7,8 @@ modules: [web-ui]
 related:
   - .lore/archive/designs/visual-direction.md
   - .lore/reference/designs/mvp-web-ui.md
-  - .lore/work/plans/mvp.md
-  - .lore/work/specs/mvp.md
+  - .lore/local/plans/mvp.md
+  - .lore/work/intents/mvp.md
 ---
 
 # Plan: Visual Transition

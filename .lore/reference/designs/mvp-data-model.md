@@ -5,7 +5,7 @@ status: implemented
 tags: [design, data-model, storage, mvp]
 modules: [daemon]
 related:
-  - .lore/work/specs/mvp.md
+  - .lore/work/intents/mvp.md
   - .lore/reference/architecture-pattern.md
 ---
 
