@@ -1,9 +1,9 @@
 ---
 title: Collection Analyst BGG discovery and preview
 date: 2026-09-25
-status: approved
-tags: [collection, analyst, bgg, discovery, prediction]
-modules: [shared, daemon, web, cli]
+status: completed
+tags: [ collection, analyst, bgg, discovery, prediction ]
+modules: [ shared, daemon, web, cli ]
 related:
   - .lore/work/intents/collection-analyst-chat.md
   - .lore/work/research/bgg-facet-discovery-for-analyst.md

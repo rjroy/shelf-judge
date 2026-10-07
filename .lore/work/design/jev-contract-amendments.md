@@ -1,10 +1,10 @@
 ---
 title: Proposed contract amendments for Jev redundancy similarity
 date: 2026-09-29
-status: approved
-tags: [jev, redundancy, owner-notes, privacy, architecture, wishlist]
-modules: [daemon, shared, web, cli]
-related: [.lore/work/design/jev-redundancy-similarity.md, .lore/reference/specs/current/owner-game-notes.md, .lore/reference/architecture-pattern.md, .lore/reference/specs/fitness/redundancy-scoring.md, .lore/reference/specs/features/wishlist.md]
+status: completed
+tags: [ jev, redundancy, owner-notes, privacy, architecture, wishlist ]
+modules: [ daemon, shared, web, cli ]
+related: [ .lore/work/design/jev-redundancy-similarity.md, .lore/reference/specs/current/owner-game-notes.md, .lore/reference/architecture-pattern.md, .lore/reference/specs/fitness/redundancy-scoring.md, .lore/reference/specs/features/wishlist.md ]
 ---
 
 # Proposed contract amendments for Jev redundancy similarity

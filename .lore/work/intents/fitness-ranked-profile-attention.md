@@ -1,9 +1,9 @@
 ---
 title: Fitness-ranked Profile attention discovery
 date: 2026-09-20
-status: approved
-tags: [collection, profile, attention, ranking, rules]
-modules: [shared, daemon, web]
+status: completed
+tags: [ collection, profile, attention, ranking, rules ]
+modules: [ shared, daemon, web ]
 related:
   - .lore/reference/specs/current/useful-collection-profile.md
   - .lore/reference/specs/current/collection-purchase-utilization.md

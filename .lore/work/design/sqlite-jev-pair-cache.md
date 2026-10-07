@@ -1,9 +1,9 @@
 ---
 title: SQLite Jev pair cache
 date: 2026-09-30
-status: approved
-tags: [jev, redundancy, sqlite, cache, privacy]
-modules: [shared, daemon, web]
+status: completed
+tags: [ jev, redundancy, sqlite, cache, privacy ]
+modules: [ shared, daemon, web ]
 related:
   - .lore/reference/specs/fitness/redundancy-scoring.md
   - .lore/reference/specs/current/owner-game-notes.md

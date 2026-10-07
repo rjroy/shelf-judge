@@ -1,10 +1,10 @@
 ---
 title: "Design: unified similarity for prediction and redundancy"
 date: 2026-10-04
-status: approved
-tags: [design, prediction, redundancy, jev, similarity, privacy, wishlist]
-modules: [daemon-services, prediction, redundancy, jev-cache, wishlist, shared-contracts]
-related: [.lore/local/plans/unified-similarity-prediction-redundancy.md, .lore/work/design/semantic-snapshot-cache.md, .lore/reference/specs/fitness/prediction-engine.md, .lore/reference/specs/fitness/redundancy-scoring.md, .lore/reference/specs/features/wishlist.md, .lore/reference/specs/current/owner-game-notes.md]
+status: completed
+tags: [ design, prediction, redundancy, jev, similarity, privacy, wishlist ]
+modules: [ daemon-services, prediction, redundancy, jev-cache, wishlist, shared-contracts ]
+related: [ .lore/local/plans/unified-similarity-prediction-redundancy.md, .lore/work/design/semantic-snapshot-cache.md, .lore/reference/specs/fitness/prediction-engine.md, .lore/reference/specs/fitness/redundancy-scoring.md, .lore/reference/specs/features/wishlist.md, .lore/reference/specs/current/owner-game-notes.md ]
 ---
 
 # Design: unified similarity for prediction and redundancy

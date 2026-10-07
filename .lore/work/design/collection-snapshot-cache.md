@@ -1,9 +1,9 @@
 ---
 title: Collection Snapshot Caching
 date: 2026-09-27
-status: draft
-tags: [collection, caching, performance]
-modules: [web, daemon]
+status: completed
+tags: [ collection, caching, performance ]
+modules: [ web, daemon ]
 ---
 
 # Collection Snapshot Caching

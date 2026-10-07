@@ -1,9 +1,9 @@
 ---
 title: Typesafe all-games reflection ranking
 date: 2026-09-18
-status: draft
-tags: [reflection, typesafe, system-one, evidence-ranking, grounded-analysis]
-modules: [profile-reflections, grounded-analysis, reflection-evidence]
+status: completed
+tags: [ reflection, typesafe, system-one, evidence-ranking, grounded-analysis ]
+modules: [ profile-reflections, grounded-analysis, reflection-evidence ]
 related: []
 ---
 
