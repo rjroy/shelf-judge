@@ -4,9 +4,11 @@ import type { NicheSettings, NicheTagFilter } from "@shelf-judge/shared";
 import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 import { profileSourceCoordinatorFor } from "../services/profile-source-coordinator.js";
+import { createLogger, type Logger } from "../services/logger.js";
 
 export interface NicheRoutesDeps {
   storageService: StorageService;
+  logger?: Logger;
 }
 
 const VALID_TYPES = new Set(["mechanic", "category", "family"]);
@@ -24,6 +26,7 @@ function isValidTagFilter(value: unknown): value is NicheTagFilter {
 
 export function createNicheRoutes(deps: NicheRoutesDeps): RouteModule {
   const { storageService } = deps;
+  const logger = deps.logger ?? createLogger("niche-routes");
   const sourceCoordinator = profileSourceCoordinatorFor(storageService);
   const routes = new Hono();
 
@@ -88,14 +91,27 @@ export function createNicheRoutes(deps: NicheRoutesDeps): RouteModule {
 
   // POST /niches/settings/ignore
   routes.post("/niches/settings/ignore", async (c) => {
+    const action = "hide";
     let body: unknown;
     try {
       body = await c.req.json();
     } catch {
+      logger.log("niche tag mutation attempt", { action });
+      logger.warn("niche tag mutation rejected", {
+        action,
+        outcome: "rejected",
+        validationCode: "invalid_json",
+      });
       return c.json({ error: "Invalid JSON body" }, 400);
     }
 
     if (!isValidTagFilter(body)) {
+      logger.log("niche tag mutation attempt", { action });
+      logger.warn("niche tag mutation rejected", {
+        action,
+        outcome: "rejected",
+        validationCode: "invalid_tag_filter",
+      });
       return c.json(
         {
           error: 'Body must have a "type" (mechanic|category|family) and a non-empty "name"',
@@ -104,8 +120,10 @@ export function createNicheRoutes(deps: NicheRoutesDeps): RouteModule {
       );
     }
 
+    const tag = { type: body.type, name: body.name };
+    logger.log("niche tag mutation attempt", { action, ...tag });
     try {
-      const settings = await sourceCoordinator.runExclusive(async () => {
+      const result = await sourceCoordinator.runExclusive(async () => {
         const current = await storageService.loadNicheSettings();
         const alreadyIgnored = current.ignoredTags.some(
           (t) => t.type === body.type && t.name === body.name,
@@ -114,24 +132,49 @@ export function createNicheRoutes(deps: NicheRoutesDeps): RouteModule {
           current.ignoredTags.push({ type: body.type, name: body.name });
           await storageService.saveNicheSettings(current);
         }
-        return current;
+        return { settings: current, changed: !alreadyIgnored };
       });
-      return c.json(settings);
+      logger.log("niche tag mutation completed", {
+        action,
+        ...tag,
+        outcome: result.changed ? "changed" : "idempotent",
+        ignoredCount: result.settings.ignoredTags.length,
+      });
+      return c.json(result.settings);
     } catch (err) {
+      logger.error("niche tag mutation failed", {
+        action,
+        ...tag,
+        outcome: "failed",
+        error: toErrorMessage(err),
+      });
       return c.json({ error: toErrorMessage(err) }, 500);
     }
   });
 
   // DELETE /niches/settings/ignore
   routes.delete("/niches/settings/ignore", async (c) => {
+    const action = "restore";
     let body: unknown;
     try {
       body = await c.req.json();
     } catch {
+      logger.log("niche tag mutation attempt", { action });
+      logger.warn("niche tag mutation rejected", {
+        action,
+        outcome: "rejected",
+        validationCode: "invalid_json",
+      });
       return c.json({ error: "Invalid JSON body" }, 400);
     }
 
     if (!isValidTagFilter(body)) {
+      logger.log("niche tag mutation attempt", { action });
+      logger.warn("niche tag mutation rejected", {
+        action,
+        outcome: "rejected",
+        validationCode: "invalid_tag_filter",
+      });
       return c.json(
         {
           error: 'Body must have a "type" (mechanic|category|family) and a non-empty "name"',
@@ -140,17 +183,33 @@ export function createNicheRoutes(deps: NicheRoutesDeps): RouteModule {
       );
     }
 
+    const tag = { type: body.type, name: body.name };
+    logger.log("niche tag mutation attempt", { action, ...tag });
     try {
-      const settings = await sourceCoordinator.runExclusive(async () => {
+      const result = await sourceCoordinator.runExclusive(async () => {
         const current = await storageService.loadNicheSettings();
+        const previousCount = current.ignoredTags.length;
         current.ignoredTags = current.ignoredTags.filter(
           (t) => !(t.type === body.type && t.name === body.name),
         );
+        const changed = current.ignoredTags.length !== previousCount;
         await storageService.saveNicheSettings(current);
-        return current;
+        return { settings: current, changed };
       });
-      return c.json(settings);
+      logger.log("niche tag mutation completed", {
+        action,
+        ...tag,
+        outcome: result.changed ? "changed" : "idempotent",
+        ignoredCount: result.settings.ignoredTags.length,
+      });
+      return c.json(result.settings);
     } catch (err) {
+      logger.error("niche tag mutation failed", {
+        action,
+        ...tag,
+        outcome: "failed",
+        error: toErrorMessage(err),
+      });
       return c.json({ error: toErrorMessage(err) }, 500);
     }
   });

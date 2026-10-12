@@ -443,7 +443,9 @@ export function createDisplayedFitnessService(
             canonicalSha256(projectProfileCollectionSource(frame.sources.collection))) ||
         sourceKey(frame.sources.tournament) !== sourceKey(snapshot.tournament) ||
         sourceKey(frame.sources.predictionSettings) !== sourceKey(snapshot.predictionSettings) ||
-        sourceKey(frame.redundancySettings) !== sourceKey(snapshot.redundancySettings)
+        sourceKey(frame.redundancySettings) !== sourceKey(snapshot.redundancySettings) ||
+        (snapshot.nicheSettings !== undefined &&
+          sourceKey(frame.nicheSettings) !== sourceKey(snapshot.nicheSettings))
       )
         throw new Error(
           `Displayed fitness snapshot differs from current capture: ${[
@@ -457,6 +459,9 @@ export function createDisplayedFitnessService(
               sourceKey(snapshot.predictionSettings) && "prediction-settings",
             sourceKey(frame.redundancySettings) !== sourceKey(snapshot.redundancySettings) &&
               "redundancy-settings",
+            snapshot.nicheSettings !== undefined &&
+              sourceKey(frame.nicheSettings) !== sourceKey(snapshot.nicheSettings) &&
+              "niche-settings",
           ]
             .filter(Boolean)
             .join(",")}`,
@@ -475,6 +480,7 @@ export function createDisplayedFitnessService(
   function unifiedDisplayedGames(
     collection: Collection,
     redundancySettings: RedundancySettings,
+    nicheSettings: NicheSettings,
     calculation: import("./unified-scoring-service.js").UnifiedCalculation,
     options: DisplayedFitnessOptions,
     outputCollection: Collection | CollectionProfileCollectionSource = collection,
@@ -525,6 +531,7 @@ export function createDisplayedFitnessService(
     if (options.includeNiches) {
       const nicheMap = computeNichePositions(
         entries.filter((entry) => entry.game.ownership !== "previously-owned"),
+        nicheSettings,
       );
       for (const entry of entries) entry.nichePosition = nicheMap.get(entry.game.id) ?? null;
     }
@@ -552,6 +559,7 @@ export function createDisplayedFitnessService(
     const games = unifiedDisplayedGames(
       proposal.collection,
       proposal.redundancySettings,
+      proposal.nicheSettings,
       calculation,
       options,
     );
@@ -760,6 +768,7 @@ export function createDisplayedFitnessService(
           games: unifiedDisplayedGames(
             frame.sources.collection,
             frame.redundancySettings,
+            frame.nicheSettings,
             calculation,
             options,
             snapshot.kind === "private-capture" ? frame.sources.collection : snapshot.collection,
@@ -818,6 +827,7 @@ export function createDisplayedFitnessService(
           unifiedDisplayedGames(
             frame.sources.collection,
             frame.redundancySettings,
+            frame.nicheSettings,
             calculation,
             options,
             frame.sources.collection,
@@ -999,6 +1009,7 @@ export function createDisplayedFitnessService(
           unifiedDisplayedGames(
             frame.sources.collection,
             frame.redundancySettings,
+            frame.nicheSettings,
             calculation,
             options,
             snapshot.kind === "private-capture" ? frame.sources.collection : snapshot.collection,
