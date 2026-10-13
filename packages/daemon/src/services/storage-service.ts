@@ -120,6 +120,7 @@ export interface JevSourceSnapshot {
   tournament: TournamentData;
   predictionSettings: PredictionSettings;
   redundancySettings: RedundancySettings;
+  nicheSettings: NicheSettings;
   /** Changes when any source file's filesystem identity or mutation metadata changes. */
   freshnessEpoch: string;
   /** Process-local generation for changes observed to originate outside storage writes. */
@@ -383,6 +384,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     tournamentPath,
     sourcePaths["prediction-settings"],
     sourcePaths["redundancy-settings"],
+    sourcePaths["niche-settings"],
   ] as const;
   const establishedJevPaths = new Set<string>();
   const unavailableJevPaths = new Set<string>();
@@ -512,7 +514,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     } finally {
       collectionMustExistForJevSnapshot = false;
     }
-    const [tournament, predictionSettings, redundancySettings] = await Promise.all([
+    const [tournament, predictionSettings, redundancySettings, nicheSettings] = await Promise.all([
       withSourceLock(tournamentPath, () => readStoredSource("tournament", false)),
       withSourceLock(sourcePaths["prediction-settings"], () =>
         readStoredSource("prediction-settings", false),
@@ -520,12 +522,16 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       withSourceLock(sourcePaths["redundancy-settings"], () =>
         readStoredSource("redundancy-settings", false),
       ),
+      withSourceLock(sourcePaths["niche-settings"], () =>
+        readStoredSource("niche-settings", false),
+      ),
     ]);
     return {
       collection,
       tournament: structuredClone(tournament.data as TournamentData),
       predictionSettings: structuredClone(predictionSettings.data as PredictionSettings),
       redundancySettings: structuredClone(redundancySettings.data as RedundancySettings),
+      nicheSettings: structuredClone(nicheSettings.data as NicheSettings),
       freshnessEpoch: "",
       externalEpoch: "",
     };

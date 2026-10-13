@@ -322,6 +322,52 @@ describe("unified scoring storage composition", () => {
     }
   });
 
+  test("recaptures and publishes after an external niche settings edit with unchanged source token", async () => {
+    directory = await mkdtemp(join(tmpdir(), "unified-scoring-external-niche-edit-"));
+    const storage = createStorageService({
+      dataDir: directory,
+      configPath: join(directory, "config.json"),
+      fileOps: createFileOps(),
+    });
+    const collection = await storage.loadCollection();
+    collection.axes = [axis()];
+    collection.games = [
+      game("target"),
+      game("rated-1", 2),
+      game("rated-2", 4),
+      game("rated-3", 6),
+      game("rated-4", 8),
+      game("rated-5", 10),
+    ];
+    await storage.saveCollection(collection);
+    if (!storage.hydrateSourceVector) throw new Error("Source vector hydration unavailable");
+    await storage.hydrateSourceVector();
+
+    const service = createUnifiedScoringService({
+      storageService: storage,
+      cache: null,
+      fitnessService: createFitnessService(),
+    });
+    const request = { scope: "predict-game", gameId: "target" } as const;
+    const requestOptions = { includeRedundancy: false } as const;
+    const originalFrame = await service.capture();
+    const originalCalculation = service.calculate(originalFrame, request, requestOptions);
+
+    await writeFile(
+      join(directory, "niche-settings.json"),
+      JSON.stringify({ ignoredTags: [{ type: "mechanic", name: "Draft" }] }),
+    );
+
+    const freshFrame = await service.capture();
+    expect(freshFrame.sourceVector.changeToken).toBe(originalFrame.sourceVector.changeToken);
+    expect(freshFrame.freshnessEpoch).not.toBe(originalFrame.freshnessEpoch);
+    expect(freshFrame.nicheSettings.ignoredTags).toEqual([{ type: "mechanic", name: "Draft" }]);
+    const freshCalculation = service.calculate(freshFrame, request, requestOptions);
+    expect(freshCalculation).not.toBe(originalCalculation);
+    expect(await service.publishCurrent(originalCalculation, () => "stale")).toBeNull();
+    expect(await service.publishCurrent(freshCalculation, () => "published")).toBe("published");
+  });
+
   test("ordinary unified scoring remains published-only through staging, cold reads, source change, and promotion", async () => {
     directory = await mkdtemp(join(tmpdir(), "unified-staged-published-boundary-"));
     const storage = createStorageService({

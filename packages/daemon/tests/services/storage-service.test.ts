@@ -140,16 +140,21 @@ describe("StorageService.loadJevSourceSnapshot", () => {
     first.collection.name = "caller mutation";
     first.tournament.settings.kFactorThreshold = 999;
     first.predictionSettings.defaultK = 999;
+    first.nicheSettings.ignoredTags.push({
+      type: "family",
+      name: "caller-only niche mutation",
+    });
 
     const second = await load();
     expect(second.collection.name).toBe("My Collection");
     expect(second.tournament.settings.kFactorThreshold).toBe(15);
     expect(second.predictionSettings.defaultK).toBe(5);
+    expect(second.nicheSettings.ignoredTags).toEqual([]);
     expect(fileOps.calls.filter((call) => call.method === "readFile")).toHaveLength(
       readsAfterFirst,
     );
     expect(fileOps.calls.filter((call) => call.method === "stat")).toHaveLength(
-      statsAfterFirst + 4,
+      statsAfterFirst + 5,
     );
     expect(second.freshnessEpoch).toBe(first.freshnessEpoch);
   });

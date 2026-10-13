@@ -5,6 +5,7 @@ import type {
   RedundancyAdjustment,
   RedundancySimilarityInfo,
   WishlistEntry,
+  NicheSettings,
 } from "@shelf-judge/shared";
 import { CollectionSchema } from "@shelf-judge/shared";
 import { randomUUID } from "node:crypto";
@@ -62,6 +63,7 @@ export interface UnifiedSourceFrame {
   readonly sources: StagedSimilaritySources;
   readonly capture: StagedSimilarityCapture;
   readonly redundancySettings: RedundancySettings;
+  readonly nicheSettings: NicheSettings;
   readonly wishlistEntries: readonly WishlistEntry[];
   readonly wishlistCandidateBggIds: readonly number[];
   readonly freshnessEpoch: string;
@@ -79,6 +81,7 @@ export interface ProposedCollectionEvaluation {
   readonly kind: "proposed-collection";
   readonly collection: Collection;
   readonly redundancySettings: RedundancySettings;
+  readonly nicheSettings: NicheSettings;
   calculate(
     request: StagedPredictionRequest,
     requestOptions: UnifiedScoringRequestOptions,
@@ -489,6 +492,7 @@ export function createUnifiedScoringService(
         sources: captured.sources,
         capture: captured,
         redundancySettings: deepFreeze(structuredClone(snapshot.redundancySettings)),
+        nicheSettings: deepFreeze(structuredClone(snapshot.nicheSettings)),
         wishlistEntries: deepFreeze(structuredClone(frameWishlistEntries)),
         wishlistCandidateBggIds: Object.freeze(
           selectedCandidates.map((candidate) => candidate.bggId),
@@ -598,6 +602,7 @@ export function createUnifiedScoringService(
         sources: proposedCapture.sources,
         capture: proposedCapture,
         redundancySettings: deepFreeze(structuredClone(snapshot.redundancySettings)),
+        nicheSettings: deepFreeze(structuredClone(snapshot.nicheSettings)),
         wishlistEntries: Object.freeze([]),
         wishlistCandidateBggIds: Object.freeze([]),
         freshnessEpoch: snapshot.freshnessEpoch,
@@ -641,6 +646,7 @@ export function createUnifiedScoringService(
       kind: "proposed-collection" as const,
       collection: proposal.collection,
       redundancySettings: proposal.frame.redundancySettings,
+      nicheSettings: proposal.frame.nicheSettings,
       calculate(request: StagedPredictionRequest, requestOptions: UnifiedScoringRequestOptions) {
         if (request.scope === "wishlist")
           throw new TypeError("Proposed collection evaluation does not accept wishlist scope");
@@ -684,6 +690,11 @@ export function createUnifiedScoringService(
       wishlistBaseline: privateWishlistIdentities.get(frame) ?? null,
       processEpoch: frame.sourceVector.processEpoch,
       changeToken: frame.sourceVector.changeToken,
+      // External source-file edits do not necessarily advance the storage revision vector.
+      // Keep the captured file freshness epochs in the ephemeral calculation memo key so a
+      // fresh frame cannot reuse a calculation fenced to an earlier external snapshot.
+      freshnessEpoch: frame.freshnessEpoch,
+      externalEpoch: frame.externalEpoch,
       wishlistGeneration: frame.wishlistGeneration,
       cacheAvailable: cache.available,
       cacheRevision,
