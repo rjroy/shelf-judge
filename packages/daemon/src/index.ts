@@ -56,6 +56,7 @@ import type { PredictionService } from "./services/prediction-service.js";
 import type { GameService } from "./services/game-service.js";
 import { createWishlistRunPreparationService } from "./services/wishlist-run-preparation.js";
 import { createUnifiedScoringService } from "./services/unified-scoring-service.js";
+import { acquireDaemonSocket } from "./services/daemon-socket.js";
 
 const logger = createLogger("daemon");
 
@@ -212,6 +213,21 @@ export async function recoverAttentionCandidatesOnStartup(
 
 export async function main() {
   const envConfig = resolveConfig();
+  logger.log("daemon socket acquisition started", { socketPath: envConfig.socketPath });
+  const releaseSocket = await acquireDaemonSocket(envConfig.socketPath);
+  // Keep the connection and its lock alive until the process actually exits.
+  process.once("exit", releaseSocket);
+  logger.log("daemon socket acquired", { socketPath: envConfig.socketPath });
+  try {
+    await startDaemon(envConfig);
+  } catch (error) {
+    process.removeListener("exit", releaseSocket);
+    releaseSocket();
+    throw error;
+  }
+}
+
+async function startDaemon(envConfig: ReturnType<typeof resolveConfig>) {
   const fileOps = createFileOps();
 
   const storageService = createStorageService({
